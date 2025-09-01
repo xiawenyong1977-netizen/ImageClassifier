@@ -1,0 +1,3 @@
+D:/ImageClassifierApp/android/app/.cxx/Debug/265q3i4e/arm64-v8a/CMakeFiles/appmodules.dir
+D:/ImageClassifierApp/android/app/.cxx/Debug/265q3i4e/arm64-v8a/CMakeFiles/edit_cache.dir
+D:/ImageClassifierApp/android/app/.cxx/Debug/265q3i4e/arm64-v8a/CMakeFiles/rebuild_cache.dir
