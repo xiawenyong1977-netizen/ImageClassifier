@@ -97,8 +97,10 @@ class GlobalImageCache {
       // 直接通过过滤 allImages 来获取数据
       
       // 计算统计信息
+      console.log('🔄 开始重新计算分类统计...');
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      console.log('✅ 分类统计计算完成');
       
       // 获取最近图片（从缓存中取前20张）
       this.cache.recentImages = this.cache.allImages
@@ -277,13 +279,19 @@ class GlobalImageCache {
     
     // 验证ID是否匹配
     if (image.id !== imageId) {
-      console.error(`❌ ID不匹配! 查找: ${imageId}, 找到: ${image.id}，重建映射表`);
+      console.warn(`⚠️ ID不匹配! 查找: ${imageId}, 找到: ${image.id}，重建映射表`);
       // 重建映射表
       this._rebuildImageIdIndex();
       
       // 再次尝试直接查找
       const correctImage = this.cache.allImages.find(img => img.id === imageId);
-      return correctImage || null;
+      if (correctImage) {
+        console.log(`✅ 重建映射表后找到正确图片: ${imageId}`);
+        return correctImage;
+      } else {
+        console.warn(`⚠️ 重建映射表后仍未找到图片: ${imageId}`);
+        return null;
+      }
     }
     
     return image;
@@ -291,14 +299,19 @@ class GlobalImageCache {
 
   // 重新构建分类统计
   _rebuildCategoryCounts() {
+    console.log('📊 开始计算分类统计，总图片数:', this.cache.allImages.length);
     this.cache.categoryCounts = {};
-    this.cache.allImages.forEach(img => {
+    this.cache.allImages.forEach((img, index) => {
       if (img.category) {
-        // 使用标准化的分类ID作为键
+        // 使用标准化的分类ID作为键（英文ID）
         const normalizedCategory = this._getCategoryId(img.category);
         this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
+        console.log(`📊 图片${index+1}: ${img.fileName} → ${img.category} → ${normalizedCategory}`);
+      } else {
+        console.log(`⚠️ 图片${index+1}: ${img.fileName} 没有分类信息`);
       }
     });
+    console.log('📊 分类统计计算结果:', this.cache.categoryCounts);
   }
 
   // 获取标准化的分类ID（与UnifiedDataService保持一致）

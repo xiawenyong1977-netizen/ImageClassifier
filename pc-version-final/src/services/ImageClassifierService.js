@@ -196,13 +196,13 @@ class ImageClassifierService {
         return { category: 'pet', confidence: 0.82, reason: 'Pet image feature' };
       }
 
-      // Time feature matching
+      // Time feature matching (only if no filename match)
       if (self.isMeetingTime(hour, dayOfWeek)) {
-        return { category: 'meeting', confidence: 0.80, reason: 'Meeting time period' };
+        return { category: 'meeting', confidence: 0.70, reason: 'Meeting time period' };
       }
 
       if (self.isLifeTime(hour, isWeekend)) {
-        return { category: 'life', confidence: 0.75, reason: 'Life time period' };
+        return { category: 'life', confidence: 0.65, reason: 'Life time period' };
       }
 
       if (self.isPeoplePhoto(fileName, fileSize)) {

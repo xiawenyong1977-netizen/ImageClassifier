@@ -24,6 +24,8 @@ class ImageStorageService {
       settings: 'app_settings',
     };
     this.isInitialized = false;
+    // 添加保存锁，防止并发保存导致数据丢失
+    this.saveLock = null;
   }
 
   // 获取分类显示名称
@@ -75,69 +77,98 @@ class ImageStorageService {
         return;
       }
       
-      // 获取现有图片数据
-      const existingImages = await this.getImages();
-      console.log(`Existing image count: ${existingImages.length}`);
-      
-      // 批量处理
-      const newImages = [];
-      const updatedImages = [];
-      
-      for (const imageData of imageDataArray) {
-        const { uri, category, confidence, timestamp, fileName, size } = imageData;
-        
-        // 检查是否已存在
-        const existingIndex = existingImages.findIndex(img => img.uri === uri);
-        
-        const imageRecord = {
-          id: existingIndex >= 0 ? existingImages[existingIndex].id : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          uri,
-          category,
-          confidence,
-          timestamp,
-          fileName,
-          size,
-          takenAt: imageData.takenAt || null,
-          latitude: imageData.latitude || null,
-          longitude: imageData.longitude || null,
-          altitude: imageData.altitude || null,
-          accuracy: imageData.accuracy || null,
-          address: imageData.address || null,
-          city: imageData.city || null,
-          country: imageData.country || null,
-          province: imageData.province || null,
-          district: imageData.district || null,
-          street: imageData.street || null,
-          locationSource: imageData.locationSource || null,
-          cityDistance: imageData.cityDistance || null,
-          createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        if (existingIndex >= 0) {
-          // 更新现有记录
-          existingImages[existingIndex] = imageRecord;
-          updatedImages.push(fileName);
-        } else {
-          // 添加新记录
-          existingImages.push(imageRecord);
-          newImages.push(fileName);
-        }
+      // 等待之前的保存操作完成
+      while (this.saveLock) {
+        console.log('⏳ 等待之前的保存操作完成...');
+        await this.saveLock;
       }
       
-      // 保存到AsyncStorage
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+      // 创建新的保存锁
+      this.saveLock = this._performSave(imageDataArray);
+      const result = await this.saveLock;
+      this.saveLock = null;
       
-      // 更新统计信息
-      await this.updateStats();
-      
-      console.log(`Batch save completed: ${newImages.length} new, ${updatedImages.length} updated`);
-      return { newCount: newImages.length, updatedCount: updatedImages.length };
+      return result;
       
     } catch (error) {
       console.error('Batch save failed:', error);
+      this.saveLock = null; // 确保锁被释放
       throw error;
     }
+  }
+  
+  // 实际执行保存操作的方法
+  async _performSave(imageDataArray) {
+    // 获取现有图片数据
+    const existingImages = await this.getImages();
+    console.log(`Existing image count: ${existingImages.length}`);
+    
+    // 批量处理
+    const newImages = [];
+    const updatedImages = [];
+    
+    for (const imageData of imageDataArray) {
+      const { uri, category, confidence, timestamp, fileName, size } = imageData;
+      
+      // 检查是否已存在
+      const existingIndex = existingImages.findIndex(img => img.uri === uri);
+      
+      // 生成更稳定的ID，基于URI的哈希值
+      const generateStableId = (uri) => {
+        // 使用URI的简单哈希作为ID基础，确保相同URI总是生成相同ID
+        let hash = 0;
+        for (let i = 0; i < uri.length; i++) {
+          const char = uri.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // 转换为32位整数
+        }
+        return `img_${Math.abs(hash).toString(36)}_${Date.now()}`;
+      };
+      
+      const imageRecord = {
+        id: existingIndex >= 0 ? existingImages[existingIndex].id : generateStableId(uri),
+        uri,
+        category,
+        confidence,
+        timestamp,
+        fileName,
+        size,
+        takenAt: imageData.takenAt || null,
+        latitude: imageData.latitude || null,
+        longitude: imageData.longitude || null,
+        altitude: imageData.altitude || null,
+        accuracy: imageData.accuracy || null,
+        address: imageData.address || null,
+        city: imageData.city || null,
+        country: imageData.country || null,
+        province: imageData.province || null,
+        district: imageData.district || null,
+        street: imageData.street || null,
+        locationSource: imageData.locationSource || null,
+        cityDistance: imageData.cityDistance || null,
+        createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      if (existingIndex >= 0) {
+        // 更新现有记录
+        existingImages[existingIndex] = imageRecord;
+        updatedImages.push(fileName);
+      } else {
+        // 添加新记录
+        existingImages.push(imageRecord);
+        newImages.push(fileName);
+      }
+    }
+    
+    // 保存到AsyncStorage
+    await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+    
+    // 更新统计信息
+    await this.updateStats();
+    
+    console.log(`Batch save completed: ${newImages.length} new, ${updatedImages.length} updated`);
+    return { newCount: newImages.length, updatedCount: updatedImages.length };
   }
 
   // Save image classification result
@@ -156,8 +187,20 @@ class ImageStorageService {
       // Check if already exists
       const existingIndex = existingImages.findIndex(img => img.uri === uri);
       
+      // 生成更稳定的ID，基于URI的哈希值
+      const generateStableId = (uri) => {
+        // 使用URI的简单哈希作为ID基础，确保相同URI总是生成相同ID
+        let hash = 0;
+        for (let i = 0; i < uri.length; i++) {
+          const char = uri.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // 转换为32位整数
+        }
+        return `img_${Math.abs(hash).toString(36)}_${Date.now()}`;
+      };
+      
       const imageRecord = {
-        id: existingIndex >= 0 ? existingImages[existingIndex].id : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: existingIndex >= 0 ? existingImages[existingIndex].id : generateStableId(uri),
         uri,
         category,
         confidence,
@@ -219,6 +262,7 @@ class ImageStorageService {
       }
       
       const fullImages = JSON.parse(imagesJson);
+      console.log(`📊 ImageStorageService.getImages() 从数据库读取到 ${fullImages.length} 张图片`);
       
       // 转换为精简数据结构 - 只包含界面显示必需字段
       const simplifiedImages = fullImages.map(img => {

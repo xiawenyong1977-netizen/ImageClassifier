@@ -37,6 +37,7 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
   
   // 数据状态
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
+  const [lastScanTime, setLastScanTime] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
   
@@ -98,13 +99,25 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
 
   // 监听缓存变化，重新加载数据
   useEffect(() => {
-    const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
-      console.log('🔄 HomeScreen 收到缓存变化通知');
-      // 刷新页面以重新加载数据
-      window.location.reload();
-    });
+    // 添加初始化延迟，避免在App初始化期间触发刷新
+    const initTimer = setTimeout(() => {
+      const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
+        console.log('🔄 HomeScreen 收到缓存变化通知');
+        // 刷新页面以重新加载数据
+        window.location.reload();
+      });
+      
+      // 将unsubscribe函数存储到window对象，以便后续清理
+      window.homeScreenCacheUnsubscribe = unsubscribe;
+    }, 1000); // 延迟1秒，确保App初始化完成
     
-    return unsubscribe;
+    return () => {
+      clearTimeout(initTimer);
+      if (window.homeScreenCacheUnsubscribe) {
+        window.homeScreenCacheUnsubscribe();
+        delete window.homeScreenCacheUnsubscribe;
+      }
+    };
   }, []);
 
   // 监听设置更新
@@ -239,6 +252,8 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
     // 扫描完成时刷新数据
     if (progress.stage === 'completed') {
       console.log('✅ 扫描完成，刷新数据');
+      // 重新加载扫描时间和统计信息
+      loadLastScanTime();
       setTimeout(() => {
         // 刷新页面以重新加载数据
         window.location.reload();
@@ -270,12 +285,51 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
     }
   }, [handleScanProgress]);
 
-  // 处理设置按钮点击
-  const handleSettingsPress = () => {
-    console.log('⚙️ 点击设置按钮');
-    setCurrentScreen('Settings');
-    setScreenProps({});
+  // 加载最近扫描时间
+  const loadLastScanTime = async () => {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      if (settings && settings.lastScanTime) {
+        setLastScanTime(settings.lastScanTime);
+        const formattedTime = new Date(settings.lastScanTime).toLocaleString('zh-CN');
+        
+        // 从缓存获取统计信息，避免触发缓存更新
+        const cache = UnifiedDataService.imageCache.getCache();
+        const images = cache.allImages || [];
+        const totalImages = images.length;
+        let totalSize = 0;
+        for (const image of images) {
+          if (image.fileSize && typeof image.fileSize === 'number') {
+            totalSize += image.fileSize;
+          }
+        }
+        
+        const formattedSize = formatFileSize(totalSize);
+        setGlobalMessage(`最近扫描完成时间: ${formattedTime} | 照片数量: ${totalImages} | 空间大小: ${formattedSize}`);
+      } else {
+        setGlobalMessage('图片分类应用已就绪');
+      }
+    } catch (error) {
+      console.error('❌ 加载最近扫描时间失败:', error);
+      setGlobalMessage('图片分类应用已就绪');
+    }
   };
+
+
+  // 格式化文件大小
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // 组件挂载时加载最近扫描时间和统计信息
+  useEffect(() => {
+    loadLastScanTime();
+  }, []);
+
 
   // 渲染分类卡片组件
   const CategoryCard = ({ category, count, recentImages }) => {
@@ -347,18 +401,6 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* 头部区域 */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>图片分类整理应用</Text>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={handleSettingsPress}
-          >
-            <Text style={styles.settingsButtonText}>⚙️ 设置</Text>
-          </TouchableOpacity>
-        </View>
-
-
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
@@ -477,16 +519,16 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
     
     return (
       <SafeAreaView style={styles.container}>
-        {/* 全局提示区 - 用于显示各种提示信息 */}
-        <View style={styles.scanProgressBanner}>
-          <Text style={styles.scanProgressMessage}>
-            {globalMessage}
-          </Text>
-        </View>
-        
+
         {/* 根据当前屏幕渲染对应页面 */}
         {currentScreen === 'Home' && (
           <View style={styles.screenContainer}>
+            {/* 消息提示区 - 只在HomeScreen中显示 */}
+            <View style={styles.scanProgressBanner}>
+              <Text style={styles.scanProgressMessage}>
+                {globalMessage}
+              </Text>
+            </View>
             {renderHomeContent()}
           </View>
         )}
@@ -574,51 +616,21 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  // 头部样式
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  settingsButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#2196F3',
-    borderRadius: 6,
-  },
-  settingsButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
   // 扫描进度提示区样式
   scanProgressBanner: {
-    backgroundColor: '#e3f2fd',
-    padding: 16,
-    margin: 16,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2196F3',
+    backgroundColor: 'transparent',
+    padding: 8,
+    margin: 8,
+    borderRadius: 4,
   },
   scanningBanner: {
-    backgroundColor: '#f3e5f5',
-    borderLeftColor: '#9C27B0',
+    backgroundColor: 'transparent',
   },
   scanProgressMessage: {
-    fontSize: 16,
-    color: '#1976d2',
+    fontSize: 12,
+    color: '#666',
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: 'normal',
   },
   progressBar: {
     height: 6,

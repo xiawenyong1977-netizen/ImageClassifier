@@ -158,9 +158,9 @@ const CategoryScreen = ({
   const loadImages = useCallback(async () => {
     try {
       let images;
-      if (city) {
+    if (city) {
         images = await UnifiedDataService.readImagesByLocation(city, null);
-      } else {
+    } else {
         images = await UnifiedDataService.readImagesByCategory(category);
       }
       
@@ -543,7 +543,7 @@ const CategoryScreen = ({
       
       {/* 视图模式切换 */}
       <View style={styles.viewModeContainer}>
-        <TouchableOpacity
+      <TouchableOpacity
           style={[styles.viewModeButton, viewMode === 'grid' && styles.viewModeButtonActive]}
           onPress={() => setViewMode('grid')}>
           <Text style={[styles.viewModeButtonText, viewMode === 'grid' && styles.viewModeButtonTextActive]}>
@@ -555,13 +555,13 @@ const CategoryScreen = ({
           onPress={() => setViewMode('timeline')}>
           <Text style={[styles.viewModeButtonText, viewMode === 'timeline' && styles.viewModeButtonTextActive]}>
             时间轴
-          </Text>
-        </TouchableOpacity>
-      </View>
+        </Text>
+      </TouchableOpacity>
+    </View>
       
         {/* 分页控制 */}
         <View style={styles.headerPagination}>
-      <TouchableOpacity
+          <TouchableOpacity
             style={[styles.headerPageButton, currentPage === 1 && styles.headerPageButtonDisabled]}
             onPress={goToPreviousPage}
             disabled={currentPage === 1}
@@ -572,7 +572,7 @@ const CategoryScreen = ({
           <View style={styles.headerPageInfo}>
             <Text style={styles.headerPageInfoText}>
               第 {currentPage} 页 / 共 {paginationData.totalPages} 页
-        </Text>
+            </Text>
           </View>
           
           <TouchableOpacity 
@@ -581,7 +581,7 @@ const CategoryScreen = ({
             disabled={currentPage === paginationData.totalPages}
           >
             <Text style={styles.headerPageButtonText}>下一页</Text>
-      </TouchableOpacity>
+          </TouchableOpacity>
           
           <View style={styles.headerItemsPerPageContainer}>
             <Text style={styles.headerItemsPerPageLabel}>每页:</Text>
@@ -603,13 +603,13 @@ const CategoryScreen = ({
         {/* 删除按钮和取消选择按钮 - 只在有选中图片时显示 */}
         {currentSelectedCount > 0 && (
           <>
-            <TouchableOpacity
+          <TouchableOpacity
               style={[styles.headerButton, styles.headerDeleteButton]}
-              onPress={handleBatchDelete}>
+            onPress={handleBatchDelete}>
               <Text style={[styles.headerButtonText, styles.headerDeleteButtonText]}>
                 删除 ({currentSelectedCount})
-              </Text>
-            </TouchableOpacity>
+            </Text>
+          </TouchableOpacity>
             
             <TouchableOpacity
               style={[styles.headerButton, styles.headerCancelButton]}
@@ -620,8 +620,8 @@ const CategoryScreen = ({
             </TouchableOpacity>
           </>
         )}
-    </View>
-  );
+      </View>
+    );
   }, [city, category, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, viewMode]);
 
   // 懒加载图片容器组件
@@ -736,7 +736,7 @@ const CategoryScreen = ({
         </View>
       );
     }
-
+    
     return (
       <ScrollView
         style={{
@@ -777,15 +777,15 @@ const CategoryScreen = ({
                     index={index}
                     total={imagesForDate.length}
                     getIsSelected={getIsSelected}
-                    onPress={handleImagePress}
-                    onLongPress={handleImageLongPress}
+                        onPress={handleImagePress}
+                        onLongPress={handleImageLongPress}
                     onRightPress={handleImageRightPress}
-                  />
+                      />
                 ))}
               </View>
-            </View>
-          );
-        })}
+                    </View>
+                  );
+                })}
       </ScrollView>
     );
   }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, city]);
@@ -807,13 +807,13 @@ const CategoryScreen = ({
               {selectAll ? 'Deselect All' : 'Select All'}
             </Text>
           </TouchableOpacity>
-        </View>
+              </View>
         
         <View style={styles.toolbarCenter}>
           <Text style={styles.selectionCount}>
             已选择 {selectedImages.length} / {allImages.length} 张
           </Text>
-        </View>
+            </View>
         
         <View style={styles.toolbarActions}>
           <TouchableOpacity
@@ -1676,7 +1676,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
-  },
+ },
 });
 
 export default CategoryScreen;

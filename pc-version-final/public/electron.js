@@ -21,9 +21,9 @@ function createWindow() {
     },
     icon: path.join(__dirname, 'icon.png'),
     title: '图片分类助手',
-    autoHideMenuBar: false,  // 显示默认菜单栏
-    titleBarStyle: 'default',  // 使用默认标题栏
-    frame: true,  // 显示窗口框架
+    autoHideMenuBar: true,  // 隐藏默认菜单栏
+    titleBarStyle: 'hidden',  // 隐藏默认标题栏
+    frame: false,  // 隐藏窗口框架，使用自定义标题栏
     resizable: true,
     minimizable: true,
     maximizable: true,
@@ -58,6 +58,12 @@ function createWindow() {
   const { ipcMain } = require('electron');
   ipcMain.on('show-settings-menu', (event) => {
     // 直接导航到设置页面
+    mainWindow.webContents.send('navigate-to-settings');
+  });
+
+  // 监听自定义标题栏设置按钮点击
+  ipcMain.on('titlebar-settings-click', (event) => {
+    console.log('[Electron Main] 标题栏设置按钮被点击');
     mainWindow.webContents.send('navigate-to-settings');
   });
 

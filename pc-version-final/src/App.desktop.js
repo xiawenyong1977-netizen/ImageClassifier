@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, TouchableOpacity } from 'react-native';
 
 // Platform detection for web and mobile
 let Platform;
@@ -32,7 +32,6 @@ export default function App() {
   console.log('🚀 App.desktop.js 开始渲染');
   
   const navigationRef = useRef(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [appData, setAppData] = useState({
     recentImages: [],
     categoryCounts: {},
@@ -47,7 +46,6 @@ export default function App() {
     const initApp = async () => {
       try {
         console.log('🔄 App.desktop.js 开始初始化应用...');
-        setIsLoading(true);
         
         // 初始化统一数据服务
         console.log('🔄 App.desktop.js 开始初始化统一数据服务...');
@@ -124,7 +122,7 @@ export default function App() {
           hideEmptyCategories: false
         });
       } finally {
-        setIsLoading(false);
+        console.log('🔄 App.desktop.js 初始化完成');
       }
     };
 
@@ -132,21 +130,28 @@ export default function App() {
   }, []);
 
   console.log('🚀 App.desktop.js 准备渲染 HomeScreen');
-
-  if (isLoading) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>正在加载图片数据...</Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      
+      {/* 自定义标题栏 */}
+      <View style={styles.titleBar}>
+        <View style={styles.titleBarDragArea}>
+          <Text style={styles.titleBarTitle}>图片分类助手</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={() => {
+            console.log('🔧 设置按钮被点击');
+            if (window.require) {
+              window.require('electron').ipcRenderer.send('titlebar-settings-click');
+            }
+          }}
+        >
+          <Text style={styles.settingsButtonText}>设置</Text>
+        </TouchableOpacity>
+      </View>
+      
       <HomeScreen 
         appData={appData}
         onRefreshCache={() => window.location.reload()}
@@ -160,13 +165,37 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5FCFF',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  // 自定义标题栏样式
+  titleBar: {
+    height: 40,
+    backgroundColor: '#f0f0f0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    WebkitAppRegion: 'drag', // 使整个标题栏可拖拽
   },
-  loadingText: {
+  titleBarDragArea: {
+    flex: 1,
+    WebkitAppRegion: 'drag', // 使标题区域可拖拽
+  },
+  titleBarTitle: {
     fontSize: 16,
-    color: '#666',
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  settingsButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#2196F3',
+    borderRadius: 4,
+    WebkitAppRegion: 'no-drag', // 设置按钮不可拖拽
+  },
+  settingsButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
