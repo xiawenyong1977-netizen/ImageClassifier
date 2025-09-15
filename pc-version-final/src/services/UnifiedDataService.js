@@ -439,7 +439,8 @@ class UnifiedDataService {
       console.log('📖 读取应用设置');
       
       const settings = await this.imageStorageService.getSettings();
-      console.log('✅ 应用设置读取完成');
+      console.log('✅ 应用设置读取完成:', settings);
+      console.log('🔧 hideEmptyCategories 值:', settings.hideEmptyCategories, '类型:', typeof settings.hideEmptyCategories);
       
       return settings;
       

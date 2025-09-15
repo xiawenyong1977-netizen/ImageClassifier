@@ -54,11 +54,21 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
   // 使用 ref 存储设置值，避免异步状态更新问题
   const hideEmptyCategoriesRef = useRef(appHideEmptyCategories);
   
+  // 监听 appHideEmptyCategories 变化，同步更新 ref
+  useEffect(() => {
+    hideEmptyCategoriesRef.current = appHideEmptyCategories;
+    console.log('🔄 更新 hideEmptyCategoriesRef.current:', appHideEmptyCategories);
+  }, [appHideEmptyCategories]);
+  
   console.log('🏠 HomeScreen 状态初始化完成:', { 
     currentScreen, 
     recentImages: recentImages?.length || 0, 
-    categoryCounts: Object.keys(categoryCounts).length 
+    categoryCounts: Object.keys(categoryCounts).length,
+    appHideEmptyCategories,
+    hideEmptyCategoriesRef: hideEmptyCategoriesRef.current,
+    appDataKeys: Object.keys(appData || {})
   });
+  console.log('🔧 HomeScreen 接收到的 appData.hideEmptyCategories:', appHideEmptyCategories, '类型:', typeof appHideEmptyCategories);
 
   // 动态加载页面组件
   const loadScreenComponent = useCallback(async (screenName) => {
@@ -111,6 +121,7 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
       window.homeScreenCacheUnsubscribe = unsubscribe;
     }, 1000); // 延迟1秒，确保App初始化完成
     
+    
     return () => {
       clearTimeout(initTimer);
       if (window.homeScreenCacheUnsubscribe) {
@@ -125,8 +136,8 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
     const handleSettingsUpdate = (event) => {
       console.log('🔄 HomeScreen 收到设置更新通知:', event.detail);
       if (event.detail.key === 'hideEmptyCategories') {
-        // 刷新页面以重新加载数据
-        window.location.reload();
+        // App.desktop.js 会重新加载数据，这里不需要额外处理
+        console.log('🔄 设置已更新，App.desktop.js 将重新加载数据');
       }
     };
 
@@ -299,8 +310,8 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         const totalImages = images.length;
         let totalSize = 0;
         for (const image of images) {
-          if (image.fileSize && typeof image.fileSize === 'number') {
-            totalSize += image.fileSize;
+          if (image.size && typeof image.size === 'number') {
+            totalSize += image.size;
           }
         }
         
@@ -407,9 +418,23 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
             <Text style={styles.sectionTitle}>按内容</Text>
             <TouchableOpacity
               style={styles.toggleButton}
-              onPress={() => {
-                // 刷新页面以重新加载数据
-                window.location.reload();
+              onPress={async () => {
+                try {
+                  console.log('🔄 切换隐藏空分类设置');
+                  // 读取当前设置
+                  const settings = await UnifiedDataService.readSettings();
+                  // 切换设置
+                  settings.hideEmptyCategories = !settings.hideEmptyCategories;
+                  // 保存设置
+                  await UnifiedDataService.writeSettings(settings);
+                  // 更新本地引用
+                  hideEmptyCategoriesRef.current = settings.hideEmptyCategories;
+                  console.log('✅ 隐藏空分类设置已更新:', settings.hideEmptyCategories);
+                  // 刷新页面以重新加载数据
+                  window.location.reload();
+                } catch (error) {
+                  console.error('❌ 切换隐藏空分类设置失败:', error);
+                }
               }}
             >
               <Text style={styles.toggleButtonText}>
@@ -534,20 +559,22 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         )}
         
         {currentScreen === 'Category' && (
-          <View style={styles.screenContainer}>
-            {CategoryScreen ? (
-              <CategoryScreen 
-                {...screenProps} 
-                forceRefresh={categoryDataChanged}
-                onBack={() => setCurrentScreen('Home')}
-                navigation={{
-                  onImagePress: (image) => {
-                    handleImagePress(image, 'Category', screenProps);
-                  }
-                }}
-              />
-            ) : <View style={styles.loadingContainer}><Text>Loading Category...</Text></View>}
-          </View>
+          CategoryScreen ? (
+            <CategoryScreen 
+              {...screenProps} 
+              forceRefresh={categoryDataChanged}
+              onBack={() => setCurrentScreen('Home')}
+              navigation={{
+                onImagePress: (image) => {
+                  handleImagePress(image, 'Category', screenProps);
+                }
+              }}
+            />
+          ) : (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>正在加载分类页面...</Text>
+            </View>
+          )
         )}
         
         {currentScreen === 'ImagePreview' && (

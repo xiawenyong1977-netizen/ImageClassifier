@@ -23,7 +23,12 @@ function createWindow() {
     title: '图片分类助手',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
     titleBarStyle: 'hidden',  // 隐藏默认标题栏
-    frame: false,  // 隐藏窗口框架，使用自定义标题栏
+    frame: true,  // 显示窗口框架
+    titleBarOverlay: {
+      color: '#f0f0f0',
+      symbolColor: '#333',
+      height: 32
+    },
     resizable: true,
     minimizable: true,
     maximizable: true,

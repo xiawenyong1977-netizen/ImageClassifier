@@ -484,6 +484,12 @@ const CategoryScreen = ({
               setShowDeleteProgress(true);
               setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedCount });
               
+              // 临时禁用缓存监听器，避免删除过程中页面刷新
+              if (window.homeScreenCacheUnsubscribe) {
+                window.homeScreenCacheUnsubscribe();
+                delete window.homeScreenCacheUnsubscribe;
+              }
+              
               const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
               await UnifiedDataService.writeDeleteImages(
                 selectedImageIds,
@@ -495,13 +501,39 @@ const CategoryScreen = ({
               // 清除选中状态
               clearCategorySelections();
               
+              // 重新加载图片数据以更新统计数据
+              await loadImages();
+              
+              // 触发 App.desktop.js 重新加载数据
+              if (window.updateAppData) {
+                await window.updateAppData();
+              }
+              
               setTimeout(() => {
                 setShowDeleteProgress(false);
+                
+                // 重新启用缓存监听器
+                if (typeof window !== 'undefined') {
+                  const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
+                    console.log('🔄 HomeScreen 收到缓存变化通知');
+                    window.location.reload();
+                  });
+                  window.homeScreenCacheUnsubscribe = unsubscribe;
+                }
               }, 1000);
               
             } catch (error) {
               setShowDeleteProgress(false);
               Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
+              
+              // 即使出错也要重新启用缓存监听器
+              if (typeof window !== 'undefined') {
+                const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
+                  console.log('🔄 HomeScreen 收到缓存变化通知');
+                  window.location.reload();
+                });
+                window.homeScreenCacheUnsubscribe = unsubscribe;
+              }
             }
           },
         },
@@ -523,6 +555,7 @@ const CategoryScreen = ({
     console.log(`🔄 HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
     console.log(`🔍 选中统计详情:`, selectedCountsByCategory);
     console.log(`🔍 查找分类 "${normalizedCategory}" 的选中数量:`, selectedCountsByCategory[normalizedCategory]);
+    console.log(`🔍 所有分类的选中数量:`, Object.entries(selectedCountsByCategory).map(([cat, count]) => `${cat}: ${count}`).join(', '));
     
     return (
     <View style={styles.header}>
@@ -1011,6 +1044,8 @@ const CategoryScreen = ({
     );
 
 
+  console.log('🏷️ CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
+  
   return (
     <SafeAreaView style={styles.container}>
       {/* Fixed Header - 可以重新渲染 */}
@@ -1056,6 +1091,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  
   
   // 分页控制样式
   paginationControls: {
@@ -1246,7 +1282,7 @@ const styles = StyleSheet.create({
   },
   fixedHeader: {
     position: 'absolute',
-    top: 0, // 紧贴窗口顶部
+    top: 32, // 为自定义标题栏留出空间
     left: 0,
     right: 0,
     zIndex: 1000,
