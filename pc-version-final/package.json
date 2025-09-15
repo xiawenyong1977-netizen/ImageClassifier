@@ -1,0 +1,51 @@
+{
+  "name": "image-classifier-desktop-final",
+  "version": "1.0.0",
+  "description": "图片分类整理桌面应用 - 真正的代码复用演示",
+  "main": "public/electron.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
+    "eject": "react-scripts eject",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron-pack": "npm run build && electron-builder",
+    "preelectron-pack": "npm run build"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3",
+    "exif-parser": "^0.1.12",
+    "noop2": "^1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-native": "^0.72.17",
+    "react-native-web": "^0.19.6",
+    "react-refresh": "^0.17.0"
+  },
+  "devDependencies": {
+    "@craco/craco": "^7.1.0",
+    "concurrently": "^8.2.0",
+    "electron": "^25.3.0",
+    "electron-builder": "^24.6.3",
+    "react-scripts": "5.0.1",
+    "wait-on": "^7.0.1"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "resolutions": {
+    "react-native-fs": "npm:noop2@1.0.0",
+    "react-native-vector-icons": "npm:noop2@1.0.0"
+  }
+}

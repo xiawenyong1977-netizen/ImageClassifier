@@ -161,5 +161,6 @@ jspm_packages/
 .pnp.*
 node_modules
 
-# PC version final build (exclude from source control)
-pc-version-final/
+# PC version final build (exclude build output only)
+pc-version-final/build/
+pc-version-final/node_modules/

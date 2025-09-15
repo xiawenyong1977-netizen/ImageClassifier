@@ -1,0 +1,1307 @@
+import { Platform } from 'react-native';
+import { PermissionsAndroid } from '../adapters/WebAdapters';
+import { RNFS } from '../adapters/WebAdapters';
+import ImageClassifierService from './ImageClassifierService';
+
+// EXIF位置信息读取函数 - 简化版�?
+const extractLocationInfo = async (filePath) => {
+  try {
+    console.log(`🔍 尝试从文�?${filePath.split('/').pop()} 读取EXIF位置信息...`);
+    
+    // 使用 React Native 的原生能力读取文件信�?
+    const RNFS = require('react-native-fs');
+    
+    try {
+      // 读取文件的基本信�?
+      const stats = await RNFS.stat(filePath);
+      console.log(`📸 文件信息:`, stats);
+      
+      // 初始化位置信息对�?
+      const locationInfo = {};
+      
+      // 尝试使用 EXIF 库读取位置信�?
+      try {
+        console.log(`🔄 尝试使用exif-parser库读取GPS信息...`);
+        const ExifParser = require('exif-parser');
+        const Buffer = require('buffer').Buffer;
+        
+        // 读取整个文件来解析EXIF数据
+        const buffer = await RNFS.read(filePath, 0, 0, 'base64');
+        const arrayBuffer = Buffer.from(buffer, 'base64');
+        
+        const parser = ExifParser.create(arrayBuffer);
+        const exifData = parser.parse();
+        console.log(`📸 EXIF数据读取成功:`, exifData);
+        
+        if (exifData && exifData.tags) {
+          // 输出所有GPS相关标签用于调试
+          const gpsTags = Object.keys(exifData.tags).filter(tag => 
+            tag.toLowerCase().includes('gps') || 
+            tag.toLowerCase().includes('lat') || 
+            tag.toLowerCase().includes('lon')
+          );
+          console.log(`🔍 找到GPS相关标签:`, gpsTags);
+          gpsTags.forEach(tag => {
+            console.log(`  ${tag}: ${exifData.tags[tag]} (${typeof exifData.tags[tag]})`);
+          });
+          
+          // 提取GPS坐标信息（坐标已经是十进制度格式�?
+          if (exifData.tags.GPSLatitude && exifData.tags.GPSLongitude) {
+            locationInfo.latitude = exifData.tags.GPSLatitude;
+            locationInfo.longitude = exifData.tags.GPSLongitude;
+            locationInfo.source = 'exif';
+            console.log(`�?EXIF找到GPS坐标: ${locationInfo.latitude}, ${locationInfo.longitude}`);
+            
+            // 提取海拔高度
+            if (exifData.tags.GPSAltitude) {
+              locationInfo.altitude = exifData.tags.GPSAltitude;
+              console.log(`�?EXIF找到海拔高度: ${locationInfo.altitude}`);
+            }
+            
+            // 提取GPS精度（如果存在）
+            if (exifData.tags.GPSHPositioningError) {
+              locationInfo.accuracy = exifData.tags.GPSHPositioningError;
+              console.log(`�?EXIF找到GPS精度: ${locationInfo.accuracy}`);
+            }
+            
+            return locationInfo;
+          } else {
+            console.log(`�?EXIF中未找到GPS坐标数据`);
+            console.log(`GPSLatitude: ${exifData.tags.GPSLatitude}`);
+            console.log(`GPSLongitude: ${exifData.tags.GPSLongitude}`);
+          }
+        } else {
+          console.log(`�?EXIF数据解析失败或没有tags`);
+        }
+        
+      } catch (exifError) {
+        console.log(`⚠️ exif-parser读取失败:`, exifError.message);
+      }
+
+      // 尝试使用原生�?
+      try {
+        console.log(`🔄 尝试使用react-native-exif原生�?..`);
+        const RNExif = require('react-native-exif');
+        
+        const exifData = await RNExif.getExif(filePath);
+        console.log(`📸 原生库EXIF数据:`, exifData);
+        
+        // 提取GPS坐标信息
+        if (exifData.GPSLatitude && exifData.GPSLongitude) {
+          locationInfo.latitude = parseFloat(exifData.GPSLatitude);
+          locationInfo.longitude = parseFloat(exifData.GPSLongitude);
+          locationInfo.source = 'exif';
+          console.log(`�?原生库找到GPS坐标: ${locationInfo.latitude}, ${locationInfo.longitude}`);
+          
+          // 提取海拔高度
+          if (exifData.GPSAltitude) {
+            locationInfo.altitude = parseFloat(exifData.GPSAltitude);
+            console.log(`�?原生库找到海拔高�? ${locationInfo.altitude}`);
+          }
+          
+          // 提取GPS精度（如果存在）
+          if (exifData.GPSHPositioningError) {
+            locationInfo.accuracy = parseFloat(exifData.GPSHPositioningError);
+            console.log(`�?原生库找到GPS精度: ${locationInfo.accuracy}`);
+          }
+          
+          return locationInfo;
+        } else {
+          console.log(`�?原生库中未找到GPS坐标数据`);
+          console.log(`GPSLatitude: ${exifData.GPSLatitude}`);
+          console.log(`GPSLongitude: ${exifData.GPSLongitude}`);
+        }
+        
+      } catch (nativeError) {
+        console.log(`⚠️ 原生库读取失�?`, nativeError.message);
+      }
+      
+                  // MediaStore �?React Native 中不可用，跳过此步骤
+      
+      // 如果都没有找到，返回默认的位置信息结�?
+      console.log(`⚠️ 未找到GPS位置信息，使用默认结构`);
+      return {
+        latitude: null,
+        longitude: null,
+        altitude: null,
+        accuracy: null,
+        address: null,
+        city: null,
+        country: null,
+        province: null,
+        district: null,
+        street: null,
+        source: 'none'
+      };
+      
+    } catch (fileError) {
+      console.log(`⚠️ 文件读取失败:`, fileError.message);
+      return null;
+    }
+    
+  } catch (error) {
+    console.error(`�?位置信息读取完全失败:`, error);
+    return null;
+  }
+};
+
+// EXIF拍摄时间读取函数
+const extractTakenTime = async (filePath) => {
+  try {
+    // 优先使用备用EXIF库（exif-parser），因为它更稳定
+    console.log(`🔍 尝试从文�?${filePath.split('/').pop()} 读取EXIF拍摄时间...`);
+    
+    try {
+      console.log(`🔄 使用exif-parser库读取EXIF数据...`);
+      const ExifParser = require('exif-parser');
+      const RNFS = require('react-native-fs');
+      const Buffer = require('buffer').Buffer;
+      
+      // 读取文件的前64KB来解析EXIF数据
+      const buffer = await RNFS.read(filePath, 65536, 0, 'base64');
+      const arrayBuffer = Buffer.from(buffer, 'base64');
+      
+      const parser = ExifParser.create(arrayBuffer);
+      const exifData = parser.parse();
+      console.log(`📸 EXIF数据读取成功:`, exifData);
+      
+      if (exifData && exifData.tags && exifData.tags.DateTimeOriginal) {
+        const takenDate = new Date(exifData.tags.DateTimeOriginal * 1000);
+        console.log(`�?找到拍摄时间: ${takenDate.toLocaleString('zh-CN')}`);
+        return takenDate.getTime();
+      }
+      
+      if (exifData && exifData.tags && exifData.tags.DateTime) {
+        const takenDate = new Date(exifData.tags.DateTime * 1000);
+        console.log(`�?找到修改时间: ${takenDate.toLocaleString('zh-CN')}`);
+        return takenDate.getTime();
+      }
+      
+      console.log(`⚠️ 文件中没有找到拍摄时间信息`);
+      return null;
+      
+    } catch (parseError) {
+      console.log(`⚠️ exif-parser解析失败:`, parseError.message);
+      
+      // 如果备用库失败，尝试使用原生库作为最后手�?
+      try {
+        console.log(`🔄 尝试使用react-native-exif原生�?..`);
+        const RNExif = require('react-native-exif');
+        
+        const exifData = await RNExif.getExif(filePath);
+        console.log(`📸 原生库EXIF数据:`, exifData);
+        
+        if (exifData && exifData.DateTimeOriginal) {
+          const dateTimeStr = exifData.DateTimeOriginal;
+          console.log(`📅 原生库找到拍摄时�? ${dateTimeStr}`);
+          
+          // 解析日期时间字符�?(格式: "2023:09:15 14:23:45")
+          const [datePart, timePart] = dateTimeStr.split(' ');
+          const [year, month, day] = datePart.split(':');
+          const [hour, minute, second] = timePart.split(':');
+          
+          const takenDate = new Date(
+            parseInt(year),
+            parseInt(month) - 1, // 月份�?开�?
+            parseInt(day),
+            parseInt(hour),
+            parseInt(minute),
+            parseInt(second)
+          );
+          
+          console.log(`�?原生库拍摄时间解析成�? ${takenDate.toLocaleString('zh-CN')}`);
+          return takenDate.getTime();
+        }
+        
+        if (exifData && exifData.DateTime) {
+          const dateTimeStr = exifData.DateTime;
+          console.log(`📅 原生库找到修改时�? ${dateTimeStr}`);
+          
+          // 解析日期时间字符�?
+          const [datePart, timePart] = dateTimeStr.split(' ');
+          const [year, month, day] = datePart.split(':');
+          const [hour, minute, second] = timePart.split(':');
+          
+          const takenDate = new Date(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(hour),
+            parseInt(minute),
+            parseInt(second)
+          );
+          
+          console.log(`�?原生库修改时间解析成�? ${takenDate.toLocaleString('zh-CN')}`);
+          return takenDate.getTime();
+        }
+        
+        console.log(`⚠️ 原生库也未找到拍摄时间信息`);
+        return null;
+        
+      } catch (nativeError) {
+        console.log(`�?原生库也失败:`, nativeError.message);
+        return null;
+      }
+    }
+    
+  } catch (error) {
+    console.error(`�?拍摄时间读取完全失败:`, error);
+    return null;
+  }
+};
+import ImageStorageService from './ImageStorageService';
+
+class GalleryScannerService {
+  constructor() {
+    this.isInitialized = false;
+    
+    // 创建服务实例
+    this.imageClassifier = new ImageClassifierService();
+    
+    // 定义本地相册路径 - 尝试多种可能的路�?
+    this.galleryPaths = [
+      // Android 标准路径
+      '/storage/emulated/0/DCIM/Camera',           // 相机拍摄的照�?
+      '/storage/emulated/0/DCIM/Screenshots',      // 截图
+      '/storage/emulated/0/Pictures',              // 图片文件�?
+      '/storage/emulated/0/Download',              // 下载文件�?
+      '/storage/emulated/0/WeChat/WeChat Images',  // 微信图片
+      '/storage/emulated/0/QQ_Images',             // QQ图片
+      '/storage/emulated/0/Telegram',              // Telegram图片
+      '/storage/emulated/0/WhatsApp/Media/WhatsApp Images', // WhatsApp图片
+      
+
+    ];
+  }
+
+  // 初始化服�?
+  async initialize() {
+    if (this.isInitialized) return;
+    
+    try {
+      // 在实际应用中，这里应该请求相册权�?
+      // 并初始化相关的原生模�?
+      await this.requestPermissions();
+      this.isInitialized = true;
+      console.log('相册扫描服务初始化成�?);
+    } catch (error) {
+      console.error('相册扫描服务初始化失�?', error);
+      throw error;
+    }
+  }
+
+  // 请求必要的权�?
+  async requestPermissions() {
+    if (Platform.OS === 'android') {
+      try {
+        console.log('🔐 开始权限检查和请求...');
+        
+        // 获取Android API级别
+        const apiLevel = Platform.Version;
+        console.log(`📱 检测到Android API级别: ${apiLevel}`);
+        
+        // 打印所有相关权限的当前状�?
+        console.log('📋 当前权限状态检�?');
+        
+        // 检查READ_EXTERNAL_STORAGE权限
+        const hasReadStorage = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+        );
+        console.log(`   📁 READ_EXTERNAL_STORAGE: ${hasReadStorage ? '�?已授�? : '�?未授�?}`);
+        
+        // 检查WRITE_EXTERNAL_STORAGE权限
+        const hasWriteStorage = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
+        );
+        console.log(`   📝 WRITE_EXTERNAL_STORAGE: ${hasWriteStorage ? '�?已授�? : '�?未授�?}`);
+        
+        // 检查READ_MEDIA_IMAGES权限（Android 13+�?
+        if (apiLevel >= 33) {
+          const hasMediaImages = await PermissionsAndroid.check(
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+          );
+          console.log(`   🖼�?READ_MEDIA_IMAGES: ${hasMediaImages ? '�?已授�? : '�?未授�?}`);
+        }
+        
+        // 检查CAMERA权限
+        const hasCamera = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.CAMERA
+        );
+        console.log(`   📷 CAMERA: ${hasCamera ? '�?已授�? : '�?未授�?}`);
+        
+        console.log('📋 权限状态检查完成\n');
+        
+        // 对于 Android 13+ (API 33+)，优先使�?READ_MEDIA_IMAGES 权限
+        if (apiLevel >= 33) {
+          console.log('�?Android 13+ 检测到，使�?READ_MEDIA_IMAGES 权限');
+          
+          // 先检查是否已经有媒体权限
+          const hasMediaPermission = await PermissionsAndroid.check(
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+          );
+          
+          console.log(`📋 READ_MEDIA_IMAGES 权限状�? ${hasMediaPermission ? '已授�? : '未授�?}`);
+          
+          if (hasMediaPermission) {
+            console.log('�?媒体权限已存在，无需请求');
+            return;
+          }
+          
+          console.log('🔄 开始请�?READ_MEDIA_IMAGES 权限...');
+          
+          // 请求媒体权限
+          const mediaGranted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+            {
+              title: '相册权限',
+              message: '应用需要访问您的相册来扫描和分类图片。请在权限弹窗中选择"允许"�?,
+              buttonNeutral: '稍后询问',
+              buttonNegative: '取消',
+              buttonPositive: '确定',
+            }
+          );
+          
+          console.log(`📋 权限请求结果: ${mediaGranted}`);
+          
+          if (mediaGranted === PermissionsAndroid.RESULTS.GRANTED) {
+            console.log('�?媒体权限已授�?);
+            return;
+          } else if (mediaGranted === PermissionsAndroid.RESULTS.DENIED) {
+            console.log('�?媒体权限被拒绝，请手动授予权�?);
+            throw new Error('相册权限被拒绝，请在系统设置中手动授予相册权�?);
+          } else {
+            console.log('⚠️ 媒体权限请求被取�?);
+            throw new Error('相册权限请求被取消，请在系统设置中手动授予相册权�?);
+          }
+        } else {
+          // 对于 Android 12 及以下版本，使用 READ_EXTERNAL_STORAGE 权限
+          console.log('�?Android 12 及以下版本，使用 READ_EXTERNAL_STORAGE 权限');
+          
+          // 先检查是否已经有存储权限
+          const hasStoragePermission = await PermissionsAndroid.check(
+            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+          );
+          
+          console.log(`📋 READ_EXTERNAL_STORAGE 权限状�? ${hasStoragePermission ? '已授�? : '未授�?}`);
+          
+          if (hasStoragePermission) {
+            console.log('�?存储权限已存在，无需请求');
+            return;
+          }
+          
+          console.log('🔄 开始请�?READ_EXTERNAL_STORAGE 权限...');
+          
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+            {
+              title: '存储权限',
+              message: '应用需要访问您的相册来扫描和分类图片。请在权限弹窗中选择"允许"�?,
+              buttonNeutral: '稍后询问',
+              buttonNegative: '取消',
+              buttonPositive: '确定',
+            }
+          );
+          
+          console.log(`📋 权限请求结果: ${granted}`);
+          
+          if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+            console.log('�?存储权限已授�?);
+          } else if (granted === PermissionsAndroid.RESULTS.DENIED) {
+            console.log('�?存储权限被拒绝，请手动授予权�?);
+            throw new Error('存储权限被拒绝，请在系统设置中手动授予存储权�?);
+          } else {
+            console.log('⚠️ 存储权限请求被取�?);
+            throw new Error('存储权限请求被取消，请在系统设置中手动授予存储权�?);
+          }
+        }
+        
+        // 尝试请求高级权限（用于删除文件）
+        console.log('🔄 尝试请求高级权限...');
+        
+        // 请求WRITE_EXTERNAL_STORAGE权限（即使可能无效）
+        if (!hasWriteStorage) {
+          console.log('🔄 请求 WRITE_EXTERNAL_STORAGE 权限...');
+          
+          const writeGranted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+            {
+              title: '写入权限',
+              message: '应用需要写入权限来删除图片文件。请在权限弹窗中选择"允许"�?,
+              buttonNeutral: '稍后询问',
+              buttonNegative: '取消',
+              buttonPositive: '确定',
+            }
+          );
+          
+          console.log(`📋 写入权限请求结果: ${writeGranted}`);
+          
+          if (writeGranted === PermissionsAndroid.RESULTS.GRANTED) {
+            console.log('�?写入权限已授�?);
+          } else {
+            console.log('⚠️ 写入权限未授予，删除功能可能受限');
+          }
+        }
+        
+        // 提示用户手动授权高级权限
+        console.log('📋 高级权限说明:');
+        console.log('   某些权限需要在系统设置中手动授�?');
+        console.log('   1. 设置 -> 应用 -> 图片分类应用 -> 权限');
+        console.log('   2. 允许"存储"�?管理所有文�?等权�?);
+        console.log('   3. 或者使用文件管理器手动删除图片');
+        
+      } catch (error) {
+        console.error('�?请求权限失败:', error);
+        console.log('📋 请按以下步骤手动授予权限�?);
+        if (Platform.Version >= 33) {
+          console.log('1. 长按应用图标');
+          console.log('2. 选择"应用信息"');
+          console.log('3. 点击"权限"');
+          console.log('4. 允许"相册"权限');
+        } else {
+          console.log('1. 长按应用图标');
+          console.log('2. 选择"应用信息"');
+          console.log('3. 点击"权限"');
+          console.log('4. 允许"存储"权限');
+        }
+        throw error;
+      }
+    }
+  }
+
+  // 自动扫描本地相册中的所有图�?
+  async scanGallery() {
+    try {
+      await this.ensureInitialized();
+      
+      console.log('开始自动扫描本地相�?..');
+      
+      let allImages = [];
+      
+      // 遍历每个相册路径
+      for (const path of this.galleryPaths) {
+        try {
+          console.log(`尝试扫描路径: ${path}`);
+          const images = await this.scanDirectory(path);
+          if (images.length > 0) {
+            console.log(`路径 ${path} 找到 ${images.length} 张图片`);
+            allImages = [...allImages, ...images];
+          } else {
+            console.log(`路径 ${path} 没有找到图片`);
+          }
+        } catch (error) {
+          console.log(`路径 ${path} 扫描失败:`, error.message);
+          // 继续扫描其他路径
+        }
+      }
+      
+      // 如果没有找到图片，尝试使�?react-native-fs 的常量路�?
+      if (allImages.length === 0) {
+        console.log('尝试使用 RNFS 常量路径...');
+        try {
+          const externalDir = RNFS.ExternalDirectoryPath;
+          const picturesDir = RNFS.PicturesDirectoryPath;
+          const dcimDir = RNFS.DCIMDirectoryPath;
+          
+          console.log(`ExternalDirectoryPath: ${externalDir}`);
+          console.log(`PicturesDirectoryPath: ${picturesDir}`);
+          console.log(`DCIMDirectoryPath: ${dcimDir}`);
+          
+          // 尝试这些路径
+          const additionalPaths = [externalDir, picturesDir, dcimDir].filter(Boolean);
+          for (const path of additionalPaths) {
+            try {
+              console.log(`尝试 RNFS 路径: ${path}`);
+              const images = await this.scanDirectory(path);
+              if (images.length > 0) {
+                console.log(`RNFS 路径 ${path} 找到 ${images.length} 张图片`);
+                allImages = [...allImages, ...images];
+              }
+            } catch (error) {
+              console.log(`RNFS 路径 ${path} 扫描失败:`, error.message);
+            }
+          }
+        } catch (error) {
+          console.log('RNFS 常量路径获取失败:', error.message);
+        }
+      }
+      
+             // 按拍摄时间排序，最新的在前�?
+       // 如果没有拍摄时间，则按文件时间排�?
+       allImages.sort((a, b) => {
+         const timeA = a.takenAt || a.timestamp;
+         const timeB = b.takenAt || b.timestamp;
+         return timeB - timeA;
+       });
+      
+      console.log(`自动扫描完成，总共发现 ${allImages.length} 张图片`);
+      
+      if (allImages.length === 0) {
+        console.log('⚠️ 没有找到任何图片，可能的原因�?);
+        console.log('1. 模拟器中没有图片文件');
+        console.log('2. 文件路径不正�?);
+        console.log('3. 权限问题');
+        console.log('4. 文件系统结构不同');
+      }
+      
+      return allImages;
+      
+    } catch (error) {
+      console.error('自动扫描相册失败:', error);
+      throw error;
+    }
+  }
+
+  // 自动扫描相册（兼容方法）
+  async autoScanGallery() {
+    return await this.autoScanGalleryWithProgress();
+  }
+
+  // 自动扫描相册（带进度回调�?
+  async autoScanGalleryWithProgress(onProgress) {
+    try {
+      console.log('开始自动扫描本地相�?..');
+      
+      // 获取已存在的图片记录，用于增量扫�?
+      const existingImages = await ImageStorageService.getImages();
+      const existingUris = new Set(existingImages.map(img => img.uri));
+      
+      console.log(`已存�?${existingImages.length} 张图片记录，开始增量扫�?..`);
+      
+      // 通知进度：初始化完成
+      if (onProgress) {
+        onProgress({
+          current: 0,
+          total: 0,
+          message: '正在扫描本地相册目录...',
+          filesFound: 0,
+          filesProcessed: 0,
+          filesFailed: 0
+        });
+      }
+      
+      const allImages = [];
+      let totalDirectories = 0;
+      let currentDirectory = 0;
+      
+      // 首先计算总目录数
+      for (const path of this.galleryPaths) {
+        try {
+          const exists = await RNFS.exists(path);
+          if (exists) {
+            totalDirectories++;
+          }
+        } catch (error) {
+          console.error(`检查路�?${path} 失败:`, error);
+        }
+      }
+      
+      // 通知进度：开始扫�?
+      if (onProgress) {
+        onProgress({
+          current: 0,
+          total: totalDirectories,
+          message: '正在扫描目录...',
+          filesFound: 0,
+          filesProcessed: 0,
+          filesFailed: 0
+        });
+      }
+      
+      for (const path of this.galleryPaths) {
+        try {
+          const exists = await RNFS.exists(path);
+          if (!exists) continue;
+          
+          currentDirectory++;
+          
+          // 通知进度：目录扫描进�?
+          if (onProgress) {
+            onProgress({
+              current: currentDirectory,
+              total: totalDirectories,
+              message: `正在扫描: ${path.split('/').pop()}`,
+              filesFound: allImages.length,
+              filesProcessed: 0,
+              filesFailed: 0
+            });
+          }
+          
+          const images = await this.scanDirectory(path, existingUris);
+          allImages.push(...images);
+          
+          // 通知进度：文件发现进�?
+          if (onProgress) {
+            onProgress({
+              current: currentDirectory,
+              total: totalDirectories,
+              message: `发现 ${images.length} 张新图片`,
+              filesFound: allImages.length,
+              filesProcessed: 0,
+              filesFailed: 0
+            });
+          }
+          
+        } catch (error) {
+          console.error(`扫描路径 ${path} 失败:`, error);
+        }
+      }
+      
+      console.log(`增量扫描完成，发�?${allImages.length} 张新图片`);
+      
+      // 通知进度：开始分�?
+      if (onProgress) {
+        onProgress({
+          current: 0,
+          total: allImages.length,
+          message: '正在分类新发现的图片...',
+          filesFound: allImages.length,
+          filesProcessed: 0,
+          filesFailed: 0
+        });
+      }
+      
+      // 只处理新发现的图�?
+      if (allImages.length > 0) {
+        console.log('开始分类新发现的图�?..');
+        let processedCount = 0;
+        let failedCount = 0;
+        
+        for (const image of allImages) {
+          try {
+            const classification = await this.imageClassifier.classifyImage(image.uri, {
+              timestamp: image.timestamp,
+              fileSize: image.size,
+              fileName: image.fileName
+            });
+            
+            await ImageStorageService.saveImageClassification({
+              uri: image.uri,
+              category: classification.category,
+              confidence: classification.confidence,
+              timestamp: image.timestamp,
+              takenAt: image.takenAt, // 添加拍摄时间
+              fileName: image.fileName,
+              size: image.size,
+              // 添加位置信息
+              latitude: image.latitude,
+              longitude: image.longitude,
+              altitude: image.altitude,
+              accuracy: image.accuracy,
+              address: image.address,
+              city: image.city,
+              country: image.country,
+              province: image.province,
+              district: image.district,
+              street: image.street,
+              locationSource: image.source
+            });
+            
+            processedCount++;
+            console.log(`图片 ${image.fileName} 分类完成: ${classification.category}`);
+            
+            // 通知进度：分类进�?
+            if (onProgress) {
+              onProgress({
+                current: processedCount,
+                total: allImages.length,
+                message: `正在分类: ${image.fileName}`,
+                filesFound: allImages.length,
+                filesProcessed: processedCount,
+                filesFailed: failedCount
+              });
+            }
+            
+          } catch (error) {
+            failedCount++;
+            console.error(`分类图片 ${image.fileName} 失败:`, error);
+            
+            // 通知进度：失败统�?
+            if (onProgress) {
+              onProgress({
+                current: processedCount,
+                total: allImages.length,
+                message: `分类失败: ${image.fileName}`,
+                filesFound: allImages.length,
+                filesProcessed: processedCount,
+                filesFailed: failedCount
+              });
+            }
+          }
+        }
+        
+        // 通知进度：完�?
+        if (onProgress) {
+          onProgress({
+            current: allImages.length,
+            total: allImages.length,
+            message: '扫描和分类完成！',
+            filesFound: allImages.length,
+            filesProcessed: processedCount,
+            filesFailed: failedCount
+          });
+        }
+      }
+      
+      return allImages;
+    } catch (error) {
+      console.error('自动扫描本地相册失败:', error);
+      throw error;
+    }
+  }
+
+  // 手动重新扫描相册（完整扫描）
+  async manualRescanGallery() {
+    try {
+      console.log('开始手动重新扫描本地相�?..');
+      console.log('galleryPaths:', this.galleryPaths);
+      
+      // 清空现有记录，进行完整扫�?
+      const allImages = [];
+      
+      for (const path of this.galleryPaths) {
+        try {
+          console.log(`正在扫描路径: ${path}`);
+          const images = await this.scanDirectory(path, new Set()); // 传入空Set，扫描所有文�?
+          console.log(`路径 ${path} 扫描完成，找�?${images.length} 张图片`);
+          allImages.push(...images);
+        } catch (error) {
+          console.error(`扫描路径 ${path} 失败:`, error);
+        }
+      }
+      
+      console.log(`手动重新扫描完成，发�?${allImages.length} 张图片`);
+      
+             // 处理所有发现的图片
+       if (allImages.length > 0) {
+         console.log('开始分类所有图�?..');
+         
+         
+         
+         for (const image of allImages) {
+            try {
+              console.log(`正在分类图片: ${image.fileName}`);
+              const classification = await this.imageClassifier.classifyImage(image.uri, {
+                timestamp: image.timestamp,
+                fileSize: image.size,
+                fileName: image.fileName
+              });
+            
+            await ImageStorageService.saveImageClassification({
+              uri: image.uri,
+              category: classification.category,
+              confidence: classification.confidence,
+              timestamp: image.timestamp,
+              takenAt: image.takenAt, // 添加拍摄时间
+              fileName: image.fileName,
+              size: image.size,
+              // 添加位置信息
+              latitude: image.latitude,
+              longitude: image.longitude,
+              altitude: image.altitude,
+              accuracy: image.accuracy,
+              address: image.address,
+              city: image.city,
+              country: image.country,
+              province: image.province,
+              district: image.district,
+              street: image.street,
+              locationSource: image.source
+            });
+            
+            console.log(`图片 ${image.fileName} 分类完成: ${classification.category}`);
+          } catch (error) {
+            console.error(`分类图片 ${image.fileName} 失败:`, error);
+          }
+        }
+      }
+      
+      return allImages;
+    } catch (error) {
+      console.error('手动重新扫描本地相册失败:', error);
+      console.error('错误堆栈:', error.stack);
+      throw error;
+    }
+  }
+
+  // 扫描指定目录
+  async scanDirectory(dirPath, existingUris = new Set()) {
+    try {
+      console.log(`开始扫描目�? ${dirPath}`);
+      
+      if (!existingUris || !(existingUris instanceof Set)) {
+        console.warn('existingUris 不是有效�?Set，创建新的空 Set');
+        existingUris = new Set();
+      }
+      
+      const exists = await RNFS.exists(dirPath);
+      if (!exists) {
+        console.log(`目录不存�? ${dirPath}`);
+        return [];
+      }
+      
+      console.log(`目录存在，开始读取内�?..`);
+      const items = await RNFS.readDir(dirPath);
+      console.log(`目录 ${dirPath} 包含 ${items.length} 个项目`);
+      
+      const images = [];
+      
+      for (const item of items) {
+        if (item.isDirectory()) {
+          console.log(`发现子目�? ${item.name}`);
+          const subImages = await this.scanDirectory(item.path, existingUris);
+          images.push(...subImages);
+        } else if (this.isImageFile(item.name)) {
+          // 检查文件是否已经存�?
+          const fileUri = `file://${item.path}`;
+          if (existingUris.has(fileUri)) {
+            continue;
+          }
+          
+                     console.log(`发现新图片文�? ${item.name}`);
+           
+                      try {
+                const stats = await RNFS.stat(item.path);
+                const takenTime = await extractTakenTime(item.path);
+                const locationInfo = await extractLocationInfo(item.path);
+                
+                // 获取文件的多种时间信�?
+                const mtime = stats.mtime ? new Date(stats.mtime).getTime() : null;
+                const ctime = stats.ctime ? new Date(stats.ctime).getTime() : null;
+                const currentTime = Date.now();
+                
+                // 对于从电脑拷贝到模拟器的文件�?
+                // - ctime（创建时间）通常重置为拷贝时间，更准确反映文件在模拟器中的状�?
+                // - mtime（修改时间）可能保留原始时间，不够准�?
+                // - 我们优先使用 ctime，因为它更准确地反映文件被拷贝到模拟器的时间
+                const fileTime = ctime || mtime || currentTime;
+                
+                const imageData = {
+                   uri: fileUri,
+                   fileName: item.name,
+                   size: stats.size,
+                   timestamp: fileTime, // 文件时间（拷�?修改时间�?
+                   takenAt: takenTime, // 只使用真正的EXIF拍摄时间
+                   path: item.path,
+                   // 添加位置信息
+                   ...locationInfo // 展开位置信息到顶层，方便后续处理
+                 };
+               
+               images.push(imageData);
+             } catch (error) {
+               console.error(`获取文件 ${item.name} 信息失败:`, error);
+             }
+        }
+      }
+      
+      console.log(`目录 ${dirPath} 扫描完成，找�?${images.length} 张图片`);
+      return images;
+    } catch (error) {
+      console.error(`扫描目录 ${dirPath} 失败:`, error);
+      console.error('错误堆栈:', error.stack);
+      return [];
+    }
+  }
+
+  // 判断是否为图片文�?
+  isImageFile(fileName) {
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+    const lowerFileName = fileName.toLowerCase();
+    return imageExtensions.some(ext => lowerFileName.endsWith(ext));
+  }
+
+  // 测试文件系统访问
+  async testFileSystemAccess() {
+    try {
+      console.log('=== 开始测试文件系统访�?===');
+      
+      // 测试 RNFS 常量
+      console.log('RNFS 常量:');
+      console.log(`ExternalDirectoryPath: ${RNFS.ExternalDirectoryPath}`);
+      console.log(`PicturesDirectoryPath: ${RNFS.PicturesDirectoryPath}`);
+      console.log(`DCIMDirectoryPath: ${RNFS.DCIMDirectoryPath}`);
+      console.log(`DocumentDirectoryPath: ${RNFS.DocumentDirectoryPath}`);
+      console.log(`MainBundlePath: ${RNFS.MainBundlePath}`);
+      
+      // 测试基本路径
+      const testPaths = [
+        '/storage/emulated/0',
+        '/sdcard',
+        '/mnt/sdcard',
+        RNFS.ExternalDirectoryPath,
+        RNFS.PicturesDirectoryPath,
+        RNFS.DCIMDirectoryPath,
+        
+        // 用户模拟器中的实际路�?
+        '/storage/emulated/0/Pictures',
+        '/storage/emulated/0/Pictures/Pictures',
+        '/sdcard/Pictures',
+        '/sdcard/Pictures/Pictures',
+      ];
+      
+      for (const path of testPaths) {
+        if (path) {
+          try {
+            const exists = await RNFS.exists(path);
+            console.log(`路径 ${path} 存在: ${exists}`);
+            
+            if (exists) {
+              try {
+                const items = await RNFS.readDir(path);
+                console.log(`路径 ${path} 包含 ${items.length} 个项目`);
+                
+                // 显示前几个项�?
+                const firstItems = items.slice(0, 5);
+                firstItems.forEach(item => {
+                  console.log(`  - ${item.name} (${item.isDirectory() ? '目录' : '文件'})`);
+                });
+                
+                if (items.length > 5) {
+                  console.log(`  ... 还有 ${items.length - 5} 个项目`);
+                }
+              } catch (error) {
+                console.log(`读取路径 ${path} 失败:`, error.message);
+              }
+            }
+          } catch (error) {
+            console.log(`检查路�?${path} 失败:`, error.message);
+          }
+        }
+      }
+      
+      console.log('=== 文件系统访问测试完成 ===');
+    } catch (error) {
+      console.error('文件系统访问测试失败:', error);
+    }
+  }
+
+  // 测试已知文件是否存在
+  async testKnownFile() {
+    try {
+      console.log('=== 开始测试已知文�?===');
+      
+      // 根据用户截图中的信息测试
+      const knownFile = '/storage/emulated/0/Pictures/Pictures/test2.jpg';
+      
+      console.log(`测试文件: ${knownFile}`);
+      
+      // 检查文件是否存�?
+      const exists = await RNFS.exists(knownFile);
+      console.log(`文件存在: ${exists}`);
+      
+      if (exists) {
+        try {
+          // 获取文件信息
+          const stats = await RNFS.stat(knownFile);
+          console.log(`文件信息:`);
+          console.log(`  大小: ${stats.size} bytes`);
+          console.log(`  修改时间: ${stats.mtime}`);
+          console.log(`  创建时间: ${stats.ctime}`);
+          console.log(`  权限: ${stats.mode}`);
+          
+          // 尝试读取文件头（�?00字节�?
+          const fileContent = await RNFS.read(knownFile, 100, 0, 'ascii');
+          console.log(`文件头内�? ${fileContent}`);
+          
+        } catch (error) {
+          console.log(`读取文件信息失败:`, error.message);
+        }
+      }
+      
+      // 尝试其他可能的路�?
+      const alternativePaths = [
+        '/sdcard/Pictures/Pictures/test2.jpg',
+        '/mnt/sdcard/Pictures/Pictures/test2.jpg',
+        '/storage/emulated/0/Pictures/test2.jpg',
+        '/sdcard/Pictures/test2.jpg',
+      ];
+      
+      for (const path of alternativePaths) {
+        try {
+          const altExists = await RNFS.exists(path);
+          console.log(`替代路径 ${path} 存在: ${altExists}`);
+        } catch (error) {
+          console.log(`检查替代路�?${path} 失败:`, error.message);
+        }
+      }
+      
+      console.log('=== 已知文件测试完成 ===');
+    } catch (error) {
+      console.error('已知文件测试失败:', error);
+    }
+  }
+
+  // 检查权限状�?
+  async checkPermissions() {
+    try {
+      console.log('=== 开始检查权限状�?===');
+      
+      if (Platform.OS === 'android') {
+        // 检查存储权�?
+        const storagePermission = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+        );
+        console.log(`存储权限状�? ${storagePermission ? '已授�? : '未授�?}`);
+        
+        // 检查媒体权限（Android 13+�?
+        let mediaPermission = false;
+        if (Platform.Version >= 33) {
+          try {
+            mediaPermission = await PermissionsAndroid.check(
+              PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+            );
+            console.log(`媒体权限状�? ${mediaPermission ? '已授�? : '未授�?}`);
+          } catch (error) {
+            console.log(`检查媒体权限失�? ${error.message}`);
+          }
+        }
+        
+        // 检�?Android 版本
+        console.log(`Android API 级别: ${Platform.Version}`);
+        
+        // 如果权限未授予，提供详细的设置指�?
+        if (!storagePermission && !mediaPermission) {
+          console.log('=== 权限设置指导 ===');
+          console.log('请按以下步骤手动授予权限�?);
+          console.log('');
+          console.log('步骤1 - 在当前权限页面查找：');
+          console.log('1. 向下滚动，查看是否有"未允�?权限类别');
+          console.log('2. 点击右上角三个点菜单(:)，查�?所有权�?选项');
+          console.log('3. 点击"Camera"权限，查看是否有"相关权限"');
+          console.log('');
+          console.log('步骤2 - 如果找不到，通过设置应用�?);
+          console.log('1. 回到主屏幕（按Home键）');
+          console.log('2. 打开设置应用（齿轮图标）');
+          console.log('3. 找到"应用"�?Apps"');
+          console.log('4. 找到"ImageClassifier"应用');
+          console.log('5. 点击"权限"�?Permissions"');
+          console.log('6. 查看完整权限列表');
+          console.log('');
+          console.log('步骤3 - 查找以下权限（可能叫不同名称）：');
+          console.log('- "相册" �?"Photos"');
+          console.log('- "媒体" �?"Media"');
+          console.log('- "文件" �?"Files"');
+          console.log('- "存储" �?"Storage"');
+          console.log('- "图片" �?"Images"');
+          console.log('');
+          console.log('步骤4 - 授予权限�?);
+          console.log('找到相关权限后，将其设置�?允许"�?Allow"');
+          console.log('');
+          console.log('如果还是找不到，请尝试：');
+          console.log('1. 重启模拟�?);
+          console.log('2. 检查模拟器设置中的权限配置');
+          console.log('3. 查看是否�?高级权限"选项');
+          console.log('');
+          console.log('权限授予后，请重新运行应用！');
+        } else if (storagePermission || mediaPermission) {
+          console.log('�?权限已授予，可以正常扫描相册�?);
+        }
+      }
+      
+      console.log('=== 权限检查完�?===');
+    } catch (error) {
+      console.error('权限检查失�?', error);
+    }
+  }
+
+  // 确保服务已初始化
+  async ensureInitialized() {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+  }
+
+  // 获取相册统计信息
+  async getGalleryStats() {
+    try {
+      const images = await this.scanGallery();
+      
+      const stats = {
+        totalImages: images.length,
+        byCategory: {},
+        byDate: {},
+        totalSize: 0,
+        averageSize: 0,
+      };
+      
+      // 按分类统�?
+      images.forEach(img => {
+        if (!stats.byCategory[img.category]) {
+          stats.byCategory[img.category] = 0;
+        }
+        stats.byCategory[img.category]++;
+        stats.totalSize += img.size || 0; // 修复：使�?size 而不�?fileSize
+      });
+      
+      // 按日期统�?
+      images.forEach(img => {
+        const date = new Date(img.timestamp).toDateString();
+        if (!stats.byDate[date]) {
+          stats.byDate[date] = 0;
+        }
+        stats.byDate[date]++;
+      });
+      
+      stats.averageSize = stats.totalImages > 0 ? stats.totalSize / stats.totalImages : 0;
+      
+      return stats;
+    } catch (error) {
+      console.error('获取相册统计失败:', error);
+      throw error;
+    }
+  }
+
+  // 测试位置信息提取功能
+  async testLocationExtraction() {
+    try {
+      console.log('🧪 开始测试位置信息提取功�?..');
+      
+      // 获取所有图�?
+      const allImages = await ImageStorageService.getImages();
+      console.log(`📊 数据库中总共�?${allImages.length} 张图片`);
+      
+      // 统计有位置信息的图片
+      let imagesWithLocation = 0;
+      let imagesWithGPS = 0;
+      let imagesWithAddress = 0;
+      const locationStats = {
+        bySource: {},
+        byCity: {},
+        byCountry: {},
+        gpsCoordinates: [],
+        recentWithLocation: []
+      };
+      
+      allImages.forEach((img, index) => {
+        if (img.location) {
+          imagesWithLocation++;
+          
+          // 统计GPS坐标
+          if (img.location.latitude && img.location.longitude) {
+            imagesWithGPS++;
+            locationStats.gpsCoordinates.push({
+              fileName: img.fileName,
+              latitude: img.location.latitude,
+              longitude: img.location.longitude,
+              accuracy: img.location.accuracy
+            });
+          }
+          
+          // 统计地址信息
+          if (img.location.address || img.location.city) {
+            imagesWithAddress++;
+          }
+          
+          // 按来源统�?
+          const source = img.location.source || 'unknown';
+          locationStats.bySource[source] = (locationStats.bySource[source] || 0) + 1;
+          
+          // 按城市统�?
+          if (img.location.city) {
+            locationStats.byCity[img.location.city] = (locationStats.byCity[img.location.city] || 0) + 1;
+          }
+          
+          // 按国家统�?
+          if (img.location.country) {
+            locationStats.byCountry[img.location.country] = (locationStats.byCountry[img.location.country] || 0) + 1;
+          }
+          
+          // 收集最�?张有位置信息的图�?
+          if (locationStats.recentWithLocation.length < 5) {
+            locationStats.recentWithLocation.push({
+              fileName: img.fileName,
+              category: img.category,
+              location: img.location,
+              takenAt: img.takenAt ? new Date(img.takenAt).toLocaleString('zh-CN') : '未知'
+            });
+          }
+        }
+      });
+      
+      // 输出测试结果
+      console.log('\n📋 位置信息提取测试结果:');
+      console.log('================================');
+      console.log(`📊 总图片数�? ${allImages.length}`);
+      console.log(`📍 有位置信息的图片: ${imagesWithLocation}`);
+      console.log(`🌍 有GPS坐标的图�? ${imagesWithGPS}`);
+      console.log(`🏠 有地址信息的图�? ${imagesWithAddress}`);
+      console.log(`📈 位置信息覆盖�? ${((imagesWithLocation / allImages.length) * 100).toFixed(1)}%`);
+      
+      console.log('\n📊 按来源统�?');
+      Object.entries(locationStats.bySource).forEach(([source, count]) => {
+        console.log(`   ${source}: ${count} 张`);
+      });
+      
+      if (Object.keys(locationStats.byCity).length > 0) {
+        console.log('\n🏙�?按城市统�?');
+        Object.entries(locationStats.byCity).forEach(([city, count]) => {
+          console.log(`   ${city}: ${count} 张`);
+        });
+      }
+      
+      if (Object.keys(locationStats.byCountry).length > 0) {
+        console.log('\n🌍 按国家统�?');
+        Object.entries(locationStats.byCountry).forEach(([country, count]) => {
+          console.log(`   ${country}: ${count} 张`);
+        });
+      }
+      
+      if (locationStats.gpsCoordinates.length > 0) {
+        console.log('\n🗺�?GPS坐标示例:');
+        locationStats.gpsCoordinates.slice(0, 3).forEach(coord => {
+          console.log(`   ${coord.fileName}: ${coord.latitude}, ${coord.longitude} (精度: ${coord.accuracy || '未知'})`);
+        });
+      }
+      
+      if (locationStats.recentWithLocation.length > 0) {
+        console.log('\n📸 最近有位置信息的图�?');
+        locationStats.recentWithLocation.forEach(img => {
+          console.log(`   ${img.fileName} (${img.category}) - ${img.takenAt}`);
+          if (img.location.latitude && img.location.longitude) {
+            console.log(`     GPS: ${img.location.latitude}, ${img.location.longitude}`);
+          }
+          if (img.location.city) {
+            console.log(`     城市: ${img.location.city}`);
+          }
+        });
+      }
+      
+      console.log('\n�?位置信息提取测试完成!');
+      
+      return {
+        totalImages: allImages.length,
+        imagesWithLocation,
+        imagesWithGPS,
+        imagesWithAddress,
+        coverageRate: (imagesWithLocation / allImages.length) * 100,
+        locationStats
+      };
+      
+    } catch (error) {
+      console.error('�?位置信息提取测试失败:', error);
+      throw error;
+    }
+  }
+
+  // 测试单张图片的位置信息提�?
+  async testSingleImageLocation(imagePath) {
+    try {
+      console.log(`🧪 测试单张图片位置信息提取: ${imagePath}`);
+      
+      const locationInfo = await extractLocationInfo(imagePath);
+      
+      if (locationInfo) {
+        console.log('�?位置信息提取成功:');
+        console.log(JSON.stringify(locationInfo, null, 2));
+        return locationInfo;
+      } else {
+        console.log('⚠️ 未找到位置信�?);
+        return null;
+      }
+    } catch (error) {
+      console.error('�?单张图片位置信息提取失败:', error);
+      throw error;
+    }
+  }
+}
+
+export default GalleryScannerService;
