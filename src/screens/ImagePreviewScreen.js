@@ -1,21 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TouchableOpacity,
-  Alert,
-  ScrollView,
-  Dimensions,
-  Modal,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Alert, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from '../adapters/WebAdapters';
 import ImageStorageService from '../services/ImageStorageService';
 import ImageClassifierService from '../services/ImageClassifierService';
 
-// 获取分类信息的辅助函数
+// 获取分类信息的辅助函�?
 const getCategoryInfo = (categoryId) => {
   // 分类信息映射
   const categoryMap = {
@@ -46,7 +35,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // 获取图片尺寸
   useEffect(() => {
     if (currentImage.uri) {
-      console.log('开始获取图片尺寸:', currentImage.uri);
+      console.log('开始获取图片尺�?', currentImage.uri);
       Image.getSize(
         currentImage.uri,
         (width, height) => {
@@ -59,7 +48,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         }
       );
     } else {
-      console.log('没有图片URI，无法获取尺寸');
+      console.log('没有图片URI，无法获取尺�?);
     }
   }, [currentImage.uri]);
 
@@ -68,7 +57,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const handleDelete = () => {
     Alert.alert(
       '确认删除',
-      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
+      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复�?,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -89,7 +78,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               );
               
               if (result.success) {
-                // 延迟关闭进度对话框，让用户看到最终结果
+                // 延迟关闭进度对话框，让用户看到最终结�?
                 setTimeout(() => {
                   setShowDeleteProgress(false);
                   navigation.goBack();
@@ -113,17 +102,17 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // 处理分类修改
   const handleCategoryChange = async (newCategory) => {
     if (newCategory === currentImage.category) {
-      return; // 如果选择的是当前分类，不做任何操作
+      return; // 如果选择的是当前分类，不做任何操�?
     }
 
     try {
-      // 直接修改分类，不需要确认提示
+      // 直接修改分类，不需要确认提�?
       await ImageStorageService.updateImageCategory(currentImage.id, newCategory);
-      // 更新本地状态，将置信度设置为"人工"
+      // 更新本地状态，将置信度设置�?人工"
       setCurrentImage(prev => ({ 
         ...prev, 
         category: newCategory,
-        confidence: 'manual' // 标记为人工分类
+        confidence: 'manual' // 标记为人工分�?
       }));
       console.log(`图片分类已修改为: ${getCategoryInfo(newCategory).name} (人工分类)`);
     } catch (error) {
@@ -149,19 +138,19 @@ const ImagePreviewScreen = ({ route, navigation }) => {
 
 
 
-  // 获取文件名
+  // 获取文件�?
   const getDisplayFileName = () => {
     // 优先使用 fileName 字段
     if (currentImage.fileName) {
       return currentImage.fileName;
     }
     
-    // 如果没有 fileName，从 URI 中提取
+    // 如果没有 fileName，从 URI 中提�?
     if (currentImage.uri) {
       const uriParts = currentImage.uri.split('/');
       const lastPart = uriParts[uriParts.length - 1];
       
-      // 如果最后一部分包含查询参数，去掉查询参数
+      // 如果最后一部分包含查询参数，去掉查询参�?
       if (lastPart.includes('?')) {
         return lastPart.split('?')[0];
       }
@@ -169,18 +158,18 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       return lastPart;
     }
     
-    // 默认值
+    // 默认�?
     return '图片预览';
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* 顶部导航栏 */}
+      {/* 顶部导航�?*/}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}>
-          <Text style={styles.backIcon}>←</Text>
+          <Text style={styles.backIcon}>�?/Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
           {getDisplayFileName()}
@@ -188,7 +177,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={handleDelete}>
-          <Text style={styles.deleteButtonText}>🗑️</Text>
+          <Text style={styles.deleteButtonText}>🗑�?/Text>
         </TouchableOpacity>
       </View>
 
@@ -206,14 +195,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
             <View style={styles.infoRow}>
               <Text style={styles.overlayLabel}>拍摄时间:</Text>
               <Text style={styles.overlayValue}>
-                {currentImage.takenAt ? formatDate(currentImage.takenAt) : '无'}
+                {currentImage.takenAt ? formatDate(currentImage.takenAt) : '�?}
               </Text>
             </View>
 
             <View style={styles.infoRow}>
               <Text style={styles.overlayLabel}>文件时间:</Text>
               <Text style={styles.overlayValue}>
-                {currentImage.timestamp ? formatDate(currentImage.timestamp) : '无'}
+                {currentImage.timestamp ? formatDate(currentImage.timestamp) : '�?}
               </Text>
             </View>
 
@@ -222,7 +211,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               <Text style={styles.overlayValue}>
                 {imageDimensions ? 
                   `${imageDimensions.width} × ${imageDimensions.height}` : 
-                  '加载中...'
+                  '加载�?..'
                 }
               </Text>
             </View>
@@ -243,6 +232,50 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               </Text>
             </View>
 
+            {/* GPS位置信息 */}
+            {currentImage.location && (
+              <>
+                <View style={styles.infoRow}>
+                  <Text style={styles.overlayLabel}>📍 位置:</Text>
+                  <Text style={styles.overlayValue}>
+                    {currentImage.location.latitude && currentImage.location.longitude ? 
+                      `${currentImage.location.latitude.toFixed(6)}, ${currentImage.location.longitude.toFixed(6)}` : 
+                      '无GPS信息'
+                    }
+                  </Text>
+                </View>
+                
+                {currentImage.location.altitude && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.overlayLabel}>🏔�?海拔:</Text>
+                    <Text style={styles.overlayValue}>
+                      {currentImage.location.altitude.toFixed(1)}m
+                    </Text>
+                  </View>
+                )}
+                
+                {currentImage.location.accuracy && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.overlayLabel}>🎯 精度:</Text>
+                    <Text style={styles.overlayValue}>
+                      ±{currentImage.location.accuracy.toFixed(1)}m
+                    </Text>
+                  </View>
+                )}
+                
+                {currentImage.location.source && currentImage.location.source !== 'none' && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.overlayLabel}>📡 来源:</Text>
+                    <Text style={styles.overlayValue}>
+                      {currentImage.location.source === 'exif' ? 'EXIF数据' : 
+                       currentImage.location.source === 'mediastore' ? 'MediaStore' : 
+                       currentImage.location.source}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+
             <View style={styles.infoRow}>
               <Text style={styles.overlayLabel}>路径:</Text>
               <Text style={styles.overlayValue}>
@@ -252,7 +285,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* 分类选择器 */}
+        {/* 分类选择�?*/}
         <View style={styles.categorySelector}>
           <View style={styles.categoryGrid}>
             {[
@@ -300,8 +333,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               正在删除图片文件...
             </Text>
             <Text style={styles.modalText}>
-              已删除: {deleteProgress.filesDeleted} 张
-              失败: {deleteProgress.filesFailed} 张
+              已删�? {deleteProgress.filesDeleted} �?
+              失败: {deleteProgress.filesFailed} �?
             </Text>
           </View>
         </View>
@@ -378,7 +411,7 @@ const styles = StyleSheet.create({
   },
   overlayLabel: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.9)', // 稍微透明的白色
+    color: 'rgba(255,255,255,0.9)', // 稍微透明的白�?
     flex: 0,
     fontWeight: '500',
     marginRight: 8,
@@ -460,7 +493,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   categoryItem: {
-    width: '18%', // 每行显示5个，留一些间距
+    width: '18%', // 每行显示5个，留一些间�?
     alignItems: 'center',
     marginVertical: 6,
     padding: 8,
@@ -472,7 +505,7 @@ const styles = StyleSheet.create({
   categoryItemActive: {
     borderColor: '#2196F3',
     borderWidth: 2,
-    backgroundColor: '#e0f7fa', // 浅蓝色背景
+    backgroundColor: '#e0f7fa', // 浅蓝色背�?
   },
   categoryIcon: {
     fontSize: 20,

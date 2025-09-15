@@ -1,17 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-  FlatList,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, ScrollView, FlatList } from 'react-native';
+import { SafeAreaView } from '../adapters/WebAdapters';
+import { launchImageLibrary } from '../adapters/WebAdapters';
 import ImageStorageService from '../services/ImageStorageService';
 import ImageClassifierService from '../services/ImageClassifierService';
 import GalleryScannerService from '../services/GalleryScannerService';
@@ -25,7 +15,7 @@ const ImageUploadScreen = ({ navigation }) => {
   const [scanning, setScanning] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  // 组件挂载时自动扫描相册
+  // 组件挂载时自动扫描相�?
   useEffect(() => {
     scanGallery();
   }, []);
@@ -36,10 +26,16 @@ const ImageUploadScreen = ({ navigation }) => {
     try {
       // 使用相册扫描服务
       await galleryScannerService.initialize();
-      const galleryImages = await galleryScannerService.scanGallery();
+      // 使用新的扫描方法
+      const result = await galleryScannerService.scanGalleryWithProgress((progress) => {
+        console.log('扫描进度:', progress);
+      });
+      
+      // 获取所有图片数据
+      const galleryImages = await ImageStorageService.getImages();
       setAllImages(galleryImages);
       
-      // 自动选择所有图片
+      // 自动选择所有图�?
       setSelectedImages(galleryImages);
       
     } catch (error) {
@@ -53,7 +49,7 @@ const ImageUploadScreen = ({ navigation }) => {
   // 处理图片分类
   const handleProcessImages = async () => {
     if (selectedImages.length === 0) {
-      Alert.alert('提示', '没有图片需要处理');
+      Alert.alert('提示', '没有图片需要处�?);
       return;
     }
 
@@ -102,13 +98,13 @@ const ImageUploadScreen = ({ navigation }) => {
         },
       ]);
     } catch (error) {
-      Alert.alert('错误', '处理过程中发生错误: ' + error.message);
+      Alert.alert('错误', '处理过程中发生错�? ' + error.message);
     } finally {
       setProcessing(false);
     }
   };
 
-  // 切换图片选择状态
+  // 切换图片选择状�?
   const toggleImageSelection = (imageId) => {
     setSelectedImages(prev => {
       if (prev.find(img => img.id === imageId)) {
@@ -120,7 +116,7 @@ const ImageUploadScreen = ({ navigation }) => {
     });
   };
 
-  // 全选/取消全选
+  // 全�?取消全�?
   const toggleSelectAll = () => {
     if (selectedImages.length === allImages.length) {
       setSelectedImages([]);
@@ -129,7 +125,7 @@ const ImageUploadScreen = ({ navigation }) => {
     }
   };
 
-  // 渲染图片项
+  // 渲染图片�?
   const renderImageItem = ({ item }) => {
     const isSelected = selectedImages.find(img => img.id === item.id);
     
@@ -140,7 +136,7 @@ const ImageUploadScreen = ({ navigation }) => {
         <Image source={{ uri: item.uri }} style={styles.imageThumbnail} />
         {isSelected && (
           <View style={styles.selectedOverlay}>
-            <Text style={styles.selectedIcon}>✓</Text>
+            <Text style={styles.selectedIcon}>�?/Text>
           </View>
         )}
         <Text style={styles.imageName} numberOfLines={1}>
@@ -166,19 +162,19 @@ const ImageUploadScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* 顶部导航栏 */}
+      {/* 顶部导航�?*/}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}>
-          <Text style={styles.backIcon}>←</Text>
+          <Text style={styles.backIcon}>�?/Text>
         </TouchableOpacity>
         <Text style={styles.title}>相册管理</Text>
         <TouchableOpacity
           style={styles.selectAllButton}
           onPress={toggleSelectAll}>
           <Text style={styles.selectAllText}>
-            {selectedImages.length === allImages.length ? '取消全选' : '全选'}
+            {selectedImages.length === allImages.length ? '取消全�? : '全�?}
           </Text>
         </TouchableOpacity>
       </View>
@@ -186,7 +182,7 @@ const ImageUploadScreen = ({ navigation }) => {
       {/* 统计信息 */}
       <View style={styles.statsSection}>
         <Text style={styles.statsText}>
-          相册中共有 {allImages.length} 张图片，已选择 {selectedImages.length} 张
+          相册中共�?{allImages.length} 张图片，已选择 {selectedImages.length} �?
         </Text>
       </View>
 
@@ -210,7 +206,7 @@ const ImageUploadScreen = ({ navigation }) => {
             <ActivityIndicator color="#fff" size="small" />
           ) : (
             <Text style={styles.processButtonText}>
-              🚀 开始分类处理 ({selectedImages.length})
+              🚀 开始分类处�?({selectedImages.length})
             </Text>
           )}
         </TouchableOpacity>

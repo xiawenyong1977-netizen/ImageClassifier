@@ -1,48 +1,48 @@
 class ImageClassifierService {
   constructor() {
     this.isInitialized = false;
-    // 支持的分类
+    // Supported categories
     this.categories = [
       'wechat', 'meeting', 'document', 'people', 'life', 'game', 'food', 'travel', 'pet', 'other'
     ];
     
-    // 直接初始化时间分类器
+    // Initialize time-based classifier directly
     this.timeBasedClassifier = this.createTimeBasedClassifier();
   }
 
-  // 初始化服务
+  // Initialize service
   async initialize() {
     if (this.isInitialized) return;
 
     try {
-      // 基于时间的模拟分类算法已经初始化
+      // Time-based simulation classification algorithm already initialized
       this.isInitialized = true;
-      console.log('图片分类服务初始化成功');
+      console.log('Image classification service initialized successfully');
     } catch (error) {
-      console.error('图片分类服务初始化失败:', error);
+      console.error('Image classification service initialization failed:', error);
       throw error;
     }
   }
 
-  // 分类图片（简化版本，直接使用时间分类）
+  // Classify image (simplified version, directly using time classification)
   async classifyImage(imageUri, metadata = {}) {
     try {
-      // 相册扫描只生成本地文件，无需验证
+      // Gallery scan only generates local files, no need to verify
       
-      // 直接使用时间分类
+      // Directly use time classification
       return await this.classifyImageByTime(imageUri, metadata);
     } catch (error) {
-      console.error('图片分类失败:', error);
+      console.error('Image classification failed:', error);
       return {
         category: 'other',
         confidence: 0.50,
-        reason: '分类失败',
+        reason: 'Classification failed',
         method: 'time-based'
       };
     }
   }
 
-  // 批量分类图片
+  // Batch classify images
   async classifyImages(imageUris, metadata = {}) {
     const results = [];
     
@@ -54,7 +54,7 @@ class ImageClassifierService {
           ...result,
         });
       } catch (error) {
-        console.error(`分类图片失败 ${uri}:`, error);
+        console.error(`Failed to classify image ${uri}:`, error);
         results.push({
           uri,
           category: 'other',
@@ -67,105 +67,105 @@ class ImageClassifierService {
     return results;
   }
 
-  // 创建基于时间的分类器
+  // Create time-based classifier
   createTimeBasedClassifier() {
-    const self = this; // 保存this引用
+    const self = this; // Save this reference
     return {
-      // 根据时间分类图片
+      // Classify images by time
       classifyByTime: (timestamp, fileSize, fileName) => {
         const date = new Date(timestamp);
         const hour = date.getHours();
-        const dayOfWeek = date.getDay(); // 0=周日, 1=周一, ..., 6=周六
+        const dayOfWeek = date.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         
-        // 基于时间的分类逻辑
+        // Time-based classification logic
         if (self.isWechatScreenshot(fileName)) {
-          return { category: 'wechat', confidence: 0.95, reason: '文件名特征匹配' };
+          return { category: 'wechat', confidence: 0.95, reason: 'Filename feature match' };
         }
         
         if (self.isDocumentPhoto(fileName, fileSize)) {
-          return { category: 'document', confidence: 0.90, reason: '文件特征匹配' };
+          return { category: 'document', confidence: 0.90, reason: 'File feature match' };
         }
         
         if (self.isWorkTime(hour, dayOfWeek)) {
-          return { category: 'document', confidence: 0.85, reason: '工作时间段' };
+          return { category: 'document', confidence: 0.85, reason: 'Work time period' };
         }
         
         if (self.isMeetingTime(hour, dayOfWeek)) {
-          return { category: 'meeting', confidence: 0.80, reason: '会议时间段' };
+          return { category: 'meeting', confidence: 0.80, reason: 'Meeting time period' };
         }
         
         if (self.isLifeTime(hour, isWeekend)) {
-          return { category: 'life', confidence: 0.75, reason: '生活时间段' };
+          return { category: 'life', confidence: 0.75, reason: 'Life time period' };
         }
         
         if (self.isPeoplePhoto(fileName, fileSize)) {
-          return { category: 'people', confidence: 0.70, reason: '社交活动特征' };
+          return { category: 'people', confidence: 0.70, reason: 'Social activity feature' };
         }
         
-        return { category: 'other', confidence: 0.50, reason: '默认分类' };
+        return { category: 'other', confidence: 0.50, reason: 'Default classification' };
       }
     };
   }
 
-  // 判断是否为微信截图
+  // Check if it's a WeChat screenshot
   isWechatScreenshot(fileName) {
     const wechatPatterns = [
       /wechat/i,
       /微信/i,
       /screenshot/i,
       /截图/i,
-      /IMG_\d{8}_\d{6}/, // 微信截图命名格式
-      /Screenshot_\d{8}-\d{6}/ // 另一种截图格式
+      /IMG_\d{8}_\d{6}/, // WeChat screenshot naming format
+      /Screenshot_\d{8}-\d{6}/ // Another screenshot format
     ];
     return wechatPatterns.some(pattern => pattern.test(fileName));
   }
   
-  // 判断是否为证件照片
+  // Check if it's a document photo
   isDocumentPhoto(fileName, fileSize) {
     const documentPatterns = [
       /id/i, /身份证/i, /passport/i, /护照/i,
       /license/i, /驾照/i, /card/i, /卡/i,
       /document/i, /文档/i, /scan/i, /扫描/i
     ];
-    const isSmallFile = fileSize < 500 * 1024; // 小于500KB
+    const isSmallFile = fileSize < 500 * 1024; // Less than 500KB
     return documentPatterns.some(pattern => pattern.test(fileName)) || isSmallFile;
   }
   
-  // 判断是否为工作时间
+  // Check if it's work time
   isWorkTime(hour, dayOfWeek) {
-    const isWorkDay = dayOfWeek >= 1 && dayOfWeek <= 5; // 周一到周五
-    const isWorkHour = hour >= 9 && hour <= 18; // 9点到18点
+    const isWorkDay = dayOfWeek >= 1 && dayOfWeek <= 5; // Monday to Friday
+    const isWorkHour = hour >= 9 && hour <= 18; // 9 AM to 6 PM
     return isWorkDay && isWorkHour;
   }
   
-  // 判断是否为会议时间
+  // Check if it's meeting time
   isMeetingTime(hour, dayOfWeek) {
     const isWorkDay = dayOfWeek >= 1 && dayOfWeek <= 5;
     const isMeetingHour = (hour >= 9 && hour <= 12) || (hour >= 14 && hour <= 17);
     return isWorkDay && isMeetingHour;
   }
   
-  // 判断是否为生活时间
+  // Check if it's life time
   isLifeTime(hour, isWeekend) {
-    if (isWeekend) return true; // 周末都是生活时间
-    const isLifeHour = hour < 9 || hour > 18; // 非工作时间
+    if (isWeekend) return true; // Weekends are all life time
+    const isLifeHour = hour < 9 || hour > 18; // Non-work hours
     return isLifeHour;
   }
   
-  // 判断是否为人像照片
+  // Check if it's a people photo
   isPeoplePhoto(fileName, fileSize) {
     const peoplePatterns = [
       /portrait/i, /人像/i, /selfie/i, /自拍/i,
       /photo/i, /照片/i, /camera/i, /相机/i,
-      /IMG_\d{8}_\d{6}/, // 手机拍照格式
-      /DSC\d{5}/ // 相机拍照格式
+      /IMG_\d{8}_\d{6}/, // Phone photo format
+      /DSC\d{5}/ // Camera photo format
     ];
-    const isLargeFile = fileSize > 1024 * 1024; // 大于1MB
+    const isLargeFile = fileSize > 1024 * 1024; // Larger than 1MB
     return peoplePatterns.some(pattern => pattern.test(fileName)) || isLargeFile;
   }
 
-  // 基于时间的快速分类（不依赖TensorFlow模型）
+  // Time-based fast classification (no dependency on TensorFlow model)
   async classifyImageByTime(imageUri, metadata = {}) {
     try {
       const { timestamp, fileSize, fileName } = metadata;
@@ -175,63 +175,63 @@ class ImageClassifierService {
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       const self = this;
 
-      // 文件名特征匹配（优先级最高）
+      // Filename feature matching (highest priority)
       if (self.isWechatScreenshot(fileName)) {
-        return { category: 'wechat', confidence: 0.95, reason: '文件名特征匹配' };
+        return { category: 'wechat', confidence: 0.95, reason: 'Filename feature match' };
       }
 
       if (self.isDocumentPhoto(fileName, fileSize)) {
-        return { category: 'document', confidence: 0.90, reason: '文件特征匹配' };
+        return { category: 'document', confidence: 0.90, reason: 'File feature match' };
       }
 
       if (self.isFoodPhoto(fileName, fileSize)) {
-        return { category: 'food', confidence: 0.88, reason: '美食图片特征' };
+        return { category: 'food', confidence: 0.88, reason: 'Food image feature' };
       }
 
       if (self.isTravelPhoto(fileName, fileSize)) {
-        return { category: 'travel', confidence: 0.85, reason: '旅行图片特征' };
+        return { category: 'travel', confidence: 0.85, reason: 'Travel image feature' };
       }
 
       if (self.isPetPhoto(fileName, fileSize)) {
-        return { category: 'pet', confidence: 0.82, reason: '宠物图片特征' };
+        return { category: 'pet', confidence: 0.82, reason: 'Pet image feature' };
       }
 
-      // 时间特征匹配
+      // Time feature matching
       if (self.isMeetingTime(hour, dayOfWeek)) {
-        return { category: 'meeting', confidence: 0.80, reason: '会议时间段' };
+        return { category: 'meeting', confidence: 0.80, reason: 'Meeting time period' };
       }
 
       if (self.isLifeTime(hour, isWeekend)) {
-        return { category: 'life', confidence: 0.75, reason: '生活时间段' };
+        return { category: 'life', confidence: 0.75, reason: 'Life time period' };
       }
 
       if (self.isPeoplePhoto(fileName, fileSize)) {
-        return { category: 'people', confidence: 0.70, reason: '社交活动特征' };
+        return { category: 'people', confidence: 0.70, reason: 'Social activity feature' };
       }
 
       if (self.isGameScreenshot(fileName, hour)) {
-        return { category: 'game', confidence: 0.65, reason: '游戏截图特征' };
+        return { category: 'game', confidence: 0.65, reason: 'Game screenshot feature' };
       }
 
-      return { category: 'other', confidence: 0.50, reason: '默认分类' };
+      return { category: 'other', confidence: 0.50, reason: 'Default classification' };
     } catch (error) {
-      console.error('基于时间的分类失败:', error);
-      return { category: 'other', confidence: 0.30, reason: '分类失败' };
+      console.error('Time-based classification failed:', error);
+      return { category: 'other', confidence: 0.30, reason: 'Classification failed' };
     }
   }
 
-  // 智能分类：优先使用时间分类，失败时使用AI分类
+  // Smart classification: prioritize time classification, fallback to AI classification
   async smartClassifyImage(imageUri, metadata = {}) {
     try {
-      // 首先尝试时间分类
+      // First try time classification
       const timeResult = await this.classifyImageByTime(imageUri, metadata);
       
-      // 如果时间分类置信度较高，直接返回
+      // If time classification confidence is high, return directly
       if (timeResult.confidence > 0.8) {
         return timeResult;
       }
       
-      // 否则尝试AI分类
+      // Otherwise try AI classification
       try {
         const aiResult = await this.classifyImage(imageUri, metadata);
         return {
@@ -240,7 +240,7 @@ class ImageClassifierService {
           fallback: true
         };
       } catch (aiError) {
-        // AI分类失败，返回时间分类结果
+        // AI classification failed, return time classification result
         return {
           ...timeResult,
           method: 'time-based-fallback',
@@ -248,36 +248,36 @@ class ImageClassifierService {
         };
       }
     } catch (error) {
-      console.error('智能分类失败:', error);
+      console.error('Smart classification failed:', error);
       return {
         category: 'other',
         confidence: 0.50,
-        reason: '分类失败',
+        reason: 'Classification failed',
         method: 'smart-classify',
         error: error.message
       };
     }
   }
 
-  // 分类信息映射
+  // Category information mapping
   static getCategoryInfo(categoryId) {
     const categoryMap = {
-      wechat: { name: '微信截图', icon: '📱', color: '#07C160' },
-      meeting: { name: '会议场景', icon: '💼', color: '#FF9800' },
-      document: { name: '工作写真', icon: '📄', color: '#2196F3' },
-      people: { name: '社交活动', icon: '👥', color: '#E91E63' },
-      life: { name: '生活记录', icon: '🌅', color: '#4CAF50' },
-      game: { name: '游戏截屏', icon: '🎮', color: '#FF5722' },
-      food: { name: '美食记录', icon: '🍕', color: '#FF6B35' },
-      travel: { name: '旅行风景', icon: '✈️', color: '#9C27B0' },
-      pet: { name: '宠物萌照', icon: '🐕', color: '#795548' },
-      other: { name: '其他图片', icon: '📷', color: '#607D8B' }
+      wechat: { name: 'WeChat Screenshot', icon: '📱', color: '#07C160' },
+      meeting: { name: 'Meeting Scene', icon: '💼', color: '#FF9800' },
+      document: { name: 'Work Document', icon: '📄', color: '#2196F3' },
+      people: { name: 'Social Activity', icon: '👥', color: '#E91E63' },
+      life: { name: 'Life Record', icon: '🌅', color: '#4CAF50' },
+      game: { name: 'Game Screenshot', icon: '🎮', color: '#FF5722' },
+      food: { name: 'Food Record', icon: '🍕', color: '#FF6B35' },
+      travel: { name: 'Travel Scenery', icon: '✈️', color: '#9C27B0' },
+      pet: { name: 'Pet Photo', icon: '🐕', color: '#795548' },
+      other: { name: 'Other Images', icon: '📷', color: '#607D8B' }
     };
     
     return categoryMap[categoryId] || categoryMap.other;
   }
 
-  // 判断是否为美食图片
+  // Check if it's a food photo
   isFoodPhoto(fileName, fileSize) {
     if (!fileName) return false;
     
@@ -288,12 +288,12 @@ class ImageClassifierService {
     ];
     
     const isFoodFile = foodPatterns.some(pattern => pattern.test(fileName));
-    const isLargeFile = fileSize && fileSize > 2000000; // 2MB以上，可能是高质量美食图片
+    const isLargeFile = fileSize && fileSize > 2000000; // Larger than 2MB, might be high-quality food image
     
     return isFoodFile || isLargeFile;
   }
 
-  // 判断是否为旅行图片
+  // Check if it's a travel photo
   isTravelPhoto(fileName, fileSize) {
     if (!fileName) return false;
     
@@ -304,12 +304,12 @@ class ImageClassifierService {
     ];
     
     const isTravelFile = travelPatterns.some(pattern => pattern.test(fileName));
-    const isLargeFile = fileSize && fileSize > 3000000; // 3MB以上，可能是高质量风景图片
+    const isLargeFile = fileSize && fileSize > 3000000; // Larger than 3MB, might be high-quality landscape image
     
     return isTravelFile || isLargeFile;
   }
 
-  // 判断是否为宠物图片
+  // Check if it's a pet photo
   isPetPhoto(fileName, fileSize) {
     if (!fileName) return false;
     
@@ -319,12 +319,12 @@ class ImageClassifierService {
     ];
     
     const isPetFile = petPatterns.some(pattern => pattern.test(fileName));
-    const isMediumFile = fileSize && fileSize > 1000000; // 1MB以上，可能是宠物照片
+    const isMediumFile = fileSize && fileSize > 1000000; // Larger than 1MB, might be pet photo
     
     return isPetFile || isMediumFile;
   }
 
-  // 判断是否为游戏截图
+  // Check if it's a game screenshot
   isGameScreenshot(fileName, hour) {
     if (!fileName) return false;
     
@@ -334,11 +334,10 @@ class ImageClassifierService {
     ];
     
     const isGameFile = gamePatterns.some(pattern => pattern.test(fileName));
-    const isGameTime = hour >= 19 || hour <= 2; // 晚上7点到凌晨2点，游戏时间
+    const isGameTime = hour >= 19 || hour <= 2; // 7 PM to 2 AM, gaming time
     
     return isGameFile || isGameTime;
   }
 }
 
 export default ImageClassifierService;
-

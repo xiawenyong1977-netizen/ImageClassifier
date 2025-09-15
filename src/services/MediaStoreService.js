@@ -1,4 +1,27 @@
-import { NativeModules, Platform } from 'react-native';
+// Platform detection for web and mobile
+let Platform;
+try {
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    // Web environment
+    Platform = { OS: 'web' };
+  } else {
+    // Mobile environment
+    Platform = eval('require("react-native").Platform');
+  }
+} catch (error) {
+  // If detection fails, default to web environment
+  Platform = { OS: 'web' };
+}
+
+// NativeModules for mobile only
+let NativeModules;
+if (typeof window !== 'undefined') {
+  // Web environment - no native modules
+  NativeModules = {};
+} else {
+  // Mobile environment
+  NativeModules = eval('require("react-native").NativeModules');
+}
 
 const { MediaStoreModule } = NativeModules;
 
@@ -7,61 +30,72 @@ class MediaStoreService {
     this.isAvailable = Platform.OS === 'android' && MediaStoreModule;
     
     if (this.isAvailable) {
-      console.log('✅ MediaStore模块可用');
+      console.log('✅ MediaStore module available');
+    } else if (Platform.OS === 'web') {
+      // In web environment, MediaStore is not available but this is expected
+      console.log('ℹ️ MediaStore module not available (web environment)');
     } else {
-      console.log('❌ MediaStore模块不可用');
+      console.log('❌ MediaStore module not available');
     }
   }
 
-  // 删除文件
+  // Delete file
   async deleteFile(filePath) {
     if (!this.isAvailable) {
-      console.log('⚠️ MediaStore模块不可用');
+      if (Platform.OS === 'web') {
+        console.log('ℹ️ MediaStore not available in web environment, using alternative method');
+      } else {
+        console.log('⚠️ MediaStore module not available');
+      }
       return false;
     }
 
     try {
-      console.log(`🗑️ 使用MediaStore删除文件: ${filePath}`);
+      console.log(`🗑️ Using MediaStore to delete file: ${filePath}`);
       
-      // 移除file://前缀
+      // Remove file:// prefix
       const cleanPath = filePath.replace('file://', '');
       
       const result = await MediaStoreModule.deleteFile(cleanPath);
-      console.log(`✅ MediaStore删除结果: ${result}`);
+      console.log(`✅ MediaStore delete result: ${result}`);
       
       return result;
     } catch (error) {
-      console.error(`❌ MediaStore删除失败: ${error.message}`);
-      // 静默处理错误，不抛出异常，返回false表示删除失败
+      console.error(`❌ MediaStore delete failed: ${error.message}`);
+      // Silently handle error, don't throw exception, return false to indicate delete failed
       return false;
     }
   }
 
-  // 获取文件信息
+  // Get file info
   async getFileInfo(filePath) {
     if (!this.isAvailable) {
-      console.log('⚠️ MediaStore模块不可用');
-      return { exists: false, error: 'MediaStore模块不可用' };
+      if (Platform.OS === 'web') {
+        console.log('ℹ️ MediaStore not available in web environment, using alternative method');
+      } else {
+        console.log('⚠️ MediaStore module not available');
+      }
+      return { exists: false, error: 'MediaStore module not available' };
     }
 
     try {
-      console.log(`🔍 获取文件信息: ${filePath}`);
+      console.log(`🔍 Getting file info: ${filePath}`);
       
-      // 移除file://前缀
+      // Remove file:// prefix
       const cleanPath = filePath.replace('file://', '');
       
       const fileInfo = await MediaStoreModule.getFileInfo(cleanPath);
-      console.log(`📋 文件信息:`, fileInfo);
+      console.log(`📋 File info:`, fileInfo);
       
       return fileInfo;
     } catch (error) {
-      console.error(`❌ 获取文件信息失败: ${error.message}`);
-      // 静默处理错误，返回基本的错误信息
+      console.error(`❌ Failed to get file info: ${error.message}`);
+      // Silently handle error, return basic error info
       return { exists: false, error: error.message };
     }
   }
 
-  // 检查模块是否可用
+  // Check if module is available
   isModuleAvailable() {
     return this.isAvailable;
   }

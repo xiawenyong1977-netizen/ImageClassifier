@@ -160,3 +160,6 @@ jspm_packages/
 .yarn/install-state.gz
 .pnp.*
 node_modules
+
+# PC version final build (exclude from source control)
+pc-version-final/

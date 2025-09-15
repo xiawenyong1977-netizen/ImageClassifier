@@ -1,15 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from '../adapters/WebAdapters';
 import ImageStorageService from '../services/ImageStorageService';
 import ImageClassifierService from '../services/ImageClassifierService';
 
@@ -48,7 +39,7 @@ const SettingsScreen = ({ navigation }) => {
   const handleClearData = () => {
     Alert.alert(
       '重新智能扫描',
-      '确定要重新扫描相册并进行智能分类吗？此操作可能需要较长时间。',
+      '确定要重新扫描相册并进行智能分类吗？此操作可能需要较长时间�?,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -56,22 +47,19 @@ const SettingsScreen = ({ navigation }) => {
           style: 'default',
           onPress: async () => {
             try {
-              // 显示进度提示窗
-              setShowProgressModal(true);
+              // 显示进度提示�?              setShowProgressModal(true);
               setClearDataProgress({
                 current: 0,
                 total: 3,
-                message: '准备开始...',
+                message: '准备开�?..',
                 step: 'preparing'
               });
               
-              // 调用清空数据方法，传入进度回调
-              await ImageStorageService.clearAllData((progress) => {
+              // 调用清空数据方法，传入进度回�?              await ImageStorageService.clearAllData((progress) => {
                 setClearDataProgress(progress);
               });
               
-              // 操作完成后，停留1秒自动关闭
-              setTimeout(() => {
+              // 操作完成后，停留1秒自动关�?              setTimeout(() => {
                 setShowProgressModal(false);
                 setClearDataProgress(null);
                 // 重新加载设置
@@ -80,8 +68,7 @@ const SettingsScreen = ({ navigation }) => {
               
             } catch (error) {
               console.error('清空数据失败:', error);
-              // 出错时也自动关闭进度窗
-              setTimeout(() => {
+              // 出错时也自动关闭进度�?              setTimeout(() => {
                 setShowProgressModal(false);
                 setClearDataProgress(null);
               }, 1000);
@@ -119,7 +106,7 @@ const SettingsScreen = ({ navigation }) => {
             <Text style={styles.settingTitle}>{title}</Text>
             <Text style={styles.settingDescription}>{description}</Text>
           </View>
-          <Text style={styles.settingArrow}>→</Text>
+          <Text style={styles.settingArrow}>�?/Text>
         </TouchableOpacity>
       );
     }
@@ -132,7 +119,7 @@ const SettingsScreen = ({ navigation }) => {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>加载中...</Text>
+          <Text style={styles.loadingText}>加载�?..</Text>
         </View>
       </SafeAreaView>
     );
@@ -151,7 +138,7 @@ const SettingsScreen = ({ navigation }) => {
           <Text style={styles.sectionTitle}>分类设置</Text>
           
           {renderSettingItem(
-            '自动隐藏无数据分类',
+            '自动隐藏无数据分�?,
             '开启后，首页只显示有图片的分类卡片',
             'switch',
             'hideEmptyCategories',
@@ -164,15 +151,15 @@ const SettingsScreen = ({ navigation }) => {
           <Text style={styles.sectionTitle}>性能设置</Text>
           
           {renderSettingItem(
-            '缩略图质量',
+            '缩略图质�?,
             '选择缩略图的压缩质量',
             'button',
             'thumbnailQuality',
-            () => Alert.alert('缩略图质量', '当前: ' + settings.thumbnailQuality)
+            () => Alert.alert('缩略图质�?, '当前: ' + settings.thumbnailQuality)
           )}
           
           {renderSettingItem(
-            '最大缓存大小',
+            '最大缓存大�?,
             `${settings.maxCacheSize} MB`,
             'button',
             'maxCacheSize',
@@ -192,10 +179,9 @@ const SettingsScreen = ({ navigation }) => {
                 重新智能分类
               </Text>
               <Text style={styles.settingDescription}>
-                清空当前数据，开始智能分类
-              </Text>
+                清空当前数据，开始智能分�?              </Text>
             </View>
-            <Text style={styles.settingArrow}>→</Text>
+            <Text style={styles.settingArrow}>�?/Text>
           </TouchableOpacity>
         </View>
 
@@ -212,21 +198,21 @@ const SettingsScreen = ({ navigation }) => {
           
           <View style={styles.settingItem}>
             <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>开发者</Text>
-              <Text style={styles.settingDescription}>深圳市智语未来软件有限公司</Text>
+              <Text style={styles.settingTitle}>开发�?/Text>
+              <Text style={styles.settingDescription}>深圳市智语未来软件有限公�?/Text>
             </View>
           </View>
         </View>
       </ScrollView>
       
-      {/* 进度提示窗 */}
+      {/* 进度提示�?*/}
       {showProgressModal && (
         <View style={styles.progressModal}>
           <View style={styles.progressContent}>
             <ActivityIndicator size="large" color="#007AFF" />
             <Text style={styles.progressTitle}>正在处理...</Text>
             <Text style={styles.progressMessage}>
-              {clearDataProgress?.message || '准备开始...'}
+              {clearDataProgress?.message || '准备开�?..'}
             </Text>
             <View style={styles.progressBar}>
               <View 
@@ -318,8 +304,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  // 进度提示窗样式
-  progressModal: {
+  // 进度提示窗样�?  progressModal: {
     position: 'absolute',
     top: 0,
     left: 0,

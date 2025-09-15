@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from '../adapters/WebAdapters';
 import ImageStorageService from '../services/ImageStorageService';
 import ImageClassifierService from '../services/ImageClassifierService';
 
@@ -41,7 +33,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
   const handleBatchDelete = () => {
     Alert.alert(
       '确认删除',
-      `确定要删除选中的 ${images.length} 张图片吗？`,
+      `确定要删除选中�?${images.length} 张图片吗？`,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -58,7 +50,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
   const handleBatchReclassify = () => {
     Alert.alert(
       '重新分类',
-      `确定要重新分类选中的 ${images.length} 张图片吗？`,
+      `确定要重新分类选中�?${images.length} 张图片吗？`,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -72,7 +64,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
   };
 
   const handleBatchMove = () => {
-         // 显示分类选择器
+         // 显示分类选择�?
      const categories = [
        { id: 'wechat', name: '微信截图' },
        { id: 'meeting', name: '会议场景' },
@@ -104,7 +96,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
         case 'delete':
           try {
             const result = await ImageStorageService.deleteImages(selectedImages);
-            Alert.alert('操作完成', '删除操作已完成');
+            Alert.alert('操作完成', '删除操作已完�?);
           } catch (error) {
             console.error('批量删除失败:', error);
             Alert.alert('操作失败', `删除过程中出现错误：${error.message}`);
@@ -125,7 +117,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
           return;
       }
       
-      // 操作成功后返回上一页
+      // 操作成功后返回上一�?
       navigation.goBack();
       
     } catch (error) {
@@ -174,7 +166,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
     Alert.alert('成功', `成功移动 ${successCount} 张图片`);
   };
 
-  // 获取分类信息的辅助函数
+  // 获取分类信息的辅助函�?
   const getCategoryInfo = (categoryId) => {
     // 分类信息映射
     const categoryMap = {
@@ -206,7 +198,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>加载中...</Text>
+          <Text style={styles.loadingText}>加载�?..</Text>
         </View>
       </SafeAreaView>
     );
@@ -214,12 +206,12 @@ const BatchOperationScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* 顶部导航栏 */}
+      {/* 顶部导航�?*/}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}>
-          <Text style={styles.backIcon}>←</Text>
+          <Text style={styles.backIcon}>�?/Text>
         </TouchableOpacity>
         <Text style={styles.title}>批量操作</Text>
         <View style={styles.placeholder} />
@@ -232,10 +224,10 @@ const BatchOperationScreen = ({ route, navigation }) => {
           <View style={styles.statsContent}>
             <View style={styles.statRow}>
               <Text style={styles.statLabel}>选中图片:</Text>
-              <Text style={styles.statValue}>{images.length} 张</Text>
+              <Text style={styles.statValue}>{images.length} �?/Text>
             </View>
             <View style={styles.statRow}>
-              <Text style={styles.statLabel}>总大小:</Text>
+              <Text style={styles.statLabel}>总大�?</Text>
               <Text style={styles.statValue}>
                 {formatFileSize(images.reduce((sum, img) => sum + (img.size || 0), 0))}
               </Text>
@@ -257,14 +249,14 @@ const BatchOperationScreen = ({ route, navigation }) => {
             style={[styles.actionButton, styles.deleteButton]}
             onPress={handleBatchDelete}
             disabled={operationLoading}>
-            <Text style={styles.actionButtonText}>🗑️ 批量删除</Text>
+            <Text style={styles.actionButtonText}>🗑�?批量删除</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionButton, styles.reclassifyButton]}
             onPress={handleBatchReclassify}
             disabled={operationLoading}>
-            <Text style={styles.actionButtonText}>🏷️ 重新分类</Text>
+            <Text style={styles.actionButtonText}>🏷�?重新分类</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -300,7 +292,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
         </View>
       </ScrollView>
 
-      {/* 操作加载指示器 */}
+      {/* 操作加载指示�?*/}
       {operationLoading && (
         <View style={styles.overlay}>
           <View style={styles.loadingModal}>
