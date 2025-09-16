@@ -811,7 +811,38 @@ export const ElectronFileAPI = {
             }
           };
           
-          ipcRenderer.on('delete-file-result', handleResult);
+          // 监听文件删除结果（通过 IPCListenerService 统一管理）
+          let timeoutId;
+          const handleDeleteResult = (event) => {
+            const result = event.detail;
+            console.log(`[ElectronFileAPI] 收到删除结果:`, result);
+            
+            // 由于 IPCListenerService 发送的是全局事件，我们需要通过其他方式匹配
+            // 这里我们假设每个删除请求都是独立的，直接处理第一个结果
+            if (result && typeof result.success === 'boolean') {
+              // 清除超时
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+              }
+              // 移除事件监听器
+              if (typeof window !== 'undefined') {
+                window.removeEventListener('file-delete-result', handleDeleteResult);
+              }
+              if (result.success) {
+                console.log(`[ElectronFileAPI] 文件删除成功: ${filePath}`);
+                resolve(result);
+              } else {
+                console.log(`[ElectronFileAPI] 文件删除失败: ${filePath}, ${result.message}`);
+                reject(new Error(result.message));
+              }
+            }
+          };
+          
+          // 监听自定义事件
+          if (typeof window !== 'undefined') {
+            window.addEventListener('file-delete-result', handleDeleteResult);
+          }
+          
           console.log(`[ElectronFileAPI] 已注册结果监听器`);
           
           // 发送删除请求
@@ -820,9 +851,11 @@ export const ElectronFileAPI = {
           console.log(`[ElectronFileAPI] 删除请求已发送`);
           
           // 设置超时
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
             console.log(`[ElectronFileAPI] 删除超时`);
-            ipcRenderer.removeListener('delete-file-result', handleResult);
+            if (typeof window !== 'undefined') {
+              window.removeEventListener('file-delete-result', handleDeleteResult);
+            }
             reject(new Error('文件删除超时'));
           }, 10000); // 10秒超时
           

@@ -48,7 +48,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     try {
       const newSettings = { ...settings, [key]: value };
       await UnifiedDataService.writeSettings(newSettings);
-      setSettings(newSettings);
+      // 重新加载设置以保持数据一致性
+      await loadSettings();
       
       // 通知首页设置已更新
       if (typeof window !== 'undefined') {
@@ -224,9 +225,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
             try {
               // 调用UnifiedDataService清空数据
               await UnifiedDataService.clearAllData();
+              // 重新加载设置以反映清空后的状态
+              await loadSettings();
               Alert.alert('成功', '照片信息已清空！');
-              // 关闭设置页面，返回首页
-              navigation.goBack();
             } catch (error) {
               console.error('清空数据失败:', error);
               Alert.alert('错误', '清空数据失败，请重试');
@@ -251,7 +252,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
               try {
                 // 调用从HomeScreen传递过来的扫描函数
                 await startSmartScan();
-                Alert.alert('成功', '智能扫描完成！');
+                Alert.alert('成功', '智能扫描完成！请手动返回首页查看结果。');
               } catch (error) {
                 console.error('智能扫描失败:', error);
                 Alert.alert('错误', '智能扫描失败，请重试');

@@ -15,20 +15,8 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 
-const HomeScreen = ({ appData, onRefreshCache }) => {
+const HomeScreen = () => {
   console.log('🚀 HomeScreen 组件开始渲染');
-  
-  // 检查 appData 是否有效
-  if (!appData) {
-    console.log('⚠️ HomeScreen: appData 为空，显示加载状态');
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>正在加载数据...</Text>
-        </View>
-      </View>
-    );
-  }
   
   // 页面状态管理
   const [currentScreen, setCurrentScreen] = useState('Home');
@@ -36,39 +24,109 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
   const [loadedScreens, setLoadedScreens] = useState({});
   
   // 数据状态
+  const [recentImages, setRecentImages] = useState([]);
+  const [categoryCounts, setCategoryCounts] = useState({});
+  const [cityCounts, setCityCounts] = useState({});
+  const [categoryRecentImages, setCategoryRecentImages] = useState({});
+  const [cityRecentImages, setCityRecentImages] = useState({});
+  const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   const [lastScanTime, setLastScanTime] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
-  
-  // 从 appData 中解构数据
-  const {
-    recentImages = [],
-    categoryCounts = {},
-    cityCounts = {},
-    categoryRecentImages = {},
-    cityRecentImages = {},
-    hideEmptyCategories: appHideEmptyCategories = false
-  } = appData;
+  const [isLoading, setIsLoading] = useState(true);
   
   // 使用 ref 存储设置值，避免异步状态更新问题
-  const hideEmptyCategoriesRef = useRef(appHideEmptyCategories);
+  const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
   
-  // 监听 appHideEmptyCategories 变化，同步更新 ref
+  // 数据加载函数
+  const loadData = useCallback(async () => {
+    try {
+      console.log('🔄 HomeScreen 开始加载数据...');
+      setIsLoading(true);
+      
+      // 并行加载所有数据
+      const [recentImagesData, categoryCountsData, cityCountsData, settings] = await Promise.all([
+        UnifiedDataService.readRecentImages(20),
+        UnifiedDataService.readCategoryCounts(),
+        UnifiedDataService.readCityCounts(),
+        UnifiedDataService.readSettings()
+      ]);
+      
+      // 加载各分类的最近图片
+      const categoryIds = ['wechat', 'meeting', 'document', 'people', 'life', 'game', 'food', 'travel', 'pet', 'other'];
+      const categoryImagesPromises = categoryIds.map(async (categoryId) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByCategory(categoryId, 1);
+          return { categoryId, images };
+        } catch (error) {
+          console.error(`❌ 加载分类 ${categoryId} 最近图片失败:`, error);
+          return { categoryId, images: [] };
+        }
+      });
+      
+      const categoryImagesResults = await Promise.all(categoryImagesPromises);
+      const categoryImagesMap = {};
+      categoryImagesResults.forEach(({ categoryId, images }) => {
+        categoryImagesMap[categoryId] = images;
+      });
+      
+      // 加载各城市的最近图片
+      const cityIds = Object.keys(cityCountsData).slice(0, 10);
+      const cityImagesPromises = cityIds.map(async (cityName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByCity(cityName, 1);
+          return { cityName, images };
+        } catch (error) {
+          console.error(`❌ 加载城市 ${cityName} 最近图片失败:`, error);
+          return { cityName, images: [] };
+        }
+      });
+      
+      const cityImagesResults = await Promise.all(cityImagesPromises);
+      const cityImagesMap = {};
+      cityImagesResults.forEach(({ cityName, images }) => {
+        cityImagesMap[cityName] = images;
+      });
+      
+      // 更新状态
+      console.log('📊 准备更新状态 - 分类统计:', categoryCountsData);
+      console.log('📊 准备更新状态 - 最近图片数量:', recentImagesData.length);
+      
+      setRecentImages(recentImagesData);
+      setCategoryCounts(categoryCountsData);
+      setCityCounts(cityCountsData);
+      setCategoryRecentImages(categoryImagesMap);
+      setCityRecentImages(cityImagesMap);
+      setHideEmptyCategories(settings.hideEmptyCategories === true);
+      hideEmptyCategoriesRef.current = settings.hideEmptyCategories === true;
+      
+      console.log('✅ HomeScreen 数据加载完成');
+      
+      // 使用 setTimeout 确保状态更新后再设置 isLoading
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 0);
+      
+    } catch (error) {
+      console.error('❌ HomeScreen 数据加载失败:', error);
+      setIsLoading(false);
+    }
+  }, []);
+  
+  // 监听 hideEmptyCategories 变化，同步更新 ref
   useEffect(() => {
-    hideEmptyCategoriesRef.current = appHideEmptyCategories;
-    console.log('🔄 更新 hideEmptyCategoriesRef.current:', appHideEmptyCategories);
-  }, [appHideEmptyCategories]);
+    hideEmptyCategoriesRef.current = hideEmptyCategories;
+    console.log('🔄 更新 hideEmptyCategoriesRef.current:', hideEmptyCategories);
+  }, [hideEmptyCategories]);
   
-  console.log('🏠 HomeScreen 状态初始化完成:', { 
-    currentScreen, 
-    recentImages: recentImages?.length || 0, 
-    categoryCounts: Object.keys(categoryCounts).length,
-    appHideEmptyCategories,
-    hideEmptyCategoriesRef: hideEmptyCategoriesRef.current,
-    appDataKeys: Object.keys(appData || {})
-  });
-  console.log('🔧 HomeScreen 接收到的 appData.hideEmptyCategories:', appHideEmptyCategories, '类型:', typeof appHideEmptyCategories);
+  // 初始化数据加载
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+  
+  // 页面重新挂载时重新加载数据（通过页面切换实现）
+  // 不再监听缓存变化，每次挂载都重新建立快照
 
   // 动态加载页面组件
   const loadScreenComponent = useCallback(async (screenName) => {
@@ -107,77 +165,20 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
     }
   }, []);
 
-  // 监听缓存变化，重新加载数据
+  // 监听自定义事件（由 IPCListenerService 发送）
   useEffect(() => {
-    // 添加初始化延迟，避免在App初始化期间触发刷新
-    const initTimer = setTimeout(() => {
-      const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
-        console.log('🔄 HomeScreen 收到缓存变化通知');
-        // 刷新页面以重新加载数据
-        window.location.reload();
-      });
-      
-      // 将unsubscribe函数存储到window对象，以便后续清理
-      window.homeScreenCacheUnsubscribe = unsubscribe;
-    }, 1000); // 延迟1秒，确保App初始化完成
-    
-    
-    return () => {
-      clearTimeout(initTimer);
-      if (window.homeScreenCacheUnsubscribe) {
-        window.homeScreenCacheUnsubscribe();
-        delete window.homeScreenCacheUnsubscribe;
-      }
-    };
-  }, []);
-
-  // 监听设置更新
-  useEffect(() => {
-    const handleSettingsUpdate = (event) => {
-      console.log('🔄 HomeScreen 收到设置更新通知:', event.detail);
-      if (event.detail.key === 'hideEmptyCategories') {
-        // App.desktop.js 会重新加载数据，这里不需要额外处理
-        console.log('🔄 设置已更新，App.desktop.js 将重新加载数据');
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('settingsUpdated', handleSettingsUpdate);
-      return () => {
-        window.removeEventListener('settingsUpdated', handleSettingsUpdate);
-      };
-    }
-  }, []);
-
-  // 监听 Electron IPC 消息
-  useEffect(() => {
-    const handleIpcMessage = (event, data) => {
-      console.log('📨 收到 IPC 消息 - event:', event, 'data:', data);
-      
-      // 在 Electron 中，第一个参数是事件对象，第二个参数是数据
-      // 事件名称通过 ipcRenderer.on 的第一个参数指定
-      console.log('⚙️ 通过 IPC 导航到设置页面, 数据:', data);
+    const handleNavigateToSettings = (event) => {
+      console.log('📨 收到导航到设置页面事件:', event.detail);
       setCurrentScreen('Settings');
       setScreenProps({});
     };
 
-    // 检查是否在 Electron 环境中
-    if (typeof window !== 'undefined' && window.require) {
-      try {
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.on('navigate-to-settings', handleIpcMessage);
-        
-        console.log('✅ IPC 监听器已设置');
-        
-        return () => {
-          ipcRenderer.removeListener('navigate-to-settings', handleIpcMessage);
-          console.log('🧹 IPC 监听器已清理');
-        };
-      } catch (error) {
-        console.log('⚠️ 不在 Electron 环境中，跳过 IPC 设置');
-      }
-    } else {
-      console.log('⚠️ 不在 Electron 环境中，跳过 IPC 设置');
+    if (typeof window !== 'undefined') {
+      window.addEventListener('navigate-to-settings', handleNavigateToSettings);
+      
+      return () => {
+        window.removeEventListener('navigate-to-settings', handleNavigateToSettings);
+      };
     }
   }, []);
 
@@ -237,10 +238,16 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
 
   // 处理刷新
   const onRefresh = useCallback(async () => {
+    console.log('🔄 HomeScreen 开始刷新数据');
     setRefreshing(true);
-    // 刷新页面以重新加载数据
-    window.location.reload();
-  }, []);
+    try {
+      await loadData();
+    } catch (error) {
+      console.error('❌ 刷新数据失败:', error);
+    } finally {
+    setRefreshing(false);
+    }
+  }, [loadData]);
 
   // 更新全局提示信息
   const updateGlobalMessage = useCallback((message) => {
@@ -265,12 +272,10 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
       console.log('✅ 扫描完成，刷新数据');
       // 重新加载扫描时间和统计信息
       loadLastScanTime();
-      setTimeout(() => {
-        // 刷新页面以重新加载数据
-        window.location.reload();
-      }, 500);
+      // 重新加载数据
+      loadData();
     }
-  }, []);
+  }, [loadData]);
 
   // 启动智能扫描
   const startSmartScan = useCallback(async () => {
@@ -404,6 +409,8 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
   const renderHomeContent = () => {
     console.log('🏠 renderHomeContent 被调用');
     console.log('🏠 hideEmptyCategoriesRef.current:', hideEmptyCategoriesRef.current);
+    console.log('🏠 当前分类统计状态:', categoryCounts);
+    console.log('🏠 当前最近图片数量:', recentImages.length);
     
     return (
       <ScrollView
@@ -415,7 +422,7 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>按内容</Text>
+          <Text style={styles.sectionTitle}>按内容</Text>
             <TouchableOpacity
               style={styles.toggleButton}
               onPress={async () => {
@@ -427,18 +434,16 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
                   settings.hideEmptyCategories = !settings.hideEmptyCategories;
                   // 保存设置
                   await UnifiedDataService.writeSettings(settings);
-                  // 更新本地引用
-                  hideEmptyCategoriesRef.current = settings.hideEmptyCategories;
+                  // 重新加载数据以应用新设置
+                  await loadData();
                   console.log('✅ 隐藏空分类设置已更新:', settings.hideEmptyCategories);
-                  // 刷新页面以重新加载数据
-                  window.location.reload();
                 } catch (error) {
                   console.error('❌ 切换隐藏空分类设置失败:', error);
                 }
               }}
             >
               <Text style={styles.toggleButtonText}>
-                {appHideEmptyCategories ? '显示空分类' : '隐藏空分类'}
+                {hideEmptyCategories ? '显示空分类' : '隐藏空分类'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -498,7 +503,7 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         {/* 城市分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>按城市</Text>
+          <Text style={styles.sectionTitle}>按城市</Text>
           </View>
           <View style={styles.categoriesContainer}>
             {cityCounts && Object.keys(cityCounts).length > 0 ? (
@@ -509,7 +514,7 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
                   const recentImages = cityRecentImages[city] || [];
                   return (
                     <CityCard
-                      key={city}
+                    key={city}
                       city={city}
                       count={count}
                       recentImages={recentImages}
@@ -560,20 +565,24 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         
         {currentScreen === 'Category' && (
           CategoryScreen ? (
-            <CategoryScreen 
-              {...screenProps} 
-              forceRefresh={categoryDataChanged}
-              onBack={() => setCurrentScreen('Home')}
-              navigation={{
-                onImagePress: (image) => {
-                  handleImagePress(image, 'Category', screenProps);
-                }
-              }}
-            />
+              <CategoryScreen 
+                {...screenProps} 
+                forceRefresh={categoryDataChanged}
+                onBack={() => {
+                  setCurrentScreen('Home');
+                  console.log('🏠 从分类页面返回，重新加载数据');
+                  loadData();
+                }}
+                navigation={{
+                  onImagePress: (image) => {
+                    handleImagePress(image, 'Category', screenProps);
+                  }
+                }}
+              />
           ) : (
             <View style={styles.loadingContainer}>
               <Text style={styles.loadingText}>正在加载分类页面...</Text>
-            </View>
+          </View>
           )
         )}
         
@@ -603,6 +612,8 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
                   } else {
                     console.log('🔙 从首页返回');
                     setCurrentScreen('Home');
+                    console.log('🏠 从图片预览返回，重新加载数据');
+                    loadData();
                   }
                 }}
               />
@@ -616,7 +627,11 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
               <SettingsScreen
                 {...screenProps}
                 navigation={{
-                  goBack: () => setCurrentScreen('Home')
+                  goBack: () => {
+                    setCurrentScreen('Home');
+                    console.log('🏠 从设置页面返回，重新加载数据');
+                    loadData();
+                  }
                 }}
                 onScanProgress={handleScanProgress}
                 startSmartScan={startSmartScan}
@@ -626,7 +641,26 @@ const HomeScreen = ({ appData, onRefreshCache }) => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, appHideEmptyCategories]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages]);
+
+  // 显示加载状态
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>正在加载数据...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  console.log('🏠 HomeScreen 状态初始化完成:', { 
+    currentScreen, 
+    recentImages: recentImages?.length || 0, 
+    categoryCounts: Object.keys(categoryCounts).length,
+    hideEmptyCategories,
+    hideEmptyCategoriesRef: hideEmptyCategoriesRef.current
+  });
 
   // 主要的返回语句
   return renderAllScreens;
@@ -791,6 +825,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 20,
   },
   // 空数据提示样式
   emptyState: {

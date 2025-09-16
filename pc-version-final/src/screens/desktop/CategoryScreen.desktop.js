@@ -164,11 +164,19 @@ const CategoryScreen = ({
         images = await UnifiedDataService.readImagesByCategory(category);
       }
       
+      // 同时加载选中状态
+      const selectedImages = await UnifiedDataService.getSelectedImages();
+      const selectedImageIds = selectedImages.map(img => img.id);
+      
       console.log(`📊 从统一数据服务获取图片: 总数=${images.length}, category=${category}, city=${city}`);
+      console.log(`📊 选中状态: ${selectedImageIds.length} 张图片被选中`);
+      
       setAllImages(images);
+      setSelectedImages(selectedImageIds);
     } catch (error) {
       console.error('❌ 获取图片数据失败:', error);
       setAllImages([]);
+      setSelectedImages([]);
     }
   }, [category, city]);
 
@@ -177,40 +185,52 @@ const CategoryScreen = ({
     loadImages();
   }, [loadImages]);
 
+  // 页面重新挂载时重新加载数据（通过页面切换实现）
+  // 不再监听缓存变化，每次挂载都重新建立快照
+
   // 必要的UI状态
   const [selectAll, setSelectAll] = useState(false);
   const [selectedImages, setSelectedImages] = useState([]);
   
-  // 使用统一数据服务的选中状态管理
-  useEffect(() => {
-    const unsubscribe = UnifiedDataService.addSelectionChangeListener((selectedImages) => {
-      // selectedImages 现在是图片对象数组，提取 ID 数组
-      const selectedArray = selectedImages.map(img => img.id);
-      setSelectedImages(selectedArray);
-    });
-    
-    // 初始化选中状态
-    const initialSelected = UnifiedDataService.getSelectedImages();
-    setSelectedImages(initialSelected.map(img => img.id));
-    
-    return unsubscribe;
-  }, []);
+  // 选中状态将在 loadImages 中统一加载
   
-  // 监听缓存变化，重新加载数据
-  useEffect(() => {
-    const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
-      console.log('🔄 CategoryScreen 收到缓存变化通知，重新加载数据');
-      // 重新加载当前分类的图片数据
-      loadImages();
-    });
-    
-    return unsubscribe;
-  }, [category, city, loadImages]);
   
-  // 创建稳定的 getIsSelected 函数
+  // 创建稳定的 getIsSelected 函数，使用本地状态
   const getIsSelected = useCallback((id) => {
-    return UnifiedDataService.isImageSelected(id);
-  }, []); // 依赖数组为空，函数引用永远不变
+    return selectedImages.includes(id);
+  }, [selectedImages]);
+
+  // 切换图片选中状态
+  const toggleImageSelection = useCallback((imageId) => {
+    setSelectedImages(prev => {
+      const newSelectedImages = prev.includes(imageId)
+        ? prev.filter(id => id !== imageId)
+        : [...prev, imageId];
+      
+      // 同时更新 UnifiedDataService 的全局状态
+      UnifiedDataService.setImageSelection(imageId, !prev.includes(imageId));
+      
+      return newSelectedImages;
+    });
+  }, []);
+
+  // 全选/取消全选
+  const toggleSelectAll = useCallback(() => {
+    if (selectedImages.length === allImages.length) {
+      // 如果全部选中，则取消全选
+      setSelectedImages([]);
+      // 清除当前分类的所有选中状态
+      UnifiedDataService.clearCategorySelection(category);
+    } else {
+      // 否则全选当前页面的所有图片
+      const allImageIds = allImages.map(img => img.id);
+      setSelectedImages(allImageIds);
+      // 批量设置选中状态
+      allImages.forEach(img => {
+        UnifiedDataService.setImageSelection(img.id, true);
+      });
+    }
+  }, [selectedImages.length, allImages, category]);
   
   console.log(`🔄 CategoryScreen 状态: selectedImages=${selectedImages.length}, getIsSelected函数引用=${getIsSelected}`);
   console.log(`🔄 CategoryScreen 渲染完成，准备渲染子组件`);
@@ -427,31 +447,25 @@ const CategoryScreen = ({
     UnifiedDataService.setImageSelection(image.id, true);
   }, []);
 
-  // Toggle image selection state
-  const toggleImageSelection = useCallback((imageId) => {
-    console.log(`🔄 切换图片选择状态: ${imageId}`);
-    UnifiedDataService.toggleImageSelection(imageId);
-  }, []);
 
   // Clear current category selections (只清除当前分类的选中状态)
   const clearCategorySelections = useCallback(() => {
+    // 清除全局状态 - 清除当前分类的所有选中状态
     UnifiedDataService.clearCategorySelection(category);
+    // 清除本地状态
+    setSelectedImages([]);
     setSelectAll(false);
+    
+    console.log(`🧹 清除选中状态: category=${category}, 本地状态已清空`);
   }, [category]);
 
-  // 全选功能 (只处理当前分类的图片)
-  const toggleSelectAll = useCallback(() => {
-    // 全选 - 选择当前分类的所有图片（优化版本，避免创建大数组）
-    UnifiedDataService.addToSelectionBatch(allImages);
-      setSelectAll(true);
-  }, [allImages]);
 
   // Image right click handler
   const handleImageRightPress = useCallback((image) => {
     console.log(`🖱️ 处理右键点击: ${image.id}`);
     // 右键点击直接切换图片的选中状态
     toggleImageSelection(image.id);
-  }, []);
+  }, [toggleImageSelection]);
 
   // Batch delete
   const handleBatchDelete = useCallback(() => {
@@ -484,12 +498,6 @@ const CategoryScreen = ({
               setShowDeleteProgress(true);
               setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedCount });
               
-              // 临时禁用缓存监听器，避免删除过程中页面刷新
-              if (window.homeScreenCacheUnsubscribe) {
-                window.homeScreenCacheUnsubscribe();
-                delete window.homeScreenCacheUnsubscribe;
-              }
-              
               const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
               await UnifiedDataService.writeDeleteImages(
                 selectedImageIds,
@@ -501,39 +509,15 @@ const CategoryScreen = ({
               // 清除选中状态
               clearCategorySelections();
               
-              // 重新加载图片数据以更新统计数据
+              // 重新加载图片数据
               await loadImages();
               
-              // 触发 App.desktop.js 重新加载数据
-              if (window.updateAppData) {
-                await window.updateAppData();
-              }
-              
-              setTimeout(() => {
-                setShowDeleteProgress(false);
-                
-                // 重新启用缓存监听器
-                if (typeof window !== 'undefined') {
-                  const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
-                    console.log('🔄 HomeScreen 收到缓存变化通知');
-                    window.location.reload();
-                  });
-                  window.homeScreenCacheUnsubscribe = unsubscribe;
-                }
-              }, 1000);
+              // 立即关闭删除进度对话框
+              setShowDeleteProgress(false);
               
             } catch (error) {
               setShowDeleteProgress(false);
               Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
-              
-              // 即使出错也要重新启用缓存监听器
-              if (typeof window !== 'undefined') {
-                const unsubscribe = UnifiedDataService.addCacheListener((cache) => {
-                  console.log('🔄 HomeScreen 收到缓存变化通知');
-                  window.location.reload();
-                });
-                window.homeScreenCacheUnsubscribe = unsubscribe;
-              }
             }
           },
         },
@@ -668,20 +652,10 @@ const CategoryScreen = ({
       setSelected(isSelected);
     }, [getIsSelected, item.id]);
     
-    // 监听全局选中状态变化
+    // 初始化选中状态
     useEffect(() => {
-      const unsubscribe = UnifiedDataService.addSelectionChangeListener((selectedImages) => {
-        console.log(`🔄 LazyImageContainer 选中状态变化: ${item.id}`);
-        // 直接使用全局选中状态检查，不依赖本地selectedImages状态
-        const isSelected = getIsSelected(item.id);
-        setSelected(isSelected);
-      });
-      
-      // 初始化选中状态
       const isSelected = getIsSelected(item.id);
       setSelected(isSelected);
-      
-      return unsubscribe;
     }, [getIsSelected, item.id]);
     
     console.log(`🔄 LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
