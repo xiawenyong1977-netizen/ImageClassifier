@@ -263,7 +263,7 @@ const CategoryScreen = ({
   const dropdownOptions = [20, 50, 100, 1000];
   
   // 视图模式状态
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'timeline'
+  const [viewMode, setViewMode] = useState('timeline'); // 'grid' or 'timeline'
   
   // 关闭下拉框
   const closeDropdown = useCallback(() => {

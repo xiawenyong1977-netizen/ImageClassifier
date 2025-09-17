@@ -388,6 +388,30 @@ class GlobalImageCache {
     this.cache.selectedCityCounts = {};
   }
 
+  // 重新构建选中统计
+  _rebuildSelectedStats() {
+    console.log('📊 开始重新计算选中统计...');
+    this.cache.selectedCategoryCounts = {};
+    this.cache.selectedCityCounts = {};
+    
+    this.cache.allImages.forEach(img => {
+      if (img.selected) {
+        if (img.category) {
+          const category = this._getCategoryId(img.category);
+          this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
+        }
+        if (img.city) {
+          this.cache.selectedCityCounts[img.city] = (this.cache.selectedCityCounts[img.city] || 0) + 1;
+        }
+      }
+    });
+    
+    console.log('📊 选中统计重建完成:', {
+      selectedCategoryCounts: this.cache.selectedCategoryCounts,
+      selectedCityCounts: this.cache.selectedCityCounts
+    });
+  }
+
   // 获取选中图片的分类统计
   getSelectedCategoryCounts() {
     return { ...this.cache.selectedCategoryCounts };
@@ -488,6 +512,7 @@ class GlobalImageCache {
       // 重新构建统计信息
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      this._rebuildSelectedStats();
       this._rebuildRecentImages();
       
       console.log(`✅ 批量删除完成: ${imagesToDelete.length}/${imageIds.length} 张图片`);
