@@ -195,20 +195,33 @@ const CategoryScreen = ({
   // 选中状态将在 loadImages 中统一加载
   
   
-  // 创建稳定的 getIsSelected 函数，使用本地状态
+  // 创建稳定的 getIsSelected 函数，使用 ref 避免依赖变化
+  const selectedImagesRef = useRef(selectedImages);
+  selectedImagesRef.current = selectedImages;
+  
   const getIsSelected = useCallback((id) => {
-    return selectedImages.includes(id);
-  }, [selectedImages]);
+    return selectedImagesRef.current.includes(id);
+  }, []); // 空依赖数组，函数引用永远不变
 
   // 切换图片选中状态
   const toggleImageSelection = useCallback((imageId) => {
     setSelectedImages(prev => {
-      const newSelectedImages = prev.includes(imageId)
+      const wasSelected = prev.includes(imageId);
+      const newSelectedImages = wasSelected
         ? prev.filter(id => id !== imageId)
         : [...prev, imageId];
       
       // 同时更新 UnifiedDataService 的全局状态
-      UnifiedDataService.setImageSelection(imageId, !prev.includes(imageId));
+      UnifiedDataService.setImageSelection(imageId, !wasSelected);
+      
+      // 发送自定义事件通知所有组件选中状态变化
+      const event = new CustomEvent('imageSelectionChanged', {
+        detail: {
+          imageId: imageId,
+          isSelected: !wasSelected
+        }
+      });
+      window.dispatchEvent(event);
       
       return newSelectedImages;
     });
@@ -646,17 +659,28 @@ const CategoryScreen = ({
     const [selected, setSelected] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
     
-    // 初始化选中状态
+    // 初始化选中状态 - 只在组件挂载时执行一次
     useEffect(() => {
       const isSelected = getIsSelected(item.id);
       setSelected(isSelected);
-    }, [getIsSelected, item.id]);
+    }, [item.id]); // 只依赖 item.id，不依赖 getIsSelected
     
-    // 初始化选中状态
+    // 监听选中状态变化 - 使用事件监听避免依赖 getIsSelected
     useEffect(() => {
-      const isSelected = getIsSelected(item.id);
-      setSelected(isSelected);
-    }, [getIsSelected, item.id]);
+      const handleSelectionChange = (event) => {
+        if (event.detail.imageId === item.id) {
+          setSelected(event.detail.isSelected);
+          console.log(`🔄 选中状态变化: ${item.id}, ${selected} -> ${event.detail.isSelected}`);
+        }
+      };
+      
+      // 监听自定义事件
+      window.addEventListener('imageSelectionChanged', handleSelectionChange);
+      
+      return () => {
+        window.removeEventListener('imageSelectionChanged', handleSelectionChange);
+      };
+    }, [item.id, selected]);
     
     console.log(`🔄 LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
     
