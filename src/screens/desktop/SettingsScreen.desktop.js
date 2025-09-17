@@ -111,35 +111,14 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       
       setGalleryPaths(paths);
       
-      // 检测目录变更
-      const changes = detectPathChanges(originalPaths, paths);
-      if (changes.hasChanges) {
-        console.log('📁 检测到目录变更:', changes);
-        // 更新原始路径记录
-        setOriginalPaths([...paths]);
-      }
+
     } catch (error) {
       console.error('Failed to save gallery paths:', error);
       Alert.alert('Error', error.message || 'Failed to save gallery paths');
     }
   };
 
-  // 检测路径变更
-  const detectPathChanges = (original, current) => {
-    const originalSet = new Set(original);
-    const currentSet = new Set(current);
-    
-    const added = current.filter(path => !originalSet.has(path));
-    const removed = original.filter(path => !currentSet.has(path));
-    
-    return {
-      hasChanges: added.length > 0 || removed.length > 0,
-      added,
-      removed,
-      addedCount: added.length,
-      removedCount: removed.length
-    };
-  };
+ 
 
 
   // 选择文件夹
@@ -196,21 +175,6 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     );
   };
 
-  // 触发重新扫描，直接保存AsyncStorage状态
-  const triggerRescan = async () => {
-    try {
-      // 直接保存到AsyncStorage，让HomeScreen检查
-      await AsyncStorage.setItem('pending_rescan', 'true');
-      
-      // 关闭设置页面，返回首页
-      navigation.goBack();
-      
-    } catch (error) {
-      console.error('保存重新扫描请求失败:', error);
-      Alert.alert('错误', '无法启动重新扫描，请重试');
-    }
-  };
-
 
   const handleClearData = async () => {
     Alert.alert(
@@ -252,7 +216,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
               try {
                 // 调用从HomeScreen传递过来的扫描函数
                 await startSmartScan();
-                Alert.alert('成功', '智能扫描完成！请手动返回首页查看结果。');
+                Alert.alert('成功', '智能扫描完成！');
               } catch (error) {
                 console.error('智能扫描失败:', error);
                 Alert.alert('错误', '智能扫描失败，请重试');
@@ -267,41 +231,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     }
   };
 
-  const handleUpdateCityInfo = async () => {
-    try {
-      Alert.alert(
-        '更新城市信息',
-        '确定要为现有图片更新城市信息吗？此操作会为有GPS坐标的图片添加城市信息。',
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '更新',
-            style: 'default',
-            onPress: async () => {
-              try {
-                const GalleryScannerService = (await import('../../services/GalleryScannerService')).default;
-                const scanner = new GalleryScannerService();
-                
-                const result = await scanner.updateExistingImagesWithCityInfo();
-                
-                Alert.alert(
-                  '更新完成',
-                  `成功更新 ${result.updated} 张图片的城市信息，跳过 ${result.skipped} 张图片。`,
-                  [{ text: '确定' }]
-                );
-              } catch (error) {
-                console.error('更新城市信息失败:', error);
-                Alert.alert('错误', '更新城市信息失败，请重试');
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('启动城市信息更新失败:', error);
-      Alert.alert('错误', '无法启动城市信息更新，请重试');
-    }
-  };
+  
 
 
 
