@@ -952,6 +952,76 @@ class UnifiedDataService {
       throw error;
     }
   }
+
+  // 获取分类规则
+  async getClassificationRules() {
+    try {
+      return await this.imageStorageService.getClassificationRules();
+    } catch (error) {
+      console.error('❌ 获取分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 保存分类规则
+  async saveClassificationRules(rules) {
+    try {
+      await this.imageStorageService.saveClassificationRules(rules);
+      console.log('✅ 分类规则保存成功');
+      return true;
+    } catch (error) {
+      console.error('❌ 保存分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 重置分类规则为默认值
+  async resetClassificationRules() {
+    try {
+      const defaultRules = await this.imageStorageService.resetClassificationRules();
+      console.log('✅ 分类规则已重置为默认值');
+      return defaultRules;
+    } catch (error) {
+      console.error('❌ 重置分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 更新单个分类规则
+  async updateClassificationRule(objectClass, newCategory) {
+    try {
+      const rules = await this.imageStorageService.updateClassificationRule(objectClass, newCategory);
+      console.log(`✅ 分类规则更新成功: ${objectClass} -> ${newCategory}`);
+      return rules;
+    } catch (error) {
+      console.error('❌ 更新分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 添加新的分类规则
+  async addClassificationRule(objectClass, category) {
+    try {
+      const rules = await this.imageStorageService.addClassificationRule(objectClass, category);
+      console.log(`✅ 新增分类规则: ${objectClass} -> ${category}`);
+      return rules;
+    } catch (error) {
+      console.error('❌ 添加分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除分类规则
+  async removeClassificationRule(objectClass) {
+    try {
+      const rules = await this.imageStorageService.removeClassificationRule(objectClass);
+      console.log(`✅ 删除分类规则: ${objectClass}`);
+      return rules;
+    } catch (error) {
+      console.error('❌ 删除分类规则失败:', error);
+      throw error;
+    }
+  }
 }
 
 // 导出单例实例

@@ -444,108 +444,60 @@ class ImageClassifierService {
 
 
   // 将YOLOv8n检测结果映射到应用分类
-  mapDetectionsToCategories(detections) {
-    const categoryMapping = {
-      // 身份证相关 -> idcard
-      'id_card_front': 'idcard',
-      'id_card_back': 'idcard',
-      
-      // 人物相关 -> people
-      'person': 'people',
-      
-      // 宠物相关 -> pet
-      'cat': 'pet',
-      'dog': 'pet',
-      'bird': 'pet',
-      'horse': 'pet',
-      'sheep': 'pet',
-      'cow': 'pet',
-      'elephant': 'pet',
-      'bear': 'pet',
-      'zebra': 'pet',
-      'giraffe': 'pet',
-      
-      // 生活用品 -> life
-      'bottle': 'life',
-      'wine glass': 'life',
-      'cup': 'life',
-      'fork': 'life',
-      'knife': 'life',
-      'spoon': 'life',
-      'bowl': 'life',
-      'tv': 'life',
-      'couch': 'life',
-      'bed': 'life',
-      'dining table': 'life',
-      'toilet': 'life',
-      'microwave': 'life',
-      'oven': 'life',
-      'toaster': 'life',
-      'sink': 'life',
-      'refrigerator': 'life',
-      'clock': 'life',
-      'vase': 'life',
-      'scissors': 'life',
-      'teddy bear': 'life',
-      'hair drier': 'life',
-      'toothbrush': 'life',
-      
-      // 食物相关 -> food
-      'banana': 'food',
-      'apple': 'food',
-      'sandwich': 'food',
-      'orange': 'food',
-      'broccoli': 'food',
-      'carrot': 'food',
-      'hot dog': 'food',
-      'pizza': 'food',
-      'donut': 'food',
-      'cake': 'food',
-      
-      // 工作文档 -> document
-      'laptop': 'document',
-      'mouse': 'document',
-      'keyboard': 'document',
-      'cell phone': 'document',
-      'book': 'document',
-      
-      // 交通工具 -> travel
-      'car': 'travel',
-      'motorcycle': 'travel',
-      'airplane': 'travel',
-      'bus': 'travel',
-      'train': 'travel',
-      'truck': 'travel',
-      'boat': 'travel',
-      'bicycle': 'travel',
-      
-      // 游戏相关 -> game
-      'sports ball': 'game',
-      'frisbee': 'game',
-      'skis': 'game',
-      'snowboard': 'game',
-      'kite': 'game',
-      'baseball bat': 'game',
-      'baseball glove': 'game',
-      'skateboard': 'game',
-      'surfboard': 'game',
-      'tennis racket': 'game',
-      
-      // 其他 -> other
-      'traffic light': 'other',
-      'fire hydrant': 'other',
-      'stop sign': 'other',
-      'parking meter': 'other',
-      'bench': 'other',
-      'backpack': 'other',
-      'umbrella': 'other',
-      'handbag': 'other',
-      'tie': 'other',
-      'suitcase': 'other',
-      'potted plant': 'other',
-      'chair': 'other'
-    };
+  async mapDetectionsToCategories(detections) {
+    // 从存储中获取分类规则（带优先级）
+    const rulesData = await UnifiedDataService.imageStorageService.getClassificationRulesWithPriority();
+    
+    // 如果没有优先级数据，回退到旧版本
+    if (!rulesData.categoryPriorities) {
+      const categoryMapping = await UnifiedDataService.getClassificationRules();
+      return this.mapDetectionsToCategoriesLegacy(detections, categoryMapping);
+    }
 
+    const { categoryPriorities, objectMappings } = rulesData;
+    const categoryScores = {};
+    
+    // 计算每个分类的分数
+    detections.forEach(detection => {
+      const mappedCategory = objectMappings[detection.class] || 'other';
+      const confidence = detection.confidence;
+      
+      if (!categoryScores[mappedCategory]) {
+        categoryScores[mappedCategory] = {
+          score: 0,
+          priority: categoryPriorities[mappedCategory] || 999, // 未知分类优先级最低
+          detections: []
+        };
+      }
+      
+      // 使用最高置信度作为该分类的分数
+      categoryScores[mappedCategory].score = Math.max(categoryScores[mappedCategory].score, confidence);
+      categoryScores[mappedCategory].detections.push(detection);
+    });
+
+    // 按优先级和置信度选择最佳分类
+    let bestCategory = 'other';
+    let bestPriority = 999;
+    let bestScore = 0;
+    
+    Object.entries(categoryScores).forEach(([category, data]) => {
+      const { score, priority } = data;
+      
+      // 优先级高的分类优先（数字小的优先级高）
+      if (priority < bestPriority || 
+          (priority === bestPriority && score > bestScore)) {
+        bestPriority = priority;
+        bestScore = score;
+        bestCategory = category;
+      }
+    });
+
+    console.log(`🎯 分类选择: ${bestCategory} (优先级: ${bestPriority}, 置信度: ${bestScore.toFixed(3)})`);
+    return bestCategory;
+  }
+
+  // 旧版本的分类方法（兼容性）
+  mapDetectionsToCategoriesLegacy(detections, categoryMapping) {
     const categoryScores = {};
     
     detections.forEach(detection => {
@@ -556,11 +508,9 @@ class ImageClassifierService {
         categoryScores[mappedCategory] = 0;
       }
       
-      // 使用最高置信度作为该分类的分数
       categoryScores[mappedCategory] = Math.max(categoryScores[mappedCategory], confidence);
     });
 
-    // 找到最高分的分类
     let bestCategory = 'other';
     let bestScore = 0;
     
@@ -634,7 +584,7 @@ class ImageClassifierService {
       let result;
       if (detectionResult.success && detectionResult.detections.length > 0) {
         // 根据检测结果进行分类
-        const category = this.mapDetectionsToCategories(detectionResult.detections);
+        const category = await this.mapDetectionsToCategories(detectionResult.detections);
         const confidence = Math.max(...detectionResult.detections.map(d => d.confidence));
         
         // 分离身份证检测结果和通用模型检测结果

@@ -20,7 +20,7 @@ try {
 class IndexedDBAdapter {
   constructor() {
     this.dbName = 'ImageClassifierDB';
-    this.version = 1;
+    this.version = 2; // 增加版本号以支持新的对象存储
     this.db = null;
     this.isInitialized = false;
   }
@@ -63,6 +63,11 @@ class IndexedDBAdapter {
         // 创建设置表
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        
+        // 创建分类规则表
+        if (!db.objectStoreNames.contains('classificationRules')) {
+          db.createObjectStore('classificationRules', { keyPath: 'key' });
         }
         
         console.log('✅ IndexedDB 数据库结构创建完成');
@@ -183,6 +188,7 @@ class ImageStorageService {
       images: 'images',
       stats: 'stats',
       settings: 'settings',
+      classificationRules: 'classificationRules',
     };
     this.isInitialized = false;
     // 添加保存锁，防止并发保存导致数据丢失
@@ -1420,6 +1426,252 @@ class ImageStorageService {
     const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
     
     return { grouped, sortedDates };
+  }
+
+  // 获取默认分类规则（带优先级）
+  getDefaultClassificationRulesWithPriority() {
+    return {
+      // 分类优先级定义（数字越小优先级越高）
+      categoryPriorities: {
+        'idcard': 1,      // 身份证 - 最高优先级
+        'people': 2,      // 社交活动
+        'pet': 3,         // 宠物照片
+        'life': 4,        // 生活记录
+        'food': 5,        // 美食记录
+        'document': 6,    // 工作照片
+        'travel': 7,      // 旅行风景
+        'game': 8,        // 运动娱乐
+        'other': 9        // 其他图片 - 最低优先级
+      },
+      
+      // 物体到分类的映射
+      objectMappings: {
+        // 身份证相关 -> idcard
+        'id_card_front': 'idcard',
+        'id_card_back': 'idcard',
+        
+        // 人物相关 -> people
+        'person': 'people',
+        
+        // 宠物相关 -> pet
+        'cat': 'pet',
+        'dog': 'pet',
+        'bird': 'pet',
+        'horse': 'pet',
+        'sheep': 'pet',
+        'cow': 'pet',
+        'elephant': 'pet',
+        'bear': 'pet',
+        'zebra': 'pet',
+        'giraffe': 'pet',
+        
+        // 生活用品 -> life
+        'bottle': 'life',
+        'wine glass': 'life',
+        'cup': 'life',
+        'fork': 'life',
+        'knife': 'life',
+        'spoon': 'life',
+        'bowl': 'life',
+        'tv': 'life',
+        'couch': 'life',
+        'bed': 'life',
+        'dining table': 'life',
+        'toilet': 'life',
+        'microwave': 'life',
+        'oven': 'life',
+        'toaster': 'life',
+        'sink': 'life',
+        'refrigerator': 'life',
+        'clock': 'life',
+        'vase': 'life',
+        'scissors': 'life',
+        'teddy bear': 'life',
+        'hair drier': 'life',
+        'toothbrush': 'life',
+        
+        // 食物相关 -> food
+        'banana': 'food',
+        'apple': 'food',
+        'sandwich': 'food',
+        'orange': 'food',
+        'broccoli': 'food',
+        'carrot': 'food',
+        'hot dog': 'food',
+        'pizza': 'food',
+        'donut': 'food',
+        'cake': 'food',
+        
+        // 工作文档 -> document
+        'laptop': 'document',
+        'mouse': 'document',
+        'keyboard': 'document',
+        'cell phone': 'document',
+        'book': 'document',
+        'remote': 'document',
+        
+        // 交通工具 -> travel
+        'car': 'travel',
+        'motorcycle': 'travel',
+        'airplane': 'travel',
+        'bus': 'travel',
+        'train': 'travel',
+        'truck': 'travel',
+        'boat': 'travel',
+        'bicycle': 'travel',
+        
+        // 游戏相关 -> game
+        'sports ball': 'game',
+        'frisbee': 'game',
+        'skis': 'game',
+        'snowboard': 'game',
+        'kite': 'game',
+        'baseball bat': 'game',
+        'baseball glove': 'game',
+        'skateboard': 'game',
+        'surfboard': 'game',
+        'tennis racket': 'game',
+        
+        // 其他 -> other
+        'traffic light': 'other',
+        'fire hydrant': 'other',
+        'stop sign': 'other',
+        'parking meter': 'other',
+        'bench': 'other',
+        'backpack': 'other',
+        'umbrella': 'other',
+        'handbag': 'other',
+        'tie': 'other',
+        'suitcase': 'other',
+        'potted plant': 'other',
+        'chair': 'other'
+      }
+    };
+  }
+
+  // 获取默认分类规则（兼容旧版本）
+  getDefaultClassificationRules() {
+    const rulesWithPriority = this.getDefaultClassificationRulesWithPriority();
+    return rulesWithPriority.objectMappings;
+  }
+
+  // 获取分类规则（带优先级）
+  async getClassificationRulesWithPriority() {
+    try {
+      await this.ensureInitialized();
+      const rulesData = await this.storage.getItem(this.storageKeys.classificationRules);
+      
+      if (!rulesData || !rulesData.categoryPriorities) {
+        // 如果没有优先级数据，初始化默认规则
+        const defaultRules = this.getDefaultClassificationRulesWithPriority();
+        await this.saveClassificationRulesWithPriority(defaultRules);
+        return defaultRules;
+      }
+      
+      return rulesData;
+    } catch (error) {
+      console.error('获取分类规则失败:', error);
+      // 出错时返回默认规则
+      return this.getDefaultClassificationRulesWithPriority();
+    }
+  }
+
+  // 获取分类规则（兼容旧版本）
+  async getClassificationRules() {
+    try {
+      const rulesWithPriority = await this.getClassificationRulesWithPriority();
+      return rulesWithPriority.objectMappings;
+    } catch (error) {
+      console.error('获取分类规则失败:', error);
+      return this.getDefaultClassificationRules();
+    }
+  }
+
+  // 保存分类规则（带优先级）
+  async saveClassificationRulesWithPriority(rulesWithPriority) {
+    try {
+      await this.ensureInitialized();
+      const rulesData = {
+        key: 'classificationRules',
+        ...rulesWithPriority,
+        updatedAt: new Date().toISOString()
+      };
+      await this.storage.setItem(this.storageKeys.classificationRules, rulesData);
+      console.log('✅ 分类规则（带优先级）保存成功');
+      return true;
+    } catch (error) {
+      console.error('保存分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 保存分类规则（兼容旧版本）
+  async saveClassificationRules(rules) {
+    try {
+      // 将旧格式转换为新格式
+      const rulesWithPriority = this.getDefaultClassificationRulesWithPriority();
+      rulesWithPriority.objectMappings = rules;
+      await this.saveClassificationRulesWithPriority(rulesWithPriority);
+      return true;
+    } catch (error) {
+      console.error('保存分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 重置分类规则为默认值
+  async resetClassificationRules() {
+    try {
+      const defaultRules = this.getDefaultClassificationRules();
+      await this.saveClassificationRules(defaultRules);
+      console.log('✅ 分类规则已重置为默认值');
+      return defaultRules;
+    } catch (error) {
+      console.error('重置分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 更新单个分类规则
+  async updateClassificationRule(objectClass, newCategory) {
+    try {
+      const rules = await this.getClassificationRules();
+      rules[objectClass] = newCategory;
+      await this.saveClassificationRules(rules);
+      console.log(`✅ 分类规则更新成功: ${objectClass} -> ${newCategory}`);
+      return rules;
+    } catch (error) {
+      console.error('更新分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 添加新的分类规则
+  async addClassificationRule(objectClass, category) {
+    try {
+      const rules = await this.getClassificationRules();
+      rules[objectClass] = category;
+      await this.saveClassificationRules(rules);
+      console.log(`✅ 新增分类规则: ${objectClass} -> ${category}`);
+      return rules;
+    } catch (error) {
+      console.error('添加分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除分类规则
+  async removeClassificationRule(objectClass) {
+    try {
+      const rules = await this.getClassificationRules();
+      delete rules[objectClass];
+      await this.saveClassificationRules(rules);
+      console.log(`✅ 删除分类规则: ${objectClass}`);
+      return rules;
+    } catch (error) {
+      console.error('删除分类规则失败:', error);
+      throw error;
+    }
   }
 }
 
