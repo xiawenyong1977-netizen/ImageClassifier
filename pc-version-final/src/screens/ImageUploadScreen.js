@@ -61,7 +61,7 @@ const ImageUploadScreen = ({ navigation }) => {
       for (const image of selectedImages) {
         try {
           // 使用智能分类
-          const classificationResult = await ImageClassifierService.smartClassifyImage(
+          const classificationResult = await ImageClassifierService.classifyImage(
             image.uri,
             {
               timestamp: image.timestamp,
@@ -70,7 +70,7 @@ const ImageUploadScreen = ({ navigation }) => {
             }
           );
 
-          // 保存分类结果
+          // 保存分类结果，包括检测结果
           await ImageStorageService.saveImageClassification({
             uri: image.uri,
             category: classificationResult.category,
@@ -78,6 +78,9 @@ const ImageUploadScreen = ({ navigation }) => {
             timestamp: image.timestamp,
             size: image.fileSize,
             fileName: image.fileName,
+            // 保存检测结果
+            idCardDetections: classificationResult.idCardDetections || [],
+            generalDetections: classificationResult.generalDetections || [],
           });
 
           successCount++;

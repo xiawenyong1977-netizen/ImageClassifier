@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO输出调试工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #666;
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 400px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YOLO输出调试工具</h1>
+        
+        <div class="section">
+            <h2>LocalStorage 数据</h2>
+            <button onclick="loadYOLOData('idCard')">加载身份证模型数据</button>
+            <button onclick="loadYOLOData('general')">加载通用模型数据</button>
+            <button onclick="loadYOLOData('both')">加载两个模型数据</button>
+            <button onclick="clearYOLOData()">清除调试数据</button>
+            <button onclick="showAllLocalStorage()">显示所有LocalStorage</button>
+            <div id="status"></div>
+            <pre id="yoloData"></pre>
+        </div>
+        
+        <div class="section">
+            <h2>数据解析</h2>
+            <button onclick="analyzeData()">分析数据</button>
+            <div id="analysis"></div>
+        </div>
+        
+        <div class="section">
+            <h2>所有LocalStorage数据</h2>
+            <pre id="allStorage"></pre>
+        </div>
+    </div>
+
+    <script>
+        function loadYOLOData(modelType = 'both') {
+            const statusDiv = document.getElementById('status');
+            const dataDiv = document.getElementById('yoloData');
+            
+            try {
+                let result = {};
+                let found = false;
+                
+                if (modelType === 'both' || modelType === 'idCard') {
+                    const idCardData = localStorage.getItem('yolo_output_debug_idCard');
+                    if (idCardData) {
+                        result.idCard = JSON.parse(idCardData);
+                        found = true;
+                    }
+                }
+                
+                if (modelType === 'both' || modelType === 'general') {
+                    const generalData = localStorage.getItem('yolo_output_debug_general');
+                    if (generalData) {
+                        result.general = JSON.parse(generalData);
+                        found = true;
+                    }
+                }
+                
+                if (found) {
+                    dataDiv.textContent = JSON.stringify(result, null, 2);
+                    statusDiv.innerHTML = '<div class="status success">✅ 成功加载YOLO调试数据</div>';
+                } else {
+                    dataDiv.textContent = `未找到 ${modelType} 模型的调试数据`;
+                    statusDiv.innerHTML = '<div class="status error">❌ 未找到调试数据</div>';
+                }
+            } catch (error) {
+                dataDiv.textContent = '解析数据时出错: ' + error.message;
+                statusDiv.innerHTML = '<div class="status error">❌ 解析错误: ' + error.message + '</div>';
+            }
+        }
+        
+        function clearYOLOData() {
+            localStorage.removeItem('yolo_output_debug_idCard');
+            localStorage.removeItem('yolo_output_debug_general');
+            document.getElementById('status').innerHTML = '<div class="status info">ℹ️ 已清除所有调试数据</div>';
+            document.getElementById('yoloData').textContent = '';
+        }
+        
+        function showAllLocalStorage() {
+            const allStorage = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                allStorage[key] = localStorage.getItem(key);
+            }
+            document.getElementById('allStorage').textContent = JSON.stringify(allStorage, null, 2);
+        }
+        
+        function analyzeData() {
+            const yoloData = localStorage.getItem('yolo_output_debug');
+            if (!yoloData) {
+                document.getElementById('analysis').innerHTML = '<div class="status error">❌ 请先加载数据</div>';
+                return;
+            }
+            
+            try {
+                const data = JSON.parse(yoloData);
+                let analysis = '<div class="status success">📊 数据分析结果:</div><ul>';
+                
+                analysis += `<li><strong>维度:</strong> [${data.dims.join(', ')}]</li>`;
+                analysis += `<li><strong>数据点数量:</strong> ${data.data.length}</li>`;
+                analysis += `<li><strong>置信度阈值:</strong> ${data.confidenceThreshold}</li>`;
+                analysis += `<li><strong>时间戳:</strong> ${data.timestamp}</li>`;
+                
+                // 分析前几个数据点
+                analysis += '<li><strong>前10个数据点:</strong> [' + data.data.slice(0, 10).map(v => v.toFixed(4)).join(', ') + ']</li>';
+                
+                // 检查数据范围
+                const minVal = Math.min(...data.data);
+                const maxVal = Math.max(...data.data);
+                analysis += `<li><strong>数据范围:</strong> ${minVal.toFixed(4)} 到 ${maxVal.toFixed(4)}</li>`;
+                
+                // 检查是否有异常大的值
+                const largeValues = data.data.filter(v => Math.abs(v) > 10);
+                analysis += `<li><strong>大值(>10)数量:</strong> ${largeValues.length}</li>`;
+                
+                analysis += '</ul>';
+                document.getElementById('analysis').innerHTML = analysis;
+                
+            } catch (error) {
+                document.getElementById('analysis').innerHTML = '<div class="status error">❌ 分析错误: ' + error.message + '</div>';
+            }
+        }
+        
+        // 页面加载时自动加载数据
+        window.onload = function() {
+            loadYOLOData('both');
+            showAllLocalStorage();
+        };
+    </script>
+</body>
+</html>

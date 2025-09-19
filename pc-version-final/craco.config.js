@@ -39,6 +39,19 @@ module.exports = {
         })
       );
       
+      // 添加 CopyWebpackPlugin 来复制模型文件
+      const CopyWebpackPlugin = require('copy-webpack-plugin');
+      webpackConfig.plugins.push(
+        new CopyWebpackPlugin({
+          patterns: [
+            {
+              from: path.resolve(__dirname, 'public/models'),
+              to: path.resolve(__dirname, 'build/models')
+            }
+          ]
+        })
+      );
+      
       return webpackConfig;
     },
   },

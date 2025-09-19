@@ -1,5 +1,5 @@
-import { AsyncStorage, RNFS } from '../adapters/WebAdapters';
-import MediaStoreService from './MediaStoreService';
+import { AsyncStorage, RNFS } from '../adapters/WebAdapters.js';
+import MediaStoreService from './MediaStoreService.js';
 
 // Platform detection for web and mobile
 let Platform;
@@ -40,6 +40,7 @@ class ImageStorageService {
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
+      idcard: '身份证',
       other: '其他图片',
     };
     
@@ -146,6 +147,9 @@ class ImageStorageService {
         street: imageData.street || null,
         locationSource: imageData.locationSource || null,
         cityDistance: imageData.cityDistance || null,
+        // Detection results
+        idCardDetections: imageData.idCardDetections || null,  // 身份证模型检测结果
+        generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -221,6 +225,9 @@ class ImageStorageService {
         street: imageData.street || null,
         locationSource: imageData.locationSource || null,
         cityDistance: imageData.cityDistance || null,
+        // Detection results
+        idCardDetections: imageData.idCardDetections || null,  // 身份证模型检测结果
+        generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
         // Additional metadata
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),

@@ -232,6 +232,58 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               </Text>
             </View>
 
+            {/* 检测结果信息 */}
+            {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) || 
+             (currentImage.generalDetections && currentImage.generalDetections.length > 0) ? (
+              <>
+                <View style={styles.infoRow}>
+                  <Text style={styles.overlayLabel}>🔍 检测结果:</Text>
+                  <Text style={styles.overlayValue}>
+                    {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0))} 个物体
+                  </Text>
+                </View>
+                
+                {/* 身份证检测结果 */}
+                {currentImage.idCardDetections && currentImage.idCardDetections.length > 0 && (
+                  <View style={styles.detectionSection}>
+                    <Text style={styles.detectionTitle}>🆔 身份证检测:</Text>
+                    {currentImage.idCardDetections.map((detection, index) => (
+                      <View key={index} style={styles.detectionItem}>
+                        <Text style={styles.detectionText}>
+                          {detection.class === 'id_card_front' ? '身份证正面' : '身份证背面'} 
+                          ({(detection.confidence * 100).toFixed(1)}%)
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                
+                {/* 通用物体检测结果 */}
+                {currentImage.generalDetections && currentImage.generalDetections.length > 0 && (
+                  <View style={styles.detectionSection}>
+                    <Text style={styles.detectionTitle}>🌐 通用物体检测:</Text>
+                    {currentImage.generalDetections.slice(0, 5).map((detection, index) => (
+                      <View key={index} style={styles.detectionItem}>
+                        <Text style={styles.detectionText}>
+                          {detection.class} ({(detection.confidence * 100).toFixed(1)}%)
+                        </Text>
+                      </View>
+                    ))}
+                    {currentImage.generalDetections.length > 5 && (
+                      <Text style={styles.detectionMore}>
+                        ... 还有 {currentImage.generalDetections.length - 5} 个物体
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.infoRow}>
+                <Text style={styles.overlayLabel}>🔍 检测结果:</Text>
+                <Text style={styles.overlayValue}>未检测到物体</Text>
+              </View>
+            )}
+
             {/* GPS位置信息 */}
             {currentImage.location && (
               <>
@@ -423,6 +475,31 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontWeight: '600',
     flexShrink: 0,
+  },
+  detectionSection: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  detectionTitle: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  detectionItem: {
+    marginLeft: 8,
+    marginBottom: 2,
+  },
+  detectionText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '500',
+  },
+  detectionMore: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    fontStyle: 'italic',
+    marginLeft: 8,
   },
 
   actionsContainer: {

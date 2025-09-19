@@ -1,6 +1,6 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
-import GlobalImageCache from './GlobalImageCache';
-import ImageStorageService from './ImageStorageService';
+import GlobalImageCache from './GlobalImageCache.js';
+import ImageStorageService from './ImageStorageService.js';
 
 class UnifiedDataService {
   constructor() {
@@ -488,6 +488,7 @@ class UnifiedDataService {
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
+      idcard: '身份证',
       other: '其他图片',
     };
     
@@ -508,6 +509,7 @@ class UnifiedDataService {
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
+      idcard: '身份证',
       other: '其他图片',
     };
     
@@ -533,7 +535,7 @@ class UnifiedDataService {
   getAllCategoryIds() {
     return [
       'wechat', 'meeting', 'document', 'people', 'life', 
-      'game', 'food', 'travel', 'pet', 'other'
+      'game', 'food', 'travel', 'pet', 'idcard', 'other'
     ];
   }
 

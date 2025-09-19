@@ -78,6 +78,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
        { id: 'food', name: '美食记录' },
        { id: 'travel', name: '旅行风景' },
        { id: 'pet', name: '宠物萌照' },
+       { id: 'idcard', name: '身份证' },
        { id: 'other', name: '其他图片' },
      ];
 
@@ -188,6 +189,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
       food: { name: '美食记录', icon: '🍕', color: '#FF6B35' },
       travel: { name: '旅行风景', icon: '✈️', color: '#9C27B0' },
       pet: { name: '宠物萌照', icon: '🐕', color: '#795548' },
+      idcard: { name: '身份证', icon: '🆔', color: '#FF6B35' },
       other: { name: '其他图片', icon: '📷', color: '#607D8B' }
     };
     

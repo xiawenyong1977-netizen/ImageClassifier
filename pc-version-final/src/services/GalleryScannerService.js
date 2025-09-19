@@ -943,6 +943,11 @@ class GalleryScannerService {
     try {
       console.log('🚀 启动独立扫描线程方案...');
       
+      // 初始化图片分类器
+      console.log('🔄 初始化图片分类器...');
+      await this.imageClassifier.initialize();
+      console.log('✅ 图片分类器初始化完成');
+      
       // 保存onProgress为实例变量
       this.onProgress = onProgress;
       
@@ -964,6 +969,11 @@ class GalleryScannerService {
       // 扫描完成
       this.sendProgressMessage('completed', allImages.length, processedCount, failedCount, scanStartTime);
       
+      // 反初始化图片分类器，卸载模型释放内存
+      console.log('🧹 扫描完成，开始反初始化图片分类器...');
+      this.imageClassifier.unloadAllModels();
+      console.log('✅ 图片分类器反初始化完成，内存已释放');
+      
       return {
         success: true,
         deleted: deletedUris.length,
@@ -974,6 +984,16 @@ class GalleryScannerService {
       
     } catch (error) {
       console.error('❌ 独立扫描线程方案失败:', error);
+      
+      // 即使出现错误也要反初始化图片分类器，释放内存
+      try {
+        console.log('🧹 扫描出错，开始反初始化图片分类器...');
+        this.imageClassifier.unloadAllModels();
+        console.log('✅ 图片分类器反初始化完成，内存已释放');
+      } catch (unloadError) {
+        console.error('❌ 反初始化图片分类器失败:', unloadError);
+      }
+      
       throw error;
     }
   }
@@ -1081,7 +1101,7 @@ class GalleryScannerService {
     this.sendProgressMessage('processing_images', newImages.length, 0, 0, scanStartTime);
     
     // 使用现有的多线程处理逻辑
-    const THREAD_COUNT = 5;
+    const THREAD_COUNT = 1;
     const SAVE_BATCH_SIZE = 100;
     
     // 计算每个线程应该处理的图片数量
@@ -1146,7 +1166,10 @@ class GalleryScannerService {
               district: locationInfo.district,
               street: locationInfo.street,
               locationSource: locationInfo.source,
-              cityDistance: locationInfo.cityDistance
+              cityDistance: locationInfo.cityDistance,
+              // 检测结果
+              idCardDetections: classification.idCardDetections || [],
+              generalDetections: classification.generalDetections || []
             };
             
             return { success: true, data: saveData };

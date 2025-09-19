@@ -1,5 +1,5 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
-import ImageStorageService from './ImageStorageService';
+import ImageStorageService from './ImageStorageService.js';
 
 class GlobalImageCache {
   constructor() {
