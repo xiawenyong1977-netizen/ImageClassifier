@@ -584,7 +584,46 @@ class ImageClassifierService {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
-      // 使用智能推理检测
+      // 第一步：检查是否为手机截图（最高优先级）
+      const fileName = metadata.fileName || '';
+      
+      // 优先使用EXIF中提取的图片尺寸，如果没有则获取原始分辨率
+      let originalWidth, originalHeight;
+      
+      if (metadata.imageDimensions && metadata.imageDimensions.width && metadata.imageDimensions.height) {
+        // 使用EXIF中提取的尺寸
+        originalWidth = metadata.imageDimensions.width;
+        originalHeight = metadata.imageDimensions.height;
+        console.log('📏 使用EXIF中的图片尺寸:', originalWidth, 'x', originalHeight);
+      } else {
+        // 回退到获取原始分辨率
+        try {
+          const originalDimensions = await this.getOriginalImageDimensions(imageUri);
+          originalWidth = originalDimensions.width;
+          originalHeight = originalDimensions.height;
+          console.log('📏 使用获取的原始分辨率:', originalWidth, 'x', originalHeight);
+        } catch (error) {
+          console.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
+          originalWidth = null;
+          originalHeight = null;
+        }
+      }
+      
+      if (originalWidth && originalHeight && this.isMobileScreenshot(originalWidth, originalHeight, fileName)) {
+          return {
+            category: 'screenshot',
+            confidence: 0.9,
+            reason: '检测到手机截图特征',
+            method: 'mobile_screenshot',
+            detections: [],
+            idCardDetected: false,
+            usedModels: [],
+            idCardDetections: [],
+            generalDetections: []
+          };
+        }
+
+      // 第二步：使用智能推理检测
       const detectionResult = await this.smartDetectObjects(imageUri, {
         idCardConfidenceThreshold: 0.7,  // 提高身份证检测阈值，减少误检
         generalConfidenceThreshold: 0.5,
@@ -853,6 +892,48 @@ class ImageClassifierService {
       results.reasoning += `推理失败: ${error.message};`;
       throw error;
     }
+  }
+
+  // 获取图片原始分辨率
+  async getOriginalImageDimensions(imageUri) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({
+          width: img.naturalWidth,
+          height: img.naturalHeight
+        });
+      };
+      img.onerror = () => {
+        reject(new Error('Failed to load image'));
+      };
+      img.src = imageUri;
+    });
+  }
+
+  // 检查是否为手机截图
+  isMobileScreenshot(originalWidth, originalHeight, fileName) {
+    // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
+    const aspectRatio = originalWidth / originalHeight;
+    const isMobileResolution = aspectRatio <= 0.5;
+    
+    // 特征2：文件名判定 - 包含截图关键词
+    const fileNameLower = fileName.toLowerCase();
+    const isScreenshotFile = fileNameLower.includes('screenshot') || 
+                            fileNameLower.includes('截图') || 
+                            fileNameLower.includes('screen');
+    
+    // 调试信息
+    console.log('🔍 手机截图判定调试:');
+    console.log(`  - 文件名: ${fileName}`);
+    console.log(`  - 原始分辨率: ${originalWidth}x${originalHeight}`);
+    console.log(`  - 宽高比: ${aspectRatio.toFixed(3)}`);
+    console.log(`  - 手机分辨率: ${isMobileResolution}`);
+    console.log(`  - 截图文件名: ${isScreenshotFile}`);
+    console.log(`  - 最终判定: ${isMobileResolution || isScreenshotFile}`);
+    
+    // 两个特征中只要有一个满足就判定为手机截图
+    return isMobileResolution || isScreenshotFile;
   }
 
   // 检查是否检测到身份证

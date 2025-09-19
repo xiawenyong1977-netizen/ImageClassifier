@@ -36,6 +36,8 @@ class GlobalImageCache {
 
   // 构建缓存
   async buildCache() {
+    console.log('🔍 buildCache 被调用，调用堆栈:', new Error().stack);
+    
     if (this.isLoading) {
       // 如果正在加载，等待完成
       return new Promise((resolve) => {
@@ -51,9 +53,11 @@ class GlobalImageCache {
     }
 
     if (this.isLoaded) {
+      console.log('🔍 缓存已加载，直接返回');
       return this.cache;
     }
 
+    console.log('🔍 开始构建缓存...');
     this.isLoading = true;
 
     try {
@@ -134,6 +138,7 @@ class GlobalImageCache {
 
   // 刷新缓存
   async refreshCache() {
+    console.log('🔍 refreshCache 被调用，调用堆栈:', new Error().stack);
     this.isLoaded = false;
     this.isLoading = false;
     return this.buildCache();
@@ -196,7 +201,7 @@ class GlobalImageCache {
   }
 
   // 更新单个图片的分类
-  updateImageClassification(imageId, newCategory) {
+  updateImageClassification(imageId, newCategory, additionalData = {}) {
     try {
       console.log(`🔄 更新图片分类: ${imageId} -> ${newCategory}`);
       
@@ -209,8 +214,12 @@ class GlobalImageCache {
       
       const oldCategory = this.cache.allImages[imageIndex].category;
       
-      // 更新图片分类
-      this.cache.allImages[imageIndex].category = newCategory;
+      // 更新图片分类，同时保留其他检测结果信息
+      this.cache.allImages[imageIndex] = {
+        ...this.cache.allImages[imageIndex], // 保留原有数据
+        category: newCategory,               // 更新分类
+        ...additionalData                   // 合并额外数据（如检测结果）
+      };
       
       // 重新构建分类索引
       // 不再需要重建索引，直接通过过滤获取数据

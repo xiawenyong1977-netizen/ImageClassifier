@@ -69,7 +69,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
   const handleBatchMove = () => {
          // 显示分类选择�?
      const categories = [
-       { id: 'wechat', name: '微信截图' },
+       { id: 'screenshot', name: '手机截图' },
        { id: 'meeting', name: '会议场景' },
        { id: 'document', name: '工作写真' },
        { id: 'people', name: '社交活动' },

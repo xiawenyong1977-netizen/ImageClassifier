@@ -54,7 +54,7 @@ const HomeScreen = () => {
       ]);
       
       // 加载各分类的最近图片
-      const categoryIds = ['wechat', 'meeting', 'document', 'people', 'life', 'game', 'food', 'travel', 'pet', 'idcard', 'other'];
+      const categoryIds = ['screenshot',  'meeting', 'document', 'people', 'life', 'game', 'food', 'travel', 'pet', 'idcard', 'other'];
       const categoryImagesPromises = categoryIds.map(async (categoryId) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByCategory(categoryId, 1);
@@ -450,7 +450,7 @@ const HomeScreen = () => {
           <View style={styles.categoriesContainer}>
             {(() => {
               const categories = [
-                { id: 'wechat', name: '微信截图', icon: '💬', color: '#4CAF50' },
+                { id: 'screenshot', name: '手机截图', icon: '📱', color: '#4CAF50' },
                 { id: 'meeting', name: '会议场景', icon: '🏢', color: '#FF5722' },
                 { id: 'document', name: '工作照片', icon: '📄', color: '#9C27B0' },
                 { id: 'people', name: '社交活动', icon: '👥', color: '#E91E63' },

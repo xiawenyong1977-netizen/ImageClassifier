@@ -31,7 +31,7 @@ class ImageStorageService {
   // 获取分类显示名称
   getCategoryDisplayName(categoryId) {
     const categoryMap = {
-      wechat: '微信截图',
+      screenshot: '手机截图',
       meeting: '会议场景',
       document: '工作照片',
       people: '社交活动',
@@ -173,6 +173,54 @@ class ImageStorageService {
     
     console.log(`Batch save completed: ${newImages.length} new, ${updatedImages.length} updated`);
     return { newCount: newImages.length, updatedCount: updatedImages.length };
+  }
+
+  // 获取完整图片数据（用于内部操作）
+  async _getFullImages() {
+    try {
+      await this.ensureInitialized();
+      
+      const imagesJson = await AsyncStorage.getItem(this.storageKeys.images);
+      if (!imagesJson) {
+        return [];
+      }
+      
+      return JSON.parse(imagesJson);
+    } catch (error) {
+      console.error('Failed to get full images:', error);
+      throw error;
+    }
+  }
+
+  // 更新图片分类ID（独立接口，只更新分类相关字段）
+  async updateImageCategory(imageId, newCategory, newConfidence = 'manual') {
+    try {
+      await this.ensureInitialized();
+      
+      console.log(`🔄 更新图片分类: ${imageId} -> ${newCategory}`);
+      
+      // 获取完整图片数据（包含检测结果）
+      const existingImages = await this._getFullImages();
+      const imageIndex = existingImages.findIndex(img => img.id === imageId);
+      
+      // 只更新分类相关字段，保留所有其他数据
+      existingImages[imageIndex].category = newCategory;
+      existingImages[imageIndex].confidence = newConfidence;
+      existingImages[imageIndex].updatedAt = new Date().toISOString();
+      
+      // 保存到数据库
+      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+      
+      // 更新统计信息
+      await this.updateStats();
+      
+      console.log(`✅ 图片分类更新成功: ${imageId} -> ${newCategory}`);
+      return existingImages[imageIndex];
+      
+    } catch (error) {
+      console.error('❌ 更新图片分类失败:', error);
+      throw error;
+    }
   }
 
   // Save image classification result

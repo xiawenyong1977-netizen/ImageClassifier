@@ -8,7 +8,7 @@ import ImageClassifierService from '../../services/ImageClassifierService';
 const getCategoryInfo = (categoryId) => {
   // Category information mapping
   const categoryMap = {
-    wechat: { name: 'WeChat Screenshots', icon: '📱', color: '#07C160' },
+    screenshot: { name: 'mobile screenshot', icon: '📱', color: '#4CAF50' },
     meeting: { name: 'Meeting Scenes', icon: '💼', color: '#FF9800' },
     document: { name: 'Work Photos', icon: '📄', color: '#2196F3' },
     people: { name: 'Social Activities', icon: '👥', color: '#E91E63' },
@@ -193,12 +193,37 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
     }
 
     try {
-      // 直接修改分类，不需要确认提示
-      await UnifiedDataService.writeImageClassification({
-        ...currentImage,
-        category: newCategory,
-        confidence: 'manual'
+      // 调试：检查currentImage是否包含检测结果
+      console.log('🔍 修改分类前检查currentImage:');
+      console.log('  - currentImage.idCardDetections:', currentImage.idCardDetections ? '存在' : '不存在');
+      console.log('  - currentImage.generalDetections:', currentImage.generalDetections ? '存在' : '不存在');
+      console.log('  - 检测结果详情:', {
+        idCardDetections: currentImage.idCardDetections,
+        generalDetections: currentImage.generalDetections
       });
+      
+      // 调试：修改分类前检查数据库中其他图片的检测结果
+      console.log('🔍 修改分类前检查数据库中其他图片的检测结果...');
+      const allImages = await UnifiedDataService.readAllImages();
+      const otherImagesWithDetections = allImages.filter(img => 
+        img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
+      );
+      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetections.length}`);
+      
+      // 使用专门的分类更新接口，只更新分类相关字段
+      await UnifiedDataService.updateImageCategory(
+        currentImage.id, 
+        newCategory, 
+        'manual'
+      );
+      
+      // 调试：修改分类后检查数据库中其他图片的检测结果
+      console.log('🔍 修改分类后检查数据库中其他图片的检测结果...');
+      const allImagesAfter = await UnifiedDataService.readAllImages();
+      const otherImagesWithDetectionsAfter = allImagesAfter.filter(img => 
+        img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
+      );
+      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetectionsAfter.length}`);
       // 更新本地状态，将置信度设置为"人工"
       setCurrentImage(prev => ({ 
         ...prev, 
