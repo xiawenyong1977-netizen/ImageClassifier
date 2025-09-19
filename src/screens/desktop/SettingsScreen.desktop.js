@@ -15,6 +15,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
   const [newPath, setNewPath] = useState(''); // 新路径输入
   const [originalPaths, setOriginalPaths] = useState(['D:\\Pictures']); // 原始路径，用于比较变更
   const [scanInterval, setScanInterval] = useState(5); // 扫描间隔（分钟）
+  const [storageType, setStorageType] = useState('检测中...'); // 存储类型
+  const [storageSize, setStorageSize] = useState('计算中...'); // 存储大小
 
   useEffect(() => {
     loadSettings();
@@ -37,11 +39,138 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       
       // 设置其他设置项
       setSettings(savedSettings);
+      
+      // 检测存储类型
+      await detectStorageType();
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // 检测存储类型和大小
+  const detectStorageType = async () => {
+    try {
+      // 检测平台
+      let Platform;
+      try {
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          Platform = { OS: 'web' };
+        } else {
+          Platform = eval('require("react-native").Platform');
+        }
+      } catch (error) {
+        Platform = { OS: 'web' };
+      }
+
+      if (Platform.OS === 'web') {
+        // Web环境检测IndexedDB和localStorage
+        const indexedDBSize = await getIndexedDBSize();
+        const localStorageSize = getLocalStorageSize();
+        
+        if (indexedDBSize > 0) {
+          setStorageType('IndexedDB');
+          setStorageSize(formatBytes(indexedDBSize));
+        } else if (localStorageSize > 0) {
+          setStorageType('localStorage (降级)');
+          setStorageSize(formatBytes(localStorageSize));
+        } else {
+          setStorageType('IndexedDB');
+          setStorageSize('0 B');
+        }
+      } else {
+        // 移动端使用AsyncStorage
+        setStorageType('AsyncStorage');
+        const asyncStorageSize = await getAsyncStorageSize();
+        setStorageSize(formatBytes(asyncStorageSize));
+      }
+    } catch (error) {
+      console.error('检测存储类型失败:', error);
+      setStorageType('未知');
+      setStorageSize('无法计算');
+    }
+  };
+
+  // 获取IndexedDB存储大小
+  const getIndexedDBSize = async () => {
+    try {
+      if ('indexedDB' in window) {
+        const db = await new Promise((resolve, reject) => {
+          const request = indexedDB.open('ImageClassifierDB', 1);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        
+        // 获取所有对象存储的大小
+        let totalSize = 0;
+        const transaction = db.transaction(['images', 'stats', 'settings'], 'readonly');
+        
+        for (const storeName of ['images', 'stats', 'settings']) {
+          const store = transaction.objectStore(storeName);
+          const request = store.getAll();
+          await new Promise((resolve, reject) => {
+            request.onsuccess = () => {
+              const data = request.result;
+              totalSize += JSON.stringify(data).length;
+              resolve();
+            };
+            request.onerror = () => reject(request.error);
+          });
+        }
+        
+        return totalSize;
+      }
+      return 0;
+    } catch (error) {
+      console.error('获取IndexedDB大小失败:', error);
+      return 0;
+    }
+  };
+
+  // 获取localStorage存储大小
+  const getLocalStorageSize = () => {
+    try {
+      let totalSize = 0;
+      for (let key in localStorage) {
+        if (localStorage.hasOwnProperty(key)) {
+          totalSize += localStorage[key].length;
+        }
+      }
+      return totalSize;
+    } catch (error) {
+      console.error('获取localStorage大小失败:', error);
+      return 0;
+    }
+  };
+
+  // 获取AsyncStorage存储大小
+  const getAsyncStorageSize = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      let totalSize = 0;
+      
+      for (const key of keys) {
+        const value = await AsyncStorage.getItem(key);
+        if (value) {
+          totalSize += value.length;
+        }
+      }
+      
+      return totalSize;
+    } catch (error) {
+      console.error('获取AsyncStorage大小失败:', error);
+      return 0;
+    }
+  };
+
+  // 格式化字节大小
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const updateSetting = async (key, value) => {
@@ -354,7 +483,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleSmartScan}>
-            <Text style={styles.actionButtonText}>🤖 智能扫描</Text>
+            <Text style={styles.actionButtonText}>🤖 开始智能分类</Text>
             <Text style={styles.actionButtonDescription}>
               扫描配置的目录并自动分类图片
             </Text>
@@ -364,7 +493,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleClearData}>
-            <Text style={styles.actionButtonText}>🗑️ 清空照片信息</Text>
+            <Text style={styles.actionButtonText}>🗑️ 清空分类信息</Text>
             <Text style={styles.actionButtonDescription}>
               清空所有照片的分类和位置信息
             </Text>
@@ -389,6 +518,16 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>平台</Text>
             <Text style={styles.infoValue}>桌面版</Text>
+          </View>
+          
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>存储类型</Text>
+            <Text style={styles.infoValue}>{storageType}</Text>
+          </View>
+          
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>存储大小</Text>
+            <Text style={styles.infoValue}>{storageSize}</Text>
           </View>
         </View>
       </ScrollView>

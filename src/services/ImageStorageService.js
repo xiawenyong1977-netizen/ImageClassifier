@@ -16,16 +16,188 @@ try {
   Platform = { OS: 'web' };
 }
 
+// IndexedDB 适配器类
+class IndexedDBAdapter {
+  constructor() {
+    this.dbName = 'ImageClassifierDB';
+    this.version = 1;
+    this.db = null;
+    this.isInitialized = false;
+  }
+
+  async init() {
+    if (this.isInitialized) {
+      return this.db;
+    }
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.version);
+      
+      request.onerror = () => {
+        console.error('❌ IndexedDB 初始化失败:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        this.isInitialized = true;
+        console.log('✅ IndexedDB 初始化成功');
+        resolve(this.db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        
+        // 创建图片存储表
+        if (!db.objectStoreNames.contains('images')) {
+          const imageStore = db.createObjectStore('images', { keyPath: 'id' });
+          imageStore.createIndex('category', 'category', { unique: false });
+          imageStore.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+        
+        // 创建统计信息表
+        if (!db.objectStoreNames.contains('stats')) {
+          db.createObjectStore('stats', { keyPath: 'key' });
+        }
+        
+        // 创建设置表
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        
+        console.log('✅ IndexedDB 数据库结构创建完成');
+      };
+    });
+  }
+
+  async getItem(key) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([key], 'readonly');
+      const store = transaction.objectStore(key);
+      const request = store.getAll();
+      
+      request.onsuccess = () => {
+        const results = request.result;
+        if (results.length === 0) {
+          resolve(null);
+        } else if (key === 'images') {
+          // 对于图片数据，返回数组
+          resolve(results);
+        } else {
+          // 对于其他数据，返回第一个结果的值
+          resolve(results[0].value);
+        }
+      };
+      
+      request.onerror = () => {
+        console.error(`❌ IndexedDB 读取失败 (${key}):`, request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  async setItem(key, value) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([key], 'readwrite');
+      const store = transaction.objectStore(key);
+      
+      if (key === 'images') {
+        // 对于图片数据，清空后批量插入
+        store.clear();
+        if (Array.isArray(value)) {
+          value.forEach(item => {
+            store.add(item);
+          });
+        }
+      } else {
+        // 对于其他数据，存储为键值对
+        store.put({ key, value });
+      }
+      
+      transaction.oncomplete = () => {
+        console.log(`✅ IndexedDB 保存成功 (${key})`);
+        resolve(true);
+      };
+      
+      transaction.onerror = () => {
+        console.error(`❌ IndexedDB 保存失败 (${key}):`, transaction.error);
+        reject(transaction.error);
+      };
+    });
+  }
+
+  async removeItem(key) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([key], 'readwrite');
+      const store = transaction.objectStore(key);
+      
+      if (key === 'images') {
+        // 对于图片数据，清空整个表
+        store.clear();
+      } else {
+        // 对于其他数据，删除键值对
+        store.delete(key);
+      }
+      
+      transaction.oncomplete = () => {
+        console.log(`✅ IndexedDB 删除成功 (${key})`);
+        resolve(true);
+      };
+      
+      transaction.onerror = () => {
+        console.error(`❌ IndexedDB 删除失败 (${key}):`, transaction.error);
+        reject(transaction.error);
+      };
+    });
+  }
+
+  async clear() {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['images', 'stats', 'settings'], 'readwrite');
+      
+      transaction.oncomplete = () => {
+        console.log('✅ IndexedDB 清空成功');
+        resolve(true);
+      };
+      
+      transaction.onerror = () => {
+        console.error('❌ IndexedDB 清空失败:', transaction.error);
+        reject(transaction.error);
+      };
+      
+      // 清空所有表
+      transaction.objectStore('images').clear();
+      transaction.objectStore('stats').clear();
+      transaction.objectStore('settings').clear();
+    });
+  }
+}
+
 class ImageStorageService {
   constructor() {
     this.storageKeys = {
-      images: 'classified_images',
-      stats: 'image_stats',
-      settings: 'app_settings',
+      images: 'images',
+      stats: 'stats',
+      settings: 'settings',
     };
     this.isInitialized = false;
     // 添加保存锁，防止并发保存导致数据丢失
     this.saveLock = null;
+    
+    // 根据平台选择存储方式
+    if (Platform.OS === 'web') {
+      // Web环境优先使用IndexedDB，失败时降级到localStorage
+      this.storage = new IndexedDBAdapter();
+      this.fallbackStorage = AsyncStorage; // 降级存储
+    } else {
+      // 移动端使用AsyncStorage
+      this.storage = AsyncStorage;
+      this.fallbackStorage = null;
+    }
   }
 
   // 获取分类显示名称
@@ -36,7 +208,7 @@ class ImageStorageService {
       document: '工作照片',
       people: '社交活动',
       life: '生活记录',
-      game: '游戏截图',
+      game: '运动娱乐',
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
@@ -52,20 +224,95 @@ class ImageStorageService {
     if (this.isInitialized) return;
     
     try {
-      // Try a simple AsyncStorage operation to verify if it's available
-      await AsyncStorage.getItem('test');
+      if (Platform.OS === 'web') {
+        // Web环境初始化IndexedDB
+        await this.storage.init();
+        
+        // 检查是否需要从localStorage迁移数据
+        await this.migrateFromLocalStorage();
+      } else {
+        // 移动端初始化AsyncStorage
+        await this.storage.getItem('test');
+      }
       this.isInitialized = true;
     } catch (error) {
-      console.warn('AsyncStorage not ready yet:', error);
+      console.warn('Primary storage not ready, trying fallback:', error);
+      
+      // 如果IndexedDB失败且有降级存储，尝试降级
+      if (Platform.OS === 'web' && this.fallbackStorage) {
+        try {
+          console.log('🔄 降级到localStorage存储');
+          this.storage = this.fallbackStorage;
+          await this.storage.getItem('test');
+          this.isInitialized = true;
+          return;
+        } catch (fallbackError) {
+          console.error('Fallback storage also failed:', fallbackError);
+        }
+      }
+      
       // Wait for a while and retry
       await new Promise(resolve => setTimeout(resolve, 1000));
       try {
-        await AsyncStorage.getItem('test');
+        if (Platform.OS === 'web') {
+          await this.storage.init();
+          await this.migrateFromLocalStorage();
+        } else {
+          await this.storage.getItem('test');
+        }
         this.isInitialized = true;
       } catch (retryError) {
-        console.error('AsyncStorage initialization failed:', retryError);
-        throw new Error('AsyncStorage not available');
+        console.error('Storage initialization failed:', retryError);
+        throw new Error('Storage not available');
       }
+    }
+  }
+
+  // 从localStorage迁移数据到IndexedDB
+  async migrateFromLocalStorage() {
+    if (Platform.OS !== 'web' || !this.fallbackStorage) return;
+    
+    try {
+      // 检查IndexedDB中是否已有数据
+      const existingImages = await this.storage.getItem(this.storageKeys.images);
+      if (existingImages && existingImages.length > 0) {
+        console.log('✅ IndexedDB中已有数据，跳过迁移');
+        return;
+      }
+      
+      // 检查localStorage中是否有数据
+      const oldImages = await this.fallbackStorage.getItem('classified_images');
+      const oldStats = await this.fallbackStorage.getItem('image_stats');
+      const oldSettings = await this.fallbackStorage.getItem('app_settings');
+      
+      if (oldImages || oldStats || oldSettings) {
+        console.log('🔄 开始从localStorage迁移数据到IndexedDB...');
+        
+        // 迁移图片数据
+        if (oldImages) {
+          const images = JSON.parse(oldImages);
+          await this.storage.setItem(this.storageKeys.images, images);
+          console.log(`✅ 迁移了 ${images.length} 张图片数据`);
+        }
+        
+        // 迁移统计数据
+        if (oldStats) {
+          const stats = JSON.parse(oldStats);
+          await this.storage.setItem(this.storageKeys.stats, stats);
+          console.log('✅ 迁移了统计数据');
+        }
+        
+        // 迁移设置数据
+        if (oldSettings) {
+          const settings = JSON.parse(oldSettings);
+          await this.storage.setItem(this.storageKeys.settings, settings);
+          console.log('✅ 迁移了设置数据');
+        }
+        
+        console.log('🎉 数据迁移完成！');
+      }
+    } catch (error) {
+      console.warn('数据迁移失败，继续使用现有存储:', error);
     }
   }
 
@@ -165,8 +412,8 @@ class ImageStorageService {
       }
     }
     
-    // 保存到AsyncStorage
-    await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+    // 保存到存储
+    await this.storage.setItem(this.storageKeys.images, existingImages);
     
     // 更新统计信息
     await this.updateStats();
@@ -180,12 +427,12 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      const imagesJson = await AsyncStorage.getItem(this.storageKeys.images);
-      if (!imagesJson) {
+      const images = await this.storage.getItem(this.storageKeys.images);
+      if (!images) {
         return [];
       }
       
-      return JSON.parse(imagesJson);
+      return images;
     } catch (error) {
       console.error('Failed to get full images:', error);
       throw error;
@@ -209,7 +456,7 @@ class ImageStorageService {
       existingImages[imageIndex].updatedAt = new Date().toISOString();
       
       // 保存到数据库
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+      await this.storage.setItem(this.storageKeys.images, existingImages);
       
       // 更新统计信息
       await this.updateStats();
@@ -292,7 +539,7 @@ class ImageStorageService {
       }
       
       // Save to AsyncStorage
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(existingImages));
+      await this.storage.setItem(this.storageKeys.images, existingImages);
       
       // Update statistics
       await this.updateStats();
@@ -311,12 +558,10 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      const imagesJson = await AsyncStorage.getItem(this.storageKeys.images);
-      if (!imagesJson) {
+      const fullImages = await this.storage.getItem(this.storageKeys.images);
+      if (!fullImages) {
         return [];
       }
-      
-      const fullImages = JSON.parse(imagesJson);
       console.log(`📊 ImageStorageService.getImages() 从数据库读取到 ${fullImages.length} 张图片`);
       
       // 转换为精简数据结构 - 只包含界面显示必需字段
@@ -370,12 +615,10 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      const imagesJson = await AsyncStorage.getItem(this.storageKeys.images);
-      if (!imagesJson) {
+      const fullImages = await this.storage.getItem(this.storageKeys.images);
+      if (!fullImages) {
         return null;
       }
-      
-      const fullImages = JSON.parse(imagesJson);
       const image = fullImages.find(img => img.id === imageId);
       return image || null;
       
@@ -479,10 +722,10 @@ class ImageStorageService {
   async getSettings() {
     try {
       await this.ensureInitialized();
-      const settingsData = await AsyncStorage.getItem('app_settings');
+      const settingsData = await this.storage.getItem(this.storageKeys.settings);
       
       if (settingsData) {
-        const parsed = JSON.parse(settingsData);
+        const parsed = settingsData;
         
         // 确保必要的设置项存在，但不要覆盖用户已有的配置
         const result = { ...parsed };
@@ -528,7 +771,7 @@ class ImageStorageService {
         throw new Error('Scan paths cannot be empty. Please provide at least one directory.');
       }
       
-      await AsyncStorage.setItem('app_settings', JSON.stringify(settings));
+      await this.storage.setItem(this.storageKeys.settings, settings);
       
       console.log('Settings saved:', settings);
       
@@ -542,8 +785,8 @@ class ImageStorageService {
   async clearAllImages() {
     try {
       await this.ensureInitialized();
-      await AsyncStorage.removeItem(this.storageKeys.images);
-      await AsyncStorage.removeItem(this.storageKeys.stats);
+      await this.storage.removeItem(this.storageKeys.images);
+      await this.storage.removeItem(this.storageKeys.stats);
       console.log('All images cleared from database');
     } catch (error) {
       console.error('Failed to clear all images:', error);
@@ -582,7 +825,7 @@ class ImageStorageService {
       
       // Remove from storage
       allImages.splice(imageIndex, 1);
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(allImages));
+      await this.storage.setItem(this.storageKeys.images, allImages);
       
       // Update statistics
       await this.updateStats();
@@ -745,7 +988,7 @@ class ImageStorageService {
       
       // Remove from storage
       allImages.splice(imageIndex, 1);
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(allImages));
+      await this.storage.setItem(this.storageKeys.images, allImages);
       
       // Update statistics
       await this.updateStats();
@@ -816,7 +1059,7 @@ class ImageStorageService {
       stats.averageSize = stats.totalImages > 0 ? stats.totalSize / stats.totalImages : 0;
       
       // Save statistics
-      await AsyncStorage.setItem(this.storageKeys.stats, JSON.stringify(stats));
+      await this.storage.setItem(this.storageKeys.stats, stats);
       
       console.log('Statistics updated successfully');
       return stats;
@@ -830,12 +1073,10 @@ class ImageStorageService {
   // Get statistics
   async getStats() {
     try {
-      const statsJson = await AsyncStorage.getItem(this.storageKeys.stats);
-      if (!statsJson) {
+      const stats = await this.storage.getItem(this.storageKeys.stats);
+      if (!stats) {
         return await this.updateStats();
       }
-      
-      const stats = JSON.parse(statsJson);
       return stats;
       
     } catch (error) {
@@ -852,13 +1093,13 @@ class ImageStorageService {
       console.log('Clearing all image data...');
       
       // Clear images
-      await AsyncStorage.removeItem(this.storageKeys.images);
+      await this.storage.removeItem(this.storageKeys.images);
       
       // Clear statistics
-      await AsyncStorage.removeItem(this.storageKeys.stats);
+      await this.storage.removeItem(this.storageKeys.stats);
       
       // Clear settings
-      await AsyncStorage.removeItem(this.storageKeys.settings);
+      await this.storage.removeItem(this.storageKeys.settings);
       
       console.log('All data cleared successfully');
       return true;
@@ -903,11 +1144,11 @@ class ImageStorageService {
       console.log(`Importing ${importData.images.length} images...`);
       
       // Save images
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(importData.images));
+      await this.storage.setItem(this.storageKeys.images, importData.images);
       
       // Save statistics if available
       if (importData.stats) {
-        await AsyncStorage.setItem(this.storageKeys.stats, JSON.stringify(importData.stats));
+        await this.storage.setItem(this.storageKeys.stats, importData.stats);
       } else {
         // Update statistics
         await this.updateStats();
@@ -1103,7 +1344,7 @@ class ImageStorageService {
       console.log(`Found ${allImages.length} total images, removing ${allImages.length - remainingImages.length} images`);
       
       // 保存更新后的图片列表
-      await AsyncStorage.setItem(this.storageKeys.images, JSON.stringify(remainingImages));
+      await this.storage.setItem(this.storageKeys.images, remainingImages);
       
       // 更新统计信息
       await this.updateStats();

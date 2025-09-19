@@ -455,7 +455,7 @@ const HomeScreen = () => {
                 { id: 'document', name: '工作照片', icon: '📄', color: '#9C27B0' },
                 { id: 'people', name: '社交活动', icon: '👥', color: '#E91E63' },
                 { id: 'life', name: '生活记录', icon: '📷', color: '#2196F3' },
-                { id: 'game', name: '游戏截图', icon: '🎮', color: '#FF9800' },
+                { id: 'game', name: '运动娱乐', icon: '🎮', color: '#FF9800' },
                 { id: 'food', name: '美食记录', icon: '🍽️', color: '#FFC107' },
                 { id: 'travel', name: '旅行风景', icon: '✈️', color: '#00BCD4' },
                 { id: 'pet', name: '宠物照片', icon: '🐕', color: '#8BC34A' },

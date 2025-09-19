@@ -331,7 +331,7 @@ class GlobalImageCache {
       document: '工作照片',
       people: '社交活动',
       life: '生活记录',
-      game: '游戏截图',
+      game: '运动娱乐',
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',

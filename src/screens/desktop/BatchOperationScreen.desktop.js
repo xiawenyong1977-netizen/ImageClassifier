@@ -74,7 +74,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
        { id: 'document', name: '工作写真' },
        { id: 'people', name: '社交活动' },
        { id: 'life', name: '生活记录' },
-       { id: 'game', name: '游戏截屏' },
+       { id: 'game', name: '运动娱乐' },
        { id: 'food', name: '美食记录' },
        { id: 'travel', name: '旅行风景' },
        { id: 'pet', name: '宠物萌照' },
@@ -180,12 +180,11 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
   const getCategoryInfo = (categoryId) => {
     // 分类信息映射
     const categoryMap = {
-      wechat: { name: '微信截图', icon: '📱', color: '#07C160' },
       meeting: { name: '会议场景', icon: '💼', color: '#FF9800' },
       document: { name: '工作写真', icon: '📄', color: '#2196F3' },
       people: { name: '社交活动', icon: '👥', color: '#E91E63' },
       life: { name: '生活记录', icon: '🌅', color: '#4CAF50' },
-      game: { name: '游戏截屏', icon: '🎮', color: '#FF5722' },
+      game: { name: '运动娱乐', icon: '🎮', color: '#FF5722' },
       food: { name: '美食记录', icon: '🍕', color: '#FF6B35' },
       travel: { name: '旅行风景', icon: '✈️', color: '#9C27B0' },
       pet: { name: '宠物萌照', icon: '🐕', color: '#795548' },
