@@ -1,0 +1,795 @@
+{
+  "timestamp": "2025-09-18T03:05:40.094Z",
+  "directory": "D:\\Pictures",
+  "stats": {
+    "total": 21,
+    "processed": 21,
+    "success": 21,
+    "failed": 0,
+    "categories": {
+      "life": 5,
+      "document": 7,
+      "people": 3,
+      "travel": 4,
+      "other": 2
+    },
+    "idCardDetected": 0,
+    "processingTime": 8654
+  },
+  "results": [
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171129.jpg",
+      "fileName": "IMG_20230118_171129.jpg",
+      "fileSize": "5.86 MB",
+      "category": "life",
+      "confidence": 0.8146863488067435,
+      "reason": "检测到 3 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "bottle",
+          "confidence": 0.6280420575655534,
+          "bbox": [
+            51.25521165142324,
+            64.38005585264546,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "bottle",
+          "confidence": 0.8146863488067435,
+          "bbox": [
+            76.66996107883652,
+            152.9852010860467,
+            100,
+            100
+          ],
+          "classIndex": 1
+        },
+        {
+          "class": "person",
+          "confidence": 0.5153043196986139,
+          "bbox": [
+            75.95387644507463,
+            184.3828086688037,
+            100,
+            100
+          ],
+          "classIndex": 2
+        }
+      ],
+      "processingTime": 306,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171514.jpg",
+      "fileName": "IMG_20230118_171514.jpg",
+      "fileSize": "5.45 MB",
+      "category": "document",
+      "confidence": 0.7525426720875671,
+      "reason": "检测到 3 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.7525426720875671,
+          "bbox": [
+            176.67913213645562,
+            172.75532769525404,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "car",
+          "confidence": 0.6527939777375995,
+          "bbox": [
+            142.84028096263103,
+            136.1171835242878,
+            100,
+            100
+          ],
+          "classIndex": 1
+        },
+        {
+          "class": "bottle",
+          "confidence": 0.5289145374929218,
+          "bbox": [
+            39.90460187588436,
+            30.23667401914727,
+            100,
+            100
+          ],
+          "classIndex": 2
+        }
+      ],
+      "processingTime": 293,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171526.jpg",
+      "fileName": "IMG_20230118_171526.jpg",
+      "fileSize": "5.11 MB",
+      "category": "document",
+      "confidence": 0.6778865080046366,
+      "reason": "检测到 2 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.675814853547654,
+          "bbox": [
+            14.394640849168772,
+            141.85547451282656,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "laptop",
+          "confidence": 0.6778865080046366,
+          "bbox": [
+            154.30276447870446,
+            62.04955533221015,
+            100,
+            100
+          ],
+          "classIndex": 1
+        }
+      ],
+      "processingTime": 277,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171536.jpg",
+      "fileName": "IMG_20230118_171536.jpg",
+      "fileSize": "5.29 MB",
+      "category": "document",
+      "confidence": 0.8250069482607097,
+      "reason": "检测到 2 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.8250069482607097,
+          "bbox": [
+            109.9007271816196,
+            107.00556825426801,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "car",
+          "confidence": 0.5378250925425367,
+          "bbox": [
+            172.50463920274086,
+            186.358050484976,
+            100,
+            100
+          ],
+          "classIndex": 1
+        }
+      ],
+      "processingTime": 356,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171542.jpg",
+      "fileName": "IMG_20230118_171542.jpg",
+      "fileSize": "4.62 MB",
+      "category": "people",
+      "confidence": 0.7986808089148054,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "person",
+          "confidence": 0.7986808089148054,
+          "bbox": [
+            101.24027963768332,
+            175.33979107356558,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 168,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230118_171623.jpg",
+      "fileName": "IMG_20230118_171623.jpg",
+      "fileSize": "5.24 MB",
+      "category": "document",
+      "confidence": 0.6546500588398003,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.6546500588398003,
+          "bbox": [
+            93.66483076534311,
+            121.66735070284945,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 432,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091255.jpg",
+      "fileName": "IMG_20230119_091255.jpg",
+      "fileSize": "6.31 MB",
+      "category": "people",
+      "confidence": 0.7694363356213392,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "person",
+          "confidence": 0.7694363356213392,
+          "bbox": [
+            119.06530959672787,
+            101.34531945213978,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 232,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091305.jpg",
+      "fileName": "IMG_20230119_091305.jpg",
+      "fileSize": "4.88 MB",
+      "category": "travel",
+      "confidence": 0.7831851288284122,
+      "reason": "检测到 3 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "car",
+          "confidence": 0.7686616985115042,
+          "bbox": [
+            139.30015935171852,
+            33.844070409535476,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "bottle",
+          "confidence": 0.6930060792399699,
+          "bbox": [
+            143.3601205261997,
+            24.578376435810423,
+            100,
+            100
+          ],
+          "classIndex": 1
+        },
+        {
+          "class": "car",
+          "confidence": 0.7831851288284122,
+          "bbox": [
+            156.78732991784008,
+            111.46895765669558,
+            100,
+            100
+          ],
+          "classIndex": 2
+        }
+      ],
+      "processingTime": 332,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091320.jpg",
+      "fileName": "IMG_20230119_091320.jpg",
+      "fileSize": "5.28 MB",
+      "category": "travel",
+      "confidence": 0.7784427108228531,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "car",
+          "confidence": 0.7784427108228531,
+          "bbox": [
+            177.0439156713112,
+            193.82111213586896,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 248,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091327.jpg",
+      "fileName": "IMG_20230119_091327.jpg",
+      "fileSize": "6.44 MB",
+      "category": "document",
+      "confidence": 0.7392322734853644,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.7392322734853644,
+          "bbox": [
+            172.57738102197297,
+            83.92217593147353,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 451,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091400.jpg",
+      "fileName": "IMG_20230119_091400.jpg",
+      "fileSize": "8.07 MB",
+      "category": "life",
+      "confidence": 0.5733053717169514,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "bottle",
+          "confidence": 0.5733053717169514,
+          "bbox": [
+            85.41896719885989,
+            164.15370866945773,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 339,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091806.jpg",
+      "fileName": "IMG_20230119_091806.jpg",
+      "fileSize": "10.92 MB",
+      "category": "travel",
+      "confidence": 0.6912177301570634,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "car",
+          "confidence": 0.6912177301570634,
+          "bbox": [
+            87.51235491851736,
+            71.32669251050321,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 525,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_091851.jpg",
+      "fileName": "IMG_20230119_091851.jpg",
+      "fileSize": "5.87 MB",
+      "category": "life",
+      "confidence": 0.8430682515299781,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "bottle",
+          "confidence": 0.8430682515299781,
+          "bbox": [
+            17.367355684150134,
+            14.812633336636916,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 543,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_092154.jpg",
+      "fileName": "IMG_20230119_092154.jpg",
+      "fileSize": "4.97 MB",
+      "category": "document",
+      "confidence": 0.7914040898884898,
+      "reason": "检测到 3 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.7914040898884898,
+          "bbox": [
+            25.723465631555122,
+            99.20918684734565,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "bottle",
+          "confidence": 0.6542437370103158,
+          "bbox": [
+            84.6776857073226,
+            139.06459182791787,
+            100,
+            100
+          ],
+          "classIndex": 1
+        },
+        {
+          "class": "laptop",
+          "confidence": 0.7626892496486786,
+          "bbox": [
+            145.97644382510305,
+            33.572535984983396,
+            100,
+            100
+          ],
+          "classIndex": 2
+        }
+      ],
+      "processingTime": 431,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_101142.jpg",
+      "fileName": "IMG_20230119_101142.jpg",
+      "fileSize": "7.91 MB",
+      "category": "other",
+      "confidence": 0.6993931643575436,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "book",
+          "confidence": 0.6993931643575436,
+          "bbox": [
+            129.8590003124846,
+            138.42918158997054,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 495,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_101217.jpg",
+      "fileName": "IMG_20230119_101217.jpg",
+      "fileSize": "6.05 MB",
+      "category": "people",
+      "confidence": 0.7209527824066472,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "person",
+          "confidence": 0.7209527824066472,
+          "bbox": [
+            60.04099655785691,
+            137.37293317858618,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 402,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_101404.jpg",
+      "fileName": "IMG_20230119_101404.jpg",
+      "fileSize": "7.56 MB",
+      "category": "life",
+      "confidence": 0.8164987458265471,
+      "reason": "检测到 2 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "bottle",
+          "confidence": 0.8164987458265471,
+          "bbox": [
+            120.33188703703108,
+            94.03124235886642,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "book",
+          "confidence": 0.5384891312009525,
+          "bbox": [
+            6.308886966278093,
+            69.93666377005093,
+            100,
+            100
+          ],
+          "classIndex": 1
+        }
+      ],
+      "processingTime": 541,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230119_103643.jpg",
+      "fileName": "IMG_20230119_103643.jpg",
+      "fileSize": "5.52 MB",
+      "category": "travel",
+      "confidence": 0.880246940908271,
+      "reason": "检测到 3 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "bottle",
+          "confidence": 0.5595781044640263,
+          "bbox": [
+            167.76894066582773,
+            130.26574460191506,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "car",
+          "confidence": 0.8095365048572143,
+          "bbox": [
+            157.08886228609038,
+            118.90789486757889,
+            100,
+            100
+          ],
+          "classIndex": 1
+        },
+        {
+          "class": "car",
+          "confidence": 0.880246940908271,
+          "bbox": [
+            192.92514894755456,
+            143.25820682161822,
+            100,
+            100
+          ],
+          "classIndex": 2
+        }
+      ],
+      "processingTime": 399,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230120_132223.jpg",
+      "fileName": "IMG_20230120_132223.jpg",
+      "fileSize": "7.56 MB",
+      "category": "other",
+      "confidence": 0.7984539471237337,
+      "reason": "检测到 2 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "car",
+          "confidence": 0.5658978520937724,
+          "bbox": [
+            99.7881433452294,
+            110.42930714882493,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "book",
+          "confidence": 0.7984539471237337,
+          "bbox": [
+            23.667227546903426,
+            120.61167314375317,
+            100,
+            100
+          ],
+          "classIndex": 1
+        }
+      ],
+      "processingTime": 543,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230120_132228.jpg",
+      "fileName": "IMG_20230120_132228.jpg",
+      "fileSize": "7.66 MB",
+      "category": "document",
+      "confidence": 0.8571361702573245,
+      "reason": "检测到 1 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.8571361702573245,
+          "bbox": [
+            30.271825732783462,
+            68.77364163868589,
+            100,
+            100
+          ],
+          "classIndex": 0
+        }
+      ],
+      "processingTime": 152,
+      "success": true
+    },
+    {
+      "path": "D:\\Pictures\\IMG_20230120_132722.jpg",
+      "fileName": "IMG_20230120_132722.jpg",
+      "fileSize": "7.96 MB",
+      "category": "life",
+      "confidence": 0.6671223882486198,
+      "reason": "检测到 2 个物体",
+      "method": "smart_detection",
+      "idCardDetected": false,
+      "usedModels": [
+        "idCard",
+        "yolo8s"
+      ],
+      "detections": [
+        {
+          "class": "laptop",
+          "confidence": 0.6334703876489349,
+          "bbox": [
+            133.78191539686415,
+            123.1530759442911,
+            100,
+            100
+          ],
+          "classIndex": 0
+        },
+        {
+          "class": "bottle",
+          "confidence": 0.6671223882486198,
+          "bbox": [
+            99.34218856236248,
+            197.1005895716287,
+            100,
+            100
+          ],
+          "classIndex": 1
+        }
+      ],
+      "processingTime": 139,
+      "success": true
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import ImageClassifierService from '../../services/ImageClassifierService';
 const getCategoryInfo = (categoryId) => {
   // Category information mapping
   const categoryMap = {
-    wechat: { name: 'WeChat Screenshots', icon: '📱', color: '#07C160' },
+    screenshot: { name: 'mobile screenshot', icon: '📱', color: '#4CAF50' },
     meeting: { name: 'Meeting Scenes', icon: '💼', color: '#FF9800' },
     document: { name: 'Work Photos', icon: '📄', color: '#2196F3' },
     people: { name: 'Social Activities', icon: '👥', color: '#E91E63' },
@@ -17,6 +17,7 @@ const getCategoryInfo = (categoryId) => {
     food: { name: 'Food Records', icon: '🍕', color: '#FF6B35' },
     travel: { name: 'Travel Scenery', icon: '✈️', color: '#9C27B0' },
     pet: { name: 'Pet Photos', icon: '🐕', color: '#795548' },
+    idcard: { name: 'ID Card', icon: '🆔', color: '#FF6B35' },
     other: { name: 'Other Images', icon: '📷', color: '#607D8B' }
   };
   
@@ -192,12 +193,37 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
     }
 
     try {
-      // 直接修改分类，不需要确认提示
-      await UnifiedDataService.writeImageClassification({
-        ...currentImage,
-        category: newCategory,
-        confidence: 'manual'
+      // 调试：检查currentImage是否包含检测结果
+      console.log('🔍 修改分类前检查currentImage:');
+      console.log('  - currentImage.idCardDetections:', currentImage.idCardDetections ? '存在' : '不存在');
+      console.log('  - currentImage.generalDetections:', currentImage.generalDetections ? '存在' : '不存在');
+      console.log('  - 检测结果详情:', {
+        idCardDetections: currentImage.idCardDetections,
+        generalDetections: currentImage.generalDetections
       });
+      
+      // 调试：修改分类前检查数据库中其他图片的检测结果
+      console.log('🔍 修改分类前检查数据库中其他图片的检测结果...');
+      const allImages = await UnifiedDataService.readAllImages();
+      const otherImagesWithDetections = allImages.filter(img => 
+        img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
+      );
+      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetections.length}`);
+      
+      // 使用专门的分类更新接口，只更新分类相关字段
+      await UnifiedDataService.updateImageCategory(
+        currentImage.id, 
+        newCategory, 
+        'manual'
+      );
+      
+      // 调试：修改分类后检查数据库中其他图片的检测结果
+      console.log('🔍 修改分类后检查数据库中其他图片的检测结果...');
+      const allImagesAfter = await UnifiedDataService.readAllImages();
+      const otherImagesWithDetectionsAfter = allImagesAfter.filter(img => 
+        img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
+      );
+      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetectionsAfter.length}`);
       // 更新本地状态，将置信度设置为"人工"
       setCurrentImage(prev => ({ 
         ...prev, 
@@ -343,6 +369,7 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                 { id: 'food', name: '美食记录', icon: '🍕', color: '#FF6B35' },
                 { id: 'travel', name: '旅行风景', icon: '✈️', color: '#9C27B0' },
                 { id: 'pet', name: '宠物萌照', icon: '🦁', color: '#795548' },
+                { id: 'idcard', name: '身份证', icon: '🆔', color: '#FF6B35' },
                 { id: 'other', name: '其他图片', icon: '📷', color: '#9E9E9E' },
               ].map((category) => (
                 <TouchableOpacity
@@ -461,6 +488,58 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                    currentImage.confidence ? ` (${(currentImage.confidence * 100).toFixed(1)}%)` : ''}
                 </Text>
               </View>
+
+              {/* 检测结果显示 */}
+              {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) ||
+               (currentImage.generalDetections && currentImage.generalDetections.length > 0) ? (
+                <>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>🔍 检测结果:</Text>
+                    <Text style={styles.infoValue}>
+                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0))} 个物体
+                    </Text>
+                  </View>
+
+                  {/* 身份证检测结果 */}
+                  {currentImage.idCardDetections && currentImage.idCardDetections.length > 0 && (
+                    <View style={styles.detectionSection}>
+                      <Text style={styles.detectionTitle}>🆔 身份证检测:</Text>
+                      {currentImage.idCardDetections.map((detection, index) => (
+                        <View key={index} style={styles.detectionItem}>
+                          <Text style={styles.detectionText}>
+                            {detection.class === 'id_card_front' ? '身份证正面' : '身份证背面'}
+                            ({(detection.confidence * 100).toFixed(1)}%)
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* 通用物体检测结果 */}
+                  {currentImage.generalDetections && currentImage.generalDetections.length > 0 && (
+                    <View style={styles.detectionSection}>
+                      <Text style={styles.detectionTitle}>🌐 通用物体检测:</Text>
+                      {currentImage.generalDetections.slice(0, 5).map((detection, index) => (
+                        <View key={index} style={styles.detectionItem}>
+                          <Text style={styles.detectionText}>
+                            {detection.class} ({(detection.confidence * 100).toFixed(1)}%)
+                          </Text>
+                        </View>
+                      ))}
+                      {currentImage.generalDetections.length > 5 && (
+                        <Text style={styles.detectionMore}>
+                          ... 还有 {currentImage.generalDetections.length - 5} 个物体
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>🔍 检测结果:</Text>
+                  <Text style={styles.infoValue}>未检测到物体</Text>
+                </View>
+              )}
             </View>
 
             {/* GPS位置信息 */}
@@ -783,6 +862,32 @@ const styles = StyleSheet.create({
   },
   modalIndicator: {
     marginTop: 10,
+  },
+  // 检测结果样式
+  detectionSection: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  detectionTitle: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  detectionItem: {
+    marginLeft: 8,
+    marginBottom: 2,
+  },
+  detectionText: {
+    fontSize: 11,
+    color: '#333',
+    fontWeight: '500',
+  },
+  detectionMore: {
+    fontSize: 10,
+    color: '#999',
+    fontStyle: 'italic',
+    marginLeft: 8,
   },
 });
 

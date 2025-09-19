@@ -1,6 +1,6 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
-import GlobalImageCache from './GlobalImageCache';
-import ImageStorageService from './ImageStorageService';
+import GlobalImageCache from './GlobalImageCache.js';
+import ImageStorageService from './ImageStorageService.js';
 
 class UnifiedDataService {
   constructor() {
@@ -336,6 +336,39 @@ class UnifiedDataService {
   // ==================== 写接口 ====================
   
   /**
+   * 更新图片分类ID（独立接口，只更新分类相关字段）
+   */
+  async updateImageCategory(imageId, newCategory, newConfidence = 'manual') {
+    try {
+      console.log('✍️ 更新图片分类:', imageId, '->', newCategory);
+      
+      // 1. 先写数据库
+      const updatedImage = await this.imageStorageService.updateImageCategory(imageId, newCategory, newConfidence);
+      console.log('✅ 数据库更新完成');
+      
+      // 2. 精确更新缓存（只更新分类相关字段）
+      const updateSuccess = this.imageCache.updateImageClassification(
+        imageId, 
+        newCategory, 
+        { confidence: newConfidence } // 只传递需要更新的字段
+      );
+      if (updateSuccess) {
+        console.log('✅ 缓存精确更新完成');
+      } else {
+        console.warn('⚠️ 缓存精确更新失败，将进行全量更新');
+        await this.imageCache.refreshCache();
+        console.log('✅ 缓存全量更新完成');
+      }
+      
+      return updatedImage;
+      
+    } catch (error) {
+      console.error('❌ 更新图片分类失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 保存图片分类结果
    * 先写缓存，再写数据库
    */
@@ -479,7 +512,7 @@ class UnifiedDataService {
    */
   getCategoryDisplayName(categoryId) {
     const categoryMap = {
-      wechat: '微信截图',
+      screenshot: '手机截图',
       meeting: '会议场景',
       document: '工作照片',
       people: '社交活动',
@@ -488,6 +521,7 @@ class UnifiedDataService {
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
+      idcard: '身份证',
       other: '其他图片',
     };
     
@@ -499,7 +533,7 @@ class UnifiedDataService {
    */
   getCategoryId(categoryInput) {
     const categoryMap = {
-      wechat: '微信截图',
+      screenshot: '手机截图',
       meeting: '会议场景',
       document: '工作照片',
       people: '社交活动',
@@ -508,6 +542,7 @@ class UnifiedDataService {
       food: '美食记录',
       travel: '旅行风景',
       pet: '宠物照片',
+      idcard: '身份证',
       other: '其他图片',
     };
     
@@ -532,8 +567,8 @@ class UnifiedDataService {
    */
   getAllCategoryIds() {
     return [
-      'wechat', 'meeting', 'document', 'people', 'life', 
-      'game', 'food', 'travel', 'pet', 'other'
+      'screenshot',  'meeting', 'document', 'people', 'life', 
+      'game', 'food', 'travel', 'pet', 'idcard', 'other'
     ];
   }
 
