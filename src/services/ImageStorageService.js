@@ -403,6 +403,7 @@ class ImageStorageService {
         // Detection results
         idCardDetections: imageData.idCardDetections || null,  // 身份证模型检测结果
         generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
+        smartClassifications: imageData.smartClassifications || null,  // MobileNetV3智能分类结果
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };

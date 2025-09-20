@@ -490,12 +490,13 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
 
               {/* 检测结果显示 */}
               {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) ||
-               (currentImage.generalDetections && currentImage.generalDetections.length > 0) ? (
+               (currentImage.generalDetections && currentImage.generalDetections.length > 0) ||
+               (currentImage.smartClassifications && currentImage.smartClassifications.length > 0) ? (
                 <>
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>🔍 检测结果:</Text>
                     <Text style={styles.infoValue}>
-                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0))} 个物体
+                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.smartClassifications?.length || 0))} 个物体
                     </Text>
                   </View>
 
@@ -528,6 +529,25 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                       {currentImage.generalDetections.length > 5 && (
                         <Text style={styles.detectionMore}>
                           ... 还有 {currentImage.generalDetections.length - 5} 个物体
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  {/* 智能分类结果 */}
+                  {currentImage.smartClassifications && currentImage.smartClassifications.length > 0 && (
+                    <View style={styles.detectionSection}>
+                      <Text style={styles.detectionTitle}>🧠 智能分类:</Text>
+                      {currentImage.smartClassifications.slice(0, 5).map((detection, index) => (
+                        <View key={index} style={styles.detectionItem}>
+                          <Text style={styles.detectionText}>
+                            {detection.class} ({(detection.confidence * 100).toFixed(1)}%)
+                          </Text>
+                        </View>
+                      ))}
+                      {currentImage.smartClassifications.length > 5 && (
+                        <Text style={styles.detectionMore}>
+                          ... 还有 {currentImage.smartClassifications.length - 5} 个分类
                         </Text>
                       )}
                     </View>

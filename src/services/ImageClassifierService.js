@@ -6,6 +6,12 @@ class ImageClassifierService {
     // Supported categories - 从 UnifiedDataService 获取
     this.categories = UnifiedDataService.getAllCategoryIds();
     
+    // ImageNet-1K类别列表（1000个类别）
+    this.imagenetClasses = null; // 延迟加载
+    
+    // ONNX Runtime实例（统一导入，避免重复导入）
+    this.ort = null;
+    
     // Multi-model configuration for ID card and general detection
     // 根据环境自动选择模型路径
     const isWebEnvironment = typeof window !== 'undefined' && window.location;
@@ -41,10 +47,44 @@ class ImageClassifierService {
         metadata: null,
         priority: 2, // 低优先级，后检测
         description: '通用物体检测模型'
+      },
+      mobilenetv3: {
+        model: null,
+        path: `${modelBasePath}/mobilenetv3_rw_Opset17.onnx`,
+        classes: null, // 延迟加载ImageNet类别
+        metadata: null,
+        priority: 3, // 最低优先级，用于图像分类
+        description: 'MobileNetV3图像分类模型',
+        inputName: 'x',
+        outputName: '496'
       }
     };
     
     
+  }
+
+  // 初始化ONNX Runtime
+  async initializeONNX() {
+    if (this.ort) {
+      return this.ort;
+    }
+
+    try {
+      if (typeof window !== 'undefined') {
+        // 浏览器环境
+        const ortModule = await import('onnxruntime-web');
+        this.ort = ortModule.default || ortModule;
+      } else {
+        // Node.js环境
+        this.ort = await import('onnxruntime-node');
+      }
+      
+      console.log('✅ ONNX Runtime初始化成功');
+      return this.ort;
+    } catch (error) {
+      console.error('❌ ONNX Runtime初始化失败:', error);
+      throw error;
+    }
   }
 
   // Initialize service
@@ -54,18 +94,17 @@ class ImageClassifierService {
     }
 
     try {
+      // 初始化ONNX Runtime
+      await this.initializeONNX();
+      
       // 加载所有模型
-      const loadResults = await this.loadMultipleModels(['idCard', 'yolo8s']);
+      const loadResults = await this.loadAllModels(['idCard', 'yolo8s', 'mobilenetv3']);
       
       // 检查加载结果
-      const failedModels = Object.entries(loadResults)
-        .filter(([name, result]) => !result.success)
-        .map(([name, result]) => `${name}: ${result.error}`);
-      
-      if (failedModels.length > 0) {
-        // 如果有模型加载失败，抛出错误而不是继续
-        throw new Error(`模型加载失败: ${failedModels.join(', ')}`);
+      if (!loadResults.success) {
+        throw new Error(`模型加载失败: ${loadResults.message}`);
       }
+      console.log(`✅ 模型加载完成: ${loadResults.message}`);
       
       // Time-based simulation classification algorithm already initialized
       this.isInitialized = true;
@@ -105,18 +144,14 @@ class ImageClassifierService {
         }
       }
 
-        // 加载ONNX模型
-        // 根据环境选择不同的 ONNX Runtime
-        let ort;
-        if (typeof window !== 'undefined') {
-          // 浏览器环境
-          ort = await import('onnxruntime-web');
-          // 在浏览器环境中，onnxruntime-web 的默认导出就是 ort
-          ort = ort.default || ort;
-        } else {
-          // Node.js 环境
-          ort = await import('onnxruntime-node');
+        // 对于MobileNetV3模型，需要先加载ImageNet类别
+        if (modelName === 'mobilenetv3') {
+          await this.loadImageNetClasses();
         }
+
+        // 加载ONNX模型
+        // 使用统一的ONNX Runtime实例
+        const ort = this.ort;
         
         // 创建推理会话时的配置
         const sessionOptions = {
@@ -149,16 +184,8 @@ class ImageClassifierService {
   // Preprocess image for YOLOv8n
   async preprocessImage(imageData, inputSize = 640) {
     try {
-      // 导入 ONNX Runtime
-      let ort;
-      if (typeof window !== 'undefined') {
-        // 浏览器环境
-        ort = await import('onnxruntime-web');
-        ort = ort.default || ort;
-      } else {
-        // Node.js 环境
-        ort = await import('onnxruntime-node');
-      }
+      // 使用统一的ONNX Runtime实例
+      const ort = this.ort;
       
       // 将图片转换为RGB格式并调整大小
       const canvas = document.createElement('canvas');
@@ -587,13 +614,22 @@ class ImageClassifierService {
         const category = await this.mapDetectionsToCategories(detectionResult.detections);
         const confidence = Math.max(...detectionResult.detections.map(d => d.confidence));
         
-        // 分离身份证检测结果和通用模型检测结果
+        // 分离不同类型的检测结果
         const idCardDetections = detectionResult.detections.filter(d => 
           d.class === 'id_card_front' || d.class === 'id_card_back'
         );
+        
+        // 检查是否使用了MobileNetV3模型
+        const hasMobileNetV3 = detectionResult.usedModels && detectionResult.usedModels.includes('mobilenetv3');
+        
         const generalDetections = detectionResult.detections.filter(d => 
-          d.class !== 'id_card_front' && d.class !== 'id_card_back'
+          d.class !== 'id_card_front' && d.class !== 'id_card_back' && !hasMobileNetV3
         );
+        
+        const smartClassifications = hasMobileNetV3 ? 
+          detectionResult.detections.filter(d => 
+            d.class !== 'id_card_front' && d.class !== 'id_card_back'
+          ) : [];
         
         result = {
           category: category || 'other',
@@ -605,7 +641,8 @@ class ImageClassifierService {
           usedModels: detectionResult.usedModels,
           // 分离的检测结果，用于保存到图片详情
           idCardDetections: idCardDetections,
-          generalDetections: generalDetections
+          generalDetections: generalDetections,
+          smartClassifications: smartClassifications
         };
       } else {
         // 如果没有检测到物体，返回默认分类
@@ -619,7 +656,8 @@ class ImageClassifierService {
           usedModels: [],
           // 空的检测结果
           idCardDetections: [],
-          generalDetections: []
+          generalDetections: [],
+          smartClassifications: []
         };
       }
 
@@ -673,22 +711,6 @@ class ImageClassifierService {
 
 
 
-  // 多模型管理功能
-  async loadMultipleModels(modelNames = ['yolo8s']) {
-    
-    const results = {};
-    for (const modelName of modelNames) {
-      try {
-        await this.loadModel(modelName);
-        results[modelName] = { success: true, error: null };
-      } catch (error) {
-        results[modelName] = { success: false, error: error.message };
-        console.error(`❌ ${modelName} failed to load:`, error.message);
-      }
-    }
-    
-    return results;
-  }
 
  
 
@@ -698,10 +720,27 @@ class ImageClassifierService {
       throw new Error(`Unknown model: ${modelName}`);
     }
     
+    // 正确释放ONNX模型会话
+    if (this.models[modelName].model) {
+      try {
+        // ONNX Runtime会话有dispose方法用于释放内存
+        if (typeof this.models[modelName].model.dispose === 'function') {
+          this.models[modelName].model.dispose();
+        }
+      } catch (error) {
+        console.warn(`释放模型 ${modelName} 时出错:`, error.message);
+      }
+    }
+    
     this.models[modelName].model = null;
     this.models[modelName].classes = null;
     this.models[modelName].metadata = null;
     
+    // 对于MobileNetV3模型，清理ImageNet类别数据（可选，因为数据量不大）
+    if (modelName === 'mobilenetv3') {
+      this.imagenetClasses = null;
+      this.models.mobilenetv3.classes = null;
+    }
   }
 
   // 卸载所有模型
@@ -718,58 +757,80 @@ class ImageClassifierService {
   }
 
   // 检测物体（使用指定模型）
-  async detectObjectsWithModel(imageUri, modelName, options = {}) {
+  // 使用YOLO模型进行检测（支持idCard和yolo8s）
+  async classifyImageWithYOLO(imageUri, modelName = 'yolo8s', options = {}) {
     if (!this.models[modelName] || !this.models[modelName].model) {
       throw new Error(`Model ${modelName} not loaded`);
     }
     
+    // 根据模型类型设置不同的默认参数
+    const defaultOptions = modelName === 'idCard' 
+      ? { confidenceThreshold: 0.3, nmsThreshold: 0.4, maxDetections: 5 }
+      : { confidenceThreshold: 0.25, nmsThreshold: 0.4, maxDetections: 10 };
+    
     const {
-      confidenceThreshold = 0.3,
-      nmsThreshold = 0.4,
-      maxDetections = 10
+      confidenceThreshold = defaultOptions.confidenceThreshold,
+      nmsThreshold = defaultOptions.nmsThreshold,
+      maxDetections = defaultOptions.maxDetections
     } = options;
 
+    try {
+      // 确保模型已加载
+      await this.loadModel(modelName);
 
-    const modelConfig = this.models[modelName];
+      const modelConfig = this.models[modelName];
 
-    // 预处理图片
-    const inputTensor = await this.preprocessImage(imageUri);
-    
-    // 运行推理
-    const feeds = { images: inputTensor };
-    // 安全地计算数据范围，避免栈溢出
-    const dataArray = Array.from(inputTensor.data);
-    const minValue = dataArray.reduce((min, val) => Math.min(min, val), Infinity);
-    const maxValue = dataArray.reduce((max, val) => Math.max(max, val), -Infinity);
-    
-    const results = await modelConfig.model.run(feeds);
-    
-    // 后处理结果
-    // 尝试不同的输出名称
-    const outputData = results.output0 || results.output || results[Object.keys(results)[0]];
-    
-    if (!outputData) {
-      throw new Error(`模型 ${modelName} 没有返回有效的输出数据。输出键: ${Object.keys(results)}`);
+      // 预处理图片
+      const inputTensor = await this.preprocessImage(imageUri);
+      
+      // 运行推理
+      const feeds = { images: inputTensor };
+      // 安全地计算数据范围，避免栈溢出
+      const dataArray = Array.from(inputTensor.data);
+      const minValue = dataArray.reduce((min, val) => Math.min(min, val), Infinity);
+      const maxValue = dataArray.reduce((max, val) => Math.max(max, val), -Infinity);
+      
+      const results = await modelConfig.model.run(feeds);
+      
+      // 后处理结果
+      // 尝试不同的输出名称
+      const outputData = results.output0 || results.output || results[Object.keys(results)[0]];
+      
+      if (!outputData) {
+        throw new Error(`模型 ${modelName} 没有返回有效的输出数据。输出键: ${Object.keys(results)}`);
+      }
+      
+      const detections = await this.postprocessYOLOOutput(
+        outputData, 
+        confidenceThreshold, 
+        nmsThreshold,
+        modelConfig.classes
+      );
+
+      // 限制检测数量
+      const limitedDetections = detections.slice(0, maxDetections);
+
+      return {
+        success: true,
+        detections: limitedDetections,
+        totalDetections: detections.length,
+        model: modelName,
+        processingTime: Date.now(),
+        // 对于身份证模型，添加idCardDetected字段
+        ...(modelName === 'idCard' && { idCardDetected: this.checkIdCardDetected(limitedDetections) })
+      };
+    } catch (error) {
+      console.error(`❌ ${modelName}模型检测失败:`, error);
+      return {
+        success: false,
+        error: error.message,
+        detections: [],
+        totalDetections: 0,
+        model: modelName,
+        processingTime: Date.now(),
+        ...(modelName === 'idCard' && { idCardDetected: false })
+      };
     }
-    
-    const detections = await this.postprocessYOLOOutput(
-      outputData, 
-      confidenceThreshold, 
-      nmsThreshold,
-      modelConfig.classes
-    );
-
-    // 限制检测数量
-    const limitedDetections = detections.slice(0, maxDetections);
-
-
-    return {
-      success: true,
-      detections: limitedDetections,
-      totalDetections: detections.length,
-      model: modelName,
-      processingTime: Date.now()
-    };
   }
 
       // 智能推理：先检测身份证，再决定是否使用通用模型
@@ -796,7 +857,7 @@ class ImageClassifierService {
 
     try {
       // 第一步：使用身份证模型检测
-      const idCardResult = await this.detectObjectsWithModel(imageUri, 'idCard', {
+      const idCardResult = await this.classifyImageWithYOLO(imageUri, 'idCard', {
         confidenceThreshold: idCardConfidenceThreshold, // 使用配置的阈值
         nmsThreshold,
         maxDetections: 5 // 身份证通常只有1-2个
@@ -817,17 +878,52 @@ class ImageClassifierService {
       } else {
         
         // 第二步：使用通用模型检测
-        const generalResult = await this.detectObjectsWithModel(imageUri, 'yolo8s', {
+        const generalResult = await this.classifyImageWithYOLO(imageUri, 'yolo8s', {
           confidenceThreshold: generalConfidenceThreshold, // 使用配置的阈值
           nmsThreshold,
           maxDetections
         });
 
         results.usedModels.push('yolo8s');
-        results.detections = generalResult.detections;
-        results.totalDetections = generalResult.totalDetections;
-        results.reasoning += '未检测到身份证，使用通用模型检测；';
-        results.success = true;
+        
+        // 检查YOLO是否检测到有效物体
+        if (generalResult.success && generalResult.detections.length > 0) {
+          results.detections = generalResult.detections;
+          results.totalDetections = generalResult.totalDetections;
+          results.reasoning += '未检测到身份证，使用通用模型检测到物体；';
+          results.success = true;
+        } else {
+          // 第三步：YOLO没有检测到物体，使用MobileNetV3进行分类
+          try {
+            const classificationResult = await this.classifyImageWithMobileNetV3(imageUri, {
+              confidenceThreshold: 0.3
+            });
+            
+            results.usedModels.push('mobilenetv3');
+            
+            if (classificationResult.success && classificationResult.validPredictions.length > 0) {
+              // 将分类结果转换为检测格式
+              const classificationDetections = classificationResult.validPredictions.map(pred => ({
+                class: pred.class,  // 修复：使用pred.class而不是pred.className
+                confidence: pred.probability,
+                bbox: [0, 0, 1, 1], // 全图检测
+                area: 1.0
+              }));
+              
+              results.detections = classificationDetections;
+              results.totalDetections = classificationDetections.length;
+              results.reasoning += 'YOLO未检测到物体，使用MobileNetV3进行分类；';
+              results.success = true;
+            } else {
+              results.reasoning += 'YOLO和MobileNetV3都未检测到有效结果；';
+              results.success = false;
+            }
+          } catch (classificationError) {
+            console.warn('MobileNetV3分类失败:', classificationError.message);
+            results.reasoning += `YOLO未检测到物体，MobileNetV3分类失败: ${classificationError.message};`;
+            results.success = false;
+          }
+        }
       }
 
       results.processingTime = Date.now() - startTime;
@@ -946,6 +1042,342 @@ class ImageClassifierService {
       return 'back';
     } else {
       return 'unknown';
+    }
+  }
+
+  // ==================== 新增的公共接口函数 ====================
+
+  
+  /**
+   * 加载指定模型
+   * @param {string} modelName - 模型名称 ('idCard' 或 'yolo8s')
+   * @returns {Promise<Object>} 加载结果
+   */
+
+  /**
+   * 加载模型（支持指定模型列表或加载所有模型）
+   * @param {Array} modelNames - 可选的模型名称数组，不传则加载所有模型
+   * @returns {Promise<Object>} 加载结果
+   */
+  async loadAllModels(modelNames = null) {
+    try {
+      // 如果没有指定模型列表，则加载所有模型
+      const targetModels = modelNames || Object.keys(this.models);
+      
+      const results = {};
+      for (const modelName of targetModels) {
+        try {
+          await this.loadModel(modelName);
+          results[modelName] = { success: true, error: null };
+        } catch (error) {
+          results[modelName] = { success: false, error: error.message };
+          console.error(`❌ ${modelName} 加载失败:`, error.message);
+        }
+      }
+      
+      const successCount = Object.values(results).filter(r => r.success).length;
+      const totalCount = targetModels.length;
+      
+        return {
+        success: successCount === totalCount,
+        totalModels: totalCount,
+        loadedModels: successCount,
+        results: results,
+        message: `成功加载 ${successCount}/${totalCount} 个模型`
+      };
+    } catch (error) {
+      console.error('加载模型失败:', error);
+        return {
+        success: false,
+        totalModels: 0,
+        loadedModels: 0,
+        results: {},
+        message: `加载失败: ${error.message}`,
+        error: error.message
+      };
+    }
+  }
+
+
+
+  /**
+   * 获取模型状态
+   * @returns {Object} 模型状态信息
+   */
+  getModelStatus() {
+    const status = {};
+    let loadedCount = 0;
+
+    Object.keys(this.models).forEach(modelName => {
+      const isLoaded = !!this.models[modelName].model;
+      status[modelName] = {
+        loaded: isLoaded,
+        path: this.models[modelName].path,
+        description: this.models[modelName].description,
+        priority: this.models[modelName].priority
+      };
+      if (isLoaded) {
+        loadedCount++;
+      }
+    });
+
+      return {
+      totalModels: Object.keys(this.models).length,
+      loadedModels: loadedCount,
+      unloadedModels: Object.keys(this.models).length - loadedCount,
+      isInitialized: this.isInitialized,
+      status: status
+    };
+  }
+
+
+  // 加载ImageNet类别数据
+  async loadImageNetClasses() {
+    if (this.imagenetClasses) {
+      return this.imagenetClasses;
+    }
+
+    try {
+      // 根据环境选择不同的加载方式
+      if (typeof window !== 'undefined') {
+        // 浏览器环境 - 使用fetch
+        const response = await fetch('./models/imagenet_classes.json');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        this.imagenetClasses = data.classes.map(cls => cls.english);
+        this.models.mobilenetv3.classes = data.classes;
+        return this.imagenetClasses;
+      } else {
+        // Node.js环境 - 使用fs
+        const fs = await import('fs');
+        const data = JSON.parse(fs.readFileSync('./models/imagenet_classes.json', 'utf8'));
+        this.imagenetClasses = data.classes.map(cls => cls.english);
+        this.models.mobilenetv3.classes = data.classes;
+        return this.imagenetClasses;
+      }
+    } catch (error) {
+      console.error('❌ 加载ImageNet类别失败:', error);
+      // 返回默认的空数组作为后备
+      this.imagenetClasses = new Array(1000).fill('unknown');
+      this.models.mobilenetv3.classes = this.imagenetClasses;
+      return this.imagenetClasses;
+    }
+  }
+
+  // 加载MobileNetV3模型
+  async loadMobileNetV3Model() {
+    try {
+      const modelConfig = this.models.mobilenetv3;
+      
+      if (modelConfig.model) {
+        return modelConfig.model;
+      }
+
+      // 先加载ImageNet类别
+      await this.loadImageNetClasses();
+
+      // 使用统一的ONNX Runtime实例
+      const ort = this.ort;
+
+      // 创建推理会话
+      const sessionOptions = {
+        executionProviders: ['cpu'],
+        graphOptimizationLevel: 'disabled',
+        enableCpuMemArena: false,
+        enableMemPattern: false,
+        enableProfiling: false,
+        logSeverityLevel: 3,
+        logVerbosityLevel: 0,
+        sessionLogSeverityLevel: 3,
+        sessionLogVerbosityLevel: 0
+      };
+
+      modelConfig.model = await ort.InferenceSession.create(modelConfig.path, sessionOptions);
+      console.log('✅ MobileNetV3模型加载成功');
+      
+      return modelConfig.model;
+    } catch (error) {
+      console.error('❌ MobileNetV3模型加载失败:', error);
+      throw error;
+    }
+  }
+
+
+  // 预处理图片用于MobileNetV3
+  async preprocessImageForMobileNetV3(imageUri) {
+    try {
+      // 使用统一的ONNX Runtime实例
+      const ort = this.ort;
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      return new Promise((resolve, reject) => {
+        img.onload = () => {
+          const inputSize = 224; // MobileNetV3输入尺寸
+          canvas.width = inputSize;
+          canvas.height = inputSize;
+          
+          // 使用cover模式保持宽高比，居中裁剪
+          const scale = Math.max(inputSize / img.width, inputSize / img.height);
+          const scaledWidth = img.width * scale;
+          const scaledHeight = img.height * scale;
+          
+          const x = (inputSize - scaledWidth) / 2;
+          const y = (inputSize - scaledHeight) / 2;
+          
+          // 填充黑色背景
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, inputSize, inputSize);
+          
+          // 绘制图片
+          ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+          
+          // 获取图片数据
+          const imageData = ctx.getImageData(0, 0, inputSize, inputSize);
+          const { data } = imageData;
+          
+          // 转换为RGB格式并归一化到[0,1]
+          const rgbData = new Float32Array(inputSize * inputSize * 3);
+          for (let i = 0; i < data.length; i += 4) {
+            const pixelIndex = i / 4;
+            rgbData[pixelIndex * 3] = data[i] / 255.0;         // R
+            rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
+            rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
+          }
+          
+          // 转换为CHW格式 (Channel, Height, Width)
+          const chwData = new Float32Array(3 * inputSize * inputSize);
+          for (let h = 0; h < inputSize; h++) {
+            for (let w = 0; w < inputSize; w++) {
+              for (let c = 0; c < 3; c++) {
+                const hwcIndex = h * inputSize * 3 + w * 3 + c;
+                const chwIndex = c * inputSize * inputSize + h * inputSize + w;
+                chwData[chwIndex] = rgbData[hwcIndex];
+              }
+            }
+          }
+          
+          // 创建ONNX张量 [1, 3, 224, 224]
+          const tensor = new ort.Tensor('float32', chwData, [1, 3, inputSize, inputSize]);
+          resolve(tensor);
+        };
+        
+        img.onerror = reject;
+        img.src = imageUri;
+      });
+    } catch (error) {
+      console.error('❌ MobileNetV3图片预处理失败:', error);
+      throw error;
+    }
+  }
+
+  // 后处理MobileNetV3输出
+  postprocessMobileNetV3Output(output, confidenceThreshold = 0.3) {
+    try {
+      const outputData = output.data;
+      const probabilities = new Array(outputData.length);
+
+      // 计算softmax
+      let maxLogit = Math.max(...outputData);
+      let sumExp = 0;
+      for (let i = 0; i < outputData.length; i++) {
+        probabilities[i] = Math.exp(outputData[i] - maxLogit);
+        sumExp += probabilities[i];
+      }
+
+      // 归一化
+      for (let i = 0; i < probabilities.length; i++) {
+        probabilities[i] /= sumExp;
+      }
+
+      // 获取top-5预测结果
+      const top5 = [];
+      for (let i = 0; i < probabilities.length; i++) {
+        top5.push({
+          index: i,
+          probability: probabilities[i],
+          class: this.imagenetClasses && this.imagenetClasses[i] ? this.imagenetClasses[i] : `class_${i}`
+        });
+      }
+
+      top5.sort((a, b) => b.probability - a.probability);
+      
+      // 过滤低置信度预测
+      const validPredictions = top5.filter(pred => pred.probability >= confidenceThreshold);
+      
+      return {
+        predictions: top5.slice(0, 5), // 返回top-5
+        validPredictions: validPredictions,
+        topPrediction: top5[0],
+        confidence: top5[0].probability
+      };
+    } catch (error) {
+      console.error('❌ MobileNetV3后处理失败:', error);
+      return {
+        predictions: [],
+        validPredictions: [],
+        topPrediction: null,
+        confidence: 0
+      };
+    }
+  }
+
+  // 使用身份证模型进行检测
+  async classifyImageWithIDModel(imageUri, options = {}) {
+    return await this.classifyImageWithYOLO(imageUri, 'idCard', options);
+  }
+
+
+  // 使用MobileNetV3分类图片
+  async classifyImageWithMobileNetV3(imageUri, options = {}) {
+    const { confidenceThreshold = 0.3 } = options;
+    
+    try {
+      // 确保模型已加载
+      await this.loadMobileNetV3Model();
+      
+      // 预处理图片
+      const inputTensor = await this.preprocessImageForMobileNetV3(imageUri);
+      
+      // 运行推理
+      const modelConfig = this.models.mobilenetv3;
+      const feeds = { [modelConfig.inputName]: inputTensor };
+      const results = await modelConfig.model.run(feeds);
+      
+      // 获取输出
+      const output = results[modelConfig.outputName];
+      if (!output) {
+        throw new Error('MobileNetV3模型没有返回有效的输出数据');
+      }
+      
+      // 后处理结果
+      const processedResults = this.postprocessMobileNetV3Output(output, confidenceThreshold);
+      
+      return {
+        success: true,
+        predictions: processedResults.predictions,
+        validPredictions: processedResults.validPredictions,
+        topPrediction: processedResults.topPrediction,
+        confidence: processedResults.confidence,
+        model: 'mobilenetv3',
+        processingTime: Date.now()
+      };
+    } catch (error) {
+      console.error('❌ MobileNetV3分类失败:', error);
+      return {
+        success: false,
+        error: error.message,
+        predictions: [],
+        validPredictions: [],
+        topPrediction: null,
+        confidence: 0,
+        model: 'mobilenetv3',
+        processingTime: Date.now()
+      };
     }
   }
 }

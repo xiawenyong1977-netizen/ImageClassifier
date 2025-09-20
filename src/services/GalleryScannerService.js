@@ -1189,7 +1189,8 @@ class GalleryScannerService {
           cityDistance: locationInfo.cityDistance,
           // 检测结果
           idCardDetections: classification.idCardDetections || [],
-          generalDetections: classification.generalDetections || []
+          generalDetections: classification.generalDetections || [],
+          smartClassifications: classification.smartClassifications || []
         };
         
         successfulData.push(saveData);

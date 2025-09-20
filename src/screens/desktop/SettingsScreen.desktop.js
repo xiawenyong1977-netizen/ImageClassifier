@@ -218,7 +218,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     try {
       if ('indexedDB' in window) {
         const db = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('ImageClassifierDB', 1);
+          const request = indexedDB.open('ImageClassifierDB', 2);
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });
