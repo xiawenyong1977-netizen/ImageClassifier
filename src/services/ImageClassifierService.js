@@ -378,11 +378,6 @@ class ImageClassifierService {
       // 使用提供的类别列表或默认类别
       const classList = classes || this.models.yolo8s.classes;
       
-      // 安全地计算数据范围，避免栈溢出
-      const sampleData = Array.from(predictions.data.slice(0, 100));
-      const minValue = sampleData.reduce((min, val) => Math.min(min, val), Infinity);
-      const maxValue = sampleData.reduce((max, val) => Math.max(max, val), -Infinity);
-      
       // 简化的调试信息
       const outputData = {
         dims: predictions.dims,
