@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIn
 import { SafeAreaView } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
+import configService from '../../services/ConfigService';
 
 // Create service instances
 const imageClassifierService = new ImageClassifierService();
@@ -68,19 +69,14 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
 
   const handleBatchMove = () => {
          // 显示分类选择�?
-     const categories = [
-       { id: 'screenshot', name: '手机截图' },
-       { id: 'meeting', name: '会议场景' },
-       { id: 'document', name: '工作写真' },
-       { id: 'people', name: '社交活动' },
-       { id: 'life', name: '生活记录' },
-       { id: 'game', name: '运动娱乐' },
-       { id: 'food', name: '美食记录' },
-       { id: 'travel', name: '旅行风景' },
-       { id: 'pet', name: '宠物萌照' },
-       { id: 'idcard', name: '身份证' },
-       { id: 'other', name: '其他图片' },
-     ];
+    if (!configService || !configService.isConfigLoaded()) {
+      Alert.alert('错误', '配置服务未初始化');
+      return;
+    }
+    const categories = configService.getAllCategoriesWithUI().map(category => ({
+      id: category.id,
+      name: category.chinese || category.english || category.id
+    }));
 
     Alert.alert(
       '选择目标分类',
@@ -178,21 +174,21 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
 
   // 获取分类信息的辅助函�?
   const getCategoryInfo = (categoryId) => {
-    // 分类信息映射
-    const categoryMap = {
-      meeting: { name: '会议场景', icon: '💼', color: '#FF9800' },
-      document: { name: '工作写真', icon: '📄', color: '#2196F3' },
-      people: { name: '社交活动', icon: '👥', color: '#E91E63' },
-      life: { name: '生活记录', icon: '🌅', color: '#4CAF50' },
-      game: { name: '运动娱乐', icon: '🎮', color: '#FF5722' },
-      food: { name: '美食记录', icon: '🍕', color: '#FF6B35' },
-      travel: { name: '旅行风景', icon: '✈️', color: '#9C27B0' },
-      pet: { name: '宠物萌照', icon: '🐕', color: '#795548' },
-      idcard: { name: '身份证', icon: '🆔', color: '#FF6B35' },
-      other: { name: '其他图片', icon: '📷', color: '#607D8B' }
-    };
+    // 确保配置服务已加载
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
     
-    return categoryMap[categoryId] || categoryMap.other;
+    const category = configService.getCategoryByKey(categoryId);
+    if (!category) {
+      throw new Error(`未找到分类: ${categoryId}`);
+    }
+    
+    return {
+      name: category.chinese || category.english || categoryId,
+      icon: '📷', // 默认图标，因为用户说不需要图标
+      color: '#607D8B' // 默认颜色
+    };
   };
 
   const formatFileSize = (bytes) => {

@@ -23,6 +23,7 @@ const { useEffect, useState } = React;
 import HomeScreen from './screens/desktop/HomeScreen.desktop';
 import UnifiedDataService from './services/UnifiedDataService';
 import IPCListenerService from './services/IPCListenerService';
+import configService from './services/ConfigService';
 
 export default function App() {
   console.log('🚀 App.desktop.js 开始渲染');
@@ -34,6 +35,10 @@ export default function App() {
     const initApp = async () => {
       try {
         console.log('🚀 App.desktop.js 开始初始化服务...');
+        
+        // 首先初始化 ConfigService
+        await configService.initialize();
+        console.log('✅ ConfigService 初始化完成');
         
         // 初始化 UnifiedDataService
         await UnifiedDataService.initialize();

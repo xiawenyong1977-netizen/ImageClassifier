@@ -7,6 +7,7 @@ import { RNFS } from '../adapters/WebAdapters';
 import ImageStorageService from '../services/ImageStorageService';
 import GalleryScannerService from '../services/GalleryScannerService';
 import ImageClassifierService from '../services/ImageClassifierService';
+import configService from '../services/ConfigService';
 import CategoryCard from '../components/CategoryCard';
 import RecentImagesGrid from '../components/RecentImagesGrid';
 
@@ -17,6 +18,43 @@ const HomeScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
 
+  // 获取所有分类信息（动态渲染用）
+  const getAllCategories = () => {
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
+    return configService.getAllCategoriesWithUI();
+  };
+
+  // 渲染分类卡片
+  const renderCategoryCards = () => {
+    try {
+      const categories = getAllCategories();
+      return categories.map(category => {
+        const categoryKey = category.id;
+        const shouldShow = hideEmptyCategories ? (categoryCounts[categoryKey] > 0) : true;
+        
+        if (!shouldShow) return null;
+        
+        return (
+          <CategoryCard
+            key={categoryKey}
+            category={{
+              id: categoryKey,
+              name: category.chinese || category.english || categoryKey,
+              color: '#607D8B' // 默认颜色，因为用户说不需要图标
+            }}
+            count={categoryCounts[categoryKey] || 0}
+            recentImages={categoryRecentImages[categoryKey] || []}
+            onPress={() => handleCategoryPress(categoryKey)}
+          />
+        );
+      });
+    } catch (error) {
+      console.error('获取分类信息失败:', error);
+      return null;
+    }
+  };
   
   // 扫描进度相关状态
   const [isScanning, setIsScanning] = useState(false);
@@ -87,7 +125,7 @@ const HomeScreen = ({ navigation }) => {
       
       // 获取每个分类的最近照片
       const categoryRecentImages = {};
-      const categories = ['wechat', 'meeting', 'document', 'people', 'life', 'game', 'food', 'travel', 'pet', 'other'];
+      const categories = UnifiedDataService.getAllCategoryIds();
       
       console.log('开始获取分类最近照片...');
       for (const category of categories) {
@@ -355,127 +393,7 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.categoriesSection}>
           <Text style={styles.sectionTitle}>按内容</Text>
           <View style={styles.categoriesContainer}>
-            {/* 根据设置决定是否隐藏无数据分类 */}
-            {(hideEmptyCategories ? categoryCounts.wechat > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'wechat',
-                  name: '微信截图',
-                  color: '#07C160'
-                }}
-                count={categoryCounts.wechat || 0}
-                recentImages={categoryRecentImages.wechat || []}
-                onPress={() => handleCategoryPress('wechat')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.meeting > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'meeting',
-                  name: '会议场景',
-                  color: '#FF9800'
-                }}
-                count={categoryCounts.meeting || 0}
-                recentImages={categoryRecentImages.meeting || []}
-                onPress={() => handleCategoryPress('meeting')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.document > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'document',
-                  name: '工作写真',
-                  color: '#2196F3'
-                }}
-                count={categoryCounts.document || 0}
-                recentImages={categoryRecentImages.document || []}
-                onPress={() => handleCategoryPress('document')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.people > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'people',
-                  name: '社交活动',
-                  color: '#E91E63'
-                }}
-                count={categoryCounts.people || 0}
-                recentImages={categoryRecentImages.people || []}
-                onPress={() => handleCategoryPress('people')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.life > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'life',
-                  name: '生活记录',
-                  color: '#4CAF50'
-                }}
-                count={categoryCounts.life || 0}
-                recentImages={categoryRecentImages.life || []}
-                onPress={() => handleCategoryPress('life')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.game > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'game',
-                  name: '游戏截屏',
-                  color: '#FF5722'
-                }}
-                count={categoryCounts.game || 0}
-                recentImages={categoryRecentImages.game || []}
-                onPress={() => handleCategoryPress('game')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.food > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'food',
-                  name: '美食记录',
-                  color: '#FF6B35'
-                }}
-                count={categoryCounts.food || 0}
-                recentImages={categoryRecentImages.food || []}
-                onPress={() => handleCategoryPress('food')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.travel > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'travel',
-                  name: '旅行风景',
-                  color: '#9C27B0'
-                }}
-                count={categoryCounts.travel || 0}
-                recentImages={categoryRecentImages.travel || []}
-                onPress={() => handleCategoryPress('travel')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.pet > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'pet',
-                  name: '宠物萌照',
-                  color: '#795548'
-                }}
-                count={categoryCounts.pet || 0}
-                recentImages={categoryRecentImages.pet || []}
-                onPress={() => handleCategoryPress('pet')}
-              />
-            )}
-            {(hideEmptyCategories ? categoryCounts.other > 0 : true) && (
-              <CategoryCard
-                category={{
-                  id: 'other',
-                  name: '其他图片',
-                  color: '#607D8B'
-                }}
-                count={categoryCounts.other || 0}
-                recentImages={categoryRecentImages.other || []}
-                onPress={() => handleCategoryPress('other')}
-              />
-            )}
+            {renderCategoryCards()}
           </View>
         </View>
 

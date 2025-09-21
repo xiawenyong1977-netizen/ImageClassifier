@@ -3,25 +3,40 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions
 import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
+import configService from '../../services/ConfigService';
 
 // Helper function to get category information
 const getCategoryInfo = (categoryId) => {
-  // Category information mapping
-  const categoryMap = {
-    screenshot: { name: 'mobile screenshot', icon: '📱', color: '#4CAF50' },
-    meeting: { name: 'Meeting Scenes', icon: '💼', color: '#FF9800' },
-    document: { name: 'Work Photos', icon: '📄', color: '#2196F3' },
-    people: { name: 'Social Activities', icon: '👥', color: '#E91E63' },
-    life: { name: 'Life Records', icon: '🌅', color: '#4CAF50' },
-    game: { name: 'Game Screenshots', icon: '🎮', color: '#FF5722' },
-    food: { name: 'Food Records', icon: '🍕', color: '#FF6B35' },
-    travel: { name: 'Travel Scenery', icon: '✈️', color: '#9C27B0' },
-    pet: { name: 'Pet Photos', icon: '🐕', color: '#795548' },
-    idcard: { name: 'ID Card', icon: '🆔', color: '#FF6B35' },
-    other: { name: 'Other Images', icon: '📷', color: '#607D8B' }
-  };
+  // 确保配置服务已加载
+  if (!configService || !configService.isConfigLoaded()) {
+    throw new Error('ConfigService未初始化或配置未加载');
+  }
   
-  return categoryMap[categoryId] || categoryMap.other;
+  const category = configService.getCategoryByKey(categoryId);
+  if (!category) {
+    throw new Error(`未找到分类: ${categoryId}`);
+  }
+  
+  return {
+    name: category.chinese || category.english || categoryId,
+    icon: '📷', // 默认图标，因为用户说不需要图标
+    color: '#607D8B' // 默认颜色
+  };
+};
+
+// Helper function to get all categories for selection
+const getAllCategories = () => {
+  // 确保配置服务已加载
+  if (!configService || !configService.isConfigLoaded()) {
+    throw new Error('ConfigService未初始化或配置未加载');
+  }
+  
+  return configService.getAllCategoriesWithUI().map(category => ({
+    id: category.id,
+    name: category.chinese || category.english || category.id,
+    icon: '📷', // 默认图标
+    color: '#607D8B' // 默认颜色
+  }));
 };
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -359,18 +374,7 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
           {/* 分类选择器 - 与图片区域对齐 */}
           <View style={styles.categorySelector}>
             <View style={styles.categoryGrid}>
-              {[
-                { id: 'meeting', name: '会议场景', icon: '💼', color: '#FF9800' },
-                { id: 'document', name: '工作写真', icon: '📄', color: '#2196F3' },
-                { id: 'people', name: '社交活动', icon: '👥', color: '#E91E63' },
-                { id: 'life', name: '生活记录', icon: '🌅', color: '#4CAF50' },
-                { id: 'game', name: '运动娱乐', icon: '🎮', color: '#FF5722' },
-                { id: 'food', name: '美食记录', icon: '🍕', color: '#FF6B35' },
-                { id: 'travel', name: '旅行风景', icon: '✈️', color: '#9C27B0' },
-                { id: 'pet', name: '宠物萌照', icon: '🦁', color: '#795548' },
-                { id: 'idcard', name: '身份证', icon: '🆔', color: '#FF6B35' },
-                { id: 'other', name: '其他图片', icon: '📷', color: '#9E9E9E' },
-              ].map((category) => (
+              {getAllCategories().map((category) => (
                 <TouchableOpacity
                   key={category.id}
                   style={[

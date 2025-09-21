@@ -293,7 +293,6 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
-        const path = eval('require("path")');
         
         const files = fs.readdirSync(dirPath);
         const result = [];
@@ -333,7 +332,6 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
-        const path = eval('require("path")');
         
         // 修复Windows路径格式问题
         let normalizedPath = filePath;

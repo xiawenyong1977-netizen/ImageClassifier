@@ -1,11 +1,13 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
+import configService from './ConfigService.js';
 
 class UnifiedDataService {
   constructor() {
     this.imageStorageService = new ImageStorageService();
     this.imageCache = GlobalImageCache;
+    this.configService = configService;
     this.isInitialized = false;
     
     // 缓存变化监听器
@@ -508,53 +510,36 @@ class UnifiedDataService {
   // ==================== 工具方法 ====================
   
   /**
-   * 获取分类显示名称
+   * 获取分类显示名称（从配置文件读取）
    */
   getCategoryDisplayName(categoryId) {
-    const categoryMap = {
-      screenshot: '手机截图',
-      meeting: '会议场景',
-      document: '工作照片',
-      people: '社交活动',
-      life: '生活记录',
-      game: '运动娱乐',
-      food: '美食记录',
-      travel: '旅行风景',
-      pet: '宠物照片',
-      idcard: '身份证',
-      other: '其他图片',
-    };
+    // 如果配置服务可用，从配置读取
+    if (this.configService && this.configService.isConfigLoaded()) {
+      return this.configService.getCategoryDisplayName(categoryId, 'chinese');
+    }
     
-    return categoryMap[categoryId] || categoryId;
+    // 后备方案：返回原ID
+    return categoryId;
   }
 
   /**
    * 获取分类ID（从显示名称或ID获取标准化的分类ID）
    */
   getCategoryId(categoryInput) {
-    const categoryMap = {
-      screenshot: '手机截图',
-      meeting: '会议场景',
-      document: '工作照片',
-      people: '社交活动',
-      life: '生活记录',
-      game: '运动娱乐',
-      food: '美食记录',
-      travel: '旅行风景',
-      pet: '宠物照片',
-      idcard: '身份证',
-      other: '其他图片',
-    };
-    
-    // 如果输入已经是ID，直接返回
-    if (categoryMap[categoryInput]) {
-      return categoryInput;
-    }
-    
-    // 如果是显示名称，查找对应的ID
-    for (const [id, displayName] of Object.entries(categoryMap)) {
-      if (displayName === categoryInput) {
-        return id;
+    // 如果配置服务可用，从配置读取
+    if (this.configService && this.configService.isConfigLoaded()) {
+      const categoryMap = this.configService.getCategoryNameMap();
+      
+      // 如果输入已经是键名，直接返回
+      if (categoryMap[categoryInput]) {
+        return categoryInput;
+      }
+      
+      // 如果是显示名称，查找对应的键名
+      for (const [key, category] of Object.entries(categoryMap)) {
+        if (category.chinese === categoryInput || category.english === categoryInput) {
+          return key;
+        }
       }
     }
     
@@ -563,13 +548,16 @@ class UnifiedDataService {
   }
 
   /**
-   * 获取所有分类ID列表
+   * 获取所有分类ID列表（从配置文件读取）
    */
   getAllCategoryIds() {
-    return [
-      'screenshot',  'meeting', 'document', 'people', 'life', 
-      'game', 'food', 'travel', 'pet', 'idcard', 'other'
-    ];
+    // 如果配置服务可用，从配置读取
+    if (this.configService && this.configService.isConfigLoaded()) {
+      return this.configService.getAllCategoryIds();
+    }
+    
+    // 后备方案：返回空数组
+    return [];
   }
 
   /**

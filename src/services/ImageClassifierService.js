@@ -1,10 +1,11 @@
 import UnifiedDataService from './UnifiedDataService.js';
+import configService from './ConfigService.js';
 
 class ImageClassifierService {
   constructor() {
     this.isInitialized = false;
-    // Supported categories - 从 UnifiedDataService 获取
-    this.categories = UnifiedDataService.getAllCategoryIds();
+    // Supported categories - 将在初始化时从配置服务获取
+    this.categories = [];
     
     // ImageNet-1K类别列表（1000个类别）
     this.imagenetClasses = null; // 延迟加载
@@ -12,55 +13,136 @@ class ImageClassifierService {
     // ONNX Runtime实例（统一导入，避免重复导入）
     this.ort = null;
     
-    // Multi-model configuration for ID card and general detection
-    // 根据环境自动选择模型路径
-    const isWebEnvironment = typeof window !== 'undefined' && window.location;
-    const isDevelopment = isWebEnvironment && window.location.hostname === 'localhost';
-    const modelBasePath = isDevelopment ? 'http://localhost:3000/models' : './models';
+    // 配置服务实例
+    this.configService = configService;
     
-    this.models = {
-      idCard: {
-        model: null,
-        path: `${modelBasePath}/id_card_detection.onnx`,
-        classes: [
-          'id_card_front',  // 身份证正面 - 类别ID: 0
-          'id_card_back'    // 身份证背面 - 类别ID: 1
-        ],
-        metadata: null,
-        priority: 1, // 高优先级，先检测
-        description: '身份证识别专用模型'
-      },
-      yolo8s: {
-        model: null,
-        path: `${modelBasePath}/yolov8s.onnx`,
-        classes: [
-          'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
-          'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
-          'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
-          'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard',
-          'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-          'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
-          'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone',
-          'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear',
-          'hair drier', 'toothbrush'
-        ],
-        metadata: null,
-        priority: 2, // 低优先级，后检测
-        description: '通用物体检测模型'
-      },
-      mobilenetv3: {
-        model: null,
-        path: `${modelBasePath}/mobilenetv3_rw_Opset17.onnx`,
-        classes: null, // 延迟加载ImageNet类别
-        metadata: null,
-        priority: 3, // 最低优先级，用于图像分类
-        description: 'MobileNetV3图像分类模型',
-        inputName: 'x',
-        outputName: '496'
+    // 模型配置将在初始化时从配置文件加载
+    this.models = {};
+  }
+
+  // 获取模型路径（处理相对路径和绝对路径）
+  getModelPath(configPath, modelBasePath) {
+    if (!configPath) {
+      throw new Error('模型路径配置缺失');
+    }
+    
+    // 如果配置中的路径已经是完整路径（包含协议或绝对路径），直接使用
+    if (configPath.startsWith('http://') || configPath.startsWith('https://') || configPath.startsWith('/')) {
+      return configPath;
+    }
+    
+    // 如果是相对路径，与基础路径组合
+    if (configPath.startsWith('./')) {
+      // 移除 './' 前缀
+      const fileName = configPath.substring(2);
+      // 如果文件名包含 models/，只取文件名部分
+      if (fileName.startsWith('models/')) {
+        const actualFileName = fileName.substring(7); // 移除 'models/' 前缀
+        return `${modelBasePath}/${actualFileName}`;
       }
-    };
+      // 直接拼接
+      return `${modelBasePath}/${fileName}`;
+    }
     
+    // 如果配置路径已经包含 models 目录，直接拼接
+    if (configPath.includes('models/')) {
+      return `${modelBasePath}/${configPath}`;
+    }
     
+    // 直接拼接
+    return `${modelBasePath}/${configPath}`;
+  }
+
+  // 从配置文件初始化模型配置
+  async initializeModelConfigs() {
+    try {
+      // 初始化配置服务
+      const configLoaded = await this.configService.initialize();
+      if (!configLoaded) {
+        throw new Error('配置服务初始化失败');
+      }
+
+      // 获取所有模型配置
+      const modelConfigs = this.configService.getAllModelConfigs();
+      
+      // 根据环境选择模型路径
+      const isWebEnvironment = typeof window !== 'undefined' && window.location;
+      const isDevelopment = isWebEnvironment && window.location.hostname === 'localhost';
+      const modelBasePath = isDevelopment ? 'http://localhost:3000/models' : './models';
+
+      // 初始化模型配置
+      this.models = {
+        // ID卡模型保持硬编码（特有模型，不在配置文件中）
+        idCard: {
+          model: null,
+          path: `${modelBasePath}/id_card_detection.onnx`,
+          classes: ['id_card_front', 'id_card_back'],
+          metadata: null,
+          priority: 1,
+          description: '身份证识别专用模型',
+          confidenceThreshold: 0.3,
+          nmsThreshold: 0.4,
+          maxDetections: 5
+        },
+        // YOLO8s模型从配置文件读取
+        yolo8s: {
+          model: null,
+          path: this.getModelPath(modelConfigs.yolo8s?.path, modelBasePath),
+          classes: null, // 将从配置文件加载
+          metadata: null,
+          priority: 2,
+          description: modelConfigs.yolo8s?.name || '通用物体检测模型',
+          confidenceThreshold: modelConfigs.yolo8s?.confidenceThreshold || 0.25,
+          nmsThreshold: modelConfigs.yolo8s?.nmsThreshold || 0.4,
+          maxDetections: modelConfigs.yolo8s?.maxDetections || 10
+        },
+        // MobileNetV3模型从配置文件读取
+        mobilenetv3: {
+          model: null,
+          path: this.getModelPath(modelConfigs.mobilenetv3?.path, modelBasePath),
+          classes: null, // 将从配置文件加载
+          metadata: null,
+          priority: 3,
+          description: modelConfigs.mobilenetv3?.name || 'MobileNetV3图像分类模型',
+          inputName: 'x',
+          outputName: '496',
+          confidenceThreshold: modelConfigs.mobilenetv3?.confidenceThreshold || 0.3
+        }
+      };
+
+      // 加载YOLO物体类别映射
+      const yoloObjectMap = this.configService.getYoloObjectNameMap();
+      this.models.yolo8s.classes = Object.keys(yoloObjectMap);
+
+      // 加载MobileNetV3类别映射
+      const mobilenetv3Classes = this.configService.getMobileNetV3Classes();
+      if (mobilenetv3Classes && Object.keys(mobilenetv3Classes).length > 0) {
+        // 转换为数组格式（按ID排序）
+        const classesArray = Object.values(mobilenetv3Classes)
+          .sort((a, b) => a.id - b.id)
+          .map(cls => cls.english);
+        
+        this.imagenetClasses = classesArray;
+        this.models.mobilenetv3.classes = Object.values(mobilenetv3Classes)
+          .sort((a, b) => a.id - b.id);
+        
+        console.log(`✅ MobileNetV3类别加载成功: ${this.imagenetClasses.length} 个类别`);
+      } else {
+        console.warn('⚠️ 配置服务中未找到MobileNetV3类别数据');
+        this.imagenetClasses = [];
+        this.models.mobilenetv3.classes = [];
+      }
+
+      // 加载分类信息
+      this.categories = this.configService.getAllCategoryIds();
+      console.log(`✅ 分类信息加载成功: ${this.categories.length} 个分类`);
+
+      console.log('✅ 模型配置初始化完成');
+      return true;
+    } catch (error) {
+      console.error('❌ 模型配置初始化失败:', error);
+      throw error;
+    }
   }
 
   // 初始化ONNX Runtime
@@ -94,6 +176,9 @@ class ImageClassifierService {
     }
 
     try {
+      // 初始化模型配置（从配置文件加载）
+      await this.initializeModelConfigs();
+      
       // 初始化ONNX Runtime
       await this.initializeONNX();
       
@@ -135,7 +220,6 @@ class ImageClassifierService {
         // Node.js 环境
         try {
           const fs = await import('fs');
-          const path = await import('path');
           
           if (!fs.existsSync(modelConfig.path)) {
             throw new Error(`${modelName} model file not found: ${modelConfig.path}`);
@@ -144,10 +228,7 @@ class ImageClassifierService {
         }
       }
 
-        // 对于MobileNetV3模型，需要先加载ImageNet类别
-        if (modelName === 'mobilenetv3') {
-          await this.loadImageNetClasses();
-        }
+        // MobileNetV3类别已在初始化时加载，无需重复加载
 
         // 加载ONNX模型
         // 使用统一的ONNX Runtime实例
@@ -181,8 +262,8 @@ class ImageClassifierService {
 
 
 
-  // Preprocess image for YOLOv8n
-  async preprocessImage(imageData, inputSize = 640) {
+  // 预处理图片用于YOLO模型
+  async preprocessImageForYOLO(imageData, inputSize = 640) {
     try {
       // 使用统一的ONNX Runtime实例
       const ort = this.ort;
@@ -260,7 +341,7 @@ class ImageClassifierService {
   }
 
   // Postprocess YOLO output with dynamic classes
-  async postprocessYOLOOutput(output, confidenceThreshold = 0.3, nmsThreshold = 0.4, classes = null) {
+  async postprocessYOLOOutput(output, confidenceThreshold = null, nmsThreshold = null, classes = null) {
     try {
       if (!output) {
         throw new Error('输出数据为空');
@@ -763,10 +844,13 @@ class ImageClassifierService {
       throw new Error(`Model ${modelName} not loaded`);
     }
     
-    // 根据模型类型设置不同的默认参数
-    const defaultOptions = modelName === 'idCard' 
-      ? { confidenceThreshold: 0.3, nmsThreshold: 0.4, maxDetections: 5 }
-      : { confidenceThreshold: 0.25, nmsThreshold: 0.4, maxDetections: 10 };
+    // 从模型配置获取默认参数
+    const modelConfig = this.models[modelName];
+    const defaultOptions = {
+      confidenceThreshold: modelConfig?.confidenceThreshold || 0.25,
+      nmsThreshold: modelConfig?.nmsThreshold || 0.4,
+      maxDetections: modelConfig?.maxDetections || 10
+    };
     
     const {
       confidenceThreshold = defaultOptions.confidenceThreshold,
@@ -781,7 +865,7 @@ class ImageClassifierService {
       const modelConfig = this.models[modelName];
 
       // 预处理图片
-      const inputTensor = await this.preprocessImage(imageUri);
+      const inputTensor = await this.preprocessImageForYOLO(imageUri);
       
       // 运行推理
       const feeds = { images: inputTensor };
@@ -896,7 +980,7 @@ class ImageClassifierService {
           // 第三步：YOLO没有检测到物体，使用MobileNetV3进行分类
           try {
             const classificationResult = await this.classifyImageWithMobileNetV3(imageUri, {
-              confidenceThreshold: 0.3
+              confidenceThreshold: this.models.mobilenetv3?.confidenceThreshold || 0.3
             });
             
             results.usedModels.push('mobilenetv3');
@@ -1131,40 +1215,6 @@ class ImageClassifierService {
   }
 
 
-  // 加载ImageNet类别数据
-  async loadImageNetClasses() {
-    if (this.imagenetClasses) {
-      return this.imagenetClasses;
-    }
-
-    try {
-      // 根据环境选择不同的加载方式
-      if (typeof window !== 'undefined') {
-        // 浏览器环境 - 使用fetch
-        const response = await fetch('./models/imagenet_classes.json');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        this.imagenetClasses = data.classes.map(cls => cls.english);
-        this.models.mobilenetv3.classes = data.classes;
-        return this.imagenetClasses;
-      } else {
-        // Node.js环境 - 使用fs
-        const fs = await import('fs');
-        const data = JSON.parse(fs.readFileSync('./models/imagenet_classes.json', 'utf8'));
-        this.imagenetClasses = data.classes.map(cls => cls.english);
-        this.models.mobilenetv3.classes = data.classes;
-        return this.imagenetClasses;
-      }
-    } catch (error) {
-      console.error('❌ 加载ImageNet类别失败:', error);
-      // 返回默认的空数组作为后备
-      this.imagenetClasses = new Array(1000).fill('unknown');
-      this.models.mobilenetv3.classes = this.imagenetClasses;
-      return this.imagenetClasses;
-    }
-  }
 
   // 加载MobileNetV3模型
   async loadMobileNetV3Model() {
@@ -1175,8 +1225,7 @@ class ImageClassifierService {
         return modelConfig.model;
       }
 
-      // 先加载ImageNet类别
-      await this.loadImageNetClasses();
+      // ImageNet类别已在初始化时加载
 
       // 使用统一的ONNX Runtime实例
       const ort = this.ort;
@@ -1276,8 +1325,11 @@ class ImageClassifierService {
   }
 
   // 后处理MobileNetV3输出
-  postprocessMobileNetV3Output(output, confidenceThreshold = 0.3) {
+  postprocessMobileNetV3Output(output, confidenceThreshold = null) {
     try {
+      // 使用模型配置中的阈值作为默认值
+      const threshold = confidenceThreshold !== null ? confidenceThreshold : (this.models.mobilenetv3?.confidenceThreshold || 0.3);
+      
       const outputData = output.data;
       const probabilities = new Array(outputData.length);
 
@@ -1307,7 +1359,7 @@ class ImageClassifierService {
       top5.sort((a, b) => b.probability - a.probability);
       
       // 过滤低置信度预测
-      const validPredictions = top5.filter(pred => pred.probability >= confidenceThreshold);
+      const validPredictions = top5.filter(pred => pred.probability >= threshold);
       
       return {
         predictions: top5.slice(0, 5), // 返回top-5
@@ -1334,7 +1386,7 @@ class ImageClassifierService {
 
   // 使用MobileNetV3分类图片
   async classifyImageWithMobileNetV3(imageUri, options = {}) {
-    const { confidenceThreshold = 0.3 } = options;
+    const { confidenceThreshold = this.models.mobilenetv3?.confidenceThreshold || 0.3 } = options;
     
     try {
       // 确保模型已加载

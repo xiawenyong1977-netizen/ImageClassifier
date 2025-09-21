@@ -4,6 +4,7 @@ import { SafeAreaView, Alert, AsyncStorage } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
 import GalleryScannerService from '../../services/GalleryScannerService';
+import configService from '../../services/ConfigService';
 
 // Create service instances
 const imageClassifierService = new ImageClassifierService();
@@ -22,122 +23,20 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
   const [availableObjects, setAvailableObjects] = useState([]); // 可用的物体类别
   const [categoryPriorities, setCategoryPriorities] = useState({}); // 分类优先级
 
-  // 分类名称中英对照表（与HomeScreen保持一致）
-  const categoryNameMap = {
-    'people': '社交活动',
-    'pet': '宠物照片',
-    'life': '生活记录',
-    'food': '美食记录',
-    'document': '工作照片',
-    'travel': '旅行风景',
-    'game': '运动娱乐',
-    'screenshot': '手机截图',
-    'meeting': '会议场景',
-    'other': '其他图片',
-    'idcard': '身份证'
+  // 获取分类名称映射（从配置服务）
+  const getCategoryNameMap = () => {
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
+    return configService.getCategoryNameMap();
   };
 
-  // 物体名称中英对照表
-  const objectNameMap = {
-    // 人物
-    'person': '人',
-    
-    // 宠物
-    'cat': '猫',
-    'dog': '狗',
-    'bird': '鸟',
-    'horse': '马',
-    'sheep': '羊',
-    'cow': '牛',
-    'elephant': '大象',
-    'bear': '熊',
-    'zebra': '斑马',
-    'giraffe': '长颈鹿',
-    
-    // 生活用品
-    'bottle': '瓶子',
-    'wine glass': '酒杯',
-    'cup': '杯子',
-    'fork': '叉子',
-    'knife': '刀',
-    'spoon': '勺子',
-    'bowl': '碗',
-    'tv': '电视',
-    'couch': '沙发',
-    'bed': '床',
-    'dining table': '餐桌',
-    'toilet': '马桶',
-    'microwave': '微波炉',
-    'oven': '烤箱',
-    'toaster': '烤面包机',
-    'sink': '水槽',
-    'refrigerator': '冰箱',
-    'clock': '时钟',
-    'vase': '花瓶',
-    'scissors': '剪刀',
-    'teddy bear': '泰迪熊',
-    'hair drier': '吹风机',
-    'toothbrush': '牙刷',
-    
-    // 食物
-    'banana': '香蕉',
-    'apple': '苹果',
-    'sandwich': '三明治',
-    'orange': '橙子',
-    'broccoli': '西兰花',
-    'carrot': '胡萝卜',
-    'hot dog': '热狗',
-    'pizza': '披萨',
-    'donut': '甜甜圈',
-    'cake': '蛋糕',
-    
-    // 工作文档
-    'laptop': '笔记本电脑',
-    'mouse': '鼠标',
-    'keyboard': '键盘',
-    'cell phone': '手机',
-    'book': '书',
-    'remote': '遥控器',
-    
-    // 交通工具
-    'car': '汽车',
-    'motorcycle': '摩托车',
-    'airplane': '飞机',
-    'bus': '公交车',
-    'train': '火车',
-    'truck': '卡车',
-    'boat': '船',
-    'bicycle': '自行车',
-    
-    // 运动娱乐
-    'sports ball': '球类',
-    'frisbee': '飞盘',
-    'skis': '滑雪板',
-    'snowboard': '滑雪板',
-    'kite': '风筝',
-    'baseball bat': '棒球棒',
-    'baseball glove': '棒球手套',
-    'skateboard': '滑板',
-    'surfboard': '冲浪板',
-    'tennis racket': '网球拍',
-    
-    // 其他
-    'traffic light': '红绿灯',
-    'fire hydrant': '消防栓',
-    'stop sign': '停车标志',
-    'parking meter': '停车计时器',
-    'bench': '长椅',
-    'backpack': '背包',
-    'umbrella': '雨伞',
-    'handbag': '手提包',
-    'tie': '领带',
-    'suitcase': '行李箱',
-    'potted plant': '盆栽',
-    'chair': '椅子',
-    
-    // 身份证
-    'id_card_front': '身份证正面',
-    'id_card_back': '身份证背面'
+  // 获取物体名称映射（从配置服务）
+  const getObjectNameMap = () => {
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
+    return configService.getYoloObjectNameMap();
   };
 
   useEffect(() => {
@@ -754,7 +653,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                   <View key={category} style={styles.tableRow}>
                     <View style={styles.categoryCell}>
                       <Text style={styles.categoryName}>
-                        {categoryNameMap[category] || category}
+                        {getCategoryNameMap()[category]?.chinese || category}
                       </Text>
                     </View>
                     <View style={styles.objectsCell}>
@@ -763,7 +662,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                           {objectClasses.map(objectClass => (
                             <View key={objectClass} style={styles.objectTag}>
                               <Text style={styles.objectTagText}>
-                                {objectNameMap[objectClass] || objectClass}
+                                {getObjectNameMap()[objectClass]?.chinese || objectClass}
                               </Text>
                               <TouchableOpacity
                                 style={styles.removeObjectButton}
@@ -785,7 +684,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                               <option value="">+ 添加物体</option>
                               {getUnassignedObjects(category).map(objectClass => (
                                 <option key={objectClass} value={objectClass}>
-                                  {objectNameMap[objectClass] || objectClass}
+                                  {getObjectNameMap()[objectClass]?.chinese || objectClass}
                                 </option>
                               ))}
                             </select>
@@ -794,7 +693,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                       ) : (
                         <Text style={styles.objectsText}>
                           {objectClasses.map(obj => 
-                            objectNameMap[obj] || obj
+                            getObjectNameMap()[obj]?.chinese || obj
                           ).join(', ')}
                         </Text>
                       )}

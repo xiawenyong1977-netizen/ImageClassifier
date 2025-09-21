@@ -1,5 +1,6 @@
 import { AsyncStorage, RNFS } from '../adapters/WebAdapters.js';
 import MediaStoreService from './MediaStoreService.js';
+import configService from './ConfigService.js';
 
 // Platform detection for web and mobile
 let Platform;
@@ -208,21 +209,12 @@ class ImageStorageService {
 
   // 获取分类显示名称
   getCategoryDisplayName(categoryId) {
-    const categoryMap = {
-      screenshot: '手机截图',
-      meeting: '会议场景',
-      document: '工作照片',
-      people: '社交活动',
-      life: '生活记录',
-      game: '运动娱乐',
-      food: '美食记录',
-      travel: '旅行风景',
-      pet: '宠物照片',
-      idcard: '身份证',
-      other: '其他图片',
-    };
+    // 确保配置服务已加载
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
     
-    return categoryMap[categoryId] || categoryId;
+    return configService.getCategoryDisplayName(categoryId, 'chinese');
   }
 
   // Initialize check

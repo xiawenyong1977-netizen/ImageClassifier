@@ -1,5 +1,6 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
 import ImageStorageService from './ImageStorageService.js';
+import configService from './ConfigService.js';
 
 class GlobalImageCache {
   constructor() {
@@ -161,7 +162,7 @@ class GlobalImageCache {
       this.imageIdToIndex.set(image.id, this.cache.allImages.length - 1);
       
       // 更新统计信息
-      const normalizedCategory = this._getCategoryId(image.category);
+      const normalizedCategory = this._normalizeCategoryId(image.category);
       this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
       if (image.city) {
         this.cache.cityCounts[image.city] = (this.cache.cityCounts[image.city] || 0) + 1;
@@ -313,7 +314,7 @@ class GlobalImageCache {
     this.cache.allImages.forEach((img, index) => {
       if (img.category) {
         // 使用标准化的分类ID作为键（英文ID）
-        const normalizedCategory = this._getCategoryId(img.category);
+        const normalizedCategory = this._normalizeCategoryId(img.category);
         this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
         console.log(`📊 图片${index+1}: ${img.fileName} → ${img.category} → ${normalizedCategory}`);
       } else {
@@ -323,37 +324,30 @@ class GlobalImageCache {
     console.log('📊 分类统计计算结果:', this.cache.categoryCounts);
   }
 
-  // 获取标准化的分类ID（与UnifiedDataService保持一致）
-  _getCategoryId(categoryInput) {
-    const categoryMap = {
-      wechat: '微信截图',
-      meeting: '会议场景',
-      document: '工作照片',
-      people: '社交活动',
-      life: '生活记录',
-      game: '运动娱乐',
-      food: '美食记录',
-      travel: '旅行风景',
-      pet: '宠物照片',
-      other: '其他图片',
-    };
+  // 标准化分类ID（直接使用ConfigService）
+  _normalizeCategoryId(categoryInput) {
+    // 确保配置服务已加载
+    if (!configService || !configService.isConfigLoaded()) {
+      throw new Error('ConfigService未初始化或配置未加载');
+    }
     
-    // 如果输入已经是ID，直接返回
+    const categoryMap = configService.getCategoryNameMap();
+    
+    // 如果输入已经是键名，直接返回
     if (categoryMap[categoryInput]) {
       return categoryInput;
     }
     
-    // 如果是显示名称，查找对应的ID
-    for (const [id, displayName] of Object.entries(categoryMap)) {
-      if (displayName === categoryInput) {
-        return id;
+    // 如果是显示名称，查找对应的键名
+    for (const [key, category] of Object.entries(categoryMap)) {
+      if (category.chinese === categoryInput || category.english === categoryInput) {
+        return key;
       }
     }
     
-    // 如果都没找到，返回原值
-    return categoryInput;
+    // 如果都没找到，抛出错误
+    throw new Error(`未找到分类: ${categoryInput}`);
   }
-
 
   // 更新选中统计 - 添加图片
   _updateSelectedStatsAdd(image) {
@@ -361,7 +355,7 @@ class GlobalImageCache {
       console.error(`❌ 图片 ${image.id} 缺少分类信息:`, image);
       throw new Error(`图片 ${image.id} 缺少分类信息`);
     }
-    const category = this._getCategoryId(image.category);
+    const category = this._normalizeCategoryId(image.category);
     this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
     
     if (image.city) {
@@ -375,7 +369,7 @@ class GlobalImageCache {
       console.error(`❌ 图片 ${image.id} 缺少分类信息:`, image);
       throw new Error(`图片 ${image.id} 缺少分类信息`);
     }
-    const category = this._getCategoryId(image.category);
+    const category = this._normalizeCategoryId(image.category);
     if (this.cache.selectedCategoryCounts[category] > 0) {
       this.cache.selectedCategoryCounts[category]--;
       if (this.cache.selectedCategoryCounts[category] === 0) {
@@ -406,7 +400,7 @@ class GlobalImageCache {
     this.cache.allImages.forEach(img => {
       if (img.selected) {
         if (img.category) {
-          const category = this._getCategoryId(img.category);
+          const category = this._normalizeCategoryId(img.category);
           this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
         }
         if (img.city) {
@@ -558,13 +552,13 @@ class GlobalImageCache {
     
     // 如果指定了分类，按分类过滤
     if (category) {
-      const normalizedCategory = this._getCategoryId(category);
+      const normalizedCategory = this._normalizeCategoryId(category);
       filteredImages = filteredImages.filter(img => {
         if (!img.category) {
           console.error(`❌ 图片 ${img.id} 缺少分类信息:`, img);
           throw new Error(`图片 ${img.id} 缺少分类信息`);
         }
-        const imgCategory = this._getCategoryId(img.category);
+        const imgCategory = this._normalizeCategoryId(img.category);
         return imgCategory === normalizedCategory;
       });
     }
@@ -579,13 +573,13 @@ class GlobalImageCache {
 
   // 获取指定分类的所有图片
   getImagesByCategory(category) {
-    const normalizedCategory = this._getCategoryId(category);
+    const normalizedCategory = this._normalizeCategoryId(category);
     return this.cache.allImages.filter(img => {
       if (!img.category) {
         console.error(`❌ 图片 ${img.id} 缺少分类信息:`, img);
         throw new Error(`图片 ${img.id} 缺少分类信息`);
       }
-      const imgCategory = this._getCategoryId(img.category);
+      const imgCategory = this._normalizeCategoryId(img.category);
       return imgCategory === normalizedCategory;
     });
   }
