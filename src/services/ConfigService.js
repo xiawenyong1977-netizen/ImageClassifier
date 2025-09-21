@@ -216,10 +216,20 @@ class ConfigService {
    * @returns {string} 显示名称
    */
   getCategoryDisplayName(categoryId, language = 'chinese') {
-    const category = this.getCategoryById(categoryId);
-    if (!category) return categoryId;
+    // 首先尝试通过键名获取分类信息
+    const categoryByKey = this.getCategoryByKey(categoryId);
+    if (categoryByKey) {
+      return categoryByKey[language] || categoryByKey.chinese || categoryByKey.english || categoryId;
+    }
     
-    return category[language] || category.chinese || category.english || categoryId;
+    // 如果键名找不到，尝试通过ID获取
+    const category = this.getCategoryById(categoryId);
+    if (category) {
+      return category[language] || category.chinese || category.english || categoryId;
+    }
+    
+    // 都找不到，返回原ID
+    return categoryId;
   }
 
   /**

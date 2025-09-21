@@ -830,7 +830,10 @@ class ImageStorageService {
       await this.updateStats();
       
       console.log(`Image deleted successfully: ${image.fileName}`);
-      return true;
+      return {
+        success: true,
+        message: 'Image deleted successfully'
+      };
       
     } catch (error) {
       console.error('Failed to delete image:', error);
