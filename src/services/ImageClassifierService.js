@@ -501,47 +501,70 @@ class ImageClassifierService {
   }
 
   // Apply Non-Maximum Suppression
-  applyNMS(detections, nmsThreshold) {
-    // 按置信度排序
+  applyNMS(detections, nmsThreshold = 0.4) {
+    if (!detections || detections.length === 0) {
+      return [];
+    }
+
+    // 按置信度降序排序
     detections.sort((a, b) => b.confidence - a.confidence);
     
     const filteredDetections = [];
-    const seenClasses = new Set();
+    const suppressed = new Array(detections.length).fill(false);
     
-    // 对于每个检测，只保留每个类别的最高置信度检测
-    for (const detection of detections) {
-      const classKey = `${detection.class}_${detection.classIndex}`;
+    for (let i = 0; i < detections.length; i++) {
+      if (suppressed[i]) continue;
       
-      if (!seenClasses.has(classKey)) {
-        filteredDetections.push(detection);
-        seenClasses.add(classKey);
+      const currentDetection = detections[i];
+      filteredDetections.push(currentDetection);
+      
+      // 计算当前检测框与其他检测框的IoU
+      for (let j = i + 1; j < detections.length; j++) {
+        if (suppressed[j]) continue;
+        
+        const otherDetection = detections[j];
+        
+        // 只对相同类别的检测框进行NMS
+        if (currentDetection.classIndex !== otherDetection.classIndex) {
+          continue;
+        }
+        
+        // 计算IoU
+        const iou = this.calculateIoU(currentDetection, otherDetection);
+        
+        // 如果IoU超过阈值，抑制该检测框
+        if (iou > nmsThreshold) {
+          suppressed[j] = true;
+        }
       }
     }
     
     return filteredDetections;
   }
 
-  // Calculate Intersection over Union (IoU)
-  calculateIoU(box1, box2) {
-    const [x1, y1, w1, h1] = box1;
-    const [x2, y2, w2, h2] = box2;
+  // 计算两个检测框的IoU (Intersection over Union)
+  calculateIoU(detection1, detection2) {
+    const x1 = Math.max(detection1.x, detection2.x);
+    const y1 = Math.max(detection1.y, detection2.y);
+    const x2 = Math.min(detection1.x + detection1.width, detection2.x + detection2.width);
+    const y2 = Math.min(detection1.y + detection1.height, detection2.y + detection2.height);
     
-    const xLeft = Math.max(x1 - w1/2, x2 - w2/2);
-    const yTop = Math.max(y1 - h1/2, y2 - h2/2);
-    const xRight = Math.min(x1 + w1/2, x2 + w2/2);
-    const yBottom = Math.min(y1 + h1/2, y2 + h2/2);
+    // 计算交集面积
+    const intersectionArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
     
-    if (xRight < xLeft || yBottom < yTop) {
+    // 计算并集面积
+    const area1 = detection1.width * detection1.height;
+    const area2 = detection2.width * detection2.height;
+    const unionArea = area1 + area2 - intersectionArea;
+    
+    // 避免除零
+    if (unionArea === 0) {
       return 0;
     }
     
-    const intersectionArea = (xRight - xLeft) * (yBottom - yTop);
-    const box1Area = w1 * h1;
-    const box2Area = w2 * h2;
-    const unionArea = box1Area + box2Area - intersectionArea;
-    
     return intersectionArea / unionArea;
   }
+
 
 
 
