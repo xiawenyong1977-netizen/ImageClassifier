@@ -179,7 +179,7 @@ const tryExifParser = async (filePath) => {
 
   } catch (error) {
 
-    console.log(`⚠️ exif-parser failed:`, error.message);
+    // exif-parser failed
 
     return null;
 
@@ -274,7 +274,6 @@ const extractExifData = async (filePath) => {
       
 
       // 提取GPS信息
-
       const gpsInfo = extractGPSFromExifParser(exifData);
 
       const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
@@ -366,7 +365,6 @@ const extractExifData = async (filePath) => {
         
 
         // 提取GPS信息
-
         const gpsInfo = extractGPSFromNativeExif(exifData);
 
         const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
@@ -464,7 +462,7 @@ class GalleryScannerService {
       // 不再处理权限，假设权限已经在APP级别处理
       this.isInitialized = true;
 
-      console.log('✅ Gallery scanner service initialized successfully');
+      // Gallery scanner service initialized successfully
 
     } catch (error) {
 
@@ -601,7 +599,7 @@ class GalleryScannerService {
         // 调试：显示每个文件的处理过程
         if (!item.isDirectory()) {
           const isImage = this.isImageFile(item.name);
-          console.log(`🔍 检查文件: ${item.name}, 是图片: ${isImage}`);
+          // 检查文件是否为图片
         }
 
         // 每处理200个文件就更新进度并让出主进程控制权
@@ -656,7 +654,7 @@ class GalleryScannerService {
 
           if (processedUris.has(fileUri)) {
 
-            console.log(`⚠️ 发现重复URI: ${fileUri}`);
+            // 发现重复URI，跳过
 
             continue;
 
@@ -666,14 +664,14 @@ class GalleryScannerService {
 
           
           imageCount++;
-          console.log(`🖼️ 发现图片文件: ${item.name}, 当前已发现图片数量: ${imageCount}`);
+          // 发现图片文件
           
 
           // 调试信息：每1000个文件输出一次
 
           if (imageCount % 1000 === 0) {
 
-            console.log(`🖼️ 已发现 ${imageCount} 个图片文件`);
+            // 已发现图片文件
 
           }
 
@@ -757,13 +755,9 @@ class GalleryScannerService {
 
       
 
-      console.log(`📊 目录扫描完成: ${dirPath}`);
+      // 目录扫描完成
 
-      console.log(`📁 子目录数量: ${dirCount}`);
-
-      console.log(`🖼️ 图片文件数量: ${imageCount}`);
-
-      console.log(`📦 总返回图片数量: ${images.length}`);
+      // 目录扫描统计
 
       
 
@@ -819,12 +813,12 @@ class GalleryScannerService {
 
     try {
 
-      console.log('🔄 Starting to update existing images with city info...');
+      // Starting to update existing images with city info
 
       
 
       const allImages = await UnifiedDataService.readAllImages();
-      console.log(`📊 Found ${allImages.length} existing images`);
+      // Found existing images
 
       
 
@@ -842,7 +836,7 @@ class GalleryScannerService {
 
           try {
 
-            console.log(`🔍 Processing image: ${image.fileName}`);
+            // Processing image for city info
 
             
 
@@ -875,13 +869,13 @@ class GalleryScannerService {
               await UnifiedDataService.writeImageClassification(updatedImage);
               
 
-              console.log(`✅ Updated ${image.fileName} with city: ${nearestCity.name}`);
+              // Updated image with city info
 
               updatedCount++;
 
             } else {
 
-              console.log(`⚠️ No city found for ${image.fileName} at ${image.latitude}, ${image.longitude}`);
+              // No city found for coordinates
 
               skippedCount++;
 
@@ -905,7 +899,7 @@ class GalleryScannerService {
 
       
 
-      console.log(`✅ City info update completed: ${updatedCount} updated, ${skippedCount} skipped`);
+      // City info update completed
 
       return { updated: updatedCount, skipped: skippedCount };
 
@@ -951,12 +945,11 @@ class GalleryScannerService {
    */
   async scanWithIndependentThread(scanPaths, onProgress, scanStartTime) {
     try {
-      console.log('🚀 启动独立扫描线程方案...');
+      // 启动独立扫描线程方案
       
       // 初始化图片分类器
-      console.log('🔄 初始化图片分类器...');
+      // 初始化图片分类器
       await this.imageClassifier.initialize();
-      console.log('✅ 图片分类器初始化完成');
       
       // 保存onProgress为实例变量
       this.onProgress = onProgress;
@@ -980,9 +973,8 @@ class GalleryScannerService {
       this.sendProgressMessage('completed', allImages.length, processedCount, failedCount, scanStartTime);
       
       // 反初始化图片分类器，卸载模型释放内存
-      console.log('🧹 扫描完成，开始反初始化图片分类器...');
+      // 扫描完成，释放内存
       this.imageClassifier.unloadAllModels();
-      console.log('✅ 图片分类器反初始化完成，内存已释放');
       
       return {
         success: true,
@@ -997,9 +989,8 @@ class GalleryScannerService {
       
       // 即使出现错误也要反初始化图片分类器，释放内存
       try {
-        console.log('🧹 扫描出错，开始反初始化图片分类器...');
+        // 扫描出错，释放内存
         this.imageClassifier.unloadAllModels();
-        console.log('✅ 图片分类器反初始化完成，内存已释放');
       } catch (unloadError) {
         console.error('❌ 反初始化图片分类器失败:', unloadError);
       }
@@ -1036,7 +1027,7 @@ class GalleryScannerService {
       }
     }
     
-    console.log(`✅ 阶段1完成: 发现 ${allImages.length} 个文件`);
+    // 阶段1完成
     return allImages;
   }
   
@@ -1045,7 +1036,7 @@ class GalleryScannerService {
    * 对比现有数据库，找出新增和删除的文件
    */
   async compareFilesPhase(allImages, scanStartTime) {
-    console.log('🔍 阶段2: 开始文件比对...');
+    // 阶段2: 文件比对
     
     this.sendProgressMessage('file_comparison', allImages.length, 0, 0, scanStartTime);
     
@@ -1091,7 +1082,7 @@ class GalleryScannerService {
     // 过滤出需要处理的新图片
     const newImages = allImages.filter(img => newUris.includes(img.uri));
     
-    console.log(`✅ 阶段2完成: ${deletedUris.length} 个文件被删除，${newImages.length} 个新文件需要处理`);
+    // 阶段2完成
     
     return { deletedUris, newImages };
   }
@@ -1102,21 +1093,19 @@ class GalleryScannerService {
    */
   async processImagesPhase(newImages, scanStartTime) {
     if (newImages.length === 0) {
-      console.log('📝 阶段3-4: 没有新文件需要处理');
+      // 阶段3-4: 没有新文件需要处理
       return { processedCount: 0, failedCount: 0 };
     }
     
-    console.log(`🔄 阶段3-4: 开始处理 ${newImages.length} 个新文件...`);
+    // 阶段3-4: 开始处理新文件
     
     this.sendProgressMessage('processing_images', newImages.length, 0, 0, scanStartTime);
     
-    // 简化的串行处理逻辑
-    const SAVE_BATCH_SIZE = 100;
+    // 简化的串行处理逻辑 - 单张保存
     let processedCount = 0;
     let failedCount = 0;
-    const successfulData = [];
     
-    console.log(`🚀 开始串行处理 ${newImages.length} 张图片`);
+    // 开始串行处理图片
     
     // 串行处理每张图片
     for (let i = 0; i < newImages.length; i++) {
@@ -1131,13 +1120,16 @@ class GalleryScannerService {
         
         // 图片分类
         const classificationStartTime = Date.now();
-        const classification = await this.imageClassifier.classifyImage(image.uri, {
-          timestamp: image.timestamp,
-          fileSize: image.size,
-          fileName: image.fileName,
-          imageDimensions: imageDimensions
-        });
+        const classification = await this.imageClassifier.classifyImage(image.uri);
         const classificationTime = Date.now() - classificationStartTime;
+        
+        // 检查分类结果
+        
+        // 检查分类是否成功
+        if (!classification.success) {
+          console.warn(`⚠️ 图片 ${image.fileName} 分类失败: ${classification.message}`);
+          // 分类失败时，函数已经返回了默认的categoryId，无需额外处理
+        }
         
         // 统计分类耗时
         if (!this.classificationStats) {
@@ -1156,21 +1148,16 @@ class GalleryScannerService {
         this.classificationStats.maxTime = Math.max(this.classificationStats.maxTime, classificationTime);
         this.classificationStats.avgTime = this.classificationStats.totalTime / this.classificationStats.count;
         
-        // 每处理10张图片输出一次统计信息
-        if (this.classificationStats.count % 10 === 0) {
-          console.log(`📊 分类性能统计 (${this.classificationStats.count}张图片):`);
-          console.log(`   - 当前图片: ${image.fileName} (${classificationTime}ms)`);
-          console.log(`   - 平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms`);
-          console.log(`   - 最快: ${this.classificationStats.minTime}ms`);
-          console.log(`   - 最慢: ${this.classificationStats.maxTime}ms`);
-          console.log(`   - 总耗时: ${this.classificationStats.totalTime}ms`);
+        // 每处理100张图片输出一次统计信息
+        if (this.classificationStats.count % 100 === 0) {
+          console.log(`📊 分类进度: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms`);
         }
         
         // 构建保存数据
         const saveData = {
           uri: image.uri,
-          category: classification.category,
-          confidence: classification.confidence,
+          category: classification.categoryId || classification.category, // 兼容两种返回格式
+          confidence: classification.confidence || 1.0, // 提供默认置信度
           timestamp: image.timestamp,
           takenAt: takenTime,
           fileName: image.fileName,
@@ -1190,27 +1177,69 @@ class GalleryScannerService {
           // 检测结果
           idCardDetections: classification.idCardDetections || [],
           generalDetections: classification.generalDetections || [],
-          smartClassifications: classification.smartClassifications || []
+          mobileNetV3Detections: classification.mobileNetV3Detections || null,
+          imageDimensions: classification.imageDimensions || null
         };
         
-        successfulData.push(saveData);
-        processedCount++;
+        // 调试：详细检查分类结果和保存数据
+        console.log(`🔍 分类结果检查 ${image.fileName}:`, {
+          success: classification.success,
+          categoryId: classification.categoryId,
+          category: classification.category,
+          hasIdCardDetections: !!classification.idCardDetections,
+          hasGeneralDetections: !!classification.generalDetections,
+          hasMobileNetV3Detections: !!classification.mobileNetV3Detections,
+          hasImageDimensions: !!classification.imageDimensions,
+          idCardCount: classification.idCardDetections?.length || 0,
+          generalCount: classification.generalDetections?.length || 0,
+          mobileNetV3Count: classification.mobileNetV3Detections?.predictions?.length || 0
+        });
+        
+        console.log(`🔍 保存数据检查 ${image.fileName}:`, {
+          hasIdCardDetections: !!saveData.idCardDetections,
+          hasGeneralDetections: !!saveData.generalDetections,
+          hasMobileNetV3Detections: !!saveData.mobileNetV3Detections,
+          hasImageDimensions: !!saveData.imageDimensions,
+          idCardCount: saveData.idCardDetections?.length || 0,
+          generalCount: saveData.generalDetections?.length || 0,
+          mobileNetV3Count: saveData.mobileNetV3Detections?.predictions?.length || 0
+        });
+        
+        // 立即保存单张图片数据
+        try {
+          // 调试：检查保存的数据是否包含检测结果
+          console.log(`🔍 准备保存图片 ${image.fileName}:`, {
+            hasIdCardDetections: !!saveData.idCardDetections,
+            hasGeneralDetections: !!saveData.generalDetections,
+            hasMobileNetV3Detections: !!saveData.mobileNetV3Detections,
+            idCardCount: saveData.idCardDetections?.length || 0,
+            generalCount: saveData.generalDetections?.length || 0
+          });
+          
+          await UnifiedDataService.writeImageDetailedInfo([saveData], false);
+          console.log(`✅ 成功保存图片: ${image.fileName} (第${processedCount + 1}张)`);
+          processedCount++;
+        } catch (saveError) {
+          console.error(`❌ 保存失败 ${image.fileName} (第${processedCount + 1}张):`, saveError);
+          console.error(`❌ 错误详情:`, {
+            message: saveError.message,
+            stack: saveError.stack,
+            saveData: {
+              fileName: saveData.fileName,
+              category: saveData.category,
+              hasDetections: !!(saveData.idCardDetections || saveData.generalDetections || saveData.mobileNetV3Detections)
+            }
+          });
+          failedCount++;
+        }
         
       } catch (error) {
         console.error(`处理图片失败 ${image.fileName}:`, error);
         failedCount++;
       }
       
-      // 批量保存数据
-      if (successfulData.length >= SAVE_BATCH_SIZE || i === newImages.length - 1) {
-        if (successfulData.length > 0) {
-          await UnifiedDataService.writeImageDetailedInfo(successfulData, false);
-          successfulData.length = 0; // 清空数组
-        }
-        
-        // 让出主进程控制权
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
+      // 每处理完一张图片就让出主进程控制权
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // 每处理1张图片就发送一次进度通知（实时更新）
       this.sendProgressMessage(
@@ -1228,15 +1257,11 @@ class GalleryScannerService {
     
     // 输出最终分类性能统计
     if (this.classificationStats && this.classificationStats.count > 0) {
-      console.log(`\n📊 最终分类性能统计 (${this.classificationStats.count}张图片):`);
-      console.log(`   - 平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms`);
-      console.log(`   - 最快: ${this.classificationStats.minTime}ms`);
-      console.log(`   - 最慢: ${this.classificationStats.maxTime}ms`);
-      console.log(`   - 总耗时: ${this.classificationStats.totalTime}ms`);
-      console.log(`   - 处理速度: ${(this.classificationStats.count / (this.classificationStats.totalTime / 1000)).toFixed(2)} 张/秒`);
+      const speed = (this.classificationStats.count / (this.classificationStats.totalTime / 1000)).toFixed(2);
+      console.log(`📊 分类完成: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms，处理速度: ${speed}张/秒`);
     }
     
-    console.log(`✅ 阶段3-4完成: 处理了 ${totalProcessed} 个文件，失败 ${totalFailed} 个`);
+    // 阶段3-4完成
     
     return { processedCount: totalProcessed, failedCount: totalFailed };
   }
@@ -1247,17 +1272,17 @@ class GalleryScannerService {
    */
   async removeFilesPhase(deletedUris, scanStartTime) {
     if (deletedUris.length === 0) {
-      console.log('📝 阶段5: 没有文件需要移除');
+      // 阶段5: 没有文件需要移除
       return;
     }
     
-    console.log(`🗑️ 阶段5: 开始移除 ${deletedUris.length} 个已删除文件...`);
+    // 阶段5: 开始移除已删除文件
     
     this.sendProgressMessage('removing_files', 0, 0, 0, scanStartTime);
     
     const deleteResult = await UnifiedDataService.removeImagesByUris(deletedUris, false);
     if (deleteResult.success) {
-      console.log(`✅ 阶段5完成: 成功移除 ${deleteResult.removedCount} 个文件`);
+      // 阶段5完成
     } else {
       console.error('❌ 阶段5失败: 移除文件失败:', deleteResult.error);
     }
@@ -1268,21 +1293,20 @@ class GalleryScannerService {
    * 更新缓存和保存扫描完成时间
    */
   async updateDataPhase(processedCount, failedCount, scanStartTime) {
-    console.log('🔄 阶段6: 开始数据批量更新...');
+    // 阶段6: 开始数据批量更新
     
     this.sendProgressMessage('updating_data', 0, processedCount, failedCount, scanStartTime);
     
     try {
       // 强制刷新缓存（重置状态后重新构建）
-      console.log('🔄 强制刷新缓存...');
+      // 强制刷新缓存
       await UnifiedDataService.imageCache.refreshCache();
-      console.log('✅ 缓存更新完成');
       
       // 保存扫描完成时间
       const settings = await UnifiedDataService.readSettings();
       settings.lastScanTime = new Date().toISOString();
       await UnifiedDataService.writeSettings(settings);
-      console.log('✅ 扫描完成时间已保存');
+      // 扫描完成时间已保存
       
     } catch (error) {
       console.error('❌ 阶段6失败: 数据更新失败:', error);
@@ -1298,7 +1322,7 @@ class GalleryScannerService {
       `处理完成: ${processedCount} 个文件，失败 ${failedCount} 个`
     );
     
-    console.log('✅ 阶段6完成: 数据更新完成');
+    // 阶段6完成
   }
 
 }

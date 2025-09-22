@@ -64,6 +64,10 @@ class GlobalImageCache {
     try {
       console.log('🔄 开始构建全局图片缓存...');
       
+      // 确保存储服务已初始化
+      await this.imageStorageService.ensureInitialized();
+      console.log('✅ 存储服务初始化完成');
+      
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
       const allImages = await this.imageStorageService.getImages();
       console.log(`📊 获取到 ${allImages.length} 张图片`);

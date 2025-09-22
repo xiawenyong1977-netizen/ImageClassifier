@@ -133,11 +133,7 @@ const BatchOperationScreen = ({ route, navigation }) => {
     
     for (const image of images) {
       try {
-        const result = await ImageClassifierService.classifyImage(image.uri, {
-          timestamp: image.timestamp || Date.now(),
-          fileSize: image.size || 0,
-          fileName: image.fileName || image.uri.split('/').pop() || 'unknown.jpg'
-        });
+        const result = await ImageClassifierService.classifyImage(image.uri);
         await ImageStorageService.updateImageCategory(image.id, result.category);
         successCount++;
       } catch (error) {

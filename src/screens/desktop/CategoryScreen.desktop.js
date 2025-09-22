@@ -540,14 +540,34 @@ const CategoryScreen = ({
 
   // Header 组件 - 可以重新渲染
   const HeaderComponent = useCallback(() => {
+    console.log('🔍 调试信息 - 原始category参数:', category);
+    console.log('🔍 调试信息 - category类型:', typeof category);
+    console.log('🔍 调试信息 - category是否为null:', category === null);
+    console.log('🔍 调试信息 - category是否为undefined:', category === undefined);
+    
     // 使用UnifiedDataService获取标准化的分类ID
     const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
+    
+    console.log('🔍 调试信息 - normalizedCategory:', normalizedCategory);
+    console.log('🔍 调试信息 - normalizedCategory类型:', typeof normalizedCategory);
+    
+    // 检查配置服务状态
+    const configService = UnifiedDataService.configService;
+    console.log('🔍 调试信息 - configService是否存在:', !!configService);
+    console.log('🔍 调试信息 - configService是否已加载:', configService?.isConfigLoaded());
+    
+    if (configService?.isConfigLoaded()) {
+      const categoryMap = configService.getCategoryNameMap();
+      console.log('🔍 调试信息 - categoryMap:', categoryMap);
+      console.log('🔍 调试信息 - categoryMap中的键:', Object.keys(categoryMap));
+      console.log('🔍 调试信息 - 查找category在categoryMap中:', categoryMap[category]);
+    }
     
     // 使用UnifiedDataService获取当前分类中选中的图片数量
     const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
     const currentSelectedCount = normalizedCategory 
-      ? (selectedCountsByCategory[normalizedCategory] || 0)
-      : (city ? UnifiedDataService.getSelectedCountsByCity()[city] || 0 : 0);
+      ? (selectedCountsByCategory[normalizedCategory] ?? 0)
+      : (city ? (UnifiedDataService.getSelectedCountsByCity()[city] ?? 0) : 0);
     
     console.log(`🔄 HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
     console.log(`🔍 选中统计详情:`, selectedCountsByCategory);

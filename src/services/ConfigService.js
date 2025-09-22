@@ -27,20 +27,34 @@ class ConfigService {
       });
       
       // 加载配置文件
-      const response = await fetch(configPath);
-      console.log('🔧 响应状态:', response.status, response.statusText);
-      console.log('🔧 响应头 Content-Type:', response.headers.get('content-type'));
+      let responseText;
       
-      if (!response.ok) {
-        throw new Error(`配置文件加载失败: ${response.status} ${response.statusText}`);
-      }
-      
-      const responseText = await response.text();
-      console.log('🔧 响应内容前200字符:', responseText.substring(0, 200));
-      
-      // 检查是否是HTML内容
-      if (responseText.trim().startsWith('<!DOCTYPE')) {
-        throw new Error('获取到HTML内容而不是JSON文件，可能是路径错误或服务器配置问题');
+      if (typeof window !== 'undefined') {
+        // 浏览器环境使用fetch
+        const response = await fetch(configPath);
+        console.log('🔧 响应状态:', response.status, response.statusText);
+        console.log('🔧 响应头 Content-Type:', response.headers.get('content-type'));
+        
+        if (!response.ok) {
+          throw new Error(`配置文件加载失败: ${response.status} ${response.statusText}`);
+        }
+        
+        responseText = await response.text();
+        console.log('🔧 响应内容前200字符:', responseText.substring(0, 200));
+        
+        // 检查是否是HTML内容
+        if (responseText.trim().startsWith('<!DOCTYPE')) {
+          throw new Error('获取到HTML内容而不是JSON文件，可能是路径错误或服务器配置问题');
+        }
+      } else {
+        // Node.js环境使用fs模块
+        const fs = require('fs');
+        const path = require('path');
+        const fullPath = path.resolve(configPath);
+        console.log('🔧 读取文件路径:', fullPath);
+        
+        responseText = fs.readFileSync(fullPath, 'utf8');
+        console.log('🔧 文件内容前200字符:', responseText.substring(0, 200));
       }
       
       this.config = JSON.parse(responseText);
@@ -144,6 +158,18 @@ class ConfigService {
   }
 
   /**
+   * 获取物体分类类别映射
+   * @returns {Object} 物体分类类别映射
+   */
+  getObjectCategories() {
+    if (!this.isLoaded || !this.config?.objectCategories) {
+      console.warn('⚠️ 配置未加载或物体分类类别映射不存在');
+      return {};
+    }
+    return this.config.objectCategories;
+  }
+
+  /**
    * 获取分类显示顺序
    * @returns {Array} 分类显示顺序数组
    */
@@ -201,7 +227,7 @@ class ConfigService {
 
   /**
    * 根据分类键名获取分类信息
-   * @param {string} categoryKey - 分类键名（如 'people', 'pet' 等）
+   * @param {string} categoryKey - 分类键名（如 'single_person', 'pets' 等）
    * @returns {Object|null} 分类信息
    */
   getCategoryByKey(categoryKey) {
@@ -290,6 +316,18 @@ class ConfigService {
       return null;
     }
     return this.config;
+  }
+
+  /**
+   * 获取物体分类到图像分类的映射
+   * @returns {Object} 物体映射配置
+   */
+  getObjectMappings() {
+    if (!this.isLoaded || !this.config?.objectMappings) {
+      console.warn('⚠️ 配置未加载或物体映射配置不存在');
+      return {};
+    }
+    return this.config.objectMappings;
   }
 
   /**

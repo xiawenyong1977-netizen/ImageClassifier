@@ -104,6 +104,13 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
         const fullImageDetails = await UnifiedDataService.readImageDetailsById(finalImageId);
         if (fullImageDetails) {
           console.log(`✅ 图片详情加载成功: ${finalImageId}`);
+          console.log('🔍 图片数据结构调试:', {
+            hasMobileNetV3: !!fullImageDetails.mobileNetV3Detections,
+            mobileNetV3Type: typeof fullImageDetails.mobileNetV3Detections,
+            mobileNetV3Value: fullImageDetails.mobileNetV3Detections,
+            hasPredictions: !!fullImageDetails.mobileNetV3Detections?.predictions,
+            predictionsLength: fullImageDetails.mobileNetV3Detections?.predictions?.length
+          });
           setCurrentImage(fullImageDetails);
         } else {
           console.log(`❌ 图片详情加载失败: ${finalImageId}`);
@@ -495,12 +502,12 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
               {/* 检测结果显示 */}
               {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) ||
                (currentImage.generalDetections && currentImage.generalDetections.length > 0) ||
-               (currentImage.smartClassifications && currentImage.smartClassifications.length > 0) ? (
+               (currentImage.mobileNetV3Detections && currentImage.mobileNetV3Detections.predictions && currentImage.mobileNetV3Detections.predictions.length > 0) ? (
                 <>
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>🔍 检测结果:</Text>
                     <Text style={styles.infoValue}>
-                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.smartClassifications?.length || 0))} 个物体
+                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))} 个物体
                     </Text>
                   </View>
 
@@ -514,6 +521,11 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                             {detection.class === 'id_card_front' ? '身份证正面' : '身份证背面'}
                             ({(detection.confidence * 100).toFixed(1)}%)
                           </Text>
+                          {detection.bbox && (
+                            <Text style={styles.bboxText}>
+                              位置: [{detection.bbox.map(v => v.toFixed(2)).join(', ')}]
+                            </Text>
+                          )}
                         </View>
                       ))}
                     </View>
@@ -523,13 +535,24 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                   {currentImage.generalDetections && currentImage.generalDetections.length > 0 && (
                     <View style={styles.detectionSection}>
                       <Text style={styles.detectionTitle}>🌐 通用物体检测:</Text>
-                      {currentImage.generalDetections.slice(0, 5).map((detection, index) => (
-                        <View key={index} style={styles.detectionItem}>
-                          <Text style={styles.detectionText}>
-                            {detection.class} ({(detection.confidence * 100).toFixed(1)}%)
-                          </Text>
-                        </View>
-                      ))}
+                      {currentImage.generalDetections.slice(0, 5).map((detection, index) => {
+                        // 获取类别名称
+                        const objectInfo = configService.getYoloObjectById(detection.classId);
+                        const className = objectInfo ? objectInfo.chinese || objectInfo.english : `Class ${detection.classId}`;
+                        
+                        return (
+                          <View key={index} style={styles.detectionItem}>
+                            <Text style={styles.detectionText}>
+                              {className} ({(detection.confidence * 100).toFixed(1)}%)
+                            </Text>
+                            {detection.bbox && (
+                              <Text style={styles.bboxText}>
+                                位置: [{detection.bbox.map(v => v.toFixed(2)).join(', ')}]
+                              </Text>
+                            )}
+                          </View>
+                        );
+                      })}
                       {currentImage.generalDetections.length > 5 && (
                         <Text style={styles.detectionMore}>
                           ... 还有 {currentImage.generalDetections.length - 5} 个物体
@@ -538,20 +561,26 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                     </View>
                   )}
 
-                  {/* 智能分类结果 */}
-                  {currentImage.smartClassifications && currentImage.smartClassifications.length > 0 && (
+                  {/* MobileNetV3 分类结果 */}
+                  {currentImage.mobileNetV3Detections && currentImage.mobileNetV3Detections.predictions && currentImage.mobileNetV3Detections.predictions.length > 0 && (
                     <View style={styles.detectionSection}>
-                      <Text style={styles.detectionTitle}>🧠 智能分类:</Text>
-                      {currentImage.smartClassifications.slice(0, 5).map((detection, index) => (
-                        <View key={index} style={styles.detectionItem}>
-                          <Text style={styles.detectionText}>
-                            {detection.class} ({(detection.confidence * 100).toFixed(1)}%)
-                          </Text>
-                        </View>
-                      ))}
-                      {currentImage.smartClassifications.length > 5 && (
+                      <Text style={styles.detectionTitle}>🧠 MobileNetV3 分类:</Text>
+                      {currentImage.mobileNetV3Detections.predictions.slice(0, 5).map((prediction, index) => {
+                        // 获取MobileNetV3分类的中文名称
+                        const mobileNetV3ClassInfo = configService?.getMobileNetV3ClassByEnglishName(prediction.class);
+                        const displayName = mobileNetV3ClassInfo?.chinese || prediction.class;
+                        
+                        return (
+                          <View key={index} style={styles.detectionItem}>
+                            <Text style={styles.detectionText}>
+                              {displayName} ({(prediction.probability * 100).toFixed(1)}%)
+                            </Text>
+                          </View>
+                        );
+                      })}
+                      {currentImage.mobileNetV3Detections.predictions.length > 5 && (
                         <Text style={styles.detectionMore}>
-                          ... 还有 {currentImage.smartClassifications.length - 5} 个分类
+                          ... 还有 {currentImage.mobileNetV3Detections.predictions.length - 5} 个分类
                         </Text>
                       )}
                     </View>
@@ -911,6 +940,13 @@ const styles = StyleSheet.create({
     color: '#999',
     fontStyle: 'italic',
     marginLeft: 8,
+  },
+  bboxText: {
+    fontSize: 10,
+    color: '#666',
+    marginLeft: 8,
+    marginTop: 2,
+    fontFamily: 'monospace',
   },
 });
 

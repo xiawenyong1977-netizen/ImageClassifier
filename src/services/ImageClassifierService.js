@@ -18,6 +18,8 @@ class ImageClassifierService {
     
     // 模型配置将在初始化时从配置文件加载
     this.models = {};
+    
+    // 注意：已移除 Web Worker 池，使用主线程并行推理
   }
 
   // 获取模型路径（处理相对路径和绝对路径）
@@ -80,7 +82,7 @@ class ImageClassifierService {
           metadata: null,
           priority: 1,
           description: '身份证识别专用模型',
-          confidenceThreshold: 0.3,
+          confidenceThreshold: 0.7,  // 提高身份证检测阈值，减少误检
           nmsThreshold: 0.4,
           maxDetections: 5
         },
@@ -113,6 +115,10 @@ class ImageClassifierService {
       // 加载YOLO物体类别映射
       const yoloObjectMap = this.configService.getYoloObjectNameMap();
       this.models.yolo8s.classes = Object.keys(yoloObjectMap);
+      
+      // 调试：输出YOLO类别信息
+      console.log(`🔍 YOLO8s模型类别数量: ${this.models.yolo8s.classes.length}`);
+      console.log(`🔍 YOLO8s类别列表:`, this.models.yolo8s.classes.slice(0, 10));
 
       // 加载MobileNetV3类别映射
       const mobilenetv3Classes = this.configService.getMobileNetV3Classes();
@@ -341,7 +347,7 @@ class ImageClassifierService {
   }
 
   // Postprocess YOLO output with dynamic classes
-  async postprocessYOLOOutput(output, confidenceThreshold = null, nmsThreshold = null, classes = null) {
+  async postprocessYOLOOutput(output, confidenceThreshold, nmsThreshold) {
     try {
       if (!output) {
         throw new Error('输出数据为空');
@@ -375,105 +381,41 @@ class ImageClassifierService {
       // 计算类别数量：总数值 - 4个边界框坐标 = 类别数量
       const numClasses = numValues - 4;
       
-      // 使用提供的类别列表或默认类别
-      const classList = classes || this.models.yolo8s.classes;
-      
-      // 简化的调试信息
-      const outputData = {
-        dims: predictions.dims,
-        dataType: typeof predictions.data[0],
-        confidenceThreshold: confidenceThreshold,
-        modelType: numValues === 6 ? 'idCard' : (numValues === 84 ? 'general' : 'unknown')
-      };
-      
-      // 只输出调试信息到控制台
-      const modelType = numValues === 6 ? 'idCard' : (numValues === 84 ? 'general' : 'unknown');
+      // 使用传入的置信度阈值
       
       // 处理所有检测框，寻找有效的class_id=0或1的检测结果
-      const maxBoxesToProcess = numBoxes; // 处理所有8400个框
-      
       const detections = [];
       
       // 解析检测结果
-      for (let i = 0; i < maxBoxesToProcess; i++) {
-        let confidence, classId;
+      for (let i = 0; i < numBoxes; i++) {
+        // 提取边界框坐标 (x, y, w, h)
+        const x = predictions.data[numBoxes * 0 + i];
+        const y = predictions.data[numBoxes * 1 + i];
+        const w = predictions.data[numBoxes * 2 + i];
+        const h = predictions.data[numBoxes * 3 + i];
         
-        // 身份证模型格式：按特征优先存储 [all_x, all_y, all_w, all_h, all_class0, all_class1]
-        // 身份证模型输出已经是概率值（0-1范围），直接使用原始分数
-        const class0Score = predictions.data[numBoxes * 4 + i]; // 身份证正面分数
-        const class1Score = predictions.data[numBoxes * 5 + i]; // 身份证背面分数
+        const classScores = [];
         
-        // 直接比较原始分数，取较大的作为置信度，对应的索引作为类别ID
-        if (class0Score > class1Score) {
-          confidence = class0Score;
-          classId = 0; // 身份证正面
-        } else {
-          confidence = class1Score;
-          classId = 1; // 身份证背面
+        // 提取所有类别分数
+        for (let j = 0; j < numClasses; j++) {
+          classScores.push(predictions.data[numBoxes * (4 + j) + i]);
         }
         
-        // 根据模型类型验证class_id范围并添加检测结果
-        if (numValues === 6) {
-          // 身份证模型：只接受 class_id = 0 或 1
-          // 使用适当的置信度阈值
-          const threshold = 0.3; // 30%阈值
-          
-          if (classId === 0 || classId === 1) {
-            if (confidence > threshold) {
-              const className = classId === 0 ? 'id_card_front' : 'id_card_back';
-              detections.push({
-                class: className,
-                confidence: confidence,
-                classIndex: classId
-              });
-            }
-          }
-        } else if (numValues === 84) {
-          // 通用模型：按特征优先存储 [all_x, all_y, all_w, all_h, all_class0, all_class1, ..., all_class79]
-          // 置信度 = max(class_0, class_1, ..., class_79)
-          // 通用模型输出可能已经是概率值，直接使用原始分数
-          
-          // 按特征优先解析检测框 i 的数据
-          const x = predictions.data[i];                           // 索引 i
-          const y = predictions.data[numBoxes + i];               // 索引 8400 + i
-          const w = predictions.data[numBoxes * 2 + i];           // 索引 16800 + i
-          const h = predictions.data[numBoxes * 3 + i];           // 索引 25200 + i
-          
-          // 提取80个类别分数
-          const classScores = [];
-          for (let j = 0; j < 80; j++) {
-            classScores.push(predictions.data[numBoxes * (4 + j) + i]);
-          }
-          
-          // 直接使用原始分数，不应用sigmoid激活
-          const maxClassScore = Math.max(...classScores);
-          const maxClassIndex = classScores.indexOf(maxClassScore);
-          
-          // 置信度 = 最高的类别分数
-          const finalConfidence = maxClassScore;
-          
-          if (finalConfidence > confidenceThreshold) {
-            const className = classList[maxClassIndex] || `class_${maxClassIndex}`;
-            detections.push({
-              class: className,
-              confidence: finalConfidence,
-              classIndex: maxClassIndex
-            });
-          }
-        } else {
-          // 其他格式，尝试通用处理
-          if (classId >= 0 && classId < 80) {
-            if (confidence > 30) {
-              const className = classList[classId] || `class_${classId}`;
-              detections.push({
-                class: className,
-                confidence: confidence,
-                classIndex: classId
-              });
-            }
-          }
-        }
+        // 找到最佳类别
+        const maxScore = Math.max(...classScores);
+        const classId = classScores.indexOf(maxScore);
+        const confidence = maxScore;
         
+      // 统一处理所有模型类型
+      if (confidence > confidenceThreshold && classId >= 0 && classId < numClasses) {
+        detections.push({
+          classId: classId,
+          confidence: confidence,
+          bbox: [x, y, w, h]
+        });
+      } else if (confidence > 0.1) { // 调试：显示低置信度的检测
+        console.log(`🔍 低置信度检测: classId=${classId}, confidence=${confidence.toFixed(3)}, threshold=${confidenceThreshold}`);
+      }
       }
       
       // 应用非极大值抑制 (NMS)
@@ -481,18 +423,11 @@ class ImageClassifierService {
       
       // 检查是否有有效检测结果
       if (nmsDetections.length === 0) {
+        console.log(`🔍 YOLO后处理: 没有通过NMS的检测结果 (原始检测: ${detections.length}个)`);
         return [];
       }
       
-      
-      // 统计检测结果
-      const idCardFrontCount = nmsDetections.filter(d => d.classIndex === 0).length;
-      const idCardBackCount = nmsDetections.filter(d => d.classIndex === 1).length;
-      
-      // 显示每个检测结果的详细信息
-      nmsDetections.forEach((detection, index) => {
-      });
-      
+      console.log(`🔍 YOLO后处理: ${detections.length}个原始检测 -> ${nmsDetections.length}个最终检测`);
       return nmsDetections;
     } catch (error) {
       console.error('YOLO postprocessing failed:', error);
@@ -516,7 +451,6 @@ class ImageClassifierService {
       if (suppressed[i]) continue;
       
       const currentDetection = detections[i];
-      filteredDetections.push(currentDetection);
       
       // 计算当前检测框与其他检测框的IoU
       for (let j = i + 1; j < detections.length; j++) {
@@ -525,7 +459,7 @@ class ImageClassifierService {
         const otherDetection = detections[j];
         
         // 只对相同类别的检测框进行NMS
-        if (currentDetection.classIndex !== otherDetection.classIndex) {
+        if (currentDetection.classId !== otherDetection.classId) {
           continue;
         }
         
@@ -537,24 +471,33 @@ class ImageClassifierService {
           suppressed[j] = true;
         }
       }
+      
+      // 只有在处理完所有其他框后，才添加当前框到结果中
+      filteredDetections.push(currentDetection);
     }
     
     return filteredDetections;
   }
 
+
   // 计算两个检测框的IoU (Intersection over Union)
   calculateIoU(detection1, detection2) {
-    const x1 = Math.max(detection1.x, detection2.x);
-    const y1 = Math.max(detection1.y, detection2.y);
-    const x2 = Math.min(detection1.x + detection1.width, detection2.x + detection2.width);
-    const y2 = Math.min(detection1.y + detection1.height, detection2.y + detection2.height);
+    // 从bbox数组获取坐标 [x, y, w, h]
+    const [x1, y1, w1, h1] = detection1.bbox;
+    const [x2, y2, w2, h2] = detection2.bbox;
+    
+    // 计算交集区域的坐标
+    const intersectionX1 = Math.max(x1, x2);
+    const intersectionY1 = Math.max(y1, y2);
+    const intersectionX2 = Math.min(x1 + w1, x2 + w2);
+    const intersectionY2 = Math.min(y1 + h1, y2 + h2);
     
     // 计算交集面积
-    const intersectionArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const intersectionArea = Math.max(0, intersectionX2 - intersectionX1) * Math.max(0, intersectionY2 - intersectionY1);
     
     // 计算并集面积
-    const area1 = detection1.width * detection1.height;
-    const area2 = detection2.width * detection2.height;
+    const area1 = w1 * h1;
+    const area2 = w2 * h2;
     const unionArea = area1 + area2 - intersectionArea;
     
     // 避免除零
@@ -567,247 +510,100 @@ class ImageClassifierService {
 
 
 
-
-
-  // 将YOLOv8n检测结果映射到应用分类
-  async mapDetectionsToCategories(detections) {
-    // 从存储中获取分类规则（带优先级）
-    const rulesData = await UnifiedDataService.imageStorageService.getClassificationRulesWithPriority();
-    
-    // 如果没有优先级数据，回退到旧版本
-    if (!rulesData.categoryPriorities) {
-      const categoryMapping = await UnifiedDataService.getClassificationRules();
-      return this.mapDetectionsToCategoriesLegacy(detections, categoryMapping);
-    }
-
-    const { categoryPriorities, objectMappings } = rulesData;
-    const categoryScores = {};
-    
-    // 计算每个分类的分数
-    detections.forEach(detection => {
-      const mappedCategory = objectMappings[detection.class] || 'other';
-      const confidence = detection.confidence;
-      
-      if (!categoryScores[mappedCategory]) {
-        categoryScores[mappedCategory] = {
-          score: 0,
-          priority: categoryPriorities[mappedCategory] || 999, // 未知分类优先级最低
-          detections: []
-        };
-      }
-      
-      // 使用最高置信度作为该分类的分数
-      categoryScores[mappedCategory].score = Math.max(categoryScores[mappedCategory].score, confidence);
-      categoryScores[mappedCategory].detections.push(detection);
-    });
-
-    // 按优先级和置信度选择最佳分类
-    let bestCategory = 'other';
-    let bestPriority = 999;
-    let bestScore = 0;
-    
-    Object.entries(categoryScores).forEach(([category, data]) => {
-      const { score, priority } = data;
-      
-      // 优先级高的分类优先（数字小的优先级高）
-      if (priority < bestPriority || 
-          (priority === bestPriority && score > bestScore)) {
-        bestPriority = priority;
-        bestScore = score;
-        bestCategory = category;
-      }
-    });
-
-    console.log(`🎯 分类选择: ${bestCategory} (优先级: ${bestPriority}, 置信度: ${bestScore.toFixed(3)})`);
-    return bestCategory;
-  }
-
-  // 旧版本的分类方法（兼容性）
-  mapDetectionsToCategoriesLegacy(detections, categoryMapping) {
-    const categoryScores = {};
-    
-    detections.forEach(detection => {
-      const mappedCategory = categoryMapping[detection.class] || 'other';
-      const confidence = detection.confidence;
-      
-      if (!categoryScores[mappedCategory]) {
-        categoryScores[mappedCategory] = 0;
-      }
-      
-      categoryScores[mappedCategory] = Math.max(categoryScores[mappedCategory], confidence);
-    });
-
-    let bestCategory = 'other';
-    let bestScore = 0;
-    
-    Object.entries(categoryScores).forEach(([category, score]) => {
-      if (score > bestScore) {
-        bestScore = score;
-        bestCategory = category;
-      }
-    });
-
-    return bestCategory;
-  }
-
   // Classify image (simplified version, directly using time classification)
-  async classifyImage(imageUri, metadata = {}, options = {}) {
-    const { unloadAfterClassification = false } = options;
-    
+  async classifyImage(imageUri) {
     try {
       // 检查服务是否已初始化
       if (!this.isInitialized) {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
+       // 获取图像尺寸
+      const imageDimensions = await this.getOriginalImageDimensions(imageUri);
       // 第一步：检查是否为手机截图（最高优先级）
-      const fileName = metadata.fileName || '';
-      
-      // 优先使用EXIF中提取的图片尺寸，如果没有则获取原始分辨率
-      let originalWidth, originalHeight;
-      
-      if (metadata.imageDimensions && metadata.imageDimensions.width && metadata.imageDimensions.height) {
-        // 使用EXIF中提取的尺寸
-        originalWidth = metadata.imageDimensions.width;
-        originalHeight = metadata.imageDimensions.height;
-        console.log('📏 使用EXIF中的图片尺寸:', originalWidth, 'x', originalHeight);
-      } else {
-        // 回退到获取原始分辨率
-        try {
-          const originalDimensions = await this.getOriginalImageDimensions(imageUri);
-          originalWidth = originalDimensions.width;
-          originalHeight = originalDimensions.height;
-          console.log('📏 使用获取的原始分辨率:', originalWidth, 'x', originalHeight);
-        } catch (error) {
-          console.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
-          originalWidth = null;
-          originalHeight = null;
-        }
-      }
-      
-      if (originalWidth && originalHeight && this.isMobileScreenshot(originalWidth, originalHeight, fileName)) {
-          return {
-            category: 'screenshot',
-            confidence: 0.9,
-            reason: '检测到手机截图特征',
-            method: 'mobile_screenshot',
-            detections: [],
-            idCardDetected: false,
-            usedModels: [],
-            idCardDetections: [],
-            generalDetections: []
-          };
-        }
-
-      // 第二步：使用智能推理检测
-      const detectionResult = await this.smartDetectObjects(imageUri, {
-        idCardConfidenceThreshold: 0.7,  // 提高身份证检测阈值，减少误检
-        generalConfidenceThreshold: 0.5,
-        nmsThreshold: 0.4,
-        maxDetections: 10
-      });
-
-      let result;
-      if (detectionResult.success && detectionResult.detections.length > 0) {
-        // 根据检测结果进行分类
-        const category = await this.mapDetectionsToCategories(detectionResult.detections);
-        const confidence = Math.max(...detectionResult.detections.map(d => d.confidence));
-        
-        // 分离不同类型的检测结果
-        const idCardDetections = detectionResult.detections.filter(d => 
-          d.class === 'id_card_front' || d.class === 'id_card_back'
-        );
-        
-        // 检查是否使用了MobileNetV3模型
-        const hasMobileNetV3 = detectionResult.usedModels && detectionResult.usedModels.includes('mobilenetv3');
-        
-        const generalDetections = detectionResult.detections.filter(d => 
-          d.class !== 'id_card_front' && d.class !== 'id_card_back' && !hasMobileNetV3
-        );
-        
-        const smartClassifications = hasMobileNetV3 ? 
-          detectionResult.detections.filter(d => 
-            d.class !== 'id_card_front' && d.class !== 'id_card_back'
-          ) : [];
-        
-        result = {
-          category: category || 'other',
-          confidence: confidence,
-          reason: `检测到 ${detectionResult.detections.length} 个物体`,
-          method: 'smart_detection',
-          detections: detectionResult.detections,
-          idCardDetected: detectionResult.idCardDetected,
-          usedModels: detectionResult.usedModels,
-          // 分离的检测结果，用于保存到图片详情
-          idCardDetections: idCardDetections,
-          generalDetections: generalDetections,
-          smartClassifications: smartClassifications
-        };
-      } else {
-        // 如果没有检测到物体，返回默认分类
-        result = {
-          category: 'other',
-          confidence: 0.50,
-          reason: '未检测到物体',
-          method: 'no_detection',
-          detections: [],
-          idCardDetected: false,
-          usedModels: [],
-          // 空的检测结果
+      console.log('🔍 第一步：检查手机截图...');
+      if (await this.identifyMobileScreenshot(imageUri, imageDimensions)) {
+        console.log('✅ 检测到手机截图，返回结果');
+        return {
+          success: true,
+          categoryId: 'screenshot',
+          confidence: 1.0,
+          message: '检测到手机截图',
           idCardDetections: [],
           generalDetections: [],
-          smartClassifications: []
+          mobileNetV3Detections: [],
+          imageDimensions: imageDimensions,
+          allModelResults: {
+            mobileScreenshot: true,
+            idCard: [],
+            general: [],
+            mobileNetV3: []
+          }
         };
       }
+      console.log('❌ 不是手机截图，继续下一步');
 
-      // 如果设置了分类后卸载模型，则卸载所有模型
-      if (unloadAfterClassification) {
-        this.unloadAllModels();
-      }
+      // 第二步到第四步：并行执行所有模型推理
+      console.log('🔍 并行执行所有模型推理...');
+      const parallelResults = await this.runParallelInference(imageUri);
+      
+      // 保存所有模型的原始结果
+      const allModelResults = {
+        mobileScreenshot: false,
+        idCard: parallelResults.idCard || [],
+        general: parallelResults.general || [],
+        mobileNetV3: parallelResults.mobileNetV3 || []
+      };
 
-      return result;
+      // 统计检测结果
+      const idCardCount = allModelResults.idCard.length;
+      const generalCount = allModelResults.general.length;
+      const mobileNetV3Count = allModelResults.mobileNetV3.predictions ? allModelResults.mobileNetV3.predictions.length : 0;
+      
+      console.log(`📊 所有模型推理完成:`);
+      console.log(`  - 身份证模型: ${idCardCount} 个检测结果`);
+      console.log(`  - 通用模型: ${generalCount} 个检测结果`);
+      console.log(`  - MobileNetV3模型: ${mobileNetV3Count} 个检测结果`);
+
+      // 调用新的分类映射函数
+      const categoryId = this.MapObjectes2Category(allModelResults, imageUri, imageDimensions);
+
+      // 返回详细的分类结果，由调用方决定如何保存
+      const result = {
+        success: true,
+        categoryId: categoryId,
+        confidence: 1.0, // 使用分类映射的置信度
+        message: '图像分类完成',
+        // 返回所有检测结果，供调用方使用
+        idCardDetections: allModelResults.idCard,
+        generalDetections: allModelResults.general,
+        mobileNetV3Detections: allModelResults.mobileNetV3,
+        imageDimensions: imageDimensions,
+        // 返回原始模型结果，供调试和分析
+        allModelResults: allModelResults
+      };
+      
+      
+      return result;  
+      
+
+
     } catch (error) {
       console.error('Image classification failed:', error);
       return {
-        category: 'other',
-        confidence: 0.50,
-        reason: 'Classification failed',
-        method: 'fallback'
+        success: false,
+        categoryId: 'other',
+        message: `分类失败: ${error.message}`,
+        // 即使分类失败，也返回空的检测结果字段，确保数据结构一致
+        idCardDetections: [],
+        generalDetections: [],
+        mobileNetV3Detections: null,
+        imageDimensions: null
       };
     }
   }
 
-  // Batch classify images
-  async classifyImages(imageUris, metadata = {}, options = {}) {
-    const { unloadAfterClassification = false } = options;
-    const results = [];
-    
-    for (const uri of imageUris) {
-      try {
-        const result = await this.classifyImage(uri, metadata, { unloadAfterClassification: false });
-        results.push({
-          uri,
-          ...result,
-        });
-      } catch (error) {
-        console.error(`Failed to classify image ${uri}:`, error);
-        results.push({
-          uri,
-          category: 'other',
-          confidence: 0,
-          error: error.message,
-        });
-      }
-    }
-    
-    // 如果设置了批量分类后卸载模型，则卸载所有模型
-    if (unloadAfterClassification) {
-      this.unloadAllModels();
-    }
-    
-    return results;
-  }
-
+ 
 
 
 
@@ -857,30 +653,26 @@ class ImageClassifierService {
 
   // 检测物体（使用指定模型）
   // 使用YOLO模型进行检测（支持idCard和yolo8s）
-  async classifyImageWithYOLO(imageUri, modelName = 'yolo8s', options = {}) {
+  async classifyImageWithYOLO(imageUri, modelName) {
+    if (!imageUri) {
+      throw new Error('imageUri is required');
+    }
+    if (!modelName) {
+      throw new Error('modelName is required');
+    }
     if (!this.models[modelName] || !this.models[modelName].model) {
       throw new Error(`Model ${modelName} not loaded`);
     }
     
-    // 从模型配置获取默认参数
+    // 从模型配置获取参数
     const modelConfig = this.models[modelName];
-    const defaultOptions = {
-      confidenceThreshold: modelConfig?.confidenceThreshold || 0.25,
-      nmsThreshold: modelConfig?.nmsThreshold || 0.4,
-      maxDetections: modelConfig?.maxDetections || 10
-    };
-    
-    const {
-      confidenceThreshold = defaultOptions.confidenceThreshold,
-      nmsThreshold = defaultOptions.nmsThreshold,
-      maxDetections = defaultOptions.maxDetections
-    } = options;
+    const confidenceThreshold = modelConfig.confidenceThreshold;
+    const nmsThreshold = modelConfig.nmsThreshold;
+    const maxDetections = modelConfig.maxDetections;
 
     try {
       // 确保模型已加载
       await this.loadModel(modelName);
-
-      const modelConfig = this.models[modelName];
 
       // 预处理图片
       const inputTensor = await this.preprocessImageForYOLO(imageUri);
@@ -888,10 +680,6 @@ class ImageClassifierService {
       // 运行推理
       const feeds = { images: inputTensor };
       // 安全地计算数据范围，避免栈溢出
-      const dataArray = Array.from(inputTensor.data);
-      const minValue = dataArray.reduce((min, val) => Math.min(min, val), Infinity);
-      const maxValue = dataArray.reduce((max, val) => Math.max(max, val), -Infinity);
-      
       const results = await modelConfig.model.run(feeds);
       
       // 后处理结果
@@ -904,143 +692,31 @@ class ImageClassifierService {
       
       const detections = await this.postprocessYOLOOutput(
         outputData, 
-        confidenceThreshold, 
-        nmsThreshold,
-        modelConfig.classes
+        confidenceThreshold,
+        nmsThreshold
       );
 
       // 限制检测数量
       const limitedDetections = detections.slice(0, maxDetections);
 
-      return {
-        success: true,
-        detections: limitedDetections,
-        totalDetections: detections.length,
-        model: modelName,
-        processingTime: Date.now(),
-        // 对于身份证模型，添加idCardDetected字段
-        ...(modelName === 'idCard' && { idCardDetected: this.checkIdCardDetected(limitedDetections) })
-      };
+      // 调试：输出检测结果
+      if (limitedDetections.length > 0) {
+        console.log(`🔍 ${modelName}检测到${limitedDetections.length}个物体:`, limitedDetections.map(d => ({
+          classId: d.classId,
+          confidence: d.confidence.toFixed(3),
+          bbox: d.bbox.map(b => b.toFixed(2))
+        })));
+      } else {
+        console.log(`⚠️ ${modelName}没有检测到任何物体 (置信度阈值: ${confidenceThreshold})`);
+      }
+     
+      return limitedDetections;
     } catch (error) {
       console.error(`❌ ${modelName}模型检测失败:`, error);
-      return {
-        success: false,
-        error: error.message,
-        detections: [],
-        totalDetections: 0,
-        model: modelName,
-        processingTime: Date.now(),
-        ...(modelName === 'idCard' && { idCardDetected: false })
-      };
+      return []
     }
   }
 
-      // 智能推理：先检测身份证，再决定是否使用通用模型
-  async smartDetectObjects(imageUri, options = {}) {
-    const {
-      idCardConfidenceThreshold = 0.3,   // 身份证阈值，适当提高
-      generalConfidenceThreshold = 0.25, // 通用模型阈值
-      nmsThreshold = 0.4,
-      maxDetections = 10
-    } = options;
-
-
-    const startTime = Date.now();
-    const results = {
-      success: false,
-      detections: [],
-      totalDetections: 0,
-      model: 'smart',
-      processingTime: 0,
-      idCardDetected: false,
-      usedModels: [],
-      reasoning: ''
-    };
-
-    try {
-      // 第一步：使用身份证模型检测
-      const idCardResult = await this.classifyImageWithYOLO(imageUri, 'idCard', {
-        confidenceThreshold: idCardConfidenceThreshold, // 使用配置的阈值
-        nmsThreshold,
-        maxDetections: 5 // 身份证通常只有1-2个
-      });
-
-      results.usedModels.push('idCard');
-      results.reasoning += '使用身份证模型检测；';
-
-      // 检查是否检测到身份证
-      const idCardDetected = this.checkIdCardDetected(idCardResult.detections);
-      results.idCardDetected = idCardDetected;
-
-      if (idCardDetected) {
-        results.detections = idCardResult.detections;
-        results.totalDetections = idCardResult.totalDetections;
-        results.reasoning += '检测到身份证，停止推理；';
-        results.success = true;
-      } else {
-        
-        // 第二步：使用通用模型检测
-        const generalResult = await this.classifyImageWithYOLO(imageUri, 'yolo8s', {
-          confidenceThreshold: generalConfidenceThreshold, // 使用配置的阈值
-          nmsThreshold,
-          maxDetections
-        });
-
-        results.usedModels.push('yolo8s');
-        
-        // 检查YOLO是否检测到有效物体
-        if (generalResult.success && generalResult.detections.length > 0) {
-          results.detections = generalResult.detections;
-          results.totalDetections = generalResult.totalDetections;
-          results.reasoning += '未检测到身份证，使用通用模型检测到物体；';
-          results.success = true;
-        } else {
-          // 第三步：YOLO没有检测到物体，使用MobileNetV3进行分类
-          try {
-            const classificationResult = await this.classifyImageWithMobileNetV3(imageUri, {
-              confidenceThreshold: this.models.mobilenetv3?.confidenceThreshold || 0.3
-            });
-            
-            results.usedModels.push('mobilenetv3');
-            
-            if (classificationResult.success && classificationResult.validPredictions.length > 0) {
-              // 将分类结果转换为检测格式
-              const classificationDetections = classificationResult.validPredictions.map(pred => ({
-                class: pred.class,  // 修复：使用pred.class而不是pred.className
-                confidence: pred.probability,
-                bbox: [0, 0, 1, 1], // 全图检测
-                area: 1.0
-              }));
-              
-              results.detections = classificationDetections;
-              results.totalDetections = classificationDetections.length;
-              results.reasoning += 'YOLO未检测到物体，使用MobileNetV3进行分类；';
-              results.success = true;
-            } else {
-              results.reasoning += 'YOLO和MobileNetV3都未检测到有效结果；';
-              results.success = false;
-            }
-          } catch (classificationError) {
-            console.warn('MobileNetV3分类失败:', classificationError.message);
-            results.reasoning += `YOLO未检测到物体，MobileNetV3分类失败: ${classificationError.message};`;
-            results.success = false;
-          }
-        }
-      }
-
-      results.processingTime = Date.now() - startTime;
-
-
-      return results;
-
-    } catch (error) {
-      console.error('❌ 智能推理失败:', error.message);
-      results.success = false;
-      results.processingTime = Date.now() - startTime;
-      results.reasoning += `推理失败: ${error.message};`;
-      throw error;
-    }
-  }
 
   // 获取图片原始分辨率
   async getOriginalImageDimensions(imageUri) {
@@ -1060,96 +736,406 @@ class ImageClassifierService {
   }
 
   // 检查是否为手机截图
-  isMobileScreenshot(originalWidth, originalHeight, fileName) {
-    // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
-    const aspectRatio = originalWidth / originalHeight;
-    const isMobileResolution = aspectRatio <= 0.5;
+
+
+
+
+  // ==================== 并行推理相关函数 ====================
+
+  /**
+   * 并行执行所有模型推理
+   * @param {string} imageUri - 图片URI
+   * @returns {Promise<Object>} 所有模型的推理结果
+   */
+  async runParallelInference(imageUri) {
+    const startTime = Date.now();
+    console.log('🚀 开始并行推理... [V3.0 - ' + new Date().toLocaleTimeString() + ']');
     
-    // 特征2：文件名判定 - 包含截图关键词
-    const fileNameLower = fileName.toLowerCase();
-    const isScreenshotFile = fileNameLower.includes('screenshot') || 
-                            fileNameLower.includes('截图') || 
-                            fileNameLower.includes('screen');
+    // 并行执行所有模型推理，提升性能
+    const [idCardResults, generalResults, mobileNetV3Results] = await Promise.allSettled([
+      this.classifyImageWithYOLO(imageUri, 'idCard').catch(error => {
+        console.error('❌ idCard 推理失败:', error);
+        return [];
+      }),
+      this.classifyImageWithYOLO(imageUri, 'yolo8s').catch(error => {
+        console.error('❌ general 推理失败:', error);
+        return [];
+      }),
+      this.classifyImageWithMobileNetV3(imageUri).catch(error => {
+        console.error('❌ mobileNetV3 推理失败:', error);
+        return {};
+      })
+    ]);
     
-    // 调试信息
-    console.log('🔍 手机截图判定调试:');
-    console.log(`  - 文件名: ${fileName}`);
-    console.log(`  - 原始分辨率: ${originalWidth}x${originalHeight}`);
-    console.log(`  - 宽高比: ${aspectRatio.toFixed(3)}`);
-    console.log(`  - 手机分辨率: ${isMobileResolution}`);
-    console.log(`  - 截图文件名: ${isScreenshotFile}`);
-    console.log(`  - 最终判定: ${isMobileResolution || isScreenshotFile}`);
-    
-    // 两个特征中只要有一个满足就判定为手机截图
-    return isMobileResolution || isScreenshotFile;
-  }
-
-  // 检查是否检测到身份证
-  checkIdCardDetected(detections) {
-    if (!detections || detections.length === 0) {
-      return false;
-    }
-
-    // 直接使用模型配置中的身份证类别
-    const idCardClasses = this.models.idCard.classes;
-
-    // 检查检测结果中是否包含身份证类别
-    const hasIdCard = detections.some(detection => 
-      idCardClasses.includes(detection.class)
-    );
-
-    if (detections.length > 0) {
-    }
-
-    return hasIdCard;
-  }
-
-  // 获取身份证检测结果详情
-  getIdCardDetectionDetails(detections) {
-    if (!detections || detections.length === 0) {
-      return {
-        detected: false,
-        count: 0,
-        details: []
-      };
-    }
-
-    // 直接使用模型配置中的身份证类别
-    const idCardClasses = this.models.idCard.classes;
-
-    const idCardDetections = detections.filter(detection => 
-      idCardClasses.includes(detection.class)
-    );
-
-    return {
-      detected: idCardDetections.length > 0,
-      count: idCardDetections.length,
-      details: idCardDetections.map(detection => ({
-        class: detection.class,
-        confidence: detection.confidence,
-        bbox: detection.bbox,
-        type: this.classifyIdCardType(detection.class)
-      }))
+    // 处理结果
+    const parallelResults = {
+      idCard: idCardResults.status === 'fulfilled' ? idCardResults.value : [],
+      general: generalResults.status === 'fulfilled' ? generalResults.value : [],
+      mobileNetV3: mobileNetV3Results.status === 'fulfilled' ? mobileNetV3Results.value : {}
     };
+    
+    const endTime = Date.now();
+    console.log(`⏱️ 并行推理完成，总耗时: ${endTime - startTime}ms`);
+    console.log(`📊 推理结果: idCard=${parallelResults.idCard.length}, general=${parallelResults.general.length}, mobileNetV3=${parallelResults.mobileNetV3.predictions?.length || 0}`);
+    
+    return parallelResults;
   }
 
-  // 分类身份证类型（正面/反面）
-  classifyIdCardType(className) {
-    // 直接使用模型配置中的类别名称
-    const idCardClasses = this.models.idCard.classes;
+
+  
+  // ==================== 分类函数 ====================
+
+  /**
+   * 识别图像中的主角对象
+   * @param {string} imageURI - 图像URI（用于日志记录）
+   * @param {Array} yoloDetectResults - YOLO检测结果数组
+   * @param {Object} imageDimensions - 图像尺寸 {width, height}
+   * @returns {Array} 主角信息数组，每个元素包含 {category, count, sizeRatio}
+   */
+  identifyMainRole(imageURI, yoloDetectResults, imageDimensions) {
+    try {
+      console.log(`🎯 开始识别图像主角: ${imageURI}`);
+      
+      if (!yoloDetectResults || yoloDetectResults.length === 0) {
+        console.log('⚠️ 没有检测到任何物体');
+        return [];
+      }
+
+      // 检查图像尺寸参数
+      if (!imageDimensions || !imageDimensions.width || !imageDimensions.height) {
+        console.log('⚠️ 缺少图像尺寸信息，无法计算物体比例');
+        return [];
+      }
+
+      const { width: imageWidth, height: imageHeight } = imageDimensions;
+      const imageArea = imageWidth * imageHeight;
+      
+      // YOLO输入尺寸（固定为640x640）
+      const yoloInputSize = 640;
+      
+      // 统计各类别的检测结果
+      const categoryStats = {};
+      
+      yoloDetectResults.forEach(detection => {
+        const classId = detection.classId;
+        
+        // 获取物体信息（包含分类信息）
+        const objectInfo = this.configService.getYoloObjectById(classId);
+        
+        if (objectInfo && objectInfo.category) {
+          const category = objectInfo.category;
+          
+          if (!categoryStats[category]) {
+            categoryStats[category] = {
+              count: 0,
+              totalArea: 0
+            };
+          }
+          
+          // 将YOLO的bbox坐标从640x640转换回原始图像尺寸
+          const [x, y, w, h] = detection.bbox;
+          
+          // 计算缩放比例（YOLO预处理时保持长宽比）
+          const scale = Math.min(yoloInputSize / imageWidth, yoloInputSize / imageHeight);
+          const scaledWidth = imageWidth * scale;
+          const scaledHeight = imageHeight * scale;
+          
+          // 计算在原始图像中的偏移量
+          const offsetX = (yoloInputSize - scaledWidth) / 2;
+          const offsetY = (yoloInputSize - scaledHeight) / 2;
+          
+          // 将bbox坐标转换回原始图像坐标
+          const originalX = (x - offsetX) / scale;
+          const originalY = (y - offsetY) / scale;
+          const originalW = w / scale;
+          const originalH = h / scale;
+          
+          // 确保坐标在图像范围内
+          const clampedX = Math.max(0, Math.min(originalX, imageWidth));
+          const clampedY = Math.max(0, Math.min(originalY, imageHeight));
+          const clampedW = Math.max(0, Math.min(originalW, imageWidth - clampedX));
+          const clampedH = Math.max(0, Math.min(originalH, imageHeight - clampedY));
+          
+          // 计算物体面积比例
+          const objectArea = clampedW * clampedH;
+          const areaRatio = objectArea / imageArea;
+          
+          categoryStats[category].count++;
+          categoryStats[category].totalArea += areaRatio;
+        }
+      });
+      
+      // 构建结果数组
+      const results = Object.entries(categoryStats)
+        .map(([category, stats]) => ({ 
+          category, 
+          count: stats.count,
+          sizeRatio: stats.totalArea // 累计面积比例
+        }))
+        .sort((a, b) => b.sizeRatio - a.sizeRatio); // 按面积比例降序排序
+      
+      console.log(`✅ 主角识别完成，识别到 ${results.length} 个分类:`);
+      results.forEach((result, index) => {
+        console.log(`  ${index + 1}. ${result.category}: ${result.count}个物体, 累计面积比例: ${(result.sizeRatio * 100).toFixed(2)}%`);
+      });
+      
+      // 输出详细的面积比例数据，用于阈值调优
+      console.log('📊 面积比例详细数据（用于阈值调优）:');
+      results.forEach((result, index) => {
+        console.log(`  ${result.category}: 面积比例=${(result.sizeRatio * 100).toFixed(3)}%, 物体数量=${result.count}`);
+      });
+      
+      return results;
+      
+    } catch (error) {
+      console.error('❌ 主角识别失败:', error);
+      return [];
+    }
+  }
+
+  
+
+
+  
+  /**
+   * 将检测到的物体映射到分类ID
+   * @param {Object} allModelResults - 所有模型的推理结果
+   * @param {string} imageURI - 图像URI
+   * @param {Object} imageDimensions - 图像尺寸 {width, height}
+   * @returns {string} 分类ID
+   */
+  MapObjectes2Category(allModelResults, imageURI, imageDimensions) {
+    // 检查身份证检测结果
+    if (allModelResults.idCard && allModelResults.idCard.length > 0) {
+      console.log('🆔 检测到身份证，返回身份证分类');
+      return 'idcard';
+    }
     
-    if (className === idCardClasses[0]) { // id_card_front
-      return 'front';
-    } else if (className === idCardClasses[1]) { // id_card_back
-      return 'back';
+    // 调用identifyMainRole获取主角信息
+    const mainRoleResults = this.identifyMainRole(imageURI, allModelResults.general, imageDimensions);
+    
+    console.log('🎯 主角识别结果:', mainRoleResults);
+    
+    // 检查人物分类（遍历所有结果查找人物）
+    if (mainRoleResults && mainRoleResults.length > 0) {
+      // 查找各种分类
+      const personSubject = mainRoleResults.find(result => result.category === 'person');
+      const animalSubject = mainRoleResults.find(result => result.category === 'animals');
+      const foodSubject = mainRoleResults.find(result => result.category === 'foods');
+      
+      if (personSubject) {
+        console.log(`👤 人物检测: 数量=${personSubject.count}, 面积占比=${(personSubject.sizeRatio * 100).toFixed(3)}%`);
+        console.log(`🔍 人物面积占比详细: ${personSubject.sizeRatio} (${(personSubject.sizeRatio * 100).toFixed(3)}%)`);
+        
+        // 检查是否为单人且面积占比大于5%（降低阈值）
+        if (personSubject.count === 1 && personSubject.sizeRatio > 0.05) {
+          console.log('✅ 单人分类: 面积占比 > 5%');
+          return 'single_person';
+        } else if (personSubject.count === 1) {
+          console.log('❌ 单人分类: 面积占比不足 5%');
+        }
+        
+        // 检查是否为多人且面积占比大于5%（降低阈值）
+        if (personSubject.count > 1 && personSubject.sizeRatio > 0.05) {
+          console.log('✅ 多人分类: 面积占比 > 5%');
+          return 'social_activities';
+        } else if (personSubject.count > 1) {
+          console.log('❌ 多人分类: 面积占比不足 5%');
+        }
+      }
+      
+      // 检查动物
+      if (animalSubject) {
+        console.log(`🐾 动物检测: 面积占比=${(animalSubject.sizeRatio * 100).toFixed(3)}%`);
+        if (animalSubject.sizeRatio > 0.05) {
+          console.log('✅ 动物分类: 面积占比 > 5%');
+          return 'pets';
+        } else {
+          console.log('❌ 动物分类: 面积占比不足 5%');
+        }
+      }
+      
+      // 检查美食
+      if (foodSubject) {
+        console.log(`🍽️ 美食检测: 面积占比=${(foodSubject.sizeRatio * 100).toFixed(3)}%`);
+        if (foodSubject.sizeRatio > 0.05) {
+          console.log('✅ 美食分类: 面积占比 > 5%');
+          return 'foods';
+        } else {
+          console.log('❌ 美食分类: 面积占比不足 5%');
+        }
+      }
+      
+      // 检查交通工具或自然风景（只要人物面积占比不超过0.1）
+      const vehicleSubject = mainRoleResults.find(result => result.category === 'transportation');
+      const landscapeSubject = mainRoleResults.find(result => result.category === 'nature');
+      
+      if (vehicleSubject) {
+        console.log(`🚗 交通工具检测: 面积占比=${(vehicleSubject.sizeRatio * 100).toFixed(3)}%`);
+      }
+      if (landscapeSubject) {
+        console.log(`🏞️ 风景检测: 面积占比=${(landscapeSubject.sizeRatio * 100).toFixed(3)}%`);
+      }
+      
+      if ((vehicleSubject && vehicleSubject.sizeRatio > 0.1) || 
+          (landscapeSubject && landscapeSubject.sizeRatio > 0.1)) {
+        // 如果检测到人物且面积占比超过0.1，则不归类为旅游风景
+        if (personSubject && personSubject.sizeRatio > 0.1) {
+          console.log('❌ 旅游风景分类: 人物面积占比超过 10%');
+        } else {
+          console.log('✅ 旅游风景分类: 面积占比 > 10% 且人物面积占比 ≤ 10%');
+          return 'travel_scenery';
+        }
+      } else if (vehicleSubject || landscapeSubject) {
+        console.log('❌ 旅游风景分类: 面积占比不足 10%');
+      }
+    }
+
+    // 如果YOLO检测没有明确结果，尝试使用MobileNetV3分类结果
+    if (allModelResults.mobileNetV3 && allModelResults.mobileNetV3.success && allModelResults.mobileNetV3.predictions && allModelResults.mobileNetV3.predictions.length > 0) {
+      console.log('🧠 使用MobileNetV3分类结果进行辅助分类');
+      
+      // 按优先级检查MobileNetV3的检测结果：旅游风景 > 宠物 > 美食
+      const priorityCategories = [
+        { objectCategory: 'transportation', appCategory: 'travel_scenery' },
+        { objectCategory: 'infrastructure', appCategory: 'travel_scenery' },
+        { objectCategory: 'nature', appCategory: 'travel_scenery' },
+        { objectCategory: 'animals', appCategory: 'pets' },
+        { objectCategory: 'food', appCategory: 'foods' }
+      ];
+      
+      for (const priority of priorityCategories) {
+        console.log(`🔍 检查优先级分类: ${priority.objectCategory} -> ${priority.appCategory}`);
+        for (const prediction of allModelResults.mobileNetV3.predictions) {
+          const confidence = prediction.probability || prediction.confidence || 0;
+          console.log(`📊 检查预测: ${prediction.class} (${(confidence * 100).toFixed(1)}%)`);
+          
+          // 只处理置信度超过0.05的物体
+          if (confidence <= 0.05) {
+            console.log(`❌ 置信度过低，跳过: ${prediction.class} (${(confidence * 100).toFixed(1)}%)`);
+            continue;
+          }
+          
+          const mobileNetV3ClassInfo = this.configService.getMobileNetV3ClassByEnglishName(prediction.class);
+          console.log(`🔍 获取类信息: ${prediction.class} ->`, mobileNetV3ClassInfo);
+          
+          if (mobileNetV3ClassInfo && mobileNetV3ClassInfo.category === priority.objectCategory) {
+            console.log(`🔍 检测到${priority.objectCategory}相关物体: ${prediction.class} -> ${priority.appCategory} (${(confidence * 100).toFixed(1)}%)`);
+            console.log(`✅ 直接归类为${priority.appCategory}: ${prediction.class}`);
+            return priority.appCategory;
+          }
+        }
+      }
+      
+      // 如果没有旅游风景相关物体，则使用置信度最高的预测结果
+      const topPrediction = allModelResults.mobileNetV3.topPrediction;
+      if (topPrediction && topPrediction.confidence > 0.3) { // 置信度阈值
+        console.log(`🧠 MobileNetV3最高置信度分类: ${topPrediction.class} (${(topPrediction.confidence * 100).toFixed(1)}%)`);
+        
+        // 根据MobileNetV3的分类结果映射到应用分类
+        const mappedCategory = this.mapMobileNetV3ToAppCategory(topPrediction.class);
+        if (mappedCategory !== 'other') {
+          console.log(`✅ MobileNetV3映射分类: ${topPrediction.class} -> ${mappedCategory}`);
+          return mappedCategory;
+        } else {
+          console.log(`⚠️ MobileNetV3分类 ${topPrediction.class} 无法映射到应用分类`);
+        }
+      } else {
+        console.log('❌ MobileNetV3最高置信度不足或不存在');
+      }
     } else {
-      return 'unknown';
+      console.log('❌ MobileNetV3分类结果不可用');
+    }
+
+    // 如果所有方法都无法确定分类，返回默认分类
+    console.log('🔄 所有分类方法都无法确定，使用默认分类');
+    return 'other';
+    }
+    
+
+  /**
+   * 将MobileNetV3的分类结果映射到应用分类
+   * @param {string} mobileNetV3Class - MobileNetV3的分类名称
+   * @returns {string} 应用分类ID
+   */
+  mapMobileNetV3ToAppCategory(mobileNetV3Class) {
+    if (!mobileNetV3Class) return 'other';
+    
+    try {
+      // 1. 通过MobileNetV3分类名称获取物体分类信息
+      const mobileNetV3ClassInfo = this.configService.getMobileNetV3ClassByEnglishName(mobileNetV3Class);
+      if (!mobileNetV3ClassInfo || !mobileNetV3ClassInfo.category) {
+        console.log(`⚠️ 未找到MobileNetV3分类 "${mobileNetV3Class}" 的配置信息`);
+        return 'other';
+      }
+      
+      const objectCategory = mobileNetV3ClassInfo.category;
+      console.log(`🔍 MobileNetV3分类 "${mobileNetV3Class}" 映射到物体分类: ${objectCategory}`);
+      
+      // 2. 通过物体分类映射到应用分类
+      const objectMappings = this.configService.getObjectMappings();
+      const appCategory = objectMappings[objectCategory];
+      
+      if (appCategory) {
+        console.log(`✅ 物体分类 "${objectCategory}" 映射到应用分类: ${appCategory}`);
+        return appCategory;
+      } else {
+        console.log(`⚠️ 未找到物体分类 "${objectCategory}" 的应用分类映射`);
+        return 'other';
+      }
+      
+    } catch (error) {
+      console.error(`❌ MobileNetV3分类映射失败: ${mobileNetV3Class}`, error);
+      return 'other';
     }
   }
 
   // ==================== 新增的公共接口函数 ====================
 
-  
+
+  /**
+   * 识别手机截图
+   * @param {string} imageUri - 图片URI
+   * @param {Object} imageDimensions - 图像尺寸 {width, height}
+   * @returns {Promise<boolean>} 如果是手机截图返回true，否则返回false
+   */
+  async identifyMobileScreenshot(imageUri, imageDimensions) {
+    try {
+      // 使用传入的图像尺寸，避免重复加载图片
+      const originalWidth = imageDimensions.width;
+      const originalHeight = imageDimensions.height;
+      
+      console.log('📏 获取图片分辨率:', originalWidth, 'x', originalHeight);
+      
+      // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
+      const aspectRatio = originalWidth / originalHeight;
+      const isMobileResolution = aspectRatio <= 0.5;
+      
+      // 特征2：文件名判定 - 包含截图关键词
+      const fileName = '';
+      const fileNameLower = fileName.toLowerCase();
+      const isScreenshotFile = fileNameLower.includes('screenshot') || 
+                              fileNameLower.includes('截图') || 
+                              fileNameLower.includes('screen');
+      
+      // 调试信息
+      console.log('🔍 手机截图判定调试:');
+      console.log(`  - 文件名: ${fileName}`);
+      console.log(`  - 原始分辨率: ${originalWidth}x${originalHeight}`);
+      console.log(`  - 宽高比: ${aspectRatio.toFixed(3)}`);
+      console.log(`  - 手机分辨率: ${isMobileResolution}`);
+      console.log(`  - 截图文件名: ${isScreenshotFile}`);
+      console.log(`  - 最终判定: ${isMobileResolution || isScreenshotFile}`);
+      
+      // 两个特征中只要有一个满足就判定为手机截图
+      return isMobileResolution || isScreenshotFile;
+    } catch (error) {
+      console.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
+      return false;
+    }
+  }
+
+
   /**
    * 加载指定模型
    * @param {string} modelName - 模型名称 ('idCard' 或 'yolo8s')
@@ -1171,7 +1157,7 @@ class ImageClassifierService {
         try {
           await this.loadModel(modelName);
           results[modelName] = { success: true, error: null };
-        } catch (error) {
+    } catch (error) {
           results[modelName] = { success: false, error: error.message };
           console.error(`❌ ${modelName} 加载失败:`, error.message);
         }
@@ -1189,7 +1175,7 @@ class ImageClassifierService {
       };
     } catch (error) {
       console.error('加载模型失败:', error);
-        return {
+      return {
         success: false,
         totalModels: 0,
         loadedModels: 0,
@@ -1202,35 +1188,6 @@ class ImageClassifierService {
 
 
 
-  /**
-   * 获取模型状态
-   * @returns {Object} 模型状态信息
-   */
-  getModelStatus() {
-    const status = {};
-    let loadedCount = 0;
-
-    Object.keys(this.models).forEach(modelName => {
-      const isLoaded = !!this.models[modelName].model;
-      status[modelName] = {
-        loaded: isLoaded,
-        path: this.models[modelName].path,
-        description: this.models[modelName].description,
-        priority: this.models[modelName].priority
-      };
-      if (isLoaded) {
-        loadedCount++;
-      }
-    });
-
-      return {
-      totalModels: Object.keys(this.models).length,
-      loadedModels: loadedCount,
-      unloadedModels: Object.keys(this.models).length - loadedCount,
-      isInitialized: this.isInitialized,
-      status: status
-    };
-  }
 
 
 
@@ -1396,10 +1353,6 @@ class ImageClassifierService {
     }
   }
 
-  // 使用身份证模型进行检测
-  async classifyImageWithIDModel(imageUri, options = {}) {
-    return await this.classifyImageWithYOLO(imageUri, 'idCard', options);
-  }
 
 
   // 使用MobileNetV3分类图片

@@ -134,11 +134,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
     
     for (const image of images) {
       try {
-        const result = await imageClassifierService.classifyImage(image.uri, {
-          timestamp: image.timestamp || Date.now(),
-          fileSize: image.size || 0,
-          fileName: image.fileName || image.uri.split('/').pop() || 'unknown.jpg'
-        });
+        const result = await imageClassifierService.classifyImage(image.uri);
         await UnifiedDataService.writeImageClassification({
           ...image,
           category: result.category

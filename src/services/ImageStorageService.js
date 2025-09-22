@@ -134,6 +134,103 @@ class IndexedDBAdapter {
     });
   }
 
+  // 新增：单条记录增量更新（性能最优）
+  async addOrUpdateSingleImage(imageData) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['images'], 'readwrite');
+      const store = transaction.objectStore('images');
+      
+      // 先尝试获取现有记录（基于URI查找）
+      const getRequest = store.get(imageData.uri);
+      
+      getRequest.onsuccess = () => {
+        const existingImage = getRequest.result;
+        
+        if (existingImage) {
+          // 更新现有记录，保留原有ID和创建时间
+          const updatedImage = {
+            ...existingImage,
+            ...imageData,
+            id: existingImage.id, // 保持原有ID
+            createdAt: existingImage.createdAt, // 保持原有创建时间
+            updatedAt: new Date().toISOString()
+          };
+          
+          store.put(updatedImage);
+          console.log(`✅ 更新图片: ${imageData.fileName}`);
+        } else {
+          // 添加新记录，确保有ID字段
+          const imageWithId = {
+            ...imageData,
+            id: imageData.id || this.generateStableId(imageData.uri)
+          };
+          store.add(imageWithId);
+          console.log(`✅ 添加图片: ${imageData.fileName}`);
+        }
+        
+        resolve(true);
+      };
+      
+      getRequest.onerror = () => {
+        console.error(`❌ IndexedDB 查找图片失败:`, getRequest.error);
+        reject(getRequest.error);
+      };
+      
+      transaction.oncomplete = () => {
+        console.log(`✅ IndexedDB 单条记录操作成功`);
+        resolve(true);
+      };
+      
+      transaction.onerror = () => {
+        console.error(`❌ IndexedDB 单条记录操作失败:`, transaction.error);
+        reject(transaction.error);
+      };
+    });
+  }
+
+  // 批量增量更新（用于批量操作）
+  async updateImagesIncremental(newImages) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['images'], 'readwrite');
+      const store = transaction.objectStore('images');
+      
+      // 获取现有数据
+      const getAllRequest = store.getAll();
+      
+      getAllRequest.onsuccess = () => {
+        const existingImages = getAllRequest.result || [];
+        const existingMap = new Map(existingImages.map(img => [img.uri, img]));
+        
+        // 合并新数据
+        newImages.forEach(newImg => {
+          existingMap.set(newImg.uri, newImg);
+        });
+        
+        // 清空并重新插入所有数据
+        store.clear();
+        const allImages = Array.from(existingMap.values());
+        allImages.forEach(item => {
+          store.add(item);
+        });
+        
+        console.log(`✅ IndexedDB 批量增量更新成功，总图片数: ${allImages.length}`);
+        resolve(true);
+      };
+      
+      getAllRequest.onerror = () => {
+        console.error(`❌ IndexedDB 读取现有数据失败:`, getAllRequest.error);
+        reject(getAllRequest.error);
+      };
+      
+      transaction.onerror = () => {
+        console.error(`❌ IndexedDB 批量增量更新失败:`, transaction.error);
+        reject(transaction.error);
+      };
+    });
+  }
+
   async removeItem(key) {
     await this.init();
     return new Promise((resolve, reject) => {
@@ -180,6 +277,20 @@ class IndexedDBAdapter {
       transaction.objectStore('stats').clear();
       transaction.objectStore('settings').clear();
     });
+  }
+
+  // 生成稳定的ID
+  generateStableId(uri) {
+    // 使用URI的简单哈希作为ID基础，确保相同URI总是生成相同ID
+    let hash = 0;
+    for (let i = 0; i < uri.length; i++) {
+      const char = uri.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // 转换为32位整数
+    }
+    // 添加随机数确保唯一性，避免并发冲突
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
   }
 }
 
@@ -233,8 +344,9 @@ class ImageStorageService {
         await this.storage.getItem('test');
       }
       this.isInitialized = true;
+      console.log('✅ 存储服务初始化成功，使用IndexedDB');
     } catch (error) {
-      console.warn('Primary storage not ready, trying fallback:', error);
+      console.error('❌ IndexedDB初始化失败:', error);
       
       // 如果IndexedDB失败且有降级存储，尝试降级
       if (Platform.OS === 'web' && this.fallbackStorage) {
@@ -243,25 +355,31 @@ class ImageStorageService {
           this.storage = this.fallbackStorage;
           await this.storage.getItem('test');
           this.isInitialized = true;
+          console.log('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
           return;
         } catch (fallbackError) {
-          console.error('Fallback storage also failed:', fallbackError);
+          console.error('❌ localStorage降级也失败:', fallbackError);
         }
       }
       
-      // Wait for a while and retry
+      // 最后尝试：等待一段时间后重试IndexedDB
+      console.log('🔄 等待1秒后重试IndexedDB初始化...');
       await new Promise(resolve => setTimeout(resolve, 1000));
       try {
         if (Platform.OS === 'web') {
+          // 重新创建IndexedDB适配器
+          this.storage = new IndexedDBAdapter();
           await this.storage.init();
           await this.migrateFromLocalStorage();
+          this.isInitialized = true;
+          console.log('✅ 重试成功，IndexedDB初始化完成');
         } else {
           await this.storage.getItem('test');
+          this.isInitialized = true;
         }
-        this.isInitialized = true;
       } catch (retryError) {
-        console.error('Storage initialization failed:', retryError);
-        throw new Error('Storage not available');
+        console.error('❌ 重试IndexedDB初始化失败:', retryError);
+        throw new Error('存储服务不可用，请刷新页面重试');
       }
     }
   }
@@ -277,6 +395,13 @@ class ImageStorageService {
         console.log('✅ IndexedDB中已有数据，跳过迁移');
         return;
       }
+      
+      // 临时：自动清空localStorage中的旧数据（包含'people'分类）
+      console.log('🧹 自动清理localStorage中的旧数据...');
+      await this.fallbackStorage.removeItem('classified_images');
+      await this.fallbackStorage.removeItem('image_stats');
+      await this.fallbackStorage.removeItem('app_settings');
+      console.log('✅ localStorage旧数据已清理');
       
       // 检查localStorage中是否有数据
       const oldImages = await this.fallbackStorage.getItem('classified_images');
@@ -368,7 +493,9 @@ class ImageStorageService {
           hash = ((hash << 5) - hash) + char;
           hash = hash & hash; // 转换为32位整数
         }
-        return `img_${Math.abs(hash).toString(36)}_${Date.now()}`;
+        // 添加随机数确保唯一性，避免并发冲突
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
       };
       
       const imageRecord = {
@@ -395,7 +522,8 @@ class ImageStorageService {
         // Detection results
         idCardDetections: imageData.idCardDetections || null,  // 身份证模型检测结果
         generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
-        smartClassifications: imageData.smartClassifications || null,  // MobileNetV3智能分类结果
+        mobileNetV3Detections: imageData.mobileNetV3Detections || null,  // MobileNetV3模型检测结果
+        imageDimensions: imageData.imageDimensions || null,  // 图像尺寸信息
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -412,7 +540,31 @@ class ImageStorageService {
     }
     
     // 保存到存储
-    await this.storage.setItem(this.storageKeys.images, existingImages);
+    console.log(`💾 开始保存到存储，检测结果字段:`, {
+      idCardDetections: imageDataArray[0]?.idCardDetections?.length || 0,
+      generalDetections: imageDataArray[0]?.generalDetections?.length || 0,
+      mobileNetV3Detections: imageDataArray[0]?.mobileNetV3Detections ? '存在' : '不存在'
+    });
+    
+    // 根据数据量选择最优保存策略
+    if (Platform.OS === 'web') {
+      if (imageDataArray.length === 1) {
+        // 单张图片：使用单条记录操作（性能最优）
+        await this.storage.addOrUpdateSingleImage(imageDataArray[0]);
+        console.log(`✅ 单条记录保存成功`);
+      } else {
+        // 批量图片：也使用单条记录操作，避免数据丢失
+        console.log(`🔄 开始批量保存 ${imageDataArray.length} 张图片`);
+        for (const imageData of imageDataArray) {
+          await this.storage.addOrUpdateSingleImage(imageData);
+        }
+        console.log(`✅ 批量保存成功，处理了 ${imageDataArray.length} 张图片`);
+      }
+    } else {
+      // 移动端：使用原有逻辑
+      await this.storage.setItem(this.storageKeys.images, existingImages);
+      console.log(`✅ 数据已保存到存储`);
+    }
     
     // 更新统计信息
     await this.updateStats();
@@ -494,7 +646,9 @@ class ImageStorageService {
           hash = ((hash << 5) - hash) + char;
           hash = hash & hash; // 转换为32位整数
         }
-        return `img_${Math.abs(hash).toString(36)}_${Date.now()}`;
+        // 添加随机数确保唯一性，避免并发冲突
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
       };
       
       const imageRecord = {
@@ -522,6 +676,8 @@ class ImageStorageService {
         // Detection results
         idCardDetections: imageData.idCardDetections || null,  // 身份证模型检测结果
         generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
+        mobileNetV3Detections: imageData.mobileNetV3Detections || null,  // MobileNetV3模型检测结果
+        imageDimensions: imageData.imageDimensions || null,  // 图像尺寸信息
         // Additional metadata
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -784,9 +940,21 @@ class ImageStorageService {
   async clearAllImages() {
     try {
       await this.ensureInitialized();
+      
+      // 清空 IndexedDB
       await this.storage.removeItem(this.storageKeys.images);
       await this.storage.removeItem(this.storageKeys.stats);
-      console.log('All images cleared from database');
+      console.log('✅ IndexedDB 数据已清空');
+      
+      // 同时清空 localStorage（防止数据重新迁移）
+      if (Platform.OS === 'web' && this.fallbackStorage) {
+        await this.fallbackStorage.removeItem('classified_images');
+        await this.fallbackStorage.removeItem('image_stats');
+        await this.fallbackStorage.removeItem('app_settings');
+        console.log('✅ localStorage 数据已清空');
+      }
+      
+      console.log('✅ 所有存储数据已清空');
     } catch (error) {
       console.error('Failed to clear all images:', error);
       throw error;
@@ -830,6 +998,8 @@ class ImageStorageService {
       await this.updateStats();
       
       console.log(`Image deleted successfully: ${image.fileName}`);
+
+
       return {
         success: true,
         message: 'Image deleted successfully'
@@ -1426,122 +1596,24 @@ class ImageStorageService {
 
   // 获取默认分类规则（带优先级）
   getDefaultClassificationRulesWithPriority() {
+    // 从ConfigService获取配置
+    const objectMappings = configService.getObjectMappings();
+    const fullConfig = configService.getFullConfig();
+    
+    // 从配置文件生成分类优先级（基于categoryDisplayOrder）
+    const categoryPriorities = {};
+    if (fullConfig?.categoryDisplayOrder) {
+      fullConfig.categoryDisplayOrder.forEach((category, index) => {
+        categoryPriorities[category] = index + 1;
+      });
+    }
+    
     return {
-      // 分类优先级定义（数字越小优先级越高）
-      categoryPriorities: {
-        'idcard': 1,      // 身份证 - 最高优先级
-        'people': 2,      // 社交活动
-        'pet': 3,         // 宠物照片
-        'life': 4,        // 生活记录
-        'food': 5,        // 美食记录
-        'document': 6,    // 工作照片
-        'travel': 7,      // 旅行风景
-        'game': 8,        // 运动娱乐
-        'other': 9        // 其他图片 - 最低优先级
-      },
+      // 分类优先级定义（从categoryDisplayOrder自动生成）
+      categoryPriorities: categoryPriorities,
       
-      // 物体到分类的映射
-      objectMappings: {
-        // 身份证相关 -> idcard
-        'id_card_front': 'idcard',
-        'id_card_back': 'idcard',
-        
-        // 人物相关 -> people
-        'person': 'people',
-        
-        // 宠物相关 -> pet
-        'cat': 'pet',
-        'dog': 'pet',
-        'bird': 'pet',
-        'horse': 'pet',
-        'sheep': 'pet',
-        'cow': 'pet',
-        'elephant': 'pet',
-        'bear': 'pet',
-        'zebra': 'pet',
-        'giraffe': 'pet',
-        
-        // 生活用品 -> life
-        'bottle': 'life',
-        'wine glass': 'life',
-        'cup': 'life',
-        'fork': 'life',
-        'knife': 'life',
-        'spoon': 'life',
-        'bowl': 'life',
-        'tv': 'life',
-        'couch': 'life',
-        'bed': 'life',
-        'dining table': 'life',
-        'toilet': 'life',
-        'microwave': 'life',
-        'oven': 'life',
-        'toaster': 'life',
-        'sink': 'life',
-        'refrigerator': 'life',
-        'clock': 'life',
-        'vase': 'life',
-        'scissors': 'life',
-        'teddy bear': 'life',
-        'hair drier': 'life',
-        'toothbrush': 'life',
-        
-        // 食物相关 -> food
-        'banana': 'food',
-        'apple': 'food',
-        'sandwich': 'food',
-        'orange': 'food',
-        'broccoli': 'food',
-        'carrot': 'food',
-        'hot dog': 'food',
-        'pizza': 'food',
-        'donut': 'food',
-        'cake': 'food',
-        
-        // 工作文档 -> document
-        'laptop': 'document',
-        'mouse': 'document',
-        'keyboard': 'document',
-        'cell phone': 'document',
-        'book': 'document',
-        'remote': 'document',
-        
-        // 交通工具 -> travel
-        'car': 'travel',
-        'motorcycle': 'travel',
-        'airplane': 'travel',
-        'bus': 'travel',
-        'train': 'travel',
-        'truck': 'travel',
-        'boat': 'travel',
-        'bicycle': 'travel',
-        
-        // 游戏相关 -> game
-        'sports ball': 'game',
-        'frisbee': 'game',
-        'skis': 'game',
-        'snowboard': 'game',
-        'kite': 'game',
-        'baseball bat': 'game',
-        'baseball glove': 'game',
-        'skateboard': 'game',
-        'surfboard': 'game',
-        'tennis racket': 'game',
-        
-        // 其他 -> other
-        'traffic light': 'other',
-        'fire hydrant': 'other',
-        'stop sign': 'other',
-        'parking meter': 'other',
-        'bench': 'other',
-        'backpack': 'other',
-        'umbrella': 'other',
-        'handbag': 'other',
-        'tie': 'other',
-        'suitcase': 'other',
-        'potted plant': 'other',
-        'chair': 'other'
-      }
+      // 物体到分类的映射（从配置文件读取）
+      objectMappings: objectMappings
     };
   }
 
