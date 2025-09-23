@@ -1255,6 +1255,33 @@ class GalleryScannerService {
     const totalProcessed = processedCount;
     const totalFailed = failedCount;
     
+    // 在这里增加相似度检测的功能
+    // 使用 ImageSimilarityService 进行相似度检测
+    try {
+      if (newImages.length > 0) {
+        console.log(`🔗 开始检测相似图片，新图片数量: ${newImages.length}`);
+        
+        // 导入并使用 ImageSimilarityService
+        const { default: ImageSimilarityService } = await import('./ImageSimilarityService.js');
+        const imageSimilarityService = new ImageSimilarityService();
+        
+        // 使用 ImageSimilarityService 的相似度检测功能
+        const similarityResult = await imageSimilarityService.detectSimilarImages({
+          timeWindow: 300,        // 5分钟时间窗口
+          similarityThreshold: 0.8 // 80%相似度阈值
+        });
+        
+        if (similarityResult.success) {
+          console.log(`🔗 相似度检测完成: 发现${similarityResult.groups.length}个相似组, 处理${similarityResult.processed}张图片`);
+        } else {
+          console.warn('⚠️ 相似度检测失败:', similarityResult.error);
+        }
+      } else {
+        console.log('🔗 没有新图片，跳过相似度检测');
+      }
+    } catch (similarityError) {
+      console.error('❌ 相似度检测阶段出错:', similarityError);
+    }
     // 输出最终分类性能统计
     if (this.classificationStats && this.classificationStats.count > 0) {
       const speed = (this.classificationStats.count / (this.classificationStats.totalTime / 1000)).toFixed(2);

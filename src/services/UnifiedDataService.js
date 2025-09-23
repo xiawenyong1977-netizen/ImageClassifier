@@ -1,11 +1,13 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
+import ImageSimilarityService from './ImageSimilarityService.js';
 import configService from './ConfigService.js';
 
 class UnifiedDataService {
   constructor() {
     this.imageStorageService = new ImageStorageService();
+    this.imageSimilarityService = new ImageSimilarityService();
     this.imageCache = GlobalImageCache;
     this.configService = configService;
     this.isInitialized = false;
@@ -48,7 +50,11 @@ class UnifiedDataService {
       await this.imageStorageService.ensureInitialized();
       console.log('✅ 数据库服务初始化完成');
       
-      // 2. 构建缓存
+      // 2. 初始化相似度检测服务
+      await this.imageSimilarityService.initialize();
+      console.log('✅ 相似度检测服务初始化完成');
+      
+      // 3. 构建缓存
       await this.imageCache.buildCache();
       console.log('✅ 缓存构建完成');
       
@@ -1007,6 +1013,134 @@ class UnifiedDataService {
       return rules;
     } catch (error) {
       console.error('❌ 删除分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  // ==================== 相似度检测接口 ====================
+
+ 
+
+  /**
+   * 获取相似度组统计信息
+   * 返回相似组数组，每个组包含groupid、图片数量和最近一张照片的URI
+   * @returns {Array} 相似组数组
+   */
+  async getSimilarityGroupsStats() {
+    try {
+      console.log('📊 获取相似度组统计信息...');
+      
+      // 使用 ImageStorageService 获取相似组数据
+      const similarityGroups = await this.imageStorageService.getSimilarityGroups('similar');
+      
+      if (!similarityGroups || similarityGroups.length === 0) {
+        console.log('📊 没有找到相似度组数据');
+        return [];
+      }
+      
+      // 获取所有图片数据用于获取最近照片的URI
+      const allImages = await this.readAllImages();
+      const imageMap = new Map(allImages.map(img => [img.id, img]));
+      
+      // 构建统计信息
+      const groups = similarityGroups.map(group => {
+        // 找到该组中最近的一张照片
+        let latestImage = null;
+        let latestTime = 0;
+        
+        group.images.forEach(imageInfo => {
+          const image = imageMap.get(imageInfo.id);
+          if (image) {
+            const imageTime = image.takenAt ? new Date(image.takenAt).getTime() : image.timestamp;
+            if (imageTime > latestTime) {
+              latestTime = imageTime;
+              latestImage = image;
+            }
+          }
+        });
+        
+        return {
+          groupId: group.id,
+          imageCount: group.images.length,
+          latestImageUri: latestImage ? latestImage.uri : null
+        };
+      });
+      
+      // 按组大小排序（从大到小）
+      groups.sort((a, b) => b.imageCount - a.imageCount);
+      
+      console.log(`📊 相似度组统计: ${groups.length}个组`);
+      return groups;
+      
+    } catch (error) {
+      console.error('❌ 获取相似度组统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定相似组的照片精简信息
+   * @param {string} groupId - 相似组ID
+   * @returns {Object} 相似组信息，包含该组的所有照片精简信息
+   */
+  async getSimilarityGroupImages(groupId) {
+    try {
+      console.log(`📖 获取相似组照片信息: ${groupId}`);
+      
+      if (!groupId) {
+        throw new Error('相似组ID不能为空');
+      }
+      
+      // 使用 ImageStorageService 获取相似组信息
+      const group = await this.imageStorageService.getSimilarityGroupById(groupId);
+      
+      if (!group) {
+        console.log(`📖 未找到相似组 ${groupId}`);
+        return {
+          groupId,
+          imageCount: 0,
+          images: [],
+          notFound: true
+        };
+      }
+      
+      // 获取所有图片数据用于获取完整信息
+      const allImages = await this.readAllImages();
+      const imageMap = new Map(allImages.map(img => [img.id, img]));
+      
+      // 构建精简信息，按相似度分数排序（从高到低）
+      const images = group.images
+        .sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
+        .map(imageInfo => {
+          const image = imageMap.get(imageInfo.id);
+          return {
+            id: imageInfo.id,
+            fileName: image ? image.fileName : 'Unknown',
+            uri: image ? image.uri : null,
+            category: image ? image.category : null,
+            city: image ? image.city : null,
+            takenAt: image ? image.takenAt : null,
+            similarityScore: imageInfo.similarity_score || 0,
+            size: image ? image.size : 0,
+            width: image ? image.width : 0,
+            height: image ? image.height : 0
+          };
+        });
+      
+      const result = {
+        groupId: group.id,
+        imageCount: images.length,
+        images,
+        confidence: group.confidence || 0,
+        createdAt: group.created_at,
+        notFound: false
+      };
+      
+      console.log(`📖 相似组 ${groupId} 包含 ${images.length} 张图片`);
+      return result;
+      
+    } catch (error) {
+      console.error('❌ 获取相似组照片信息失败:', error);
       throw error;
     }
   }

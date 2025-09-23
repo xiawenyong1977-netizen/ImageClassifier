@@ -82,7 +82,7 @@ class ImageClassifierService {
           metadata: null,
           priority: 1,
           description: '身份证识别专用模型',
-          confidenceThreshold: 0.7,  // 提高身份证检测阈值，减少误检
+          confidenceThreshold: 0.3,  // 提高身份证检测阈值，减少误检
           nmsThreshold: 0.4,
           maxDetections: 5
         },

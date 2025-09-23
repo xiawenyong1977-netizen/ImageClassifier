@@ -30,6 +30,7 @@ const HomeScreen = () => {
   const [cityCounts, setCityCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
+  const [similarityGroups, setSimilarityGroups] = useState([]);
   const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   const [lastScanTime, setLastScanTime] = useState(null);
@@ -47,10 +48,11 @@ const HomeScreen = () => {
       setIsLoading(true);
       
       // 并行加载所有数据
-      const [recentImagesData, categoryCountsData, cityCountsData, settings] = await Promise.all([
+      const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings] = await Promise.all([
         UnifiedDataService.readRecentImages(20),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
+        UnifiedDataService.getSimilarityGroupsStats(),
         UnifiedDataService.readSettings()
       ]);
       
@@ -93,10 +95,12 @@ const HomeScreen = () => {
       // 更新状态
       console.log('📊 准备更新状态 - 分类统计:', categoryCountsData);
       console.log('📊 准备更新状态 - 最近图片数量:', recentImagesData.length);
+      console.log('📊 准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
       
       setRecentImages(recentImagesData);
       setCategoryCounts(categoryCountsData);
       setCityCounts(cityCountsData);
+      setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
       setHideEmptyCategories(settings.hideEmptyCategories === true);
@@ -406,6 +410,44 @@ const HomeScreen = () => {
     );
   };
 
+  // 渲染相似照片卡片组件
+  const SimilarityCard = ({ group }) => {
+    return (
+      <TouchableOpacity
+        style={styles.categoryCard}
+        onPress={() => {
+          // 导航到相似照片详情页面
+          console.log('点击相似照片组:', group.groupId);
+          setCurrentScreen('Category');
+          setScreenProps({ 
+            category: null, 
+            city: null, 
+            similarityGroupId: group.groupId 
+          });
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {group.latestImageUri ? (
+          <Image
+            source={{ uri: group.latestImageUri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
+            <Text style={styles.emptyThumbnailText}>🔗</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示相似照片信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>相似照片</Text>
+          <Text style={styles.categoryCount}>{group.imageCount}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   // 渲染首页内容的函数
   const renderHomeContent = () => {
     console.log('🏠 renderHomeContent 被调用');
@@ -525,6 +567,23 @@ const HomeScreen = () => {
           </View>
         </View>
 
+        {/* 相似照片板块 - 只有当有相似照片组时才显示 */}
+        {similarityGroups && similarityGroups.length > 0 && (
+          <View style={styles.categoriesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>相似照片</Text>
+            </View>
+            <View style={styles.categoriesContainer}>
+              {similarityGroups.slice(0, 10).map((group) => (
+                <SimilarityCard
+                  key={group.groupId}
+                  group={group}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* 最近照片 */}
         <View style={styles.recentSection}>
           <Text style={styles.sectionTitle}>最近</Text>
@@ -639,7 +698,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups]);
 
   // 显示加载状态
   if (isLoading) {
@@ -756,11 +815,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   categoryCard: {
-    width: 'calc(20% - 9.6px)', // 5列布局，考虑gap
-    minWidth: 200,
-    maxWidth: 280,
-    height: 200,
-    borderRadius: 12,
+    width: 140, // 固定宽度，比最近照片稍大
+    height: 140, // 固定高度，正方形
+    borderRadius: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -779,31 +836,31 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    padding: 12,
+    padding: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   categoryName: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: 'bold',
     color: 'white',
     flex: 1,
   },
   categoryCount: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: 'bold',
     color: 'white',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
   emptyThumbnailText: {
-    fontSize: 48,
+    fontSize: 32,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
-    lineHeight: 200,
+    lineHeight: 140,
   },
   emptyMessage: {
     fontSize: 16,

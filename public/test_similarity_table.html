@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>相似度数据表测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        h1, h2 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .loading {
+            display: none;
+            color: #007bff;
+            font-weight: bold;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 相似度数据表测试</h1>
+        
+        <div class="section">
+            <h2>📊 数据表结构</h2>
+            <div class="result info">
+相似度数据表设计：
+{
+  "imageId1": {
+    "similarity_features": {...},      // 颜色直方图特征
+    "similarity_group_id": "group_1",  // 相似组ID
+    "similarity_group_type": "duplicate", // 组类型
+    "similarity_score": 0.95,          // 相似度分数
+    "is_similarity_processed": true,   // 是否已处理
+    "updatedAt": "2024-01-15T10:30:00Z" // 更新时间
+  },
+  "imageId2": {...}
+}
+
+优势：
+✅ 性能优化 - 相似度检测不需要加载完整图片数据
+✅ 存储效率 - 避免在主表中存储大量特征数据
+✅ 功能解耦 - 相似度功能独立，不影响主功能
+✅ 扩展性好 - 可以独立优化相似度算法
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🚀 测试操作</h2>
+            <div>
+                <button onclick="testCreateData()">创建测试数据</button>
+                <button onclick="testUpdateData()">更新相似度数据</button>
+                <button onclick="testGetData()">获取相似度数据</button>
+                <button onclick="testStats()">获取统计信息</button>
+                <button onclick="testClearData()">清除数据</button>
+            </div>
+            <div class="loading" id="testLoading">测试中...</div>
+            <div id="testResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟相似度数据表API
+        class MockSimilarityDataTable {
+            constructor() {
+                this.data = {};
+            }
+            
+            async getSimilarityData() {
+                await this.delay(200);
+                return { ...this.data };
+            }
+            
+            async saveSimilarityData(data) {
+                await this.delay(300);
+                this.data = { ...data };
+                console.log(`✅ 保存相似度数据成功，共${Object.keys(data).length}条记录`);
+                return true;
+            }
+            
+            async updateImageSimilarity(imageId, similarityInfo) {
+                await this.delay(100);
+                this.data[imageId] = {
+                    ...this.data[imageId],
+                    ...similarityInfo,
+                    updatedAt: new Date().toISOString()
+                };
+                console.log(`✅ 更新图片相似度数据: ${imageId}`);
+                return true;
+            }
+            
+            async updateImagesSimilarity(imageSimilarityArray) {
+                await this.delay(500);
+                imageSimilarityArray.forEach(item => {
+                    this.data[item.imageId] = {
+                        ...this.data[item.imageId],
+                        ...item.similarityInfo,
+                        updatedAt: new Date().toISOString()
+                    };
+                });
+                console.log(`✅ 批量更新图片相似度数据: ${imageSimilarityArray.length}张图片`);
+                return true;
+            }
+            
+            async getImageSimilarity(imageId) {
+                await this.delay(100);
+                return this.data[imageId] || null;
+            }
+            
+            async clearSimilarityData(imageIds = null) {
+                await this.delay(200);
+                if (imageIds === null) {
+                    this.data = {};
+                    console.log('✅ 清除所有相似度数据成功');
+                } else {
+                    imageIds.forEach(imageId => {
+                        delete this.data[imageId];
+                    });
+                    console.log(`✅ 清除${imageIds.length}张图片的相似度数据成功`);
+                }
+                return true;
+            }
+            
+            delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+        
+        const mockAPI = new MockSimilarityDataTable();
+        
+        window.testCreateData = async function() {
+            showLoading(true);
+            showResult('');
+            
+            try {
+                // 创建测试数据
+                const testData = {
+                    'img_001': {
+                        similarity_features: { rgb: [0.1, 0.2, 0.3], hsv: [0.4, 0.5, 0.6] },
+                        similarity_group_id: 'group_1',
+                        similarity_group_type: 'duplicate',
+                        similarity_score: 0.95,
+                        is_similarity_processed: true,
+                        updatedAt: new Date().toISOString()
+                    },
+                    'img_002': {
+                        similarity_features: { rgb: [0.1, 0.2, 0.3], hsv: [0.4, 0.5, 0.6] },
+                        similarity_group_id: 'group_1',
+                        similarity_group_type: 'duplicate',
+                        similarity_score: 0.96,
+                        is_similarity_processed: true,
+                        updatedAt: new Date().toISOString()
+                    },
+                    'img_003': {
+                        similarity_features: { rgb: [0.2, 0.3, 0.4], hsv: [0.5, 0.6, 0.7] },
+                        similarity_group_id: 'group_2',
+                        similarity_group_type: 'similar',
+                        similarity_score: 0.82,
+                        is_similarity_processed: true,
+                        updatedAt: new Date().toISOString()
+                    }
+                };
+                
+                await mockAPI.saveSimilarityData(testData);
+                showResult('✅ 测试数据创建成功！\n\n' + JSON.stringify(testData, null, 2));
+            } catch (error) {
+                showResult('❌ 创建测试数据失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        };
+        
+        window.testUpdateData = async function() {
+            showLoading(true);
+            showResult('');
+            
+            try {
+                // 批量更新测试
+                const updateData = [
+                    {
+                        imageId: 'img_001',
+                        similarityInfo: {
+                            similarity_score: 0.98,
+                            updatedAt: new Date().toISOString()
+                        }
+                    },
+                    {
+                        imageId: 'img_004',
+                        similarityInfo: {
+                            similarity_features: { rgb: [0.3, 0.4, 0.5], hsv: [0.6, 0.7, 0.8] },
+                            similarity_group_id: 'group_3',
+                            similarity_group_type: 'similar',
+                            similarity_score: 0.75,
+                            is_similarity_processed: true,
+                            updatedAt: new Date().toISOString()
+                        }
+                    }
+                ];
+                
+                await mockAPI.updateImagesSimilarity(updateData);
+                const result = await mockAPI.getSimilarityData();
+                showResult('✅ 批量更新成功！\n\n' + JSON.stringify(result, null, 2));
+            } catch (error) {
+                showResult('❌ 更新数据失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        };
+        
+        window.testGetData = async function() {
+            showLoading(true);
+            showResult('');
+            
+            try {
+                const data = await mockAPI.getSimilarityData();
+                const stats = {
+                    total: Object.keys(data).length,
+                    processed: Object.values(data).filter(d => d.is_similarity_processed).length,
+                    grouped: Object.values(data).filter(d => d.similarity_group_id).length,
+                    groupTypes: {}
+                };
+                
+                // 统计组类型
+                Object.values(data).forEach(d => {
+                    if (d.similarity_group_type) {
+                        stats.groupTypes[d.similarity_group_type] = 
+                            (stats.groupTypes[d.similarity_group_type] || 0) + 1;
+                    }
+                });
+                
+                showResult('📊 相似度数据获取成功！\n\n' + 
+                          '统计信息:\n' + JSON.stringify(stats, null, 2) + '\n\n' +
+                          '详细数据:\n' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('❌ 获取数据失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        };
+        
+        window.testStats = async function() {
+            showLoading(true);
+            showResult('');
+            
+            try {
+                const data = await mockAPI.getSimilarityData();
+                const entries = Object.values(data);
+                
+                const stats = {
+                    total: Object.keys(data).length,
+                    processed: entries.filter(d => d.is_similarity_processed).length,
+                    grouped: entries.filter(d => d.similarity_group_id).length,
+                    groupTypes: {},
+                    processingProgress: 0
+                };
+                
+                // 统计组类型
+                entries.forEach(d => {
+                    if (d.similarity_group_type) {
+                        stats.groupTypes[d.similarity_group_type] = 
+                            (stats.groupTypes[d.similarity_group_type] || 0) + 1;
+                    }
+                });
+                
+                // 计算处理进度
+                if (stats.total > 0) {
+                    stats.processingProgress = (stats.processed / stats.total) * 100;
+                }
+                
+                showResult('📈 统计信息获取成功！\n\n' + JSON.stringify(stats, null, 2));
+            } catch (error) {
+                showResult('❌ 获取统计信息失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        };
+        
+        window.testClearData = async function() {
+            showLoading(true);
+            showResult('');
+            
+            try {
+                await mockAPI.clearSimilarityData();
+                const data = await mockAPI.getSimilarityData();
+                showResult('🗑️ 数据清除成功！\n\n当前数据: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('❌ 清除数据失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        };
+        
+        function showLoading(show) {
+            document.getElementById('testLoading').style.display = show ? 'block' : 'none';
+        }
+        
+        function showResult(content) {
+            const resultDiv = document.getElementById('testResult');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = content;
+        }
+    </script>
+</body>
+</html>

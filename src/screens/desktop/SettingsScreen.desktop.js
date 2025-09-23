@@ -117,7 +117,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     try {
       if ('indexedDB' in window) {
         const db = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('ImageClassifierDB', 2);
+          const request = indexedDB.open('ImageClassifierDB', 3); // 使用当前版本号
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });

@@ -21,7 +21,7 @@ try {
 class IndexedDBAdapter {
   constructor() {
     this.dbName = 'ImageClassifierDB';
-    this.version = 2; // 增加版本号以支持新的对象存储
+    this.version = 3; // 增加版本号以支持相似度相关的对象存储
     this.db = null;
     this.isInitialized = false;
   }
@@ -31,15 +31,67 @@ class IndexedDBAdapter {
       return this.db;
     }
 
+    // 检查 IndexedDB 是否可用
+    if (!window.indexedDB) {
+      console.error('❌ IndexedDB 不可用');
+      throw new Error('IndexedDB 不可用');
+    }
+
+    // 尝试关闭可能存在的旧连接
+    if (this.db) {
+      console.log('🔄 关闭旧数据库连接...');
+      this.db.close();
+      this.db = null;
+      this.isInitialized = false;
+    }
+
     return new Promise((resolve, reject) => {
+      // 添加超时机制，防止无限等待
+      const timeout = setTimeout(() => {
+        console.error('❌ IndexedDB 初始化超时');
+        console.error('❌ 可能的原因: 数据库被锁定或浏览器兼容性问题');
+        reject(new Error('IndexedDB 初始化超时'));
+      }, 5000); // 5秒超时
+
+      console.log(`🔄 尝试打开IndexedDB: ${this.dbName}, 版本: ${this.version}`);
+      console.log('🔄 IndexedDB 支持情况:', {
+        indexedDB: !!window.indexedDB,
+        IDBKeyRange: !!window.IDBKeyRange,
+        IDBTransaction: !!window.IDBTransaction
+      });
+      
+      // 添加请求状态监听
+      let requestStarted = false;
       const request = indexedDB.open(this.dbName, this.version);
       
+      // 监听请求开始
+      request.addEventListener('success', () => {
+        console.log('🔄 IndexedDB 请求成功事件触发');
+      });
+      
+      request.addEventListener('error', () => {
+        console.log('🔄 IndexedDB 请求错误事件触发');
+      });
+      
+      request.addEventListener('upgradeneeded', () => {
+        console.log('🔄 IndexedDB 升级事件触发');
+      });
+      
+      // 检查请求是否立即被阻塞
+      setTimeout(() => {
+        if (!requestStarted) {
+          console.log('🔄 IndexedDB 请求状态检查: 请求可能被阻塞');
+        }
+      }, 100);
+      
       request.onerror = () => {
+        clearTimeout(timeout);
         console.error('❌ IndexedDB 初始化失败:', request.error);
         reject(request.error);
       };
 
       request.onsuccess = () => {
+        clearTimeout(timeout);
         this.db = request.result;
         this.isInitialized = true;
         console.log('✅ IndexedDB 初始化成功');
@@ -47,31 +99,82 @@ class IndexedDBAdapter {
       };
 
       request.onupgradeneeded = (event) => {
+        console.log('🔄 IndexedDB 开始升级数据库...');
+        console.log('🔄 升级事件详情:', {
+          oldVersion: event.oldVersion,
+          newVersion: event.newVersion,
+          type: event.type
+        });
+        
         const db = event.target.result;
+        console.log('🔄 数据库对象:', db);
+        console.log('🔄 当前对象存储:', Array.from(db.objectStoreNames));
         
-        // 创建图片存储表
-        if (!db.objectStoreNames.contains('images')) {
-          const imageStore = db.createObjectStore('images', { keyPath: 'id' });
-          imageStore.createIndex('category', 'category', { unique: false });
-          imageStore.createIndex('createdAt', 'createdAt', { unique: false });
+        try {
+          // 创建图片存储表
+          if (!db.objectStoreNames.contains('images')) {
+            console.log('📦 创建 images 对象存储...');
+            const imageStore = db.createObjectStore('images', { keyPath: 'id' });
+            imageStore.createIndex('category', 'category', { unique: false });
+            imageStore.createIndex('createdAt', 'createdAt', { unique: false });
+            console.log('✅ images 对象存储创建完成');
+          } else {
+            console.log('📦 images 对象存储已存在');
+          }
+          
+          // 创建统计信息表
+          if (!db.objectStoreNames.contains('stats')) {
+            console.log('📦 创建 stats 对象存储...');
+            db.createObjectStore('stats', { keyPath: 'key' });
+            console.log('✅ stats 对象存储创建完成');
+          } else {
+            console.log('📦 stats 对象存储已存在');
+          }
+          
+          // 创建设置表
+          if (!db.objectStoreNames.contains('settings')) {
+            console.log('📦 创建 settings 对象存储...');
+            db.createObjectStore('settings', { keyPath: 'key' });
+            console.log('✅ settings 对象存储创建完成');
+          } else {
+            console.log('📦 settings 对象存储已存在');
+          }
+          
+          // 创建分类规则表
+          if (!db.objectStoreNames.contains('classificationRules')) {
+            console.log('📦 创建 classificationRules 对象存储...');
+            db.createObjectStore('classificationRules', { keyPath: 'key' });
+            console.log('✅ classificationRules 对象存储创建完成');
+          } else {
+            console.log('📦 classificationRules 对象存储已存在');
+          }
+          
+          // 创建相似度数据表
+          if (!db.objectStoreNames.contains('similarityData')) {
+            console.log('📦 创建 similarityData 对象存储...');
+            db.createObjectStore('similarityData', { keyPath: 'key' });
+            console.log('✅ similarityData 对象存储创建完成');
+          } else {
+            console.log('📦 similarityData 对象存储已存在');
+          }
+          
+          // 创建相似组索引表
+          if (!db.objectStoreNames.contains('similarityGroupIndex')) {
+            console.log('📦 创建 similarityGroupIndex 对象存储...');
+            db.createObjectStore('similarityGroupIndex', { keyPath: 'key' });
+            console.log('✅ similarityGroupIndex 对象存储创建完成');
+          } else {
+            console.log('📦 similarityGroupIndex 对象存储已存在');
+          }
+          
+          console.log('✅ IndexedDB 数据库结构创建完成');
+          console.log('🔄 升级完成后的对象存储:', Array.from(db.objectStoreNames));
+        } catch (upgradeError) {
+          console.error('❌ 数据库升级过程中出错:', upgradeError);
+          console.error('❌ 升级错误堆栈:', upgradeError.stack);
+          clearTimeout(timeout);
+          reject(upgradeError);
         }
-        
-        // 创建统计信息表
-        if (!db.objectStoreNames.contains('stats')) {
-          db.createObjectStore('stats', { keyPath: 'key' });
-        }
-        
-        // 创建设置表
-        if (!db.objectStoreNames.contains('settings')) {
-          db.createObjectStore('settings', { keyPath: 'key' });
-        }
-        
-        // 创建分类规则表
-        if (!db.objectStoreNames.contains('classificationRules')) {
-          db.createObjectStore('classificationRules', { keyPath: 'key' });
-        }
-        
-        console.log('✅ IndexedDB 数据库结构创建完成');
       };
     });
   }
@@ -301,6 +404,8 @@ class ImageStorageService {
       stats: 'stats',
       settings: 'settings',
       classificationRules: 'classificationRules',
+      similarityData: 'similarityData', // 新增：相似度数据表
+      similarityGroupIndex: 'similarityGroupIndex', // 新增：相似组索引
     };
     this.isInitialized = false;
     // 添加保存锁，防止并发保存导致数据丢失
@@ -335,13 +440,19 @@ class ImageStorageService {
     try {
       if (Platform.OS === 'web') {
         // Web环境初始化IndexedDB
+        console.log('🌐 开始初始化IndexedDB...');
         await this.storage.init();
+        console.log('✅ IndexedDB初始化完成');
         
         // 检查是否需要从localStorage迁移数据
+        console.log('🔄 开始检查localStorage迁移...');
         await this.migrateFromLocalStorage();
+        console.log('✅ localStorage迁移检查完成');
       } else {
         // 移动端初始化AsyncStorage
+        console.log('📱 开始初始化AsyncStorage...');
         await this.storage.getItem('test');
+        console.log('✅ AsyncStorage初始化完成');
       }
       this.isInitialized = true;
       console.log('✅ 存储服务初始化成功，使用IndexedDB');
@@ -362,24 +473,40 @@ class ImageStorageService {
         }
       }
       
-      // 最后尝试：等待一段时间后重试IndexedDB
-      console.log('🔄 等待1秒后重试IndexedDB初始化...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // 最后尝试：强制清理数据库后重试
+      console.log('🔄 尝试强制清理数据库...');
       try {
-        if (Platform.OS === 'web') {
-          // 重新创建IndexedDB适配器
-          this.storage = new IndexedDBAdapter();
-          await this.storage.init();
-          await this.migrateFromLocalStorage();
-          this.isInitialized = true;
-          console.log('✅ 重试成功，IndexedDB初始化完成');
-        } else {
-          await this.storage.getItem('test');
-          this.isInitialized = true;
-        }
+        // 尝试删除数据库
+        const deleteRequest = indexedDB.deleteDatabase(this.dbName);
+        deleteRequest.onsuccess = () => {
+          console.log('✅ 数据库删除成功，准备重新创建');
+        };
+        deleteRequest.onerror = () => {
+          console.log('⚠️ 数据库删除失败，继续尝试');
+        };
+        
+        // 等待删除完成
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // 重新创建IndexedDB适配器
+        console.log('🔄 重新创建IndexedDB适配器...');
+        this.storage = new IndexedDBAdapter();
+        console.log('🔄 重试IndexedDB初始化...');
+        await this.storage.init();
+        console.log('✅ 重试IndexedDB初始化成功');
+        console.log('🔄 重试localStorage迁移...');
+        await this.migrateFromLocalStorage();
+        console.log('✅ 重试localStorage迁移完成');
+        this.isInitialized = true;
+        console.log('✅ 重试成功，IndexedDB初始化完成');
       } catch (retryError) {
         console.error('❌ 重试IndexedDB初始化失败:', retryError);
-        throw new Error('存储服务不可用，请刷新页面重试');
+        console.log('🔄 最终降级到localStorage存储');
+        // 最终降级到localStorage
+        this.storage = this.fallbackStorage;
+        await this.storage.getItem('test');
+        this.isInitialized = true;
+        console.log('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
       }
     }
   }
@@ -1007,54 +1134,6 @@ class ImageStorageService {
       
     } catch (error) {
       console.error('Failed to delete image:', error);
-      throw error;
-    }
-  }
-
-  // Delete multiple images with progress callback
-  async deleteImages(imageIds, onProgress) {
-    try {
-      await this.ensureInitialized();
-      
-      console.log(`Deleting ${imageIds.length} images...`);
-      
-      let filesDeleted = 0;
-      let filesFailed = 0;
-      
-      // Initialize progress
-      if (onProgress) {
-        onProgress({
-          filesDeleted: 0,
-          filesFailed: 0,
-          total: imageIds.length
-        });
-      }
-      
-      for (let i = 0; i < imageIds.length; i++) {
-        try {
-          await this.deleteImage(imageIds[i]);
-          filesDeleted++;
-          console.log(`Deleted image ${i + 1}/${imageIds.length}: ${imageIds[i]}`);
-        } catch (error) {
-          filesFailed++;
-          console.error(`Failed to delete image ${imageIds[i]}:`, error);
-        }
-        
-        // Update progress
-        if (onProgress) {
-          onProgress({
-            filesDeleted,
-            filesFailed,
-            total: imageIds.length
-          });
-        }
-      }
-      
-      console.log(`Batch delete completed: ${filesDeleted} deleted, ${filesFailed} failed`);
-      return { success: true, filesDeleted, filesFailed };
-      
-    } catch (error) {
-      console.error('Failed to delete images:', error);
       throw error;
     }
   }
@@ -1741,6 +1820,590 @@ class ImageStorageService {
       throw error;
     }
   }
+
+  // ==================== 相似度数据表相关方法 ====================
+
+  /**
+   * 获取相似组索引
+   * @returns {Promise<Object>} 相似组索引 {groupId: [imageId1, imageId2, ...]}
+   */
+  async getSimilarityGroupIndex() {
+    try {
+      await this.ensureInitialized();
+      const index = await this.storage.getItem(this.storageKeys.similarityGroupIndex);
+      return index || {};
+    } catch (error) {
+      console.error('❌ 获取相似组索引失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 保存相似组索引
+   * @param {Object} groupIndex - 相似组索引
+   * @returns {Promise<boolean>} 是否保存成功
+   */
+  async saveSimilarityGroupIndex(groupIndex) {
+    try {
+      await this.ensureInitialized();
+      await this.storage.setItem(this.storageKeys.similarityGroupIndex, groupIndex);
+      console.log(`✅ 保存相似组索引成功，共${Object.keys(groupIndex).length}个组`);
+      return true;
+    } catch (error) {
+      console.error('❌ 保存相似组索引失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新相似组索引（当图片的相似组信息发生变化时）
+   * @param {string} imageId - 图片ID
+   * @param {string} oldGroupId - 旧的组ID（如果存在）
+   * @param {string} newGroupId - 新的组ID（如果存在）
+   * @returns {Promise<boolean>} 是否更新成功
+   */
+  async updateSimilarityGroupIndex(imageId, oldGroupId, newGroupId) {
+    try {
+      const groupIndex = await this.getSimilarityGroupIndex();
+      
+      // 从旧组中移除图片
+      if (oldGroupId && groupIndex[oldGroupId]) {
+        groupIndex[oldGroupId] = groupIndex[oldGroupId].filter(id => id !== imageId);
+        // 如果组为空，删除该组
+        if (groupIndex[oldGroupId].length === 0) {
+          delete groupIndex[oldGroupId];
+        }
+      }
+      
+      // 添加到新组
+      if (newGroupId) {
+        if (!groupIndex[newGroupId]) {
+          groupIndex[newGroupId] = [];
+        }
+        if (!groupIndex[newGroupId].includes(imageId)) {
+          groupIndex[newGroupId].push(imageId);
+        }
+      }
+      
+      await this.saveSimilarityGroupIndex(groupIndex);
+      console.log(`✅ 更新相似组索引: ${imageId} ${oldGroupId ? `从${oldGroupId}` : ''} ${newGroupId ? `到${newGroupId}` : '移除'}`);
+      return true;
+    } catch (error) {
+      console.error('❌ 更新相似组索引失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 重建相似组索引（从相似度数据表重建）
+   * @returns {Promise<boolean>} 是否重建成功
+   */
+  async rebuildSimilarityGroupIndex() {
+    try {
+      const similarityData = await this.getSimilarityData();
+      const groupIndex = {};
+      
+      // 遍历相似度数据，按组ID分组
+      Object.entries(similarityData).forEach(([imageId, data]) => {
+        if (data.similarity_group_id) {
+          const groupId = data.similarity_group_id;
+          if (!groupIndex[groupId]) {
+            groupIndex[groupId] = [];
+          }
+          groupIndex[groupId].push(imageId);
+        }
+      });
+      
+      await this.saveSimilarityGroupIndex(groupIndex);
+      console.log(`✅ 重建相似组索引成功，共${Object.keys(groupIndex).length}个组`);
+      return true;
+    } catch (error) {
+      console.error('❌ 重建相似组索引失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取相似度数据表
+   * @returns {Promise<Object>} 相似度数据映射表 {imageId: similarityData}
+   */
+  async getSimilarityData() {
+    try {
+      await this.ensureInitialized();
+      const data = await this.storage.getItem(this.storageKeys.similarityData);
+      return data || {};
+    } catch (error) {
+      console.error('❌ 获取相似度数据失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 保存相似度数据表
+   * @param {Object} similarityData - 相似度数据映射表
+   * @returns {Promise<boolean>} 是否保存成功
+   */
+  async saveSimilarityData(similarityData) {
+    try {
+      await this.ensureInitialized();
+      await this.storage.setItem(this.storageKeys.similarityData, similarityData);
+      console.log(`✅ 保存相似度数据成功，共${Object.keys(similarityData).length}条记录`);
+      return true;
+    } catch (error) {
+      console.error('❌ 保存相似度数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新单张图片的相似度数据
+   * @param {string} imageId - 图片ID
+   * @param {Object} similarityInfo - 相似度信息
+   * @returns {Promise<boolean>} 是否更新成功
+   */
+  async updateImageSimilarity(imageId, similarityInfo) {
+    try {
+      const similarityData = await this.getSimilarityData();
+      
+      // 获取旧的组ID（用于索引更新）
+      const oldGroupId = similarityData[imageId]?.similarity_group_id;
+      const newGroupId = similarityInfo.similarity_group_id;
+      
+      // 更新或添加相似度数据
+      similarityData[imageId] = {
+        ...similarityData[imageId],
+        ...similarityInfo,
+        updatedAt: new Date().toISOString()
+      };
+      
+      // 保存相似度数据
+      await this.saveSimilarityData(similarityData);
+      
+      // 更新相似组索引
+      await this.updateSimilarityGroupIndex(imageId, oldGroupId, newGroupId);
+      
+      console.log(`✅ 更新图片相似度数据: ${imageId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ 更新图片相似度数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量更新图片相似度数据
+   * @param {Array} imageSimilarityArray - 图片相似度数据数组
+   * @returns {Promise<boolean>} 是否更新成功
+   */
+  async updateImagesSimilarity(imageSimilarityArray) {
+    try {
+      const similarityData = await this.getSimilarityData();
+      const groupIndex = await this.getSimilarityGroupIndex();
+      
+      // 批量更新相似度数据
+      imageSimilarityArray.forEach(item => {
+        const oldGroupId = similarityData[item.imageId]?.similarity_group_id;
+        const newGroupId = item.similarityInfo.similarity_group_id;
+        
+        // 更新相似度数据
+        similarityData[item.imageId] = {
+          ...similarityData[item.imageId],
+          ...item.similarityInfo,
+          updatedAt: new Date().toISOString()
+        };
+        
+        // 更新相似组索引
+        if (oldGroupId && oldGroupId !== newGroupId) {
+          // 从旧组中移除
+          if (groupIndex[oldGroupId]) {
+            groupIndex[oldGroupId] = groupIndex[oldGroupId].filter(id => id !== item.imageId);
+            if (groupIndex[oldGroupId].length === 0) {
+              delete groupIndex[oldGroupId];
+            }
+          }
+        }
+        
+        // 添加到新组
+        if (newGroupId) {
+          if (!groupIndex[newGroupId]) {
+            groupIndex[newGroupId] = [];
+          }
+          if (!groupIndex[newGroupId].includes(item.imageId)) {
+            groupIndex[newGroupId].push(item.imageId);
+          }
+        }
+      });
+      
+      // 保存更新后的数据
+      await this.saveSimilarityData(similarityData);
+      await this.saveSimilarityGroupIndex(groupIndex);
+      
+      console.log(`✅ 批量更新图片相似度数据: ${imageSimilarityArray.length}张图片`);
+      console.log(`✅ 更新相似组索引: ${Object.keys(groupIndex).length}个组`);
+      return true;
+    } catch (error) {
+      console.error('❌ 批量更新图片相似度数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取单张图片的相似度数据
+   * @param {string} imageId - 图片ID
+   * @returns {Promise<Object|null>} 相似度数据
+   */
+  async getImageSimilarity(imageId) {
+    try {
+      const similarityData = await this.getSimilarityData();
+      return similarityData[imageId] || null;
+    } catch (error) {
+      console.error('❌ 获取图片相似度数据失败:', error);
+      return null;
+    }
+  }
+
+  // ==================== 相似度检测相关方法 ====================
+
+  /**
+   * 获取相似度检测统计信息（使用独立相似度数据表）
+   * @returns {Promise<Object>} 统计信息
+   */
+  async getSimilarityStats() {
+    try {
+      // 获取相似度数据
+      const similarityData = await this.getSimilarityData();
+      const similarityEntries = Object.values(similarityData);
+      
+      const stats = {
+        processed: similarityEntries.filter(data => data.is_similarity_processed).length,
+        grouped: similarityEntries.filter(data => data.similarity_group_id).length,
+        groupTypes: {}
+      };
+
+      // 统计各类型组数量
+      similarityEntries.forEach(data => {
+        if (data.similarity_group_type) {
+          stats.groupTypes[data.similarity_group_type] = 
+            (stats.groupTypes[data.similarity_group_type] || 0) + 1;
+        }
+      });
+
+      return stats;
+    } catch (error) {
+      console.error('❌ 获取相似度统计信息失败:', error);
+      return {
+        processed: 0,
+        grouped: 0,
+        groupTypes: {}
+      };
+    }
+  }
+
+  /**
+   * 获取相似图片组
+   * @param {string} groupType - 组类型过滤，'all'表示所有类型
+   * @returns {Promise<Array>} 相似图片组列表
+   */
+  async getSimilarityGroups(groupType = 'all') {
+    try {
+      // 使用索引快速获取相似组
+      const groupIndex = await this.getSimilarityGroupIndex();
+      const similarityData = await this.getSimilarityData();
+      const groups = {};
+
+      // 遍历索引中的每个组
+      Object.entries(groupIndex).forEach(([groupId, imageIds]) => {
+        if (imageIds.length === 0) return; // 跳过空组
+        
+        // 获取组中第一张图片的数据来确定组类型
+        const firstImageId = imageIds[0];
+        const firstImageData = similarityData[firstImageId];
+        
+        if (!firstImageData) return;
+        
+        groups[groupId] = {
+          id: groupId,
+          type: firstImageData.similarity_group_type || 'similar',
+          images: [],
+          confidence: 0,
+          created_at: firstImageData.updatedAt
+        };
+        
+        // 添加组中所有图片
+        imageIds.forEach(imageId => {
+          const data = similarityData[imageId];
+          if (data) {
+            groups[groupId].images.push({
+              id: imageId,
+              similarity_score: data.similarity_score,
+              similarity_group_type: data.similarity_group_type
+            });
+            
+            // 更新组置信度（取平均值）
+            if (data.similarity_score) {
+              const currentConfidence = groups[groupId].confidence;
+              const imageCount = groups[groupId].images.length;
+              groups[groupId].confidence = 
+                (currentConfidence * (imageCount - 1) + data.similarity_score) / imageCount;
+            }
+          }
+        });
+      });
+
+      // 过滤组类型
+      let filteredGroups = Object.values(groups);
+      if (groupType !== 'all') {
+        filteredGroups = filteredGroups.filter(group => group.type === groupType);
+      }
+
+      // 按组大小和置信度排序
+      filteredGroups.sort((a, b) => {
+        if (b.images.length !== a.images.length) {
+          return b.images.length - a.images.length;
+        }
+        return b.confidence - a.confidence;
+      });
+
+      return filteredGroups;
+    } catch (error) {
+      console.error('❌ 获取相似图片组失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 根据组ID快速获取相似组信息
+   * @param {string} groupId - 组ID
+   * @returns {Promise<Object|null>} 相似组信息
+   */
+  async getSimilarityGroupById(groupId) {
+    try {
+      const groupIndex = await this.getSimilarityGroupIndex();
+      const imageIds = groupIndex[groupId];
+      
+      if (!imageIds || imageIds.length === 0) {
+        return null;
+      }
+      
+      const similarityData = await this.getSimilarityData();
+      const firstImageData = similarityData[imageIds[0]];
+      
+      if (!firstImageData) {
+        return null;
+      }
+      
+      const group = {
+        id: groupId,
+        type: firstImageData.similarity_group_type || 'similar',
+        images: [],
+        confidence: 0,
+        created_at: firstImageData.updatedAt
+      };
+      
+      // 添加组中所有图片
+      imageIds.forEach(imageId => {
+        const data = similarityData[imageId];
+        if (data) {
+          group.images.push({
+            id: imageId,
+            similarity_score: data.similarity_score,
+            similarity_group_type: data.similarity_group_type
+          });
+          
+          // 更新组置信度（取平均值）
+          if (data.similarity_score) {
+            const currentConfidence = group.confidence;
+            const imageCount = group.images.length;
+            group.confidence = 
+              (currentConfidence * (imageCount - 1) + data.similarity_score) / imageCount;
+          }
+        }
+      });
+      
+      return group;
+    } catch (error) {
+      console.error('❌ 获取相似组信息失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取特定图片的相似图片
+   * @param {string} imageId - 图片ID
+   * @param {number} limit - 返回数量限制，默认10
+   * @returns {Promise<Array>} 相似图片列表
+   */
+  async getSimilarImages(imageId, limit = 10) {
+    try {
+      // 获取目标图片的相似度数据
+      const targetSimilarity = await this.getImageSimilarity(imageId);
+      
+      if (!targetSimilarity || !targetSimilarity.similarity_group_id) {
+        return [];
+      }
+
+      // 使用索引快速获取同组图片
+      const groupIndex = await this.getSimilarityGroupIndex();
+      const groupImageIds = groupIndex[targetSimilarity.similarity_group_id];
+      
+      if (!groupImageIds || groupImageIds.length <= 1) {
+        return [];
+      }
+
+      // 获取相似度数据并按相似度分数排序
+      const similarityData = await this.getSimilarityData();
+      const similarImages = groupImageIds
+        .filter(id => id !== imageId) // 排除目标图片
+        .map(id => ({
+          id: id,
+          similarity_score: similarityData[id]?.similarity_score || 0
+        }))
+        .sort((a, b) => b.similarity_score - a.similarity_score)
+        .slice(0, limit);
+
+      return similarImages;
+    } catch (error) {
+      console.error('❌ 获取相似图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 清除相似度检测数据
+   * @param {Array} imageIds - 要清除的图片ID数组，为空则清除所有
+   * @returns {Promise<boolean>} 是否清除成功
+   */
+  async clearSimilarityData(imageIds = null) {
+    try {
+      if (imageIds === null) {
+        // 清除所有相似度数据
+        await this.storage.removeItem(this.storageKeys.similarityData);
+        await this.storage.removeItem(this.storageKeys.similarityGroupIndex);
+        console.log('✅ 清除所有相似度数据成功');
+      } else {
+        // 清除指定图片的相似度数据
+        const similarityData = await this.getSimilarityData();
+        const groupIndex = await this.getSimilarityGroupIndex();
+        
+        // 记录需要更新的组
+        const groupsToUpdate = new Set();
+        
+        imageIds.forEach(imageId => {
+          // 从相似度数据中移除
+          const oldData = similarityData[imageId];
+          if (oldData?.similarity_group_id) {
+            groupsToUpdate.add(oldData.similarity_group_id);
+          }
+          delete similarityData[imageId];
+          
+          // 从组索引中移除
+          if (oldData?.similarity_group_id && groupIndex[oldData.similarity_group_id]) {
+            const groupId = oldData.similarity_group_id;
+            groupIndex[groupId] = groupIndex[groupId].filter(id => id !== imageId);
+            
+            // 如果组为空或只剩一张图片，删除该组
+            if (groupIndex[groupId].length <= 1) {
+              // 如果组只剩一张图片，需要清除该图片的相似组信息
+              if (groupIndex[groupId].length === 1) {
+                const remainingImageId = groupIndex[groupId][0];
+                if (similarityData[remainingImageId]) {
+                  delete similarityData[remainingImageId].similarity_group_id;
+                  delete similarityData[remainingImageId].similarity_group_type;
+                  delete similarityData[remainingImageId].similarity_score;
+                  console.log(`✅ 清除单图片组，移除图片 ${remainingImageId} 的相似组信息`);
+                }
+              }
+              // 删除该组
+              delete groupIndex[groupId];
+            }
+          }
+        });
+        
+        // 保存更新后的数据
+        await this.saveSimilarityData(similarityData);
+        await this.saveSimilarityGroupIndex(groupIndex);
+        console.log(`✅ 清除${imageIds.length}张图片的相似度数据成功`);
+      }
+      return true;
+    } catch (error) {
+      console.error('❌ 清除相似度检测数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 删除相似组（优化版本）
+   * @param {string} groupId - 相似组ID
+   * @returns {Promise<boolean>} 是否删除成功
+   */
+  async deleteSimilarityGroup(groupId) {
+    try {
+      // 获取组索引和相似度数据
+      const groupIndex = await this.getSimilarityGroupIndex();
+      const similarityData = await this.getSimilarityData();
+      
+      const groupImageIds = groupIndex[groupId];
+      
+      if (!groupImageIds || groupImageIds.length === 0) {
+        console.log(`⚠️ 未找到相似组: ${groupId}`);
+        return false;
+      }
+
+      // 直接从相似度数据中删除该组的所有图片
+      groupImageIds.forEach(imageId => {
+        delete similarityData[imageId];
+      });
+      
+      // 从索引中删除该组
+      delete groupIndex[groupId];
+      
+      // 保存更新后的数据
+      await this.saveSimilarityData(similarityData);
+      await this.saveSimilarityGroupIndex(groupIndex);
+      
+      console.log(`✅ 删除相似组${groupId}，影响${groupImageIds.length}张图片`);
+      return true;
+      
+    } catch (error) {
+      console.error('❌ 删除相似组失败:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 获取时间窗口内的图片
+   * @param {Date} startTime - 开始时间
+   * @param {Date} endTime - 结束时间
+   * @returns {Promise<Array>} 时间窗口内的图片列表
+   */
+  async getImagesInTimeWindow(startTime, endTime) {
+    try {
+      const allImages = await this.getImages();
+      
+      const filteredImages = allImages.filter(image => {
+        // 只使用拍摄时间，没有拍摄时间就不参与相似度检测
+        if (!image.takenAt) {
+          return false;
+        }
+        
+        const imageTime = new Date(image.takenAt);
+        return imageTime >= startTime && imageTime <= endTime;
+      });
+
+      // 按时间排序
+      filteredImages.sort((a, b) => {
+        const timeA = new Date(a.takenAt).getTime();
+        const timeB = new Date(b.takenAt).getTime();
+        return timeA - timeB;
+      });
+
+      return filteredImages;
+    } catch (error) {
+      console.error('❌ 获取时间窗口图片失败:', error);
+      return [];
+    }
+  }
+
 }
 
 export default ImageStorageService;

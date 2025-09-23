@@ -133,6 +133,7 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
 const CategoryScreen = ({ 
   category: propCategory, 
   city: propCity, 
+  similarityGroupId: propSimilarityGroupId, // 添加相似组ID参数
   onBack, 
   forceRefresh = true, 
   scrollToImageId = null,
@@ -147,6 +148,8 @@ const CategoryScreen = ({
   const category = propCategory || route?.params?.category;
   // 优先使用 prop 中的 city，然后是 route.params.city
   const city = propCity || route?.params?.city;
+  // 优先使用 prop 中的 similarityGroupId，然后是 route.params.similarityGroupId
+  const similarityGroupId = propSimilarityGroupId || route?.params?.similarityGroupId;
   
   // 调试日志（暂时禁用以减少渲染）
   // console.log('🔍 CategoryScreen 接收到的参数:', { propCategory, city: propCity, category, city, forceRefresh });
@@ -158,17 +161,26 @@ const CategoryScreen = ({
   const loadImages = useCallback(async () => {
     try {
       let images;
-    if (city) {
+      
+      if (similarityGroupId) {
+        // 加载相似组图片
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
+        images = groupData.images || [];
+        console.log(`📊 从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}`);
+      } else if (city) {
+        // 按城市加载
         images = await UnifiedDataService.readImagesByLocation(city, null);
-    } else {
+        console.log(`📊 从城市获取图片: 总数=${images.length}, city=${city}`);
+      } else {
+        // 按分类加载
         images = await UnifiedDataService.readImagesByCategory(category);
+        console.log(`📊 从分类获取图片: 总数=${images.length}, category=${category}`);
       }
       
       // 同时加载选中状态
       const selectedImages = await UnifiedDataService.getSelectedImages();
       const selectedImageIds = selectedImages.map(img => img.id);
       
-      console.log(`📊 从统一数据服务获取图片: 总数=${images.length}, category=${category}, city=${city}`);
       console.log(`📊 选中状态: ${selectedImageIds.length} 张图片被选中`);
       
       setAllImages(images);
@@ -178,7 +190,7 @@ const CategoryScreen = ({
       setAllImages([]);
       setSelectedImages([]);
     }
-  }, [category, city]);
+  }, [category, city, similarityGroupId]);
 
   // 初始加载图片数据
   useEffect(() => {
@@ -588,7 +600,12 @@ const CategoryScreen = ({
       </TouchableOpacity>
       
       <Text style={styles.title}>
-        {city ? `${city} (${allImages.length}张)` : `${UnifiedDataService.getCategoryDisplayName(category)} (${allImages.length}张)`}
+        {similarityGroupId 
+          ? `相似照片组 (${allImages.length}张)` 
+          : city 
+            ? `${city} (${allImages.length}张)` 
+            : `${UnifiedDataService.getCategoryDisplayName(category)} (${allImages.length}张)`
+        }
       </Text>
       
       {/* 视图模式切换 */}
@@ -782,7 +799,12 @@ const CategoryScreen = ({
           <Text style={styles.emptyIcon}>📷</Text>
           <Text style={styles.emptyTitle}>暂无图片</Text>
           <Text style={styles.emptySubtitle}>
-            {city ? `${city} 暂无图片` : '该分类暂无图片'}
+            {similarityGroupId 
+              ? '该相似组暂无图片' 
+              : city 
+                ? `${city} 暂无图片` 
+                : '该分类暂无图片'
+            }
           </Text>
         </View>
       );
@@ -1056,7 +1078,12 @@ const CategoryScreen = ({
       <Text style={styles.emptyIcon}>📷</Text>
       <Text style={styles.emptyTitle}>暂无图片</Text>
       <Text style={styles.emptySubtitle}>
-        {city ? `${city} 暂无图片` : '该分类暂无图片'}
+        {similarityGroupId 
+          ? '该相似组暂无图片' 
+          : city 
+            ? `${city} 暂无图片` 
+            : '该分类暂无图片'
+        }
       </Text>
       </View>
     );

@@ -51,7 +51,14 @@ export default function App() {
         setIsServiceReady(true);
       } catch (error) {
         console.error('❌ 服务初始化失败:', error);
-        setIsServiceReady(true); // 即使失败也继续，避免卡住
+        console.error('❌ 错误堆栈:', error.stack);
+        // 如果是热更新相关错误，强制继续
+        if (error.message && error.message.includes('hot-update')) {
+          console.log('🔄 检测到热更新错误，强制继续...');
+          setIsServiceReady(true);
+        } else {
+          throw error;
+        }
       }
     };
     
