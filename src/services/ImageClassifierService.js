@@ -1,5 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
+import { logger } from '../adapters/WebAdapters.js';
 
 class ImageClassifierService {
   constructor() {
@@ -117,8 +118,8 @@ class ImageClassifierService {
       this.models.yolo8s.classes = Object.keys(yoloObjectMap);
       
       // 调试：输出YOLO类别信息
-      console.log(`🔍 YOLO8s模型类别数量: ${this.models.yolo8s.classes.length}`);
-      console.log(`🔍 YOLO8s类别列表:`, this.models.yolo8s.classes.slice(0, 10));
+      logger.debug(`YOLO8s模型类别数量: ${this.models.yolo8s.classes.length}`);
+      logger.debug(`YOLO8s类别列表:`, this.models.yolo8s.classes.slice(0, 10));
 
       // 加载MobileNetV3类别映射
       const mobilenetv3Classes = this.configService.getMobileNetV3Classes();
@@ -132,21 +133,21 @@ class ImageClassifierService {
         this.models.mobilenetv3.classes = Object.values(mobilenetv3Classes)
           .sort((a, b) => a.id - b.id);
         
-        console.log(`✅ MobileNetV3类别加载成功: ${this.imagenetClasses.length} 个类别`);
+        logger.debug(`MobileNetV3类别加载成功: ${this.imagenetClasses.length} 个类别`);
       } else {
-        console.warn('⚠️ 配置服务中未找到MobileNetV3类别数据');
+        logger.warn('配置服务中未找到MobileNetV3类别数据');
         this.imagenetClasses = [];
         this.models.mobilenetv3.classes = [];
       }
 
       // 加载分类信息
       this.categories = this.configService.getAllCategoryIds();
-      console.log(`✅ 分类信息加载成功: ${this.categories.length} 个分类`);
+      logger.debug(`分类信息加载成功: ${this.categories.length} 个分类`);
 
-      console.log('✅ 模型配置初始化完成');
+      logger.debug('模型配置初始化完成');
       return true;
     } catch (error) {
-      console.error('❌ 模型配置初始化失败:', error);
+      logger.error('模型配置初始化失败:', error);
       throw error;
     }
   }
@@ -167,10 +168,10 @@ class ImageClassifierService {
         this.ort = await import('onnxruntime-node');
       }
       
-      console.log('✅ ONNX Runtime初始化成功');
+      logger.debug('ONNX Runtime初始化成功');
       return this.ort;
     } catch (error) {
-      console.error('❌ ONNX Runtime初始化失败:', error);
+      logger.error('ONNX Runtime初始化失败:', error);
       throw error;
     }
   }

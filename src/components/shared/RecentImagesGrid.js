@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import { logger } from '../../adapters/WebAdapters.js';
 
 const RecentImagesGrid = ({ images, onImagePress }) => {
   const [imageErrors, setImageErrors] = useState({});
@@ -47,7 +48,7 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
                 source={{ uri: image.uri }}
                 style={styles.image}
                 onError={() => {
-                  console.log(`❌ Image load error for: ${image.uri}`);
+                  logger.error(`Image load error for: ${image.uri}`);
                   handleImageError(imageId);
                 }}
                 onLoad={() => {

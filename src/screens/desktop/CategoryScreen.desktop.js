@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useFocusEffect, getWebAccessibleUri } from '../../adapters/WebAdapters';
+import { useFocusEffect, getWebAccessibleUri, logger } from '../../adapters/WebAdapters';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Modal, Platform, TextInput, ScrollView } from 'react-native';
 // 分页方案实现
 import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapters';
@@ -30,11 +30,11 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
   
   // 调试日志
   if (shouldLoad) {
-    console.log(`🖼️ 图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, webUri: ${webUri}, imageError: ${imageError}`);
-    console.log(`🖼️ 原始数据: item.uri=${item.uri}, displayItem.uri=${displayItem?.uri}`);
-    console.log(`🖼️ 分类信息: item.category=${item.category}, displayItem.category=${displayItem?.category}`);
+    logger.debug(`图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, webUri: ${webUri}, imageError: ${imageError}`);
+    logger.debug(`原始数据: item.uri=${item.uri}, displayItem.uri=${displayItem?.uri}`);
+    logger.debug(`分类信息: item.category=${item.category}, displayItem.category=${displayItem?.category}`);
     if (!webUri) {
-      console.log(`⚠️ 图片缺少URI: ${item.id}, 将显示占位符`);
+      logger.warn(`图片缺少URI: ${item.id}, 将显示占位符`);
     }
   }
   
@@ -44,7 +44,7 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
   };
   
   const handleImageError = (error) => {
-    console.log('Image load error for:', item.fileName, error.nativeEvent?.error);
+    logger.error('Image load error for:', item.fileName, error.nativeEvent?.error);
     setImageError(true);
     setImageLoading(false);
   };
@@ -66,13 +66,13 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
       onContextMenu={handleContextMenu}
       onMouseDown={(event) => {
         if (event.button === 2) { // 右键点击
-          console.log(`🖱️ 鼠标右键按下: ${item.id}`);
+          logger.debug(`鼠标右键按下: ${item.id}`);
           event.preventDefault(); // 阻止默认右键菜单
           if (onRightPress) {
-            console.log(`🖱️ 调用onRightPress: ${item.id}`);
+            logger.debug(`调用onRightPress: ${item.id}`);
             onRightPress(item);
           } else {
-            console.log(`⚠️ onRightPress未定义: ${item.id}`);
+            logger.warn(`onRightPress未定义: ${item.id}`);
           }
         }
       }}
@@ -165,20 +165,20 @@ const CategoryScreen = ({
         images = groupData.images || [];
         // 过滤掉tobecleaned分类的照片
         images = images.filter(img => img.category !== 'tobecleaned');
-        console.log(`📊 从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
+        logger.debug(`从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
       } else if (city) {
         // 按城市加载
         images = await UnifiedDataService.readImagesByLocation(city, null);
         // 过滤掉tobecleaned分类的照片
         images = images.filter(img => img.category !== 'tobecleaned');
-        console.log(`📊 从城市获取图片: 总数=${images.length}, city=${city}, 已过滤tobecleaned`);
+        logger.debug(`从城市获取图片: 总数=${images.length}, city=${city}, 已过滤tobecleaned`);
       } else if (category) {
         // 按分类加载
         images = await UnifiedDataService.readImagesByCategory(category);
-        console.log(`📊 从分类获取图片: 总数=${images.length}, category=${category}`);
+        logger.debug(`从分类获取图片: 总数=${images.length}, category=${category}`);
       } else {
         // 没有有效的上下文参数，返回空数组
-        console.log('❌ 没有有效的上下文参数（category、city、similarityGroupId），无法加载图片');
+        logger.error('没有有效的上下文参数（category、city、similarityGroupId），无法加载图片');
         images = [];
       }
       
@@ -188,7 +188,7 @@ const CategoryScreen = ({
         // 从相似组进入，获取相似组的选中图片
         const selectedImages = await UnifiedDataService.getSelectedImages(null, null, similarityGroupId);
         selectedImageIds = selectedImages.map(img => img.id);
-        console.log(`📊 相似组选中状态: ${selectedImageIds.length} 张图片被选中`);
+        logger.debug(`相似组选中状态: ${selectedImageIds.length} 张图片被选中`);
       } else if (city) {
         // 从城市进入，获取城市的选中图片
         const selectedImages = await UnifiedDataService.getSelectedImages(null, city);
@@ -203,12 +203,12 @@ const CategoryScreen = ({
         selectedImageIds = selectedImages.map(img => img.id);
       }
       
-      console.log(`📊 选中状态: ${selectedImageIds.length} 张图片被选中`);
+      logger.debug(`选中状态: ${selectedImageIds.length} 张图片被选中`);
       
       setAllImages(images);
       setSelectedImages(selectedImageIds);
     } catch (error) {
-      console.error('❌ 获取图片数据失败:', error);
+      logger.error('获取图片数据失败:', error);
       setAllImages([]);
       setSelectedImages([]);
     }
@@ -282,7 +282,7 @@ const CategoryScreen = ({
         logPrefix = '分类';
       }
       const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
-      console.log(`🔄 ${logPrefix}取消全选: 操作了 ${deselectedCount} 张图片`);
+      logger.debug(`${logPrefix}取消全选: 操作了 ${deselectedCount} 张图片`);
     } else {
 
       
@@ -427,11 +427,11 @@ const CategoryScreen = ({
     const targetPage = Math.floor(imageIndex / itemsPerPage) + 1;
     const currentPageValue = currentPageRef.current; // 使用ref获取最新值
     
-    console.log(`🎯 滚动到图片 ${imageId}，索引: ${imageIndex}，目标页码: ${targetPage}，当前页码: ${currentPageValue}`);
+    logger.debug(`滚动到图片 ${imageId}，索引: ${imageIndex}，目标页码: ${targetPage}，当前页码: ${currentPageValue}`);
     
     // 如果目标页码不是当前页码，直接跳转到目标页码
     if (targetPage !== currentPageValue) {
-      console.log(`📄 直接跳转到第${targetPage}页以显示图片`);
+      logger.debug(`直接跳转到第${targetPage}页以显示图片`);
       setCurrentPage(targetPage);
       // 页码跳转后，图片会自动显示在正确位置，不需要额外滚动
     } else {
@@ -442,7 +442,7 @@ const CategoryScreen = ({
       animated: true
     });
       }
-      console.log(`📄 已在正确页码，图片应该可见`);
+      logger.debug(`已在正确页码，图片应该可见`);
     }
   }, [itemsPerPage, allImages]); // 只依赖itemsPerPage和allImages
   
@@ -466,7 +466,7 @@ const CategoryScreen = ({
     
     // 如果照片数量不超过100，显示所有照片，不分页
     if (total <= 100) {
-      console.log(`📄 照片数量${total}张，不超过100张，显示全部照片`);
+      logger.debug(`照片数量${total}张，不超过100张，显示全部照片`);
       return {
         currentPageImages: safeImages,
         totalPages: 1,
@@ -482,7 +482,7 @@ const CategoryScreen = ({
     const endIndex = Math.min(startIndex + itemsPerPage, total);
     const currentPageImages = safeImages.slice(startIndex, endIndex);
     
-    console.log(`📄 分页数据: 第${currentPage}页/${totalPagesCount}页, 显示${currentPageImages.length}张图片 (${startIndex}-${endIndex-1})`);
+    logger.debug(`分页数据: 第${currentPage}页/${totalPagesCount}页, 显示${currentPageImages.length}张图片 (${startIndex}-${endIndex-1})`);
     
     return {
       currentPageImages,
@@ -505,14 +505,14 @@ const CategoryScreen = ({
   // 当初始页面或每页数量参数变化时更新状态
   useEffect(() => {
     if (initialPage !== currentPage) {
-      console.log(`📄 初始页面参数变化: ${initialPage}`);
+      logger.debug(`初始页面参数变化: ${initialPage}`);
       setCurrentPage(initialPage);
     }
   }, [initialPage]); // 只依赖initialPage，不依赖currentPage
 
   useEffect(() => {
     if (propItemsPerPage !== itemsPerPage) {
-      console.log(`📄 每页数量参数变化: ${propItemsPerPage}`);
+      logger.debug(`每页数量参数变化: ${propItemsPerPage}`);
       setItemsPerPage(propItemsPerPage);
     }
   }, [propItemsPerPage]); // 只依赖propItemsPerPage，不依赖itemsPerPage
@@ -570,7 +570,7 @@ const CategoryScreen = ({
     }
     
     const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
-    console.log(`🧹 清除${logPrefix}选中状态: ${filterValue}, 操作了 ${deselectedCount} 张图片`);
+    logger.debug(`清除${logPrefix}选中状态: ${filterValue}, 操作了 ${deselectedCount} 张图片`);
     
     // 清除本地状态
     setSelectedImages([]);
@@ -580,7 +580,7 @@ const CategoryScreen = ({
 
   // Image right click handler
   const handleImageRightPress = useCallback((image) => {
-    console.log(`🖱️ 处理右键点击: ${image.id}`);
+    logger.debug(`处理右键点击: ${image.id}`);
     // 右键点击直接切换图片的选中状态
     toggleImageSelection(image.id);
   }, [toggleImageSelection]);
@@ -706,7 +706,7 @@ const CategoryScreen = ({
                     
                     processed++;
                   } catch (error) {
-                    console.error(`Failed to update image ${imageId}:`, error);
+                    logger.error(`Failed to update image ${imageId}:`, error);
                   }
                 }
                 
@@ -716,7 +716,7 @@ const CategoryScreen = ({
                 if (similarityGroupId) {
                   const remainingImages = UnifiedDataService.imageCache.getImagesBySimilarityGroup(similarityGroupId);
                   if (remainingImages.length <= 1) {
-                    console.log(`🗑️ 相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
+                    logger.debug(`相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
                     Alert.alert('操作完成', `已成功标记 ${processed} 张图片为待清理\n\n相似组已被删除，返回主页面`, [
                       { text: '确定', onPress: () => onBack() }
                     ]);
@@ -748,14 +748,14 @@ const CategoryScreen = ({
     
     // 检查配置服务状态
     const configService = UnifiedDataService.configService;
-    console.log('🔍 调试信息 - configService是否存在:', !!configService);
-    console.log('🔍 调试信息 - configService是否已加载:', configService?.isConfigLoaded());
+    logger.debug('调试信息 - configService是否存在:', !!configService);
+    logger.debug('调试信息 - configService是否已加载:', configService?.isConfigLoaded());
     
     if (configService?.isConfigLoaded()) {
       const categoryMap = configService.getCategoryNameMap();
-      console.log('🔍 调试信息 - categoryMap:', categoryMap);
-      console.log('🔍 调试信息 - categoryMap中的键:', Object.keys(categoryMap));
-      console.log('🔍 调试信息 - 查找category在categoryMap中:', categoryMap[category]);
+      logger.debug('调试信息 - categoryMap:', categoryMap);
+      logger.debug('调试信息 - categoryMap中的键:', Object.keys(categoryMap));
+      logger.debug('调试信息 - 查找category在categoryMap中:', categoryMap[category]);
     }
     
     // 使用UnifiedDataService获取当前分类中选中的图片数量
@@ -774,13 +774,13 @@ const CategoryScreen = ({
       currentSelectedCount = selectedImages.length;
     }
     
-    console.log(`🔄 HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
-    console.log(`🔍 分类选中统计详情:`, selectedCountsByCategory);
-    console.log(`🔍 城市选中统计详情:`, selectedCountsByCity);
-    console.log(`🔍 查找分类 "${normalizedCategory}" 的选中数量:`, selectedCountsByCategory[normalizedCategory]);
-    console.log(`🔍 查找城市 "${city}" 的选中数量:`, selectedCountsByCity[city]);
-    console.log(`🔍 所有分类的选中数量:`, Object.entries(selectedCountsByCategory).map(([cat, count]) => `${cat}: ${count}`).join(', '));
-    console.log(`🔍 所有城市的选中数量:`, Object.entries(selectedCountsByCity).map(([cityName, count]) => `${cityName}: ${count}`).join(', '));
+    logger.debug(`HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
+    logger.debug(`分类选中统计详情:`, selectedCountsByCategory);
+    logger.debug(`城市选中统计详情:`, selectedCountsByCity);
+    logger.debug(`查找分类 "${normalizedCategory}" 的选中数量:`, selectedCountsByCategory[normalizedCategory]);
+    logger.debug(`查找城市 "${city}" 的选中数量:`, selectedCountsByCity[city]);
+    logger.debug(`所有分类的选中数量:`, Object.entries(selectedCountsByCategory).map(([cat, count]) => `${cat}: ${count}`).join(', '));
+    logger.debug(`所有城市的选中数量:`, Object.entries(selectedCountsByCity).map(([cityName, count]) => `${cityName}: ${count}`).join(', '));
     
     return (
     <View style={styles.header}>
@@ -905,7 +905,7 @@ const CategoryScreen = ({
       const handleSelectionChange = (event) => {
         if (event.detail.imageId === item.id) {
           setSelected(event.detail.isSelected);
-          console.log(`🔄 选中状态变化: ${item.id}, ${selected} -> ${event.detail.isSelected}`);
+          logger.debug(`选中状态变化: ${item.id}, ${selected} -> ${event.detail.isSelected}`);
         }
       };
       
@@ -917,7 +917,7 @@ const CategoryScreen = ({
       };
     }, [item.id, selected]);
     
-    console.log(`🔄 LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
+    logger.debug(`LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
     
     // 处理右键点击
     const handleRightPress = () => {
@@ -1104,7 +1104,7 @@ const CategoryScreen = ({
   // 分页导航函数
   const goToPage = useCallback((page) => {
     const safePage = Math.max(1, Math.min(page, paginationData.totalPages));
-    console.log(`📄 跳转到第${safePage}页`);
+    logger.debug(`跳转到第${safePage}页`);
     setCurrentPage(safePage);
     
     // 通知父组件页面变化
@@ -1132,7 +1132,7 @@ const CategoryScreen = ({
   }, [currentPage, paginationData.totalPages]);
 
   const handleItemsPerPageChange = useCallback((newItemsPerPage) => {
-    console.log(`📄 每页数量改为: ${newItemsPerPage}`);
+    logger.debug(`每页数量改为: ${newItemsPerPage}`);
     setItemsPerPage(newItemsPerPage);
     setCurrentPage(1); // 重置到第一页
     
@@ -1287,7 +1287,7 @@ const CategoryScreen = ({
     );
 
 
-  console.log('🏷️ CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
+  logger.debug('CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
   
   return (
     <View style={styles.container}>

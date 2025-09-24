@@ -15,9 +15,10 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import configService from '../../services/ConfigService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
+import { logger } from '../../adapters/WebAdapters.js';
 
 const HomeScreen = () => {
-  console.log('🚀 HomeScreen 组件开始渲染');
+  logger.debug('HomeScreen 组件开始渲染');
   
   // 页面状态管理
   const [currentScreen, setCurrentScreen] = useState('Home');
@@ -44,7 +45,7 @@ const HomeScreen = () => {
   // 数据加载函数
   const loadData = useCallback(async () => {
     try {
-      console.log('🔄 HomeScreen 开始加载数据...');
+      logger.debug('HomeScreen 开始加载数据...');
       setIsLoading(true);
       
       // 并行加载所有数据
@@ -63,7 +64,7 @@ const HomeScreen = () => {
           const images = await UnifiedDataService.readRecentImagesByCategory(categoryId, 1);
           return { categoryId, images };
         } catch (error) {
-          console.error(`❌ 加载分类 ${categoryId} 最近图片失败:`, error);
+          logger.error(`加载分类 ${categoryId} 最近图片失败:`, error);
           return { categoryId, images: [] };
         }
       });
@@ -81,7 +82,7 @@ const HomeScreen = () => {
           const images = await UnifiedDataService.readRecentImagesByCity(cityName, 1);
           return { cityName, images };
         } catch (error) {
-          console.error(`❌ 加载城市 ${cityName} 最近图片失败:`, error);
+          logger.error(`加载城市 ${cityName} 最近图片失败:`, error);
           return { cityName, images: [] };
         }
       });
@@ -93,9 +94,9 @@ const HomeScreen = () => {
       });
       
       // 更新状态
-      console.log('📊 准备更新状态 - 分类统计:', categoryCountsData);
-      console.log('📊 准备更新状态 - 最近图片数量:', recentImagesData.length);
-      console.log('📊 准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
+      logger.debug('准备更新状态 - 分类统计:', categoryCountsData);
+      logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
+      logger.debug('准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
       
       setRecentImages(recentImagesData);
       setCategoryCounts(categoryCountsData);
@@ -106,7 +107,7 @@ const HomeScreen = () => {
       setHideEmptyCategories(settings.hideEmptyCategories === true);
       hideEmptyCategoriesRef.current = settings.hideEmptyCategories === true;
       
-      console.log('✅ HomeScreen 数据加载完成');
+      logger.debug('HomeScreen 数据加载完成');
       
       // 使用 setTimeout 确保状态更新后再设置 isLoading
       setTimeout(() => {
@@ -114,7 +115,7 @@ const HomeScreen = () => {
       }, 0);
       
     } catch (error) {
-      console.error('❌ HomeScreen 数据加载失败:', error);
+      logger.error('HomeScreen 数据加载失败:', error);
       setIsLoading(false);
     }
   }, []);
@@ -122,7 +123,7 @@ const HomeScreen = () => {
   // 监听 hideEmptyCategories 变化，同步更新 ref
   useEffect(() => {
     hideEmptyCategoriesRef.current = hideEmptyCategories;
-    console.log('🔄 更新 hideEmptyCategoriesRef.current:', hideEmptyCategories);
+    logger.debug('更新 hideEmptyCategoriesRef.current:', hideEmptyCategories);
   }, [hideEmptyCategories]);
   
   // 初始化数据加载
@@ -165,14 +166,14 @@ const HomeScreen = () => {
 
       return ScreenComponent;
     } catch (error) {
-      console.error(`❌ 加载页面失败 ${screenName}:`, error);
+      logger.error(`加载页面失败 ${screenName}:`, error);
       return null;
     }
   }, []);
 
   // 处理扫描进度更新 - 添加防抖
   const handleScanProgress = useCallback((progress) => {
-    console.log('🔄 HomeScreen 收到扫描进度更新:', progress);
+    logger.debug('HomeScreen 收到扫描进度更新:', progress);
     
     // 防抖：只在消息真正变化时更新
     setGlobalMessage(prevMessage => {
@@ -185,7 +186,7 @@ const HomeScreen = () => {
     
     // 扫描完成时刷新数据
     if (progress.stage === 'completed') {
-      console.log('✅ 扫描完成，刷新数据');
+      logger.debug('扫描完成，刷新数据');
       // 重新加载扫描时间和统计信息
       loadLastScanTime();
       // 重新加载数据
@@ -196,13 +197,13 @@ const HomeScreen = () => {
   // 监听自定义事件（由 IPCListenerService 发送）
   useEffect(() => {
     const handleNavigateToSettings = (event) => {
-      console.log('📨 收到导航到设置页面事件:', event.detail);
+      logger.debug('收到导航到设置页面事件:', event.detail);
       setCurrentScreen('Settings');
       setScreenProps({});
     };
 
     const handleScanProgressEvent = (event) => {
-      console.log('📨 收到扫描进度事件:', event.detail);
+      logger.debug('收到扫描进度事件:', event.detail);
       handleScanProgress(event.detail);
     };
 
@@ -226,7 +227,7 @@ const HomeScreen = () => {
 
   // 处理分类点击
   const handleCategoryPress = (category) => {
-    console.log('📂 点击分类:', category);
+    logger.debug('点击分类:', category);
     setCurrentScreen('Category');
     setScreenProps(prev => ({
       ...prev,
@@ -239,7 +240,7 @@ const HomeScreen = () => {
 
   // 处理城市点击
   const handleCityPress = (city) => {
-    console.log('🏙️ 点击城市:', city);
+    logger.debug('点击城市:', city);
     setCurrentScreen('Category');
     setScreenProps(prev => ({
       ...prev,
@@ -252,7 +253,7 @@ const HomeScreen = () => {
 
   // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
   const handleImagePress = (image, fromScreen = 'Home', additionalProps = {}) => {
-    console.log('🖼️ 点击图片，接收到的参数:', image, '来源页面:', fromScreen, '额外属性:', additionalProps);
+    logger.debug('点击图片，接收到的参数:', image, '来源页面:', fromScreen, '额外属性:', additionalProps);
     
     // 处理不同的参数格式
     let imageId;
@@ -261,11 +262,11 @@ const HomeScreen = () => {
     } else if (image && image.id) {
       imageId = image.id;
     } else {
-      console.error('❌ 无效的图片参数:', image);
+      logger.error('无效的图片参数:', image);
       return;
     }
     
-    console.log('🖼️ 提取的图片ID:', imageId);
+    logger.debug('提取的图片ID:', imageId);
     // 进入 ImagePreview 时重置强制刷新标志
     setCategoryDataChanged(false);
     
@@ -300,17 +301,17 @@ const HomeScreen = () => {
     }
     
     setCurrentScreen('ImagePreview');
-    console.log('🖼️ 设置URL参数，imageId:', imageId, '上下文:', additionalProps);
+    logger.debug('设置URL参数，imageId:', imageId, '上下文:', additionalProps);
   };
 
   // 处理刷新
   const onRefresh = useCallback(async () => {
-    console.log('🔄 HomeScreen 开始刷新数据');
+    logger.debug('HomeScreen 开始刷新数据');
     setRefreshing(true);
     try {
       await loadData();
     } catch (error) {
-      console.error('❌ 刷新数据失败:', error);
+      logger.error('刷新数据失败:', error);
     } finally {
     setRefreshing(false);
     }
@@ -324,7 +325,7 @@ const HomeScreen = () => {
   // 启动智能扫描
   const startSmartScan = useCallback(async () => {
     try {
-      console.log('🚀 HomeScreen 启动智能扫描');
+      logger.debug('HomeScreen 启动智能扫描');
       
       // 显示开始扫描消息
       setGlobalMessage('初始化扫描: 准备扫描环境');
@@ -332,14 +333,14 @@ const HomeScreen = () => {
       // 调用GalleryScannerService的扫描接口
       const galleryScannerService = new GalleryScannerService();
       await galleryScannerService.scanGalleryWithProgress((progress) => {
-        console.log('扫描进度:', progress);
+        logger.debug('扫描进度:', progress);
         // 更新进度
         handleScanProgress(progress);
       });
       
-      console.log('✅ 智能扫描完成');
+      logger.debug('智能扫描完成');
     } catch (error) {
-      console.error('❌ 智能扫描失败:', error);
+      logger.error('智能扫描失败:', error);
       setGlobalMessage('扫描失败: ' + error.message);
       throw error;
     }
@@ -370,7 +371,7 @@ const HomeScreen = () => {
         setGlobalMessage('图片分类应用已就绪');
       }
     } catch (error) {
-      console.error('❌ 加载最近扫描时间失败:', error);
+      logger.error('加载最近扫描时间失败:', error);
       setGlobalMessage('图片分类应用已就绪');
     }
   };
@@ -456,7 +457,7 @@ const HomeScreen = () => {
         style={styles.categoryCard}
         onPress={() => {
           // 导航到相似照片详情页面
-          console.log('点击相似照片组:', group.groupId);
+          logger.debug('点击相似照片组:', group.groupId);
           setCurrentScreen('Category');
           setScreenProps(prev => ({
             ...prev,
@@ -491,10 +492,10 @@ const HomeScreen = () => {
 
   // 渲染首页内容的函数
   const renderHomeContent = () => {
-    console.log('🏠 renderHomeContent 被调用');
-    console.log('🏠 hideEmptyCategoriesRef.current:', hideEmptyCategoriesRef.current);
-    console.log('🏠 当前分类统计状态:', categoryCounts);
-    console.log('🏠 当前最近图片数量:', recentImages.length);
+    logger.debug('renderHomeContent 被调用');
+    logger.debug('hideEmptyCategoriesRef.current:', hideEmptyCategoriesRef.current);
+    logger.debug('当前分类统计状态:', categoryCounts);
+    logger.debug('当前最近图片数量:', recentImages.length);
     
     return (
       <ScrollView
@@ -511,7 +512,7 @@ const HomeScreen = () => {
               style={styles.toggleButton}
               onPress={async () => {
                 try {
-                  console.log('🔄 切换隐藏空分类设置');
+                  logger.debug('切换隐藏空分类设置');
                   // 读取当前设置
                   const settings = await UnifiedDataService.readSettings();
                   // 切换设置
@@ -520,9 +521,9 @@ const HomeScreen = () => {
                   await UnifiedDataService.writeSettings(settings);
                   // 重新加载数据以应用新设置
                   await loadData();
-                  console.log('✅ 隐藏空分类设置已更新:', settings.hideEmptyCategories);
+                  logger.debug('隐藏空分类设置已更新:', settings.hideEmptyCategories);
                 } catch (error) {
-                  console.error('❌ 切换隐藏空分类设置失败:', error);
+                  logger.error('切换隐藏空分类设置失败:', error);
                 }
               }}
             >
@@ -639,7 +640,7 @@ const HomeScreen = () => {
 
   // 渲染所有页面的函数
   const renderAllScreens = useMemo(() => {
-    console.log('🖥️ renderAllScreens 开始执行');
+    logger.debug('renderAllScreens 开始执行');
     
     const CategoryScreen = loadedScreens.Category;
     const ImagePreviewScreen = loadedScreens.ImagePreview;
@@ -670,7 +671,7 @@ const HomeScreen = () => {
                   onDataChange={() => setCategoryDataChanged(true)}
                   onBack={() => {
                     setCurrentScreen('Home');
-                    console.log('🏠 从分类页面返回，重新加载数据');
+                    logger.debug('从分类页面返回，重新加载数据');
                     loadData();
                   }}
                   navigation={{
@@ -694,7 +695,7 @@ const HomeScreen = () => {
               <ImagePreviewScreen 
                 onDataChange={() => setCategoryDataChanged(true)}
                 onBack={() => {
-                  console.log('🔙 ImagePreview 返回按钮被点击');
+                  logger.debug('ImagePreview 返回按钮被点击');
                   
                   // 从URL参数获取来源页面和图片ID
                   const urlParams = new URLSearchParams(window.location.search);
@@ -706,7 +707,7 @@ const HomeScreen = () => {
                   
                   
                   if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City') {
-                    console.log('🔙 从分类/相似组/城市页面返回，图片ID:', imageId);
+                    logger.debug('从分类/相似组/城市页面返回，图片ID:', imageId);
                     setCurrentScreen('Category');
                     
                     // 恢复上下文信息到screenProps
@@ -719,9 +720,9 @@ const HomeScreen = () => {
                       scrollToImageId: imageId || null
                     }));
                   } else {
-                    console.log('🔙 从首页返回');
+                    logger.debug('从首页返回');
                     setCurrentScreen('Home');
-                    console.log('🏠 从图片预览返回，重新加载数据');
+                    logger.debug('从图片预览返回，重新加载数据');
                     loadData();
                   }
                 }}
@@ -743,7 +744,7 @@ const HomeScreen = () => {
                 navigation={{
                   goBack: () => {
                     setCurrentScreen('Home');
-                    console.log('🏠 从设置页面返回，重新加载数据');
+                    logger.debug('从设置页面返回，重新加载数据');
                     loadData();
                   }
                 }}
@@ -768,7 +769,7 @@ const HomeScreen = () => {
     );
   }
 
-  console.log('🏠 HomeScreen 状态初始化完成:', { 
+  logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
     recentImages: recentImages?.length || 0, 
     categoryCounts: Object.keys(categoryCounts).length,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, ScrollView, FlatList } from 'react-native';
-import { SafeAreaView } from '../../adapters/WebAdapters';
+import { SafeAreaView, logger } from '../../adapters/WebAdapters';
 import { launchImageLibrary } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
@@ -27,7 +27,7 @@ const ImageUploadScreen = ({ navigation }) => {
       
       // 使用新的扫描方法
       const result = await galleryScannerService.scanGalleryWithProgress((progress) => {
-        console.log('扫描进度:', progress);
+        logger.debug('扫描进度:', progress);
       });
       
       // 获取所有图片数据
@@ -38,7 +38,7 @@ const ImageUploadScreen = ({ navigation }) => {
       setSelectedImages(allImages);
       
     } catch (error) {
-      console.error('Failed to scan gallery:', error);
+      logger.error('Failed to scan gallery:', error);
       Alert.alert('Error', 'Failed to scan gallery: ' + error.message);
     } finally {
       setScanning(false);
@@ -92,10 +92,10 @@ const ImageUploadScreen = ({ navigation }) => {
           processedCount++;
           
           // Update progress
-          console.log(`Processed ${processedCount}/${selectedImages.length} images`);
+          logger.debug(`Processed ${processedCount}/${selectedImages.length} images`);
           
         } catch (error) {
-          console.error('Failed to process image:', image.fileName, error);
+          logger.error('Failed to process image:', image.fileName, error);
           failedCount++;
         }
       }
@@ -112,7 +112,7 @@ const ImageUploadScreen = ({ navigation }) => {
       );
 
     } catch (error) {
-      console.error('Processing failed:', error);
+      logger.error('Processing failed:', error);
       Alert.alert('Error', 'Processing failed: ' + error.message);
     } finally {
       setProcessing(false);
@@ -145,7 +145,7 @@ const ImageUploadScreen = ({ navigation }) => {
         setSelectedImages(prev => [...prev, ...newImages]);
       }
     } catch (error) {
-      console.error('Failed to select images:', error);
+      logger.error('Failed to select images:', error);
       Alert.alert('Error', 'Failed to select images: ' + error.message);
     }
   };

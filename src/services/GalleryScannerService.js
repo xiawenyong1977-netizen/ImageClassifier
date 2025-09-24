@@ -1,5 +1,7 @@
 ﻿// Platform detection for web and mobile
 
+import { logger } from '../adapters/WebAdapters.js';
+
 let Platform;
 
 try {
@@ -393,7 +395,7 @@ const extractExifData = async (filePath) => {
 
   } catch (error) {
 
-    console.error(`❌ EXIF extraction failed:`, error);
+    logger.error(`EXIF extraction failed:`, error);
 
     return {
 
@@ -466,7 +468,7 @@ class GalleryScannerService {
 
     } catch (error) {
 
-      console.error('❌ Gallery scanner service initialization failed:', error);
+      logger.error('Gallery scanner service initialization failed:', error);
 
       throw error;
 
@@ -540,7 +542,7 @@ class GalleryScannerService {
 
   async scanGalleryWithProgress(onProgress = null) {
     try {
-      console.log('Starting full scan of local gallery...');
+      logger.debug('Starting full scan of local gallery...');
       
       // 确保使用最新的配置
       const settings = await UnifiedDataService.readSettings();
@@ -551,7 +553,7 @@ class GalleryScannerService {
       // 使用独立扫描线程方案，避免阻塞UI
       return await this.scanWithIndependentThread(this.galleryPaths, onProgress, scanStartTime);
     } catch (error) {
-      console.error('Full scan failed:', error);
+      logger.error('Full scan failed:', error);
       throw error;
     }
   }

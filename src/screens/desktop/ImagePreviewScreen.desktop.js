@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
-import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
 import configService from '../../services/ConfigService';
@@ -105,19 +105,19 @@ const ImagePreviewScreen = ({
   useEffect(() => {
     const loadImageDetails = async () => {
       if (!finalImageId) {
-        console.log('❌ 没有图片ID，无法加载详情');
+        logger.error('没有图片ID，无法加载详情');
         setLoading(false);
         return;
       }
 
       try {
-        console.log(`📸 开始从数据库加载图片详情: ${finalImageId}`);
+        logger.debug(`开始从数据库加载图片详情: ${finalImageId}`);
         setLoading(true);
         
         const fullImageDetails = await UnifiedDataService.readImageDetailsById(finalImageId);
         if (fullImageDetails) {
-          console.log(`✅ 图片详情加载成功: ${finalImageId}`);
-          console.log('🔍 图片数据结构调试:', {
+          logger.debug(`图片详情加载成功: ${finalImageId}`);
+          logger.debug('图片数据结构调试:', {
             hasMobileNetV3: !!fullImageDetails.mobileNetV3Detections,
             mobileNetV3Type: typeof fullImageDetails.mobileNetV3Detections,
             mobileNetV3Value: fullImageDetails.mobileNetV3Detections,
@@ -129,10 +129,10 @@ const ImagePreviewScreen = ({
           // 加载当前上下文的所有图片用于导航
           await loadContextImages(fullImageDetails);
         } else {
-          console.log(`❌ 图片详情加载失败: ${finalImageId}`);
+          logger.error(`图片详情加载失败: ${finalImageId}`);
         }
       } catch (error) {
-        console.error(`❌ 加载图片详情异常: ${finalImageId}`, error);
+        logger.error(`加载图片详情异常: ${finalImageId}`, error);
       } finally {
         setLoading(false);
       }
@@ -196,9 +196,9 @@ const ImagePreviewScreen = ({
       // 找到当前图片在上下文中的索引
       const currentIndex = images.findIndex(img => img.id === finalImageId);
       setCurrentImageIndex(currentIndex);
-      console.log(`📸 当前图片在${contextType} ${contextValue}中的索引: ${currentIndex}/${images.length - 1}`);
+      logger.debug(`当前图片在${contextType} ${contextValue}中的索引: ${currentIndex}/${images.length - 1}`);
     } catch (error) {
-      console.error(`❌ 加载上下文图片失败:`, error);
+      logger.error(`加载上下文图片失败:`, error);
       setCategoryImages([]);
       setCurrentImageIndex(-1);
     }
@@ -207,20 +207,20 @@ const ImagePreviewScreen = ({
   // 获取图片尺寸
   useEffect(() => {
     if (currentImage && currentImage.uri) {
-      console.log('开始获取图片尺寸:', currentImage.uri);
+      logger.debug('开始获取图片尺寸:', currentImage.uri);
       Image.getSize(
         currentImage.uri,
         (width, height) => {
-          console.log('图片尺寸获取成功:', width, '×', height);
+          logger.debug('图片尺寸获取成功:', width, '×', height);
           setImageDimensions({ width, height });
         },
         (error) => {
-          console.log('获取图片尺寸失败:', error);
+          logger.error('获取图片尺寸失败:', error);
           setImageDimensions(null);
         }
       );
     } else {
-      console.log('没有图片URI，无法获取尺寸');
+      logger.warn('没有图片URI，无法获取尺寸');
     }
   }, [currentImage?.uri]);
 
@@ -268,7 +268,7 @@ const ImagePreviewScreen = ({
   const handlePreviousImage = async () => {
     if (currentImageIndex > 0 && categoryImages.length > 0) {
       const previousImage = categoryImages[currentImageIndex - 1];
-      console.log(`📸 导航到前一张图片: ${previousImage.id}`);
+      logger.debug(`导航到前一张图片: ${previousImage.id}`);
       
       try {
         setLoading(true);
@@ -285,7 +285,7 @@ const ImagePreviewScreen = ({
           }
         }
       } catch (error) {
-        console.error('❌ 加载前一张图片失败:', error);
+        logger.error('加载前一张图片失败:', error);
         Alert.alert('错误', '加载前一张图片失败');
       } finally {
         setLoading(false);
@@ -297,7 +297,7 @@ const ImagePreviewScreen = ({
   const handleNextImage = async () => {
     if (currentImageIndex < categoryImages.length - 1 && categoryImages.length > 0) {
       const nextImage = categoryImages[currentImageIndex + 1];
-      console.log(`📸 导航到后一张图片: ${nextImage.id}`);
+      logger.debug(`导航到后一张图片: ${nextImage.id}`);
       
       try {
         setLoading(true);
@@ -314,7 +314,7 @@ const ImagePreviewScreen = ({
           }
         }
       } catch (error) {
-        console.error('❌ 加载后一张图片失败:', error);
+        logger.error('加载后一张图片失败:', error);
         Alert.alert('错误', '加载后一张图片失败');
       } finally {
         setLoading(false);
@@ -323,12 +323,12 @@ const ImagePreviewScreen = ({
   };
 
   const handleDelete = () => {
-    console.log('🗑️ 删除按钮被点击，currentImage:', currentImage);
-    console.log('🗑️ 图片ID:', currentImage?.id);
-    console.log('🗑️ 当前分类:', currentImage?.category);
+    logger.debug('删除按钮被点击，currentImage:', currentImage);
+    logger.debug('图片ID:', currentImage?.id);
+    logger.debug('当前分类:', currentImage?.category);
     
     if (!currentImage || !currentImage.id) {
-      console.error('🗑️ 错误：currentImage 或 currentImage.id 不存在');
+      logger.error('错误：currentImage 或 currentImage.id 不存在');
       Alert.alert('错误', '图片信息不完整，无法操作');
       return;
     }
@@ -337,7 +337,7 @@ const ImagePreviewScreen = ({
     
     if (isToBeCleanedCategory) {
       // 如果当前分类是tobecleaned，执行真正的删除
-      console.log('🗑️ 当前分类是tobecleaned，执行删除操作...');
+      logger.debug('当前分类是tobecleaned，执行删除操作...');
       Alert.alert(
         '确认删除',
         '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
@@ -345,31 +345,31 @@ const ImagePreviewScreen = ({
           { 
             text: '取消', 
             style: 'cancel',
-            onPress: () => console.log('🗑️ 用户取消删除')
+            onPress: () => logger.debug('用户取消删除')
           },
           {
             text: '删除',
             style: 'destructive',
             onPress: async () => {
-              console.log('🗑️ 用户确认删除，开始删除流程...');
+              logger.debug('用户确认删除，开始删除流程...');
               try {
                 // 显示自定义进度对话框
                 setShowDeleteProgress(true);
                 setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
                 
-                console.log('🗑️ 调用deleteImage方法...');
+                logger.debug('调用deleteImage方法...');
                 const result = await UnifiedDataService.writeDeleteImage(currentImage.id);
                 
-                console.log('🗑️ 删除结果:', result);
+                logger.debug('删除结果:', result);
                 if (result.success) {
-                  console.log('🗑️ 删除成功，准备返回上一页...');
+                  logger.debug('删除成功，准备返回上一页...');
                   // 延迟关闭进度对话框，让用户看到最终结果
                   setTimeout(() => {
                     setShowDeleteProgress(false);
                     handleBack();
                   }, 1000);
                 } else {
-                  console.log('🗑️ 删除失败:', result.message);
+                  logger.error('删除失败:', result.message);
                   setShowDeleteProgress(false);
                   Alert.alert('删除失败', result.message);
                 }
@@ -383,7 +383,7 @@ const ImagePreviewScreen = ({
       );
     } else {
       // 如果当前分类不是tobecleaned，标记为待清理
-      console.log('🗑️ 当前分类不是tobecleaned，标记为待清理...');
+      logger.debug('当前分类不是tobecleaned，标记为待清理...');
       Alert.alert(
         '标记为待清理',
         '确定要将这张图片标记为待清理吗？\n\n图片将被移动到"待清理"分类中。',
@@ -391,13 +391,13 @@ const ImagePreviewScreen = ({
           { 
             text: '取消', 
             style: 'cancel',
-            onPress: () => console.log('🗑️ 用户取消标记为待清理')
+            onPress: () => logger.debug('用户取消标记为待清理')
           },
           {
             text: '标记',
             style: 'default',
             onPress: async () => {
-              console.log('🗑️ 用户确认标记为待清理，开始更新分类...');
+              logger.debug('用户确认标记为待清理，开始更新分类...');
               try {
                 // 更新分类为tobecleaned
                 await UnifiedDataService.updateImageCategory(
@@ -424,7 +424,7 @@ const ImagePreviewScreen = ({
                   similarityGroupType: null
                 }));
                 
-                console.log('🗑️ 标记为待清理成功');
+                logger.debug('标记为待清理成功');
                 Alert.alert('操作完成', '图片已标记为待清理');
                 
                 // 通知父组件数据已变化
@@ -432,7 +432,7 @@ const ImagePreviewScreen = ({
                   onDataChange();
                 }
               } catch (error) {
-                console.error('标记为待清理失败:', error);
+                logger.error('标记为待清理失败:', error);
                 Alert.alert('错误', '标记为待清理失败，请重试');
               }
             },
@@ -450,21 +450,21 @@ const ImagePreviewScreen = ({
 
     try {
       // 调试：检查currentImage是否包含检测结果
-      console.log('🔍 修改分类前检查currentImage:');
-      console.log('  - currentImage.idCardDetections:', currentImage.idCardDetections ? '存在' : '不存在');
-      console.log('  - currentImage.generalDetections:', currentImage.generalDetections ? '存在' : '不存在');
-      console.log('  - 检测结果详情:', {
+      logger.debug('修改分类前检查currentImage:');
+      logger.debug('  - currentImage.idCardDetections:', currentImage.idCardDetections ? '存在' : '不存在');
+      logger.debug('  - currentImage.generalDetections:', currentImage.generalDetections ? '存在' : '不存在');
+      logger.debug('  - 检测结果详情:', {
         idCardDetections: currentImage.idCardDetections,
         generalDetections: currentImage.generalDetections
       });
       
       // 调试：修改分类前检查数据库中其他图片的检测结果
-      console.log('🔍 修改分类前检查数据库中其他图片的检测结果...');
+      logger.debug('修改分类前检查数据库中其他图片的检测结果...');
       const allImages = await UnifiedDataService.readAllImages();
       const otherImagesWithDetections = allImages.filter(img => 
         img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
       );
-      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetections.length}`);
+      logger.debug(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetections.length}`);
       
       // 使用专门的分类更新接口，只更新分类相关字段
       await UnifiedDataService.updateImageCategory(
@@ -474,26 +474,26 @@ const ImagePreviewScreen = ({
       );
       
       // 调试：修改分类后检查数据库中其他图片的检测结果
-      console.log('🔍 修改分类后检查数据库中其他图片的检测结果...');
+      logger.debug('修改分类后检查数据库中其他图片的检测结果...');
       const allImagesAfter = await UnifiedDataService.readAllImages();
       const otherImagesWithDetectionsAfter = allImagesAfter.filter(img => 
         img.id !== currentImage.id && (img.idCardDetections || img.generalDetections)
       );
-      console.log(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetectionsAfter.length}`);
+      logger.debug(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetectionsAfter.length}`);
       // 更新本地状态，将置信度设置为"人工"
       setCurrentImage(prev => ({ 
         ...prev, 
         category: newCategory,
         confidence: 'manual' // 标记为人工分类
       }));
-      console.log(`图片分类已修改为: ${getCategoryInfo(newCategory).name} (人工分类)`);
+      logger.debug(`图片分类已修改为: ${getCategoryInfo(newCategory).name} (人工分类)`);
       
       // 通知父组件数据已变化
       if (onDataChange) {
         onDataChange();
       }
     } catch (error) {
-      console.error('修改分类失败:', error);
+      logger.error('修改分类失败:', error);
       Alert.alert('错误', '分类修改失败，请重试');
     }
   };
@@ -614,10 +614,10 @@ const ImagePreviewScreen = ({
                       style={styles.image}
                       resizeMode="contain"
                       onError={(error) => {
-                        console.log('Image load error:', error.nativeEvent?.error);
+                        logger.error('Image load error:', error.nativeEvent?.error);
                       }}
                       onLoad={() => {
-                        console.log('Image loaded successfully');
+                        logger.debug('Image loaded successfully');
                       }}
                     />
                   ) : (
@@ -676,7 +676,7 @@ const ImagePreviewScreen = ({
                 <Text style={styles.infoValue}>
                   {currentImage.takenAt ? formatDate(currentImage.takenAt) : '未知'}
                 </Text>
-                {console.log('📸 当前图片EXIF数据:', {
+                {logger.debug('当前图片EXIF数据:', {
                   takenAt: currentImage.takenAt,
                   timestamp: currentImage.timestamp,
                   uri: currentImage.uri,

@@ -1,6 +1,97 @@
 // 共享适配层 - 根据平台提供不同的API实现
 // 在web环境中，Platform来自react-native-web，在移动端来自react-native
 import React from 'react';
+
+// 统一日志系统
+class Logger {
+  constructor() {
+    // 更宽松的调试模式判断
+    this.isDevelopment = process.env.NODE_ENV === 'development' || 
+                        (typeof window !== 'undefined' && window.location?.hostname === 'localhost') ||
+                        (typeof window !== 'undefined' && window.location?.hostname === '127.0.0.1') ||
+                        (typeof window !== 'undefined' && window.location?.protocol === 'file:') ||
+                        (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production');
+    this.isDebug = this.isDevelopment;
+  }
+
+  // 设置调试模式
+  setDebugMode(enabled) {
+    this.isDebug = enabled;
+  }
+
+
+  // 通用日志方法
+  log(level, message, ...args) {
+    if (!this.isDebug) return;
+    
+    const timestamp = new Date().toISOString();
+    const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
+    
+    switch (level) {
+      case 'error':
+        console.error(prefix, message, ...args);
+        break;
+      case 'warn':
+        console.warn(prefix, message, ...args);
+        break;
+      case 'info':
+        console.info(prefix, message, ...args);
+        break;
+      case 'debug':
+        console.log(prefix, message, ...args);
+        break;
+      default:
+        console.log(prefix, message, ...args);
+    }
+  }
+
+  // 便捷方法
+  error(message, ...args) {
+    this.log('error', message, ...args);
+  }
+
+  warn(message, ...args) {
+    this.log('warn', message, ...args);
+  }
+
+  info(message, ...args) {
+    this.log('info', message, ...args);
+  }
+
+  debug(message, ...args) {
+    this.log('debug', message, ...args);
+  }
+
+  // 性能监控
+  time(label) {
+    if (this.isDebug) {
+      console.time(label);
+    }
+  }
+
+  timeEnd(label) {
+    if (this.isDebug) {
+      console.timeEnd(label);
+    }
+  }
+
+  // 分组日志
+  group(label) {
+    if (this.isDebug) {
+      console.group(label);
+    }
+  }
+
+  groupEnd() {
+    if (this.isDebug) {
+      console.groupEnd();
+    }
+  }
+}
+
+// 创建单例实例
+const logger = new Logger();
+
 let Platform;
 try {
   // 尝试检测web环境
@@ -74,20 +165,20 @@ export const getFileStats = async (filePath) => {
       const stats = fs.statSync(normalizedPath);
       return stats;
     } catch (fsError) {
-      console.log(`⚠️ Node.js fs stat failed:`, fsError.message);
+      logger.warn(`Node.js fs stat failed:`, fsError.message);
       throw new Error(`Failed to get file stats in Electron: ${fsError.message}`);
     }
   }
   
   // 在非Electron环境中使用RNFS方法
   try {
-    console.log(`🔄 Using RNFS in non-Electron environment...`);
+    logger.debug(`Using RNFS in non-Electron environment...`);
     const RNFS = eval('require("react-native-fs")');
     const stats = await RNFS.stat(normalizedPath);
-    console.log(`📦 RNFS stats read successfully, size: ${stats.size}`);
+    logger.debug(`RNFS stats read successfully, size: ${stats.size}`);
     return stats;
   } catch (rnfsError) {
-    console.log(`⚠️ RNFS stat failed:`, rnfsError.message);
+    logger.warn(`RNFS stat failed:`, rnfsError.message);
     throw new Error(`Failed to get file stats: ${rnfsError.message}`);
   }
 };
@@ -171,7 +262,7 @@ export const AsyncStorage = {
         const value = localStorage.getItem(key);
         return value ? JSON.parse(value) : null;
       } catch (error) {
-        console.error('[Web] AsyncStorage.getItem error:', error);
+        logger.error('[Web] AsyncStorage.getItem error:', error);
         return null;
       }
     } else {
@@ -182,12 +273,12 @@ export const AsyncStorage = {
   },
   setItem: async (key, value) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] AsyncStorage.setItem: ${key}`);
+      logger.debug(`[Web] AsyncStorage.setItem: ${key}`);
       try {
         localStorage.setItem(key, JSON.stringify(value));
         return true;
       } catch (error) {
-        console.error('[Web] AsyncStorage.setItem error:', error);
+        logger.error('[Web] AsyncStorage.setItem error:', error);
         return false;
       }
     } else {
@@ -198,12 +289,12 @@ export const AsyncStorage = {
   },
   removeItem: async (key) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] AsyncStorage.removeItem: ${key}`);
+      logger.debug(`[Web] AsyncStorage.removeItem: ${key}`);
       try {
         localStorage.removeItem(key);
         return true;
       } catch (error) {
-        console.error('[Web] AsyncStorage.removeItem error:', error);
+        logger.error('[Web] AsyncStorage.removeItem error:', error);
         return false;
       }
     } else {
@@ -214,12 +305,12 @@ export const AsyncStorage = {
   },
   clear: async () => {
     if (Platform.OS === 'web') {
-      console.log('[Web] AsyncStorage.clear');
+      logger.debug('[Web] AsyncStorage.clear');
       try {
         localStorage.clear();
         return true;
       } catch (error) {
-        console.error('[Web] AsyncStorage.clear error:', error);
+        logger.error('[Web] AsyncStorage.clear error:', error);
         return false;
       }
     } else {
@@ -230,11 +321,11 @@ export const AsyncStorage = {
   },
   getAllKeys: async () => {
     if (Platform.OS === 'web') {
-      console.log('[Web] AsyncStorage.getAllKeys');
+      logger.debug('[Web] AsyncStorage.getAllKeys');
       try {
         return Object.keys(localStorage);
       } catch (error) {
-        console.error('[Web] AsyncStorage.getAllKeys error:', error);
+        logger.error('[Web] AsyncStorage.getAllKeys error:', error);
         return [];
       }
     } else {
@@ -391,7 +482,7 @@ export const RNFS = {
         console.log(`[Web] File deleted via Electron: ${normalizedPath}`, result);
         return true;
       } catch (error) {
-        console.error(`[Web] Failed to delete file via Electron: ${filePath}`, error);
+        logger.error(`[Web] Failed to delete file via Electron: ${filePath}`, error);
         throw error;
       }
     } else {
@@ -858,11 +949,11 @@ export const ElectronFileAPI = {
           }, 10000); // 10秒超时
           
         } catch (error) {
-          console.error(`[ElectronFileAPI] 错误:`, error);
+          logger.error(`[ElectronFileAPI] 错误:`, error);
           reject(error);
         }
       } else {
-        console.error(`[ElectronFileAPI] Electron环境不可用 - Platform.OS: ${Platform.OS}, window.require: ${!!window.require}`);
+        logger.error(`[ElectronFileAPI] Electron环境不可用 - Platform.OS: ${Platform.OS}, window.require: ${!!window.require}`);
         reject(new Error('Electron环境不可用'));
       }
     });
@@ -1041,7 +1132,7 @@ export const PermissionAdapter = {
         console.log('   3. Or use file manager to manually delete images');
         
       } catch (error) {
-        console.error('❌ Permission request failed:', error);
+        logger.error('Permission request failed:', error);
         console.log('📋 Please follow these steps to manually grant permissions:');
         if (Platform.Version >= 33) {
           console.log('1. Long press app icon');
@@ -1132,3 +1223,6 @@ export const PermissionAdapter = {
 
 // 15. React Hooks 导出
 export { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+
+// 16. Logger 导出
+export { logger };

@@ -1,6 +1,7 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
+import { logger } from '../adapters/WebAdapters.js';
 
 class GlobalImageCache {
   constructor() {
@@ -38,7 +39,7 @@ class GlobalImageCache {
 
   // 构建缓存
   async buildCache() {
-    console.log('🔍 buildCache 被调用，调用堆栈:', new Error().stack);
+    logger.debug('buildCache 被调用，调用堆栈:', new Error().stack);
     
     if (this.isLoading) {
       // 如果正在加载，等待完成
@@ -55,27 +56,27 @@ class GlobalImageCache {
     }
 
     if (this.isLoaded) {
-      console.log('🔍 缓存已加载，直接返回');
+      logger.debug('缓存已加载，直接返回');
       return this.cache;
     }
 
-    console.log('🔍 开始构建缓存...');
+    logger.debug('开始构建缓存...');
     this.isLoading = true;
 
     try {
-      console.log('🔄 开始构建全局图片缓存...');
+      logger.debug('开始构建全局图片缓存...');
       
       // 确保存储服务已初始化
       await this.imageStorageService.ensureInitialized();
-      console.log('✅ 存储服务初始化完成');
+      logger.debug('存储服务初始化完成');
       
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
       const allImages = await this.imageStorageService.getImages();
-      console.log(`📊 获取到 ${allImages.length} 张图片`);
+      logger.debug(`获取到 ${allImages.length} 张图片`);
       
       // 确保 allImages 是数组
       if (!Array.isArray(allImages)) {
-        console.warn('⚠️ allImages 不是数组，初始化为空数组');
+        logger.warn('allImages 不是数组，初始化为空数组');
         this.cache.allImages = [];
       } else {
         // 直接使用ImageStorageService返回的数据，避免重复转换
@@ -87,7 +88,7 @@ class GlobalImageCache {
       this.cache.allImages.forEach(img => {
         if (!img.category) {
           missingCategoryCount++;
-          console.warn(`⚠️ 图片 ${img.id} 缺少分类信息:`, {
+          logger.warn(`图片 ${img.id} 缺少分类信息:`, {
             id: img.id,
             fileName: img.fileName,
             category: img.category,
@@ -97,7 +98,7 @@ class GlobalImageCache {
       });
       
       if (missingCategoryCount > 0) {
-        console.warn(`⚠️ 发现 ${missingCategoryCount} 张图片缺少分类信息`);
+        logger.warn(`发现 ${missingCategoryCount} 张图片缺少分类信息`);
       }
       
       // 更新ID到索引的映射

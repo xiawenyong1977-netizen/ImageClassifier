@@ -1,4 +1,6 @@
 // Platform detection for web and mobile
+import { logger } from '../adapters/WebAdapters.js';
+
 let Platform;
 try {
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -30,12 +32,12 @@ class MediaStoreService {
     this.isAvailable = Platform.OS === 'android' && MediaStoreModule;
     
     if (this.isAvailable) {
-      console.log('✅ MediaStore module available');
+      logger.debug('MediaStore module available');
     } else if (Platform.OS === 'web') {
       // In web environment, MediaStore is not available but this is expected
-      console.log('ℹ️ MediaStore module not available (web environment)');
+      logger.info('MediaStore module not available (web environment)');
     } else {
-      console.log('❌ MediaStore module not available');
+      logger.warn('MediaStore module not available');
     }
   }
 
@@ -43,7 +45,7 @@ class MediaStoreService {
   async deleteFile(filePath) {
     if (!this.isAvailable) {
       if (Platform.OS === 'web') {
-        console.log('ℹ️ MediaStore not available in web environment, using alternative method');
+        logger.info('MediaStore not available in web environment, using alternative method');
       } else {
         console.log('⚠️ MediaStore module not available');
       }
@@ -71,7 +73,7 @@ class MediaStoreService {
   async getFileInfo(filePath) {
     if (!this.isAvailable) {
       if (Platform.OS === 'web') {
-        console.log('ℹ️ MediaStore not available in web environment, using alternative method');
+        logger.info('MediaStore not available in web environment, using alternative method');
       } else {
         console.log('⚠️ MediaStore module not available');
       }

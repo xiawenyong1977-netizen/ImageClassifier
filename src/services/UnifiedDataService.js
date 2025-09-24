@@ -3,6 +3,7 @@ import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import ImageSimilarityService from './ImageSimilarityService.js';
 import configService from './ConfigService.js';
+import { logger } from '../adapters/WebAdapters.js';
 
 class UnifiedDataService {
   constructor() {
@@ -43,7 +44,7 @@ class UnifiedDataService {
     }
 
     try {
-      console.log('🚀 开始初始化 UnifiedDataService...');
+      logger.debug('开始初始化 UnifiedDataService...');
       
       // 1. 初始化数据库服务
       await this.imageStorageService.ensureInitialized();
@@ -55,11 +56,11 @@ class UnifiedDataService {
       await this.imageCache.buildCache();
       
       this.isInitialized = true;
-      console.log('🎉 UnifiedDataService 初始化完成');
+      logger.debug('UnifiedDataService 初始化完成');
       return true;
       
     } catch (error) {
-      console.error('❌ UnifiedDataService 初始化失败:', error);
+      logger.error('UnifiedDataService 初始化失败:', error);
       throw error;
     }
   }
@@ -75,19 +76,19 @@ class UnifiedDataService {
       // 先从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.allImages && cache.allImages.length > 0) {
-        console.log('📖 从缓存读取所有图片:', cache.allImages.length);
+        logger.debug('从缓存读取所有图片:', cache.allImages.length);
         return cache.allImages;
       }
       
       // 缓存没有，从数据库读取并更新缓存
-      console.log('📖 从数据库读取所有图片');
+      logger.debug('从数据库读取所有图片');
       await this.imageCache.refreshCache();
       
       const updatedCache = this.imageCache.getCache();
       return updatedCache.allImages;
       
     } catch (error) {
-      console.error('❌ 读取所有图片失败:', error);
+      logger.error('读取所有图片失败:', error);
       throw error;
     }
   }
@@ -103,12 +104,12 @@ class UnifiedDataService {
       const cachedImage = cache.allImages.find(img => img.id === imageId);
       
       if (cachedImage) {
-        console.log('📖 从缓存读取图片基本信息:', imageId);
+        logger.debug('从缓存读取图片基本信息:', imageId);
         return cachedImage;
       }
       
       // 缓存没有，从数据库读取
-      console.log('📖 从数据库读取图片基本信息:', imageId);
+      logger.debug('从数据库读取图片基本信息:', imageId);
       const image = await this.imageStorageService.getImageById(imageId);
       
       // 如果找到图片，将其添加到缓存中（增量更新，性能更好）
@@ -119,7 +120,7 @@ class UnifiedDataService {
       return image;
       
     } catch (error) {
-      console.error('❌ 读取图片基本信息失败:', error);
+      logger.error('读取图片基本信息失败:', error);
       throw error;
     }
   }
@@ -130,13 +131,13 @@ class UnifiedDataService {
    */
   async readImageDetailsById(imageId) {
     try {
-      console.log('📖 从数据库读取图片详细信息:', imageId);
+      logger.debug('从数据库读取图片详细信息:', imageId);
       const fullImage = await this.imageStorageService.getImageDetailsById(imageId);
       
       return fullImage;
       
     } catch (error) {
-      console.error('❌ 读取图片详细信息失败:', error);
+      logger.error('读取图片详细信息失败:', error);
       throw error;
     }
   }
@@ -149,15 +150,15 @@ class UnifiedDataService {
     try {
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
-      console.log(`📖 读取分类图片: 原始=${category}, 标准化=${normalizedCategory}`);
+      logger.debug(`读取分类图片: 原始=${category}, 标准化=${normalizedCategory}`);
       
       // 直接从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
-      console.log('📖 从缓存读取分类图片:', normalizedCategory, categoryImages.length);
+      logger.debug('从缓存读取分类图片:', normalizedCategory, categoryImages.length);
       return categoryImages;
       
     } catch (error) {
-      console.error('❌ 读取分类图片失败:', error);
+      logger.error('读取分类图片失败:', error);
       throw error;
     }
   }
@@ -171,19 +172,19 @@ class UnifiedDataService {
       // 先从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.recentImages && cache.recentImages.length > 0) {
-        console.log('📖 从缓存读取最近图片:', cache.recentImages.length);
+        logger.debug('从缓存读取最近图片:', cache.recentImages.length);
         return cache.recentImages.slice(0, limit);
       }
       
       // 缓存没有，从数据库读取并更新缓存
-      console.log('📖 从数据库读取最近图片');
+      logger.debug('从数据库读取最近图片');
       await this.imageCache.refreshCache();
       
       const updatedCache = this.imageCache.getCache();
       return updatedCache.recentImages.slice(0, limit);
       
     } catch (error) {
-      console.error('❌ 读取最近图片失败:', error);
+      logger.error('读取最近图片失败:', error);
       throw error;
     }
   }
@@ -196,7 +197,7 @@ class UnifiedDataService {
     try {
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
-      console.log(`📖 读取分类最近图片: 原始=${category}, 标准化=${normalizedCategory}`);
+      logger.debug(`读取分类最近图片: 原始=${category}, 标准化=${normalizedCategory}`);
       
       // 直接从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
@@ -210,11 +211,11 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      console.log('📖 从缓存读取分类最近图片:', normalizedCategory, recentImages.length);
+      logger.debug('从缓存读取分类最近图片:', normalizedCategory, recentImages.length);
       return recentImages;
       
     } catch (error) {
-      console.error('❌ 读取分类最近图片失败:', error);
+      logger.error('读取分类最近图片失败:', error);
       throw error;
     }
   }
@@ -225,7 +226,7 @@ class UnifiedDataService {
    */
   async readRecentImagesByCity(city, limit = 4) {
     try {
-      console.log(`📖 读取城市最近图片: ${city}`);
+      logger.debug(`读取城市最近图片: ${city}`);
       
       // 直接从缓存获取城市图片
       const cityImages = this.imageCache.getImagesByCity(city);
@@ -239,11 +240,11 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      console.log('📖 从缓存读取城市最近图片:', city, recentImages.length);
+      logger.debug('从缓存读取城市最近图片:', city, recentImages.length);
       return recentImages;
       
     } catch (error) {
-      console.error('❌ 读取城市最近图片失败:', error);
+      logger.error('读取城市最近图片失败:', error);
       throw error;
     }
   }
@@ -257,19 +258,19 @@ class UnifiedDataService {
       // 先从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.categoryCounts && Object.keys(cache.categoryCounts).length > 0) {
-        console.log('📖 从缓存读取分类统计');
+        logger.debug('从缓存读取分类统计');
         return cache.categoryCounts;
       }
       
       // 缓存没有，从数据库读取并更新缓存
-      console.log('📖 从数据库读取分类统计');
+      logger.debug('从数据库读取分类统计');
       await this.imageCache.refreshCache();
       
       const updatedCache = this.imageCache.getCache();
       return updatedCache.categoryCounts;
       
     } catch (error) {
-      console.error('❌ 读取分类统计失败:', error);
+      logger.error('读取分类统计失败:', error);
       throw error;
     }
   }
@@ -283,19 +284,19 @@ class UnifiedDataService {
       // 先从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.cityCounts && Object.keys(cache.cityCounts).length > 0) {
-        console.log('📖 从缓存读取城市统计');
+        logger.debug('从缓存读取城市统计');
         return cache.cityCounts;
       }
       
       // 缓存没有，从数据库读取并更新缓存
-      console.log('📖 从数据库读取城市统计');
+      logger.debug('从数据库读取城市统计');
       await this.imageCache.refreshCache();
       
       const updatedCache = this.imageCache.getCache();
       return updatedCache.cityCounts;
       
     } catch (error) {
-      console.error('❌ 读取城市统计失败:', error);
+      logger.error('读取城市统计失败:', error);
       throw error;
     }
   }
@@ -323,11 +324,11 @@ class UnifiedDataService {
         );
       }
       
-      console.log('📖 从缓存读取城市图片:', city, filteredImages.length);
+      logger.debug('从缓存读取城市图片:', city, filteredImages.length);
       return filteredImages;
       
     } catch (error) {
-      console.error('❌ 读取城市图片失败:', error);
+      logger.error('读取城市图片失败:', error);
       throw error;
     }
   }
@@ -344,11 +345,11 @@ class UnifiedDataService {
    */
   async updateImageCategory(imageId, newCategory, newConfidence = 'manual') {
     try {
-      console.log('✍️ 更新图片分类:', imageId, '->', newCategory);
+      logger.debug('更新图片分类:', imageId, '->', newCategory);
       
       // 1. 先写数据库
       const updatedImage = await this.imageStorageService.updateImageCategory(imageId, newCategory, newConfidence);
-      console.log('✅ 数据库更新完成');
+      logger.debug('数据库更新完成');
       
       // 2. 精确更新缓存（只更新分类相关字段）
       const updateSuccess = this.imageCache.updateImageClassification(
@@ -357,17 +358,17 @@ class UnifiedDataService {
         { confidence: newConfidence } // 只传递需要更新的字段
       );
       if (updateSuccess) {
-        console.log('✅ 缓存精确更新完成');
+        logger.debug('缓存精确更新完成');
       } else {
-        console.warn('⚠️ 缓存精确更新失败，将进行全量更新');
+        logger.warn('缓存精确更新失败，将进行全量更新');
         await this.imageCache.refreshCache();
-        console.log('✅ 缓存全量更新完成');
+        logger.debug('缓存全量更新完成');
       }
       
       return updatedImage;
       
     } catch (error) {
-      console.error('❌ 更新图片分类失败:', error);
+      logger.error('更新图片分类失败:', error);
       throw error;
     }
   }
@@ -378,26 +379,26 @@ class UnifiedDataService {
    */
   async writeImageClassification(imageData) {
     try {
-      console.log('✍️ 保存图片分类结果:', imageData.fileName);
+      logger.debug('保存图片分类结果:', imageData.fileName);
       
       // 1. 先写数据库
       const savedImage = await this.imageStorageService.saveImageClassification(imageData);
-      console.log('✅ 数据库写入完成');
+      logger.debug('数据库写入完成');
       
       // 2. 精确更新缓存
       const updateSuccess = this.imageCache.updateImageClassification(savedImage.id, savedImage.category);
       if (updateSuccess) {
-        console.log('✅ 缓存精确更新完成');
+        logger.debug('缓存精确更新完成');
       } else {
-        console.warn('⚠️ 缓存精确更新失败，将进行全量更新');
+        logger.warn('缓存精确更新失败，将进行全量更新');
         await this.imageCache.refreshCache();
-        console.log('✅ 缓存全量更新完成');
+        logger.debug('缓存全量更新完成');
       }
       
       return savedImage;
       
     } catch (error) {
-      console.error('❌ 保存图片分类失败:', error);
+      logger.error('保存图片分类失败:', error);
       throw error;
     }
   }
@@ -413,26 +414,26 @@ class UnifiedDataService {
    */
   async writeDeleteImage(imageId) {
     try {
-      console.log('✍️ 删除图片:', imageId);
+      logger.debug('删除图片:', imageId);
       
       // 1. 先写数据库
       const result = await this.imageStorageService.deleteImage(imageId);
-      console.log('✅ 数据库删除完成');
+      logger.debug('数据库删除完成');
       
       // 2. 精确删除缓存
       const deleteSuccess = this.imageCache.removeImage(imageId);
       if (deleteSuccess) {
-        console.log('✅ 缓存精确删除完成');
+        logger.debug('缓存精确删除完成');
       } else {
-        console.warn('⚠️ 缓存精确删除失败，将进行全量更新');
+        logger.warn('缓存精确删除失败，将进行全量更新');
         await this.imageCache.refreshCache();
-        console.log('✅ 缓存全量更新完成');
+        logger.debug('缓存全量更新完成');
       }
       
       return result;
       
     } catch (error) {
-      console.error('❌ 删除图片失败:', error);
+      logger.error('删除图片失败:', error);
       throw error;
     }
   }
@@ -443,26 +444,26 @@ class UnifiedDataService {
    */
   async writeDeleteImages(imageIds, onProgress) {
     try {
-      console.log('✍️ 批量删除图片:', imageIds.length);
+      logger.debug('批量删除图片:', imageIds.length);
       
       // 1. 先写数据库
       const result = await this.imageStorageService.deleteImages(imageIds, onProgress);
-      console.log('✅ 数据库批量删除完成');
+      logger.debug('数据库批量删除完成');
       
       // 2. 精确批量删除缓存
       const deleteSuccess = this.imageCache.removeImages(imageIds);
       if (deleteSuccess) {
-        console.log('✅ 缓存精确批量删除完成');
+        logger.debug('缓存精确批量删除完成');
       } else {
-        console.warn('⚠️ 缓存精确批量删除失败，将进行全量更新');
+        logger.warn('缓存精确批量删除失败，将进行全量更新');
         await this.imageCache.refreshCache();
-        console.log('✅ 缓存全量更新完成');
+        logger.debug('缓存全量更新完成');
       }
       
       return result;
       
     } catch (error) {
-      console.error('❌ 批量删除图片失败:', error);
+      logger.error('批量删除图片失败:', error);
       throw error;
     }
   }
@@ -473,16 +474,16 @@ class UnifiedDataService {
    */
   async readSettings() {
     try {
-      console.log('📖 读取应用设置');
+      logger.debug('读取应用设置');
       
       const settings = await this.imageStorageService.getSettings();
-      console.log('✅ 应用设置读取完成:', settings);
-      console.log('🔧 hideEmptyCategories 值:', settings.hideEmptyCategories, '类型:', typeof settings.hideEmptyCategories);
+      logger.debug('应用设置读取完成:', settings);
+      logger.debug('hideEmptyCategories 值:', settings.hideEmptyCategories, '类型:', typeof settings.hideEmptyCategories);
       
       return settings;
       
     } catch (error) {
-      console.error('❌ 读取设置失败:', error);
+      logger.error('读取设置失败:', error);
       throw error;
     }
   }
@@ -493,7 +494,7 @@ class UnifiedDataService {
    */
   async writeSettings(settings) {
     try {
-      console.log('✍️ 保存应用设置');
+      logger.debug('保存应用设置');
       
       // 1. 先写数据库
       await this.imageStorageService.saveSettings(settings);

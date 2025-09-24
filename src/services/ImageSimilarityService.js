@@ -6,6 +6,7 @@
 
 import ColorHistogramExtractor from './ColorHistogramExtractor.js';
 import ImageStorageService from './ImageStorageService.js';
+import { logger } from '../adapters/WebAdapters.js';
 
 class ImageSimilarityService {
   constructor() {
@@ -28,12 +29,12 @@ class ImageSimilarityService {
    */
   async initialize() {
     try {
-      console.log('🔗 ImageSimilarityService 开始初始化...');
+      logger.debug('ImageSimilarityService 开始初始化...');
       await this.storageService.ensureInitialized();
       this.isInitialized = true;
-      console.log('✅ ImageSimilarityService 初始化成功');
+      logger.debug('ImageSimilarityService 初始化成功');
     } catch (error) {
-      console.error('❌ ImageSimilarityService 初始化失败:', error);
+      logger.error('ImageSimilarityService 初始化失败:', error);
       throw error;
     }
   }
@@ -56,7 +57,7 @@ class ImageSimilarityService {
       similarityThreshold = 0.8,
     } = options;
 
-    console.log(`🔍 开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}`);
+    logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}`);
 
     try {
       // 获取所有图片数据（精简信息）

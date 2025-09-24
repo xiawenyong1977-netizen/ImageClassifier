@@ -24,9 +24,10 @@ import HomeScreen from './screens/desktop/HomeScreen.desktop';
 import UnifiedDataService from './services/UnifiedDataService';
 import IPCListenerService from './services/IPCListenerService';
 import configService from './services/ConfigService';
+import { logger } from './adapters/WebAdapters';
 
 export default function App() {
-  console.log('🚀 App.desktop.js 开始渲染');
+  logger.debug('App.desktop.js 开始渲染');
   
   const [isServiceReady, setIsServiceReady] = useState(false);
 
@@ -34,27 +35,27 @@ export default function App() {
   useEffect(() => {
     const initApp = async () => {
       try {
-        console.log('🚀 App.desktop.js 开始初始化服务...');
+        logger.debug('App.desktop.js 开始初始化服务...');
         
         // 首先初始化 ConfigService
         await configService.initialize();
-        console.log('✅ ConfigService 初始化完成');
+        logger.debug('ConfigService 初始化完成');
         
         // 初始化 UnifiedDataService
         await UnifiedDataService.initialize();
-        console.log('✅ UnifiedDataService 初始化完成');
+        logger.debug('UnifiedDataService 初始化完成');
         
         // 初始化 IPC 监听器
         IPCListenerService.initialize();
-        console.log('✅ IPCListenerService 初始化完成');
+        logger.debug('IPCListenerService 初始化完成');
         
         setIsServiceReady(true);
       } catch (error) {
-        console.error('❌ 服务初始化失败:', error);
-        console.error('❌ 错误堆栈:', error.stack);
+        logger.error('服务初始化失败:', error);
+        logger.error('错误堆栈:', error.stack);
         // 如果是热更新相关错误，强制继续
         if (error.message && error.message.includes('hot-update')) {
-          console.log('🔄 检测到热更新错误，强制继续...');
+          logger.debug('检测到热更新错误，强制继续...');
           setIsServiceReady(true);
         } else {
           throw error;
@@ -86,7 +87,7 @@ export default function App() {
         <TouchableOpacity 
           style={styles.settingsButton}
           onPress={() => {
-            console.log('🔧 设置按钮被点击');
+            logger.debug('设置按钮被点击');
             if (window.require) {
               window.require('electron').ipcRenderer.send('titlebar-settings-click');
             }
@@ -111,7 +112,7 @@ export default function App() {
       <TouchableOpacity 
         style={styles.settingsButton}
         onPress={() => {
-          console.log('🔧 设置按钮被点击');
+          logger.debug('设置按钮被点击');
           if (window.require) {
             window.require('electron').ipcRenderer.send('titlebar-settings-click');
           }

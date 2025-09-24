@@ -2,6 +2,24 @@ const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
 
+// 简单的日志系统
+const logger = {
+  debug: (message, ...args) => {
+    if (isDev) {
+      console.log(`[DEBUG] ${message}`, ...args);
+    }
+  },
+  info: (message, ...args) => {
+    console.log(`[INFO] ${message}`, ...args);
+  },
+  warn: (message, ...args) => {
+    console.warn(`[WARN] ${message}`, ...args);
+  },
+  error: (message, ...args) => {
+    console.error(`[ERROR] ${message}`, ...args);
+  }
+};
+
   // 禁用应用菜单
   Menu.setApplicationMenu(null);
 
@@ -64,7 +82,7 @@ function createWindow() {
 
   // 监听自定义标题栏设置按钮点击
   ipcMain.on('titlebar-settings-click', (event) => {
-    console.log('[Electron Main] 标题栏设置按钮被点击');
+    logger.debug('标题栏设置按钮被点击');
     mainWindow.webContents.send('navigate-to-settings');
   });
 
@@ -88,32 +106,32 @@ function createWindow() {
 
   // 监听文件删除请求
   ipcMain.on('delete-file', (event, filePath) => {
-    console.log(`[Electron Main] 收到删除文件请求: ${filePath}`);
+    logger.debug(`收到删除文件请求: ${filePath}`);
     try {
       const fs = require('fs');
       const path = require('path');
       
-      console.log(`[Electron Main] 检查文件是否存在: ${filePath}`);
+      logger.debug(`检查文件是否存在: ${filePath}`);
       // 检查文件是否存在
       if (fs.existsSync(filePath)) {
-        console.log(`[Electron Main] 文件存在，开始删除...`);
+        logger.debug(`文件存在，开始删除...`);
         // 删除文件
         fs.unlinkSync(filePath);
-        console.log(`[Electron Main] 文件删除成功: ${filePath}`);
+        logger.info(`文件删除成功: ${filePath}`);
         event.reply('delete-file-result', { success: true, message: '文件删除成功' });
       } else {
-        console.log(`[Electron Main] 文件不存在: ${filePath}`);
+        logger.warn(`文件不存在: ${filePath}`);
         event.reply('delete-file-result', { success: false, message: '文件不存在' });
       }
     } catch (error) {
-      console.error(`[Electron Main] 文件删除失败: ${filePath}`, error);
+      logger.error(`文件删除失败: ${filePath}`, error);
       event.reply('delete-file-result', { success: false, message: `文件删除失败: ${error.message}` });
     }
   });
 
   // 监听更新标题栏统计信息
   ipcMain.on('update-titlebar-stats', (event, stats) => {
-    console.log(`[Electron Main] 更新标题栏统计信息:`, stats);
+    logger.debug(`更新标题栏统计信息:`, stats);
     try {
       const totalImages = stats.totalImages || 0;
       const classified = stats.classified || 0;
@@ -123,13 +141,13 @@ function createWindow() {
       // 更新窗口标题
       mainWindow.setTitle(titleText);
     } catch (error) {
-      console.error(`[Electron Main] 更新标题栏统计信息失败:`, error);
+      logger.error(`更新标题栏统计信息失败:`, error);
     }
   });
 
   // 页面加载完成
   mainWindow.webContents.on('did-finish-load', () => {
-    console.log('[Electron Main] 页面加载完成');
+    logger.info('页面加载完成');
   });
 
 
@@ -159,7 +177,7 @@ function setupIpcHandlers() {
         return { success: false, message: '用户取消了选择' };
       }
     } catch (error) {
-      console.error('文件夹选择失败:', error);
+      logger.error('文件夹选择失败:', error);
       return { success: false, message: '文件夹选择失败: ' + error.message };
     }
   });

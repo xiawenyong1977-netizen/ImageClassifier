@@ -3,6 +3,8 @@
  * 负责读取和管理 initialSettings.json 配置文件
  */
 
+import { logger } from '../adapters/WebAdapters.js';
+
 class ConfigService {
   constructor() {
     this.config = null;
@@ -15,12 +17,12 @@ class ConfigService {
    */
   async initialize() {
     try {
-      console.log('🔧 开始加载配置文件...');
+      logger.debug('开始加载配置文件...');
       
       // 根据环境选择配置文件路径
       const configPath = this.getConfigPath();
-      console.log('🔧 配置文件路径:', configPath);
-      console.log('🔧 环境信息:', {
+      logger.debug('配置文件路径:', configPath);
+      logger.debug('环境信息:', {
         hasWindow: typeof window !== 'undefined',
         hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
         origin: typeof window !== 'undefined' ? window.location.origin : 'N/A'
@@ -32,8 +34,8 @@ class ConfigService {
       if (typeof window !== 'undefined') {
         // 浏览器环境使用fetch
         const response = await fetch(configPath);
-        console.log('🔧 响应状态:', response.status, response.statusText);
-        console.log('🔧 响应头 Content-Type:', response.headers.get('content-type'));
+        logger.debug('响应状态:', response.status, response.statusText);
+        logger.debug('响应头 Content-Type:', response.headers.get('content-type'));
         
         if (!response.ok) {
           throw new Error(`配置文件加载失败: ${response.status} ${response.statusText}`);

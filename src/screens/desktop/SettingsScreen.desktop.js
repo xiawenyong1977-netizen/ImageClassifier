@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput } from 'react-native';
-import { SafeAreaView, Alert, AsyncStorage } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 
@@ -35,7 +35,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       // 检测存储类型
       await detectStorageType();
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      logger.error('Failed to load settings:', error);
     } finally {
       setLoading(false);
     }
@@ -78,7 +78,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
         setStorageSize(formatBytes(asyncStorageSize));
       }
     } catch (error) {
-      console.error('检测存储类型失败:', error);
+      logger.error('检测存储类型失败:', error);
       setStorageType('未知');
       setStorageSize('无法计算');
     }
@@ -115,7 +115,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       }
       return 0;
     } catch (error) {
-      console.error('获取IndexedDB大小失败:', error);
+      logger.error('获取IndexedDB大小失败:', error);
       return 0;
     }
   };
@@ -131,7 +131,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       }
       return totalSize;
     } catch (error) {
-      console.error('获取localStorage大小失败:', error);
+      logger.error('获取localStorage大小失败:', error);
       return 0;
     }
   };
@@ -151,7 +151,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       
       return totalSize;
     } catch (error) {
-      console.error('获取AsyncStorage大小失败:', error);
+      logger.error('获取AsyncStorage大小失败:', error);
       return 0;
     }
   };
@@ -182,7 +182,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
         }));
       }
     } catch (error) {
-      console.error('Failed to save settings:', error);
+      logger.error('Failed to save settings:', error);
       Alert.alert('错误', '保存设置失败');
     }
   };
@@ -191,7 +191,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
   // 保存照片目录配置
   const saveGalleryPaths = async (paths) => {
     try {
-      console.log('💾 正在保存目录配置到统一设置:', paths);
+      logger.debug('正在保存目录配置到统一设置:', paths);
       
       // 验证路径不能为空数组
       if (!paths || paths.length === 0) {
@@ -202,13 +202,13 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       // 通过UnifiedDataService保存到统一设置中
       const newSettings = { ...settings, scanPaths: paths };
       await UnifiedDataService.writeSettings(newSettings);
-      console.log('✅ 目录配置已保存到统一设置');
+      logger.debug('目录配置已保存到统一设置');
       
       setGalleryPaths(paths);
       
 
     } catch (error) {
-      console.error('Failed to save gallery paths:', error);
+      logger.error('Failed to save gallery paths:', error);
       Alert.alert('错误', error.message || '保存照片目录失败');
     }
   };
@@ -225,10 +225,10 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       if (result.success) {
         setNewPath(result.path);
       } else {
-        console.log('文件夹选择取消或失败:', result.message);
+        logger.debug('文件夹选择取消或失败:', result.message);
       }
     } catch (error) {
-      console.error('文件夹选择失败:', error);
+      logger.error('文件夹选择失败:', error);
       Alert.alert('错误', '文件夹选择失败，请手动输入路径');
     }
   };
@@ -288,7 +288,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
               await loadSettings();
               Alert.alert('成功', '照片信息已清空！');
             } catch (error) {
-              console.error('清空数据失败:', error);
+              logger.error('清空数据失败:', error);
               Alert.alert('错误', '清空数据失败，请重试');
             }
           }
@@ -313,7 +313,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                 await startSmartScan();
                 Alert.alert('成功', '智能扫描完成！');
               } catch (error) {
-                console.error('智能扫描失败:', error);
+                logger.error('智能扫描失败:', error);
                 Alert.alert('错误', '智能扫描失败，请重试');
               }
             }
@@ -321,7 +321,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
         ]
       );
     } catch (error) {
-      console.error('启动智能扫描失败:', error);
+      logger.error('启动智能扫描失败:', error);
       Alert.alert('错误', '启动智能扫描失败，请重试');
     }
   };

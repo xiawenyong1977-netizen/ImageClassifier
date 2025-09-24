@@ -3,6 +3,8 @@
  * 从图片中提取RGB和HSV颜色直方图特征
  */
 
+import { logger } from '../adapters/WebAdapters.js';
+
 class ColorHistogramExtractor {
   constructor() {
     this.rgbBins = 256;  // RGB每个通道的bin数量
@@ -38,7 +40,7 @@ class ColorHistogramExtractor {
           canvas = createCanvas(image.width, image.height);
           ctx = canvas.getContext('2d');
         } catch (error) {
-          console.warn('⚠️ Node.js环境下的canvas处理在浏览器构建中被跳过');
+          logger.warn('Node.js环境下的canvas处理在浏览器构建中被跳过');
           throw new Error('Node.js环境在浏览器构建中不支持');
         }
       }
@@ -69,11 +71,11 @@ class ColorHistogramExtractor {
         extracted_at: new Date().toISOString()
       };
       
-      console.log(`✅ 提取颜色直方图成功: ${imageUri}`);
+      logger.debug(`提取颜色直方图成功: ${imageUri}`);
       return features;
       
     } catch (error) {
-      console.error('❌ 提取颜色直方图失败:', error);
+      logger.error('提取颜色直方图失败:', error);
       throw error;
     }
   }
@@ -93,7 +95,7 @@ class ColorHistogramExtractor {
         
         image.onload = () => resolve(image);
         image.onerror = (error) => {
-          console.error('❌ 图片加载失败:', error);
+          logger.error('图片加载失败:', error);
           reject(new Error(`图片加载失败: ${imageUri}`));
         };
         

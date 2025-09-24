@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from '../../adapters/WebAdapters';
+import { SafeAreaView, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageClassifierService from '../../services/ImageClassifierService';
 import configService from '../../services/ConfigService';
@@ -27,7 +27,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
       );
       setImages(selectedImageData);
     } catch (error) {
-      console.error('加载选中图片失败:', error);
+      logger.error('加载选中图片失败:', error);
       Alert.alert('错误', '加载图片失败');
     } finally {
       setLoading(false);
@@ -98,7 +98,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
             const result = await UnifiedDataService.writeDeleteImages(selectedImages);
             Alert.alert('Operation completed', 'Delete operation completed');
           } catch (error) {
-            console.error('Batch delete failed:', error);
+            logger.error('Batch delete failed:', error);
             Alert.alert('Operation failed', `Error occurred during deletion: ${error.message}`);
             return; // Do not go back if deletion failed
           }
@@ -121,7 +121,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
       navigation.goBack();
       
     } catch (error) {
-      console.error('Batch operation failed:', error);
+      logger.error('Batch operation failed:', error);
       Alert.alert('Error', 'Operation failed, please try again');
     } finally {
       setOperationLoading(false);
@@ -141,7 +141,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
         });
         successCount++;
       } catch (error) {
-        console.error(`重新分类图片失败 ${image.id}:`, error);
+        logger.error(`重新分类图片失败 ${image.id}:`, error);
         failCount++;
       }
     }
@@ -161,7 +161,7 @@ const BatchOperationScreen = ({ route = {}, navigation = {} }) => {
         });
         successCount++;
       } catch (error) {
-        console.error(`移动图片失败 ${imageId}:`, error);
+        logger.error(`移动图片失败 ${imageId}:`, error);
       }
     }
     

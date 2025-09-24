@@ -3,6 +3,8 @@
  * 负责管理所有 Electron IPC 监听器
  */
 
+import { logger } from '../adapters/WebAdapters.js';
+
 class IPCListenerService {
   constructor() {
     this.listeners = new Map();
@@ -14,12 +16,12 @@ class IPCListenerService {
    */
   initialize() {
     if (this.isInitialized) {
-      console.log('⚠️ IPCListenerService 已经初始化');
+      logger.warn('IPCListenerService 已经初始化');
       return;
     }
 
     if (typeof window === 'undefined' || !window.require) {
-      console.log('⚠️ 非 Electron 环境，跳过 IPC 监听器初始化');
+      logger.warn('非 Electron 环境，跳过 IPC 监听器初始化');
       return;
     }
 
@@ -33,9 +35,9 @@ class IPCListenerService {
       this.setupFileOperationListeners(ipcRenderer);
       
       this.isInitialized = true;
-      console.log('✅ IPCListenerService 初始化完成');
+      logger.debug('IPCListenerService 初始化完成');
     } catch (error) {
-      console.error('❌ IPCListenerService 初始化失败:', error);
+      logger.error('IPCListenerService 初始化失败:', error);
     }
   }
 
