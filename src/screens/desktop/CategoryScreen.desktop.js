@@ -143,7 +143,6 @@ const CategoryScreen = ({
   itemsPerPage: propItemsPerPage = 50, // 每页数量，默认为50
   onPageChange = null // 页面变化回调函数
 }) => {
-  console.log(`🔄 CategoryScreen 组件渲染开始`);
   // 优先使用 prop 中的 category，然后是 route.params.category
   const category = propCategory || route?.params?.category;
   // 优先使用 prop 中的 city，然后是 route.params.city
@@ -303,8 +302,6 @@ const CategoryScreen = ({
     }
   }, [selectedImages.length, allImages, category, city, similarityGroupId]);
   
-  console.log(`🔄 CategoryScreen 状态: selectedImages=${selectedImages.length}, getIsSelected函数引用=${getIsSelected}`);
-  console.log(`🔄 CategoryScreen 渲染完成，准备渲染子组件`);
   
   // 删除进度状态
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
@@ -457,7 +454,6 @@ const CategoryScreen = ({
 
   // 分页数据计算
   const paginationData = useMemo(() => {
-    console.log(`🔄 paginationData useMemo 执行，allImages.length=${allImages?.length}, currentPage=${currentPage}, itemsPerPage=${itemsPerPage}`);
     const safeImages = allImages || [];
     const total = safeImages.length;
     const totalPagesCount = Math.ceil(total / itemsPerPage);
@@ -504,7 +500,6 @@ const CategoryScreen = ({
 
   // Image click handler - 简化：只传递图片ID字符串
   const handleImagePress = useCallback((image) => {
-    console.log(`🔄 点击图片，ID: ${image.id}`);
     // 直接跳转到图片预览页面，只传递图片ID字符串
     if (navigation?.onImagePress) {
       navigation.onImagePress(image.id);
@@ -513,7 +508,6 @@ const CategoryScreen = ({
 
   // Image long press handler
   const handleImageLongPress = useCallback((image) => {
-    console.log(`🔄 handleImageLongPress 函数被调用`);
     // 长按直接选中图片，不清除其他选中状态
     UnifiedDataService.setImageSelection(image.id, true);
   }, []);
@@ -711,16 +705,10 @@ const CategoryScreen = ({
 
   // Header 组件 - 可以重新渲染
   const HeaderComponent = useCallback(() => {
-    console.log('🔍 调试信息 - 原始category参数:', category);
-    console.log('🔍 调试信息 - category类型:', typeof category);
-    console.log('🔍 调试信息 - category是否为null:', category === null);
-    console.log('🔍 调试信息 - category是否为undefined:', category === undefined);
     
     // 使用UnifiedDataService获取标准化的分类ID
     const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
     
-    console.log('🔍 调试信息 - normalizedCategory:', normalizedCategory);
-    console.log('🔍 调试信息 - normalizedCategory类型:', typeof normalizedCategory);
     
     // 检查配置服务状态
     const configService = UnifiedDataService.configService;

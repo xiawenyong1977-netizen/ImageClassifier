@@ -47,15 +47,12 @@ class UnifiedDataService {
       
       // 1. 初始化数据库服务
       await this.imageStorageService.ensureInitialized();
-      console.log('✅ 数据库服务初始化完成');
       
       // 2. 初始化相似度检测服务
       await this.imageSimilarityService.initialize();
-      console.log('✅ 相似度检测服务初始化完成');
       
       // 3. 构建缓存
       await this.imageCache.buildCache();
-      console.log('✅ 缓存构建完成');
       
       this.isInitialized = true;
       console.log('🎉 UnifiedDataService 初始化完成');
