@@ -1163,34 +1163,25 @@ class UnifiedDataService {
         };
       }
       
-      // 获取所有图片数据用于获取完整信息
+      // 获取所有图片数据
       const allImages = await this.readAllImages();
       const imageMap = new Map(allImages.map(img => [img.id, img]));
       
-      // 构建精简信息，按相似度分数排序（从高到低）
+      // 直接使用缓存中的图片对象，添加相似度信息
       const images = group.images
-        .sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
         .map(imageInfo => {
           const image = imageMap.get(imageInfo.id);
           if (image) {
-            // 确保缓存中的图片对象有similarityGroupIndex属性
+            // 为缓存中的图片对象添加相似度信息
+            image.similarityScore = imageInfo.similarity_score || 0;
             image.similarityGroupIndex = groupId;
+            image.similarityGroupType = imageInfo.similarity_group_type || 'similar';
+            return image; // 直接返回缓存中的对象
           }
-          return {
-            id: imageInfo.id,
-            fileName: image ? image.fileName : 'Unknown',
-            uri: image ? image.uri : null,
-            category: image ? image.category : null,
-            city: image ? image.city : null,
-            takenAt: image ? image.takenAt : null,
-            similarityScore: imageInfo.similarity_score || 0,
-            similarityGroupIndex: groupId, // 添加相似组索引
-            size: image ? image.size : 0,
-            width: image ? image.width : 0,
-            height: image ? image.height : 0,
-            selected: image ? image.selected : false // 添加选中状态
-          };
-        });
+          return null;
+        })
+        .filter(img => img !== null) // 过滤掉不存在的图片
+        .sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)); // 按相似度排序
       
       const result = {
         groupId: group.id,
