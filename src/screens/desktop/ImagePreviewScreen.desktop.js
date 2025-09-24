@@ -238,11 +238,22 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
                   'manual'
                 );
                 
+                // 清理相似组数据（如果图片在相似组中）
+                if (currentImage.similarityGroupIndex) {
+                  await UnifiedDataService.removeImageFromSimilarityGroup(
+                    currentImage.id, 
+                    currentImage.similarityGroupIndex
+                  );
+                }
+                
                 // 更新本地状态
                 setCurrentImage(prev => ({ 
                   ...prev, 
                   category: 'tobecleaned',
-                  confidence: 'manual'
+                  confidence: 'manual',
+                  similarityGroupIndex: null,
+                  similarityScore: null,
+                  similarityGroupType: null
                 }));
                 
                 console.log('🗑️ 标记为待清理成功');

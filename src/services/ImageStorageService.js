@@ -1859,40 +1859,108 @@ class ImageStorageService {
   }
 
   /**
-   * 更新相似组索引（当图片的相似组信息发生变化时）
+   * 从相似组中移除图片
    * @param {string} imageId - 图片ID
-   * @param {string} oldGroupId - 旧的组ID（如果存在）
-   * @param {string} newGroupId - 新的组ID（如果存在）
-   * @returns {Promise<boolean>} 是否更新成功
+   * @returns {Promise<boolean>} 是否移除成功
    */
-  async updateSimilarityGroupIndex(imageId, oldGroupId, newGroupId) {
+  async removeImageFromSimilarityGroup(imageId) {
     try {
+      const similarityData = await this.getSimilarityData();
       const groupIndex = await this.getSimilarityGroupIndex();
       
-      // 从旧组中移除图片
-      if (oldGroupId && groupIndex[oldGroupId]) {
-        groupIndex[oldGroupId] = groupIndex[oldGroupId].filter(id => id !== imageId);
+      // 从相似度数据中获取图片的组ID
+      const imageData = similarityData[imageId];
+      if (!imageData || !imageData.similarity_group_id) {
+        console.log(`⚠️ 图片 ${imageId} 没有相似组信息`);
+        return true;
+      }
+      
+      const groupId = imageData.similarity_group_id;
+      
+      if (groupIndex[groupId]) {
+        // 先检查删除后还剩多少张图片
+        const remainingCount = groupIndex[groupId].length - 1;
+        let remainingImageId = null;
+        
+        // 如果删除后只剩1张图片，获取剩余图片ID
+        if (remainingCount === 1) {
+          remainingImageId = groupIndex[groupId].find(id => id !== imageId);
+          if (remainingImageId && similarityData[remainingImageId]) {
+            delete similarityData[remainingImageId];
+            console.log(`🗑️ 清除剩余图片的相似组数据: ${remainingImageId}`);
+          }
+        }
+        
+        // 删除目标图片的相似组数据
+        if (similarityData[imageId]) {
+          delete similarityData[imageId];
+          console.log(`🗑️ 清除目标图片的相似组数据: ${imageId}`);
+        }
+        
+        // 删除目标图片
+        groupIndex[groupId] = groupIndex[groupId].filter(id => id !== imageId);
+        
+        // 如果删除后只剩1张图片，也要从组中移除剩余图片
+        if (remainingCount === 1 && remainingImageId) {
+          groupIndex[groupId] = groupIndex[groupId].filter(id => id !== remainingImageId);
+        }
+        
         // 如果组为空，删除该组
-        if (groupIndex[oldGroupId].length === 0) {
-          delete groupIndex[oldGroupId];
+        if (groupIndex[groupId].length === 0) {
+          delete groupIndex[groupId];
         }
       }
       
-      // 添加到新组
-      if (newGroupId) {
-        if (!groupIndex[newGroupId]) {
-          groupIndex[newGroupId] = [];
+      // 保存更新后的数据
+      await this.saveSimilarityGroupIndex(groupIndex);
+      await this.saveSimilarityData(similarityData);
+      console.log(`✅ 从相似组移除图片: ${imageId} 从 ${groupId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ 从相似组移除图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 添加图片到相似组
+   * @param {string} imageId - 图片ID
+   * @param {string} groupId - 组ID
+   * @param {Object} similarityInfo - 相似度信息
+   * @returns {Promise<boolean>} 是否添加成功
+   */
+  async addImageToSimilarityGroup(imageId, groupId, similarityInfo = {}) {
+    try {
+      // 先清理图片的现有相似度信息
+      await this.removeImageFromSimilarityGroup(imageId);
+      
+      const groupIndex = await this.getSimilarityGroupIndex();
+      const similarityData = await this.getSimilarityData();
+      
+      if (groupId) {
+        // 更新相似组索引
+        if (!groupIndex[groupId]) {
+          groupIndex[groupId] = [];
         }
-        if (!groupIndex[newGroupId].includes(imageId)) {
-          groupIndex[newGroupId].push(imageId);
+        if (!groupIndex[groupId].includes(imageId)) {
+          groupIndex[groupId].push(imageId);
         }
+        
+        // 更新相似度数据，包含完整的相似度信息
+        similarityData[imageId] = {
+          ...similarityData[imageId],
+          ...similarityInfo,
+          similarity_group_id: groupId,
+          updatedAt: new Date().toISOString()
+        };
       }
       
       await this.saveSimilarityGroupIndex(groupIndex);
-      console.log(`✅ 更新相似组索引: ${imageId} ${oldGroupId ? `从${oldGroupId}` : ''} ${newGroupId ? `到${newGroupId}` : '移除'}`);
+      await this.saveSimilarityData(similarityData);
+      console.log(`✅ 添加图片到相似组: ${imageId} 到 ${groupId}`);
       return true;
     } catch (error) {
-      console.error('❌ 更新相似组索引失败:', error);
+      console.error('❌ 添加图片到相似组失败:', error);
       throw error;
     }
   }
@@ -1983,7 +2051,12 @@ class ImageStorageService {
       await this.saveSimilarityData(similarityData);
       
       // 更新相似组索引
-      await this.updateSimilarityGroupIndex(imageId, oldGroupId, newGroupId);
+      if (oldGroupId && oldGroupId !== newGroupId) {
+        await this.removeImageFromSimilarityGroup(imageId);
+      }
+      if (newGroupId && newGroupId !== oldGroupId) {
+        await this.addImageToSimilarityGroup(imageId, newGroupId, similarityInfo);
+      }
       
       console.log(`✅ 更新图片相似度数据: ${imageId}`);
       return true;
@@ -2118,8 +2191,20 @@ class ImageStorageService {
       Object.entries(groupIndex).forEach(([groupId, imageIds]) => {
         if (imageIds.length === 0) return; // 跳过空组
         
-        // 获取组中第一张图片的数据来确定组类型
-        const firstImageId = imageIds[0];
+        // 验证组中所有图片的数据是否都存在
+        const validImageIds = imageIds.filter(imageId => similarityData[imageId]);
+        if (validImageIds.length === 0) {
+          console.log(`⚠️ 相似组 ${groupId} 没有有效数据，跳过`);
+          return;
+        }
+        
+        // 如果有效图片数量少于原始数量，说明有数据不一致
+        if (validImageIds.length !== imageIds.length) {
+          console.log(`⚠️ 相似组 ${groupId} 数据不一致，有效图片: ${validImageIds.length}/${imageIds.length}`);
+        }
+        
+        // 获取组中第一张有效图片的数据来确定组类型
+        const firstImageId = validImageIds[0];
         const firstImageData = similarityData[firstImageId];
         
         if (!firstImageData) return;
@@ -2132,8 +2217,8 @@ class ImageStorageService {
           created_at: firstImageData.updatedAt
         };
         
-        // 添加组中所有图片
-        imageIds.forEach(imageId => {
+        // 添加组中所有有效图片
+        validImageIds.forEach(imageId => {
           const data = similarityData[imageId];
           if (data) {
             groups[groupId].images.push({

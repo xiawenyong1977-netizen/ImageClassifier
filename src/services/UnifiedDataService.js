@@ -1200,6 +1200,52 @@ class UnifiedDataService {
       throw error;
     }
   }
+
+  /**
+   * 从相似组中移除图片
+   */
+  async removeImageFromSimilarityGroup(imageId, groupId) {
+    try {
+      console.log(`🔄 从相似组移除图片: ${imageId}, groupId: ${groupId}`);
+      
+      // 从相似组中移除图片
+      await this.imageStorageService.removeImageFromSimilarityGroup(imageId);
+      
+      // 重建缓存以同步所有数据
+      await this.imageCache.buildCache();
+      
+      console.log(`✅ 成功从相似组移除图片: ${imageId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ 从相似组移除图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 添加图片到相似组
+   * @param {string} imageId - 图片ID
+   * @param {string} groupId - 相似组ID
+   * @param {Object} similarityInfo - 相似度信息
+   * @returns {Promise<boolean>} 是否添加成功
+   */
+  async addImageToSimilarityGroup(imageId, groupId, similarityInfo = {}) {
+    try {
+      console.log(`🔄 添加图片到相似组: ${imageId}, groupId: ${groupId}`);
+      
+      // 添加到相似组
+      await this.imageStorageService.addImageToSimilarityGroup(imageId, groupId, similarityInfo);
+      
+      // 重建缓存以同步所有数据
+      await this.imageCache.buildCache();
+      
+      console.log(`✅ 成功添加图片到相似组: ${imageId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ 添加图片到相似组失败:', error);
+      throw error;
+    }
+  }
 }
 
 // 导出单例实例

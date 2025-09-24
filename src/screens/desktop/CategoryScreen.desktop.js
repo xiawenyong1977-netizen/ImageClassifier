@@ -166,22 +166,27 @@ const CategoryScreen = ({
         // 加载相似组图片
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         images = groupData.images || [];
-        console.log(`📊 从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}`);
+        // 过滤掉tobecleaned分类的照片
+        images = images.filter(img => img.category !== 'tobecleaned');
+        console.log(`📊 从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
       } else if (city) {
         // 按城市加载
         images = await UnifiedDataService.readImagesByLocation(city, null);
-        console.log(`📊 从城市获取图片: 总数=${images.length}, city=${city}`);
+        // 过滤掉tobecleaned分类的照片
+        images = images.filter(img => img.category !== 'tobecleaned');
+        console.log(`📊 从城市获取图片: 总数=${images.length}, city=${city}, 已过滤tobecleaned`);
       } else {
         // 按分类加载
         images = await UnifiedDataService.readImagesByCategory(category);
         console.log(`📊 从分类获取图片: 总数=${images.length}, category=${category}`);
       }
       
-      // 同时加载选中状态 - 根据当前模式获取对应的选中图片
+      // 同时加载选中状态 - 统一使用getSelectedImages方法
       let selectedImageIds = [];
       if (similarityGroupId) {
-        // 从相似组进入，检查当前相似组图片中哪些被选中
-        selectedImageIds = images.filter(img => img.selected === true).map(img => img.id);
+        // 从相似组进入，获取相似组的选中图片
+        const selectedImages = await UnifiedDataService.getSelectedImages(null, null, similarityGroupId);
+        selectedImageIds = selectedImages.map(img => img.id);
         console.log(`📊 相似组选中状态: ${selectedImageIds.length} 张图片被选中`);
       } else if (city) {
         // 从城市进入，获取城市的选中图片
@@ -283,10 +288,10 @@ const CategoryScreen = ({
       // 否则全选当前页面的所有图片
       const allImageIds = allImages.map(img => img.id);
       setSelectedImages(allImageIds);
-      // 批量设置选中状态
+      // 统一使用添加到选中状态
+      UnifiedDataService.addToSelection(allImageIds);
+      // 发送全选事件通知图片组件
       allImages.forEach(img => {
-        UnifiedDataService.setImageSelection(img.id, true);
-        // 发送全选事件通知图片组件
         const event = new CustomEvent('imageSelectionChanged', {
           detail: {
             imageId: img.id,
@@ -516,20 +521,26 @@ const CategoryScreen = ({
 
   // Clear current selections (清除当前分类或城市的选中状态)
   const clearCategorySelections = useCallback(() => {
-    // 根据当前模式清除选中状态
+    // 统一使用_deselectImagesByFilter方法清除选中状态
+    let filterType, filterValue, logPrefix;
     if (similarityGroupId) {
-      // 从相似组进入，清除相似组的所有选中状态
-      UnifiedDataService.deselectImagesBySimilarityGroup(similarityGroupId);
-      console.log(`🧹 清除相似组选中状态: groupId=${similarityGroupId}, 本地状态已清空`);
+      filterType = 'similarityGroup';
+      filterValue = similarityGroupId;
+      logPrefix = '相似组';
     } else if (city) {
-      // 从城市进入，清除城市的所有选中状态
-      UnifiedDataService.deselectImagesByCity(city);
-      console.log(`🧹 清除城市选中状态: city=${city}, 本地状态已清空`);
+      filterType = 'city';
+      filterValue = city;
+      logPrefix = '城市';
     } else if (category) {
-      // 从分类进入，清除分类的所有选中状态
-      UnifiedDataService.clearCategorySelection(category);
-      console.log(`🧹 清除分类选中状态: category=${category}, 本地状态已清空`);
+      filterType = 'category';
+      filterValue = category;
+      logPrefix = '分类';
+    } else {
+      return; // 没有有效的过滤条件
     }
+    
+    const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
+    console.log(`🧹 清除${logPrefix}选中状态: ${filterValue}, 操作了 ${deselectedCount} 张图片`);
     
     // 清除本地状态
     setSelectedImages([]);
@@ -549,20 +560,37 @@ const CategoryScreen = ({
     // 使用UnifiedDataService获取标准化的分类ID
     const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
     
-    // 使用UnifiedDataService获取当前分类中选中的图片数量
+    // 获取选中图片数量 - 支持相似组
     const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
-    const selectedCount = normalizedCategory 
-      ? (selectedCountsByCategory[normalizedCategory] || 0)
-      : (city ? UnifiedDataService.getSelectedCountsByCity()[city] || 0 : 0);
+    const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
+    const selectedCountsBySimilarityGroup = UnifiedDataService.getSelectedCountsBySimilarityGroup();
+    
+    let selectedCount;
+    if (similarityGroupId) {
+      selectedCount = selectedCountsBySimilarityGroup[similarityGroupId] || 0;
+    } else if (normalizedCategory) {
+      selectedCount = selectedCountsByCategory[normalizedCategory] || 0;
+    } else if (city) {
+      selectedCount = selectedCountsByCity[city] || 0;
+    } else {
+      selectedCount = 0;
+    }
     
     if (selectedCount === 0) return;
 
-    // 获取当前分类中选中的图片
-    const currentCategorySelectedImages = normalizedCategory 
-      ? UnifiedDataService.getSelectedImagesByCategory(normalizedCategory)
-      : (city ? UnifiedDataService.getSelectedImagesByCity(city) : []);
+    // 获取当前选中的图片 - 支持相似组
+    let currentCategorySelectedImages;
+    if (similarityGroupId) {
+      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+    } else if (normalizedCategory) {
+      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
+    } else if (city) {
+      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesByCity(city);
+    } else {
+      currentCategorySelectedImages = [];
+    }
 
-    // 检查当前分类是否为tobecleaned
+    // 检查当前模式是否为tobecleaned分类
     const isToBeCleanedCategory = normalizedCategory === 'tobecleaned';
 
     if (isToBeCleanedCategory) {
@@ -633,11 +661,19 @@ const CategoryScreen = ({
                 
                 // 清除选中状态
                 clearCategorySelections();
-                // 批量更新图片分类为tobecleaned
+                // 批量更新图片分类为tobecleaned，并从相似组中移除
                 let processed = 0;
                 for (const imageId of selectedImageIds) {
                   try {
+                    // 更新分类为tobecleaned
                     await UnifiedDataService.updateImageCategory(imageId, 'tobecleaned');
+                    
+                    // 清理相似组数据（如果图片在相似组中）
+                    const image = UnifiedDataService.imageCache._getImageById(imageId);
+                    if (image && image.similarityGroupIndex) {
+                      await UnifiedDataService.removeImageFromSimilarityGroup(imageId, image.similarityGroupIndex);
+                    }
+                    
                     processed++;
                   } catch (error) {
                     console.error(`Failed to update image ${imageId}:`, error);
@@ -645,6 +681,18 @@ const CategoryScreen = ({
                 }
                 
           
+                
+                // 检查相似组是否还存在，如果不存在则导航回HomeScreen
+                if (similarityGroupId) {
+                  const remainingImages = UnifiedDataService.imageCache.getImagesBySimilarityGroup(similarityGroupId);
+                  if (remainingImages.length <= 1) {
+                    console.log(`🗑️ 相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
+                    Alert.alert('操作完成', `已成功标记 ${processed} 张图片为待清理\n\n相似组已被删除，返回主页面`, [
+                      { text: '确定', onPress: () => onBack() }
+                    ]);
+                    return;
+                  }
+                }
                 
                 // 重新加载图片数据
                 await loadImages();
@@ -659,7 +707,7 @@ const CategoryScreen = ({
         ]
       );
     }
-  }, [category, city]);
+  }, [category, city, similarityGroupId]);
 
   // Header 组件 - 可以重新渲染
   const HeaderComponent = useCallback(() => {

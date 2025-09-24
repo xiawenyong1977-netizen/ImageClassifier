@@ -112,6 +112,11 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       console.log('✅ 分类统计计算完成');
       
+      // 加载相似组数据到图片对象中
+      console.log('🔄 开始加载相似组数据...');
+      await this._loadSimilarityGroupData();
+      console.log('✅ 相似组数据加载完成');
+      
       // 获取最近图片（从缓存中取前20张）
       this.cache.recentImages = this.cache.allImages
         .sort((a, b) => {
@@ -372,6 +377,10 @@ class GlobalImageCache {
     }
     
     if (image.similarityGroupIndex) {
+      // 确保selectedSimilarityGroupCounts对象存在
+      if (!this.cache.selectedSimilarityGroupCounts) {
+        this.cache.selectedSimilarityGroupCounts = {};
+      }
       this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] || 0) + 1;
       console.log(`🔍 相似组选中统计更新: ${image.similarityGroupIndex} = ${this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]}`);
     } else {
@@ -400,10 +409,16 @@ class GlobalImageCache {
       }
     }
     
-    if (image.similarityGroupIndex && this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] > 0) {
-      this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]--;
-      if (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] === 0) {
-        delete this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex];
+    if (image.similarityGroupIndex) {
+      // 确保selectedSimilarityGroupCounts对象存在
+      if (!this.cache.selectedSimilarityGroupCounts) {
+        this.cache.selectedSimilarityGroupCounts = {};
+      }
+      if (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] > 0) {
+        this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]--;
+        if (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] === 0) {
+          delete this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex];
+        }
       }
     }
   }
@@ -413,6 +428,40 @@ class GlobalImageCache {
     this.cache.selectedCategoryCounts = {};
     this.cache.selectedCityCounts = {};
     this.cache.selectedSimilarityGroupCounts = {};
+  }
+
+  // 加载相似组数据到图片对象中
+  async _loadSimilarityGroupData() {
+    try {
+      // 获取相似组索引
+      const similarityGroupIndex = await this.imageStorageService.getSimilarityGroupIndex();
+      
+      if (!similarityGroupIndex || Object.keys(similarityGroupIndex).length === 0) {
+        console.log('📊 没有相似组数据需要加载');
+        return;
+      }
+      
+      console.log(`📊 开始加载相似组数据，共 ${Object.keys(similarityGroupIndex).length} 个相似组`);
+      
+      // 为每个图片设置相似组信息
+      let processedCount = 0;
+      for (const [groupId, imageIds] of Object.entries(similarityGroupIndex)) {
+        if (Array.isArray(imageIds)) {
+          for (const imageId of imageIds) {
+            const image = this._getImageById(imageId);
+            if (image) {
+              image.similarityGroupIndex = groupId;
+              processedCount++;
+            }
+          }
+        }
+      }
+      
+      console.log(`✅ 相似组数据加载完成，处理了 ${processedCount} 张图片`);
+      
+    } catch (error) {
+      console.error('❌ 加载相似组数据失败:', error);
+    }
   }
 
   // 重新构建选中统计
@@ -432,6 +481,10 @@ class GlobalImageCache {
           this.cache.selectedCityCounts[img.city] = (this.cache.selectedCityCounts[img.city] || 0) + 1;
         }
         if (img.similarityGroupIndex) {
+          // 确保selectedSimilarityGroupCounts对象存在
+          if (!this.cache.selectedSimilarityGroupCounts) {
+            this.cache.selectedSimilarityGroupCounts = {};
+          }
           this.cache.selectedSimilarityGroupCounts[img.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[img.similarityGroupIndex] || 0) + 1;
         }
       }
@@ -596,7 +649,7 @@ class GlobalImageCache {
   }
 
   // 获取选中的图片对象数组
-  getSelectedImages(category = null, city = null) {
+  getSelectedImages(category = null, city = null, similarityGroupId = null) {
     let filteredImages = this.cache.allImages.filter(img => img.selected);
     
     // 如果指定了分类，按分类过滤
@@ -615,6 +668,11 @@ class GlobalImageCache {
     // 如果指定了城市，按城市过滤
     if (city) {
       filteredImages = filteredImages.filter(img => img.city === city);
+    }
+    
+    // 如果指定了相似组，按相似组过滤
+    if (similarityGroupId) {
+      filteredImages = filteredImages.filter(img => img.similarityGroupIndex === similarityGroupId);
     }
     
     return filteredImages;
