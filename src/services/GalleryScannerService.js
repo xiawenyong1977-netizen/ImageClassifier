@@ -517,6 +517,12 @@ class GalleryScannerService {
         simpleMessage = `移除已删除照片: ${filesProcessed || 0} 张`;
         break;
         
+      case 'similarity_detection':
+        // 从extraInfo中提取相似度检测信息
+        const similarityInfo = message.includes(':') ? message.split(': ')[1] : message;
+        simpleMessage = `相似度检测: ${similarityInfo}`;
+        break;
+        
       case 'completed':
         simpleMessage = `扫描完成: 处理了 ${filesProcessed || 0} 张照片`;
         break;
@@ -1255,15 +1261,20 @@ class GalleryScannerService {
     const totalProcessed = processedCount;
     const totalFailed = failedCount;
     
-    // 在这里增加相似度检测的功能
-    // 使用 ImageSimilarityService 进行相似度检测
-    try {
-      if (newImages.length > 0) {
-        console.log(`🔗 开始检测相似图片，新图片数量: ${newImages.length}`);
-        
+    // 阶段4.5: 相似度检测
+    if (newImages.length > 0) {
+      console.log(`🔗 开始检测相似图片，新图片数量: ${newImages.length}`);
+      
+      // 发送相似度检测开始消息
+      this.sendProgressMessage('similarity_detection', newImages.length, 0, 0, scanStartTime, '开始检测相似图片...');
+      
+      try {
         // 导入并使用 ImageSimilarityService
         const { default: ImageSimilarityService } = await import('./ImageSimilarityService.js');
         const imageSimilarityService = new ImageSimilarityService();
+        
+        // 发送相似度检测进行中消息
+        this.sendProgressMessage('similarity_detection', newImages.length, 0, 0, scanStartTime, '正在分析图片相似度...');
         
         // 使用 ImageSimilarityService 的相似度检测功能
         const similarityResult = await imageSimilarityService.detectSimilarImages({
@@ -1273,14 +1284,20 @@ class GalleryScannerService {
         
         if (similarityResult.success) {
           console.log(`🔗 相似度检测完成: 发现${similarityResult.groups.length}个相似组, 处理${similarityResult.processed}张图片`);
+          // 发送相似度检测完成消息
+          this.sendProgressMessage('similarity_detection', newImages.length, similarityResult.processed, 0, scanStartTime, `检测完成: 发现${similarityResult.groups.length}个相似组`);
         } else {
           console.warn('⚠️ 相似度检测失败:', similarityResult.error);
+          // 发送相似度检测失败消息
+          this.sendProgressMessage('similarity_detection', newImages.length, 0, 1, scanStartTime, '相似度检测失败');
         }
-      } else {
-        console.log('🔗 没有新图片，跳过相似度检测');
+      } catch (similarityError) {
+        console.error('❌ 相似度检测阶段出错:', similarityError);
+        // 发送相似度检测错误消息
+        this.sendProgressMessage('similarity_detection', newImages.length, 0, 1, scanStartTime, '相似度检测出错');
       }
-    } catch (similarityError) {
-      console.error('❌ 相似度检测阶段出错:', similarityError);
+    } else {
+      console.log('🔗 没有新图片，跳过相似度检测');
     }
     // 输出最终分类性能统计
     if (this.classificationStats && this.classificationStats.count > 0) {
