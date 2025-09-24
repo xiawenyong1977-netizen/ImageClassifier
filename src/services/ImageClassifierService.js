@@ -1,6 +1,5 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import DocumentDetectionService from './DocumentDetectionService.js';
 
 class ImageClassifierService {
   constructor() {
@@ -16,9 +15,6 @@ class ImageClassifierService {
     
     // 配置服务实例
     this.configService = configService;
-    
-    // 文档检测服务实例
-    this.documentDetectionService = new DocumentDetectionService();
     
     // 模型配置将在初始化时从配置文件加载
     this.models = {};
