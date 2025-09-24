@@ -24,8 +24,24 @@ class ColorHistogramExtractor {
       const image = await this._loadImage(imageUri);
       
       // 创建canvas来获取像素数据
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      let canvas, ctx;
+      if (typeof document !== 'undefined') {
+        // 浏览器环境
+        canvas = document.createElement('canvas');
+        ctx = canvas.getContext('2d');
+      } else {
+        // Node.js环境，使用canvas库
+        try {
+          const { createRequire } = await import('module');
+          const require = createRequire(import.meta.url);
+          const { createCanvas } = require('D:/ImageClassifierApp/pc-version-final/node_modules/canvas');
+          canvas = createCanvas(image.width, image.height);
+          ctx = canvas.getContext('2d');
+        } catch (error) {
+          console.warn('⚠️ Node.js环境下的canvas处理在浏览器构建中被跳过');
+          throw new Error('Node.js环境在浏览器构建中不支持');
+        }
+      }
       
       // 设置canvas尺寸（为了性能，可以缩放）
       const maxSize = 200; // 限制最大尺寸以提高性能
@@ -68,19 +84,35 @@ class ColorHistogramExtractor {
    * @returns {Promise<HTMLImageElement>} 图片对象
    * @private
    */
-  _loadImage(imageUri) {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      image.crossOrigin = 'anonymous'; // 允许跨域
-      
-      image.onload = () => resolve(image);
-      image.onerror = (error) => {
-        console.error('❌ 图片加载失败:', error);
-        reject(new Error(`图片加载失败: ${imageUri}`));
-      };
-      
-      image.src = imageUri;
-    });
+  async _loadImage(imageUri) {
+    // 检查是否在浏览器环境中
+    if (typeof window !== 'undefined' && window.Image) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous'; // 允许跨域
+        
+        image.onload = () => resolve(image);
+        image.onerror = (error) => {
+          console.error('❌ 图片加载失败:', error);
+          reject(new Error(`图片加载失败: ${imageUri}`));
+        };
+        
+        image.src = imageUri;
+      });
+    } else {
+      // Node.js环境，使用canvas库
+      try {
+        const { createRequire } = await import('module');
+        const require = createRequire(import.meta.url);
+        const { loadImage } = require('D:/ImageClassifierApp/pc-version-final/node_modules/canvas');
+        // 将file://协议转换为普通路径
+        const filePath = imageUri.replace('file:///', '');
+        return await loadImage(filePath);
+      } catch (error) {
+        console.warn('⚠️ Node.js环境下的图片加载在浏览器构建中被跳过');
+        throw new Error('Node.js环境在浏览器构建中不支持');
+      }
+    }
   }
 
   /**

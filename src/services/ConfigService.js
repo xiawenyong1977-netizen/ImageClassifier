@@ -48,13 +48,18 @@ class ConfigService {
         }
       } else {
         // Node.js环境使用fs模块
-        const fs = require('fs');
-        const path = require('path');
-        const fullPath = path.resolve(configPath);
-        console.log('🔧 读取文件路径:', fullPath);
-        
-        responseText = fs.readFileSync(fullPath, 'utf8');
-        console.log('🔧 文件内容前200字符:', responseText.substring(0, 200));
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const fullPath = path.resolve(configPath);
+          console.log('🔧 读取文件路径:', fullPath);
+          
+          responseText = fs.readFileSync(fullPath, 'utf8');
+          console.log('🔧 文件内容前200字符:', responseText.substring(0, 200));
+        } catch (error) {
+          console.warn('⚠️ Node.js环境下的文件系统操作在浏览器构建中被跳过');
+          throw new Error('Node.js环境在浏览器构建中不支持');
+        }
       }
       
       this.config = JSON.parse(responseText);

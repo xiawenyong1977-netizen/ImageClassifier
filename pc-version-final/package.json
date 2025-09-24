@@ -16,10 +16,13 @@
   },
   "dependencies": {
     "buffer": "^6.0.3",
+    "canvas": "^2.11.2",
     "exif-parser": "^0.1.12",
+    "jimp": "^1.6.0",
     "noop2": "^1.0.0",
     "onnxruntime-node": "^1.22.0",
     "onnxruntime-web": "^1.22.0",
+    "opencv.js": "^1.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-native": "^0.72.17",

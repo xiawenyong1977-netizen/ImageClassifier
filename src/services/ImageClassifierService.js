@@ -1,5 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
+import DocumentDetectionService from './DocumentDetectionService.js';
 
 class ImageClassifierService {
   constructor() {
@@ -15,6 +16,9 @@ class ImageClassifierService {
     
     // 配置服务实例
     this.configService = configService;
+    
+    // 文档检测服务实例
+    this.documentDetectionService = new DocumentDetectionService();
     
     // 模型配置将在初始化时从配置文件加载
     this.models = {};
@@ -82,7 +86,7 @@ class ImageClassifierService {
           metadata: null,
           priority: 1,
           description: '身份证识别专用模型',
-          confidenceThreshold: 0.3,  // 提高身份证检测阈值，减少误检
+          confidenceThreshold: 0.7,  // 提高身份证检测阈值，减少误检
           nmsThreshold: 0.4,
           maxDetections: 5
         },
@@ -223,15 +227,8 @@ class ImageClassifierService {
       // 如果文件不存在，ONNX Runtime 会抛出相应的错误
       // 在 Node.js 环境中，可以检查文件是否存在
       if (typeof window === 'undefined') {
-        // Node.js 环境
-        try {
-          const fs = await import('fs');
-          
-          if (!fs.existsSync(modelConfig.path)) {
-            throw new Error(`${modelName} model file not found: ${modelConfig.path}`);
-          }
-        } catch (error) {
-        }
+        // Node.js 环境 - 在构建时跳过，因为浏览器环境不需要
+        console.warn('⚠️ Node.js环境下的文件系统检查在浏览器构建中被跳过');
       }
 
         // MobileNetV3类别已在初始化时加载，无需重复加载
@@ -240,9 +237,13 @@ class ImageClassifierService {
         // 使用统一的ONNX Runtime实例
         const ort = this.ort;
         
+        // 检测可用的执行提供者
+        const availableProviders = await this.detectAvailableProviders();
+        console.log(`🔍 检测到的执行提供者: ${availableProviders.join(', ')}`);
+        
         // 创建推理会话时的配置
         const sessionOptions = {
-          executionProviders: ['cpu'], // 强制使用CPU
+          executionProviders: availableProviders, // 使用检测到的可用提供者
           graphOptimizationLevel: 'disabled', // 禁用图优化，避免输出格式变化
           enableCpuMemArena: false, // 禁用CPU内存池
           enableMemPattern: false, // 禁用内存模式
@@ -264,9 +265,93 @@ class ImageClassifierService {
     }
   }
 
- 
-
-
+  /**
+   * 检测可用的执行提供者（GPU/CPU）
+   * @returns {Promise<string[]>} 可用的执行提供者列表
+   */
+  async detectAvailableProviders() {
+    try {
+      const ort = this.ort;
+      const availableProviders = [];
+      
+      // 检查是否有getAvailableProviders方法
+      if (typeof ort.getAvailableProviders === 'function') {
+        // 检查可用的执行提供者
+        const providers = await ort.getAvailableProviders();
+        console.log(`🔍 ONNX Runtime 可用提供者: ${providers.join(', ')}`);
+        
+        // 优先选择GPU提供者（优先WebGL，因为WebGPU需要特殊标志）
+        if (providers.includes('webgl')) {
+          availableProviders.push('webgl');
+          console.log('🚀 使用 WebGL 加速');
+        } else if (providers.includes('webgpu')) {
+          availableProviders.push('webgpu');
+          console.log('🚀 使用 WebGPU 加速');
+        } else if (providers.includes('cuda')) {
+          availableProviders.push('cuda');
+          console.log('🚀 使用 CUDA 加速');
+        } else if (providers.includes('dml')) {
+          availableProviders.push('dml');
+          console.log('🚀 使用 DirectML 加速');
+        } else if (providers.includes('openvino')) {
+          availableProviders.push('openvino');
+          console.log('🚀 使用 OpenVINO 加速');
+        }
+        
+        // 总是添加CPU作为后备
+        if (providers.includes('cpu')) {
+          availableProviders.push('cpu');
+          console.log('💻 添加 CPU 作为后备');
+        }
+      } else {
+        // 如果没有getAvailableProviders方法，使用默认策略
+        console.log('⚠️ getAvailableProviders 方法不可用，使用默认策略');
+        
+        // 根据环境推断可用的提供者
+        if (typeof window !== 'undefined') {
+          // 浏览器环境
+          console.log('🌐 检测浏览器环境支持...');
+          
+          // 检测WebGPU支持
+          if (typeof navigator !== 'undefined' && navigator.gpu) {
+            availableProviders.push('webgpu');
+            console.log('🚀 检测到 WebGPU 支持');
+          } else {
+            console.log('❌ 未检测到 WebGPU 支持');
+          }
+          
+          // 检测WebGL支持
+          try {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (gl) {
+              availableProviders.push('webgl');
+              console.log('🚀 检测到 WebGL 支持');
+            } else {
+              console.log('❌ 未检测到 WebGL 支持');
+            }
+          } catch (error) {
+            console.log('❌ WebGL 检测失败:', error.message);
+          }
+        }
+        
+        // 总是添加CPU
+        availableProviders.push('cpu');
+        console.log('💻 添加 CPU 支持');
+      }
+      
+      // 如果没有检测到任何提供者，默认使用CPU
+      if (availableProviders.length === 0) {
+        availableProviders.push('cpu');
+        console.log('⚠️ 未检测到可用提供者，使用 CPU');
+      }
+      
+      return availableProviders;
+    } catch (error) {
+      console.warn('⚠️ 检测执行提供者失败，使用 CPU:', error.message);
+      return ['cpu'];
+    }
+  }
 
   // 预处理图片用于YOLO模型
   async preprocessImageForYOLO(imageData, inputSize = 640) {
@@ -360,8 +445,13 @@ class ImageClassifierService {
       // 获取实际的数值数据
       let data;
       if (output.cpuData) {
+        // CPU数据，直接使用
         data = output.cpuData;
+      } else if (output.data) {
+        // GPU数据，需要转换为CPU数据
+        data = await output.data();
       } else if (Array.isArray(output)) {
+        // 数组格式数据
         data = output;
       } else {
         throw new Error(`无法识别的输出数据格式: ${JSON.stringify(output)}`);
@@ -543,6 +633,10 @@ class ImageClassifierService {
       }
       console.log('❌ 不是手机截图，继续下一步');
 
+     
+    
+
+    
       // 第二步到第四步：并行执行所有模型推理
       console.log('🔍 并行执行所有模型推理...');
       const parallelResults = await this.runParallelInference(imageUri);
@@ -566,7 +660,7 @@ class ImageClassifierService {
       console.log(`  - MobileNetV3模型: ${mobileNetV3Count} 个检测结果`);
 
       // 调用新的分类映射函数
-      const categoryId = this.MapObjectes2Category(allModelResults, imageUri, imageDimensions);
+      const categoryId = await this.MapObjectes2Category(allModelResults, imageUri, imageDimensions);
 
       // 返回详细的分类结果，由调用方决定如何保存
       const result = {
@@ -749,36 +843,51 @@ class ImageClassifierService {
    */
   async runParallelInference(imageUri) {
     const startTime = Date.now();
-    console.log('🚀 开始并行推理... [V3.0 - ' + new Date().toLocaleTimeString() + ']');
+    console.log('🚀 开始串行推理（测试模式）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
     
-    // 并行执行所有模型推理，提升性能
-    const [idCardResults, generalResults, mobileNetV3Results] = await Promise.allSettled([
-      this.classifyImageWithYOLO(imageUri, 'idCard').catch(error => {
-        console.error('❌ idCard 推理失败:', error);
-        return [];
-      }),
-      this.classifyImageWithYOLO(imageUri, 'yolo8s').catch(error => {
-        console.error('❌ general 推理失败:', error);
-        return [];
-      }),
-      this.classifyImageWithMobileNetV3(imageUri).catch(error => {
-        console.error('❌ mobileNetV3 推理失败:', error);
-        return {};
-      })
-    ]);
+    // 串行执行推理，避免异步问题
+    let idCardResults = [];
+    let generalResults = [];
+    let mobileNetV3Results = {};
+    
+    try {
+      console.log('🔍 开始 idCard 推理...');
+      idCardResults = await this.classifyImageWithYOLO(imageUri, 'idCard');
+      console.log(`✅ idCard 推理完成: ${idCardResults.length} 个检测结果`);
+    } catch (error) {
+      console.error('❌ idCard 推理失败:', error);
+      idCardResults = [];
+    }
+    
+    try {
+      console.log('🔍 开始 general 推理...');
+      generalResults = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
+      console.log(`✅ general 推理完成: ${generalResults.length} 个检测结果`);
+    } catch (error) {
+      console.error('❌ general 推理失败:', error);
+      generalResults = [];
+    }
+    
+    try {
+      console.log('🔍 开始 mobileNetV3 推理...');
+      mobileNetV3Results = await this.classifyImageWithMobileNetV3(imageUri);
+      console.log(`✅ mobileNetV3 推理完成: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
+    } catch (error) {
+      console.error('❌ mobileNetV3 推理失败:', error);
+      mobileNetV3Results = {};
+    }
     
     // 处理结果
-    const parallelResults = {
-      idCard: idCardResults.status === 'fulfilled' ? idCardResults.value : [],
-      general: generalResults.status === 'fulfilled' ? generalResults.value : [],
-      mobileNetV3: mobileNetV3Results.status === 'fulfilled' ? mobileNetV3Results.value : {}
+    const serialResults = {
+      idCard: idCardResults || [],
+      general: generalResults || [],
+      mobileNetV3: mobileNetV3Results || {}
     };
     
     const endTime = Date.now();
-    console.log(`⏱️ 并行推理完成，总耗时: ${endTime - startTime}ms`);
-    console.log(`📊 推理结果: idCard=${parallelResults.idCard.length}, general=${parallelResults.general.length}, mobileNetV3=${parallelResults.mobileNetV3.predictions?.length || 0}`);
+    console.log(`⏱️ 串行推理完成，总耗时: ${endTime - startTime}ms`);
     
-    return parallelResults;
+    return serialResults;
   }
 
 
@@ -904,13 +1013,94 @@ class ImageClassifierService {
    * @param {Object} imageDimensions - 图像尺寸 {width, height}
    * @returns {string} 分类ID
    */
-  MapObjectes2Category(allModelResults, imageURI, imageDimensions) {
+  async MapObjectes2Category(allModelResults, imageURI, imageDimensions) {
     // 检查身份证检测结果
     if (allModelResults.idCard && allModelResults.idCard.length > 0) {
       console.log('🆔 检测到身份证，返回身份证分类');
       return 'idcard';
     }
     
+    // 合并YOLO和MobileNetV3检测结果到一个集合中
+    const allDetectedObjects = [];
+    
+    // 添加YOLO检测结果（general模型）
+    if (allModelResults.general && allModelResults.general.length > 0) {
+      allModelResults.general.forEach(detection => {
+        // 获取物体名称和类别信息
+        const objectInfo = this.configService.getYoloObjectById(detection.classId);
+        const objectName = objectInfo ? objectInfo.english : `class_${detection.classId}`;
+        const objectCategory = objectInfo ? objectInfo.category : null;
+        
+        // 通过物体类别映射到应用分类
+        let appCategory = null;
+        if (objectCategory) {
+          const objectMappings = this.configService.getObjectMappings();
+          appCategory = objectMappings[objectCategory];
+        }
+        
+        allDetectedObjects.push({
+          name: objectName,
+          confidence: detection.confidence,
+          source: 'YOLO',
+          boundingBox: detection.bbox,
+          objectCategory: objectCategory,
+          appCategory: appCategory
+        });
+      });
+    }
+    
+    // 添加MobileNetV3检测结果
+    if (allModelResults.mobileNetV3 && allModelResults.mobileNetV3.success && allModelResults.mobileNetV3.predictions) {
+      allModelResults.mobileNetV3.predictions.forEach(prediction => {
+        // 获取MobileNetV3类别信息
+        const mobileNetV3ClassInfo = this.configService.getMobileNetV3ClassByEnglishName(prediction.class);
+        const objectCategory = mobileNetV3ClassInfo ? mobileNetV3ClassInfo.category : null;
+        
+        // 通过物体类别映射到应用分类
+        let appCategory = null;
+        if (objectCategory) {
+          const objectMappings = this.configService.getObjectMappings();
+          appCategory = objectMappings[objectCategory];
+        }
+        
+        allDetectedObjects.push({
+          name: prediction.class,
+          confidence: prediction.probability,
+          source: 'MobileNetV3',
+          boundingBox: null,
+          objectCategory: objectCategory,
+          appCategory: appCategory
+        });
+      });
+    }
+    
+    // 按置信度排序
+    allDetectedObjects.sort((a, b) => b.confidence - a.confidence);
+    
+    console.log('🔍 所有检测到的物体:', allDetectedObjects.map(obj => 
+      `${obj.name}: ${(obj.confidence * 100).toFixed(1)}% (${obj.source})`
+    ).join(', '));
+
+    // 特殊处理：检查espresso maker
+    const espressoMakerDetection = allDetectedObjects.find(obj => 
+      obj.name === 'espresso maker' && obj.confidence > 0.05
+    );
+    
+    if (espressoMakerDetection) {
+      console.log(`☕ 检测到espresso maker，置信度: ${(espressoMakerDetection.confidence * 100).toFixed(1)}%，来源: ${espressoMakerDetection.source}，返回idcard分类`);
+      return 'idcard';
+    }
+
+    // 特殊处理：检查book
+    const bookDetection = allDetectedObjects.find(obj => 
+      obj.name === 'Book' && obj.confidence > 0.1
+    );
+    
+    if (bookDetection) {
+      console.log(`📚 检测到book，置信度: ${(bookDetection.confidence * 100).toFixed(1)}%，来源: ${bookDetection.source}，返回idcard分类`);
+      return 'idcard';
+    }
+
     // 调用identifyMainRole获取主角信息
     const mainRoleResults = this.identifyMainRole(imageURI, allModelResults.general, imageDimensions);
     
@@ -925,7 +1115,6 @@ class ImageClassifierService {
       
       if (personSubject) {
         console.log(`👤 人物检测: 数量=${personSubject.count}, 面积占比=${(personSubject.sizeRatio * 100).toFixed(3)}%`);
-        console.log(`🔍 人物面积占比详细: ${personSubject.sizeRatio} (${(personSubject.sizeRatio * 100).toFixed(3)}%)`);
         
         // 检查是否为单人且面积占比大于5%（降低阈值）
         if (personSubject.count === 1 && personSubject.sizeRatio > 0.05) {
@@ -935,12 +1124,12 @@ class ImageClassifierService {
           console.log('❌ 单人分类: 面积占比不足 5%');
         }
         
-        // 检查是否为多人且面积占比大于5%（降低阈值）
-        if (personSubject.count > 1 && personSubject.sizeRatio > 0.05) {
-          console.log('✅ 多人分类: 面积占比 > 5%');
+        // 检查是否为多人且面积占比大于8%（降低阈值）
+        if (personSubject.count > 1 && personSubject.sizeRatio > 0.08) {
+          console.log('✅ 多人分类: 面积占比 > 8%');
           return 'social_activities';
         } else if (personSubject.count > 1) {
-          console.log('❌ 多人分类: 面积占比不足 5%');
+          console.log('❌ 多人分类: 面积占比不足 8%');
         }
       }
       
@@ -965,92 +1154,49 @@ class ImageClassifierService {
           console.log('❌ 美食分类: 面积占比不足 5%');
         }
       }
-      
-      // 检查交通工具或自然风景（只要人物面积占比不超过0.1）
-      const vehicleSubject = mainRoleResults.find(result => result.category === 'transportation');
-      const landscapeSubject = mainRoleResults.find(result => result.category === 'nature');
-      
-      if (vehicleSubject) {
-        console.log(`🚗 交通工具检测: 面积占比=${(vehicleSubject.sizeRatio * 100).toFixed(3)}%`);
-      }
-      if (landscapeSubject) {
-        console.log(`🏞️ 风景检测: 面积占比=${(landscapeSubject.sizeRatio * 100).toFixed(3)}%`);
-      }
-      
-      if ((vehicleSubject && vehicleSubject.sizeRatio > 0.1) || 
-          (landscapeSubject && landscapeSubject.sizeRatio > 0.1)) {
-        // 如果检测到人物且面积占比超过0.1，则不归类为旅游风景
-        if (personSubject && personSubject.sizeRatio > 0.1) {
-          console.log('❌ 旅游风景分类: 人物面积占比超过 10%');
-        } else {
-          console.log('✅ 旅游风景分类: 面积占比 > 10% 且人物面积占比 ≤ 10%');
-          return 'travel_scenery';
-        }
-      } else if (vehicleSubject || landscapeSubject) {
-        console.log('❌ 旅游风景分类: 面积占比不足 10%');
-      }
     }
 
-    // 如果YOLO检测没有明确结果，尝试使用MobileNetV3分类结果
-    if (allModelResults.mobileNetV3 && allModelResults.mobileNetV3.success && allModelResults.mobileNetV3.predictions && allModelResults.mobileNetV3.predictions.length > 0) {
-      console.log('🧠 使用MobileNetV3分类结果进行辅助分类');
+    // 特殊处理：检查是否含有nature类别
+    const natureDetections = allDetectedObjects.filter(obj => 
+      obj.objectCategory === 'nature' && obj.confidence > 0.1
+    );
+    
+    if (natureDetections.length > 0) {
+      console.log(`🌿 检测到自然风景相关物体: ${natureDetections.length}个`);
+      natureDetections.forEach((obj, index) => {
+        console.log(`  ${index + 1}. ${obj.name} (${obj.source}): 置信度 ${(obj.confidence * 100).toFixed(1)}%`);
+      });
+      console.log('✅ 归类为自然风景分类');
+      return 'travel_scenery';
+    }
+
+    // 返回置信度最高的物体的app归类
+    if (allDetectedObjects.length > 0) {
+      const topConfidenceObject = allDetectedObjects[0]; // 已经按置信度排序，第一个就是最高的
       
-      // 按优先级检查MobileNetV3的检测结果：旅游风景 > 宠物 > 美食
-      const priorityCategories = [
-        { objectCategory: 'transportation', appCategory: 'travel_scenery' },
-        { objectCategory: 'infrastructure', appCategory: 'travel_scenery' },
-        { objectCategory: 'nature', appCategory: 'travel_scenery' },
-        { objectCategory: 'animals', appCategory: 'pets' },
-        { objectCategory: 'food', appCategory: 'foods' }
-      ];
-      
-      for (const priority of priorityCategories) {
-        console.log(`🔍 检查优先级分类: ${priority.objectCategory} -> ${priority.appCategory}`);
-        for (const prediction of allModelResults.mobileNetV3.predictions) {
-          const confidence = prediction.probability || prediction.confidence || 0;
-          console.log(`📊 检查预测: ${prediction.class} (${(confidence * 100).toFixed(1)}%)`);
-          
-          // 只处理置信度超过0.05的物体
-          if (confidence <= 0.05) {
-            console.log(`❌ 置信度过低，跳过: ${prediction.class} (${(confidence * 100).toFixed(1)}%)`);
-            continue;
-          }
-          
-          const mobileNetV3ClassInfo = this.configService.getMobileNetV3ClassByEnglishName(prediction.class);
-          console.log(`🔍 获取类信息: ${prediction.class} ->`, mobileNetV3ClassInfo);
-          
-          if (mobileNetV3ClassInfo && mobileNetV3ClassInfo.category === priority.objectCategory) {
-            console.log(`🔍 检测到${priority.objectCategory}相关物体: ${prediction.class} -> ${priority.appCategory} (${(confidence * 100).toFixed(1)}%)`);
-            console.log(`✅ 直接归类为${priority.appCategory}: ${prediction.class}`);
-            return priority.appCategory;
-          }
-        }
-      }
-      
-      // 如果没有旅游风景相关物体，则使用置信度最高的预测结果
-      const topPrediction = allModelResults.mobileNetV3.topPrediction;
-      if (topPrediction && topPrediction.confidence > 0.3) { // 置信度阈值
-        console.log(`🧠 MobileNetV3最高置信度分类: ${topPrediction.class} (${(topPrediction.confidence * 100).toFixed(1)}%)`);
-        
-        // 根据MobileNetV3的分类结果映射到应用分类
-        const mappedCategory = this.mapMobileNetV3ToAppCategory(topPrediction.class);
-        if (mappedCategory !== 'other') {
-          console.log(`✅ MobileNetV3映射分类: ${topPrediction.class} -> ${mappedCategory}`);
-          return mappedCategory;
-        } else {
-          console.log(`⚠️ MobileNetV3分类 ${topPrediction.class} 无法映射到应用分类`);
-        }
+      if (topConfidenceObject.appCategory) {
+        console.log(`🎯 使用置信度最高的物体进行分类:`);
+        console.log(`  - 物体名称: ${topConfidenceObject.name}`);
+        console.log(`  - 置信度: ${(topConfidenceObject.confidence * 100).toFixed(1)}%`);
+        console.log(`  - 来源: ${topConfidenceObject.source}`);
+        console.log(`  - 物体类别: ${topConfidenceObject.objectCategory}`);
+        console.log(`  - 应用分类: ${topConfidenceObject.appCategory}`);
+        console.log(`✅ 返回应用分类: ${topConfidenceObject.appCategory}`);
+        return topConfidenceObject.appCategory;
       } else {
-        console.log('❌ MobileNetV3最高置信度不足或不存在');
+        console.log(`⚠️ 置信度最高的物体 "${topConfidenceObject.name}" 没有有效的应用分类，使用默认分类`);
+        return 'other';
       }
-    } else {
-      console.log('❌ MobileNetV3分类结果不可用');
     }
 
-    // 如果所有方法都无法确定分类，返回默认分类
-    console.log('🔄 所有分类方法都无法确定，使用默认分类');
+    
+
+
+    
+
+    
     return 'other';
-    }
+  }
     
 
   /**
@@ -1300,12 +1446,31 @@ class ImageClassifierService {
   }
 
   // 后处理MobileNetV3输出
-  postprocessMobileNetV3Output(output, confidenceThreshold = null) {
+  async postprocessMobileNetV3Output(output, confidenceThreshold = null) {
     try {
       // 使用模型配置中的阈值作为默认值
       const threshold = confidenceThreshold !== null ? confidenceThreshold : (this.models.mobilenetv3?.confidenceThreshold || 0.3);
       
-      const outputData = output.data;
+      // 获取实际的数值数据（支持GPU和CPU）
+      let outputData;
+      if (output.cpuData) {
+        // CPU数据，直接使用
+        outputData = output.cpuData;
+        console.log('📊 使用CPU数据，长度:', outputData.length);
+      } else if (output.data) {
+        // GPU数据，需要转换为CPU数据
+        outputData = await output.data();
+        console.log('📊 使用GPU数据，长度:', outputData.length);
+      } else if (Array.isArray(output)) {
+        // 数组格式数据
+        outputData = output;
+        console.log('📊 使用数组数据，长度:', outputData.length);
+      } else {
+        throw new Error(`无法识别的MobileNetV3输出数据格式: ${JSON.stringify(output)}`);
+      }
+      
+      console.log('📊 输出数据前5个值:', outputData.slice(0, 5));
+      console.log('📊 ImageNet类别数量:', this.imagenetClasses ? this.imagenetClasses.length : 'undefined');
       const probabilities = new Array(outputData.length);
 
       // 计算softmax
@@ -1378,7 +1543,7 @@ class ImageClassifierService {
       }
       
       // 后处理结果
-      const processedResults = this.postprocessMobileNetV3Output(output, confidenceThreshold);
+      const processedResults = await this.postprocessMobileNetV3Output(output, confidenceThreshold);
       
       return {
         success: true,

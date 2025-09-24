@@ -68,8 +68,8 @@
     "food": "foods",
     "transportation": "travel_scenery",
     "infrastructure": "travel_scenery",
-    "nature": "travel_scenery"
-
+    "nature": "travel_scenery",
+    "daily_items": "other"
   },
   "objectCategories": {
     "person": {
@@ -1461,15 +1461,15 @@
       "id": 108,
       "chinese": "珊瑚",
       "english": "sea anemone, anemone",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "brain coral": {
       "id": 109,
       "chinese": "珊瑚",
       "english": "brain coral",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "flatworm, platyhelminth": {
       "id": 110,
@@ -1482,29 +1482,29 @@
       "id": 111,
       "chinese": "海蛇",
       "english": "nematode, nematode worm, roundworm",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "conch": {
       "id": 112,
       "chinese": "海螺",
       "english": "conch",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "snail": {
       "id": 113,
       "chinese": "蜗牛",
       "english": "snail",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "slug": {
       "id": 114,
       "chinese": "蜗牛",
       "english": "slug",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "sea slug, nudibranch": {
       "id": 115,
@@ -1524,8 +1524,8 @@
       "id": 117,
       "chinese": "海螺",
       "english": "chambered nautilus, pearly nautilus, nautilus",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "Dungeness crab, Cancer magister": {
       "id": 118,
@@ -4996,7 +4996,9 @@
     "megalith, megalithic structure": {
       "id": 649,
       "chinese": "石柱",
-      "english": "megalith, megalithic structure"
+      "english": "megalith, megalithic structure",
+      "category": "nature",
+      "subcategory": "plants"
     },
     "microphone, mike": {
       "id": 650,
@@ -6124,7 +6126,9 @@
     "stone wall": {
       "id": 825,
       "chinese": "石堆",
-      "english": "stone wall"
+      "english": "stone wall",
+      "category": "nature",
+      "subcategory": "plants"
     },
     "stopwatch, stop watch": {
       "id": 826,
@@ -6733,27 +6737,37 @@
     "menu": {
       "id": 922,
       "chinese": "菜单",
-      "english": "menu"
+      "english": "menu",
+      "category": "daily_items", 
+      "subcategory": "tools"
     },
     "plate": {
       "id": 923,
-      "chinese": "菜",
-      "english": "plate"
+      "chinese": "盘子",
+      "english": "plate",
+      "category": "daily_items",
+      "subcategory": "tools"
     },
     "guacamole": {
       "id": 924,
-      "chinese": "菜",
-      "english": "guacamole"
+      "chinese": "墨西哥鳄梨酱",
+      "english": "guacamole",
+      "category": "food",
+      "subcategory": "fruits"
     },
     "consomme": {
       "id": 925,
-      "chinese": "菜",
-      "english": "consomme"
+      "chinese": "清炖肉汤",
+      "english": "consomme",
+      "category": "food",
+      "subcategory": "fruits"
     },
     "hot pot, hotpot": {
       "id": 926,
-      "chinese": "菜",
-      "english": "hot pot, hotpot"
+      "chinese": "焖罐",
+      "english": "hot pot, hotpot",
+      "category": "food",
+      "subcategory": "fruits"
     },
     "trifle": {
       "id": 927,
@@ -6919,7 +6933,9 @@
     "fig": {
       "id": 952,
       "chinese": "水果",
-      "english": "fig"
+      "english": "fig",
+      "category": "food",
+      "subcategory": "fruits"
     },
     "pineapple, ananas": {
       "id": 953,
@@ -6943,7 +6959,9 @@
     "custard apple": {
       "id": 956,
       "chinese": "水果",
-      "english": "custard apple"
+      "english": "custard apple",
+      "category": "food",
+      "subcategory": "fruits"
     },
     "pomegranate": {
       "id": 957,
@@ -7041,14 +7059,16 @@
     "cliff, drop, drop-off": {
       "id": 972,
       "chinese": "悬崖",
-      "english": "cliff, drop, drop-off"
+      "english": "cliff, drop, drop-off",
+      "category": "nature",
+      "subcategory": "plants"
     },
     "coral reef": {
       "id": 973,
       "chinese": "珊瑚",
       "english": "coral reef",
-      "category": "animals",
-      "subcategory": "all_animals"
+      "category": "nature",
+      "subcategory": "plants"
     },
     "geyser": {
       "id": 974,
@@ -7074,7 +7094,9 @@
     "sandbar, sand bar": {
       "id": 977,
       "chinese": "沙滩",
-      "english": "sandbar, sand bar"
+      "english": "sandbar, sand bar",
+      "category": "nature",
+      "subcategory": "plants"
     },
     "seashore, coast, seacoast, sea-coast": {
       "id": 978,
@@ -7145,7 +7167,9 @@
     "acorn": {
       "id": 988,
       "chinese": "松果",
-      "english": "acorn"
+      "english": "acorn",
+      "category": "nature",
+      "subcategory": "plants"
     },
     "hip, rose hip, rosehip": {
       "id": 989,
