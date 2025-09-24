@@ -66,10 +66,22 @@ const getWebAccessibleUri = (uri) => {
   return uri;
 };
 
-const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, fromScreen, onDataChange }) => {
+const ImagePreviewScreen = ({ 
+  route = {}, 
+  navigation = {}, 
+  imageId, 
+  onBack, 
+  fromScreen = 'Home', 
+  onDataChange,
+  // 添加上下文参数
+  category = null,
+  city = null,
+  similarityGroupId = null
+}) => {
   console.log('🚀 ImagePreviewScreen 组件开始渲染');
   console.log('📸 接收到的图片ID:', imageId);
   console.log('📸 接收到的route参数:', route);
+  console.log('📸 接收到的props参数:', { category, city, similarityGroupId, fromScreen });
   
   // 直接从URL参数获取图片ID
   const getImageIdFromURL = () => {
@@ -87,6 +99,10 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 1 });
   const [loading, setLoading] = useState(true);
+  
+  // 导航相关状态
+  const [categoryImages, setCategoryImages] = useState([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(-1);
 
   const [imageClassifierService] = useState(new ImageClassifierService());
 
@@ -114,6 +130,9 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
             predictionsLength: fullImageDetails.mobileNetV3Detections?.predictions?.length
           });
           setCurrentImage(fullImageDetails);
+          
+          // 加载当前上下文的所有图片用于导航
+          await loadContextImages(fullImageDetails);
         } else {
           console.log(`❌ 图片详情加载失败: ${finalImageId}`);
         }
@@ -126,6 +145,78 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
 
     loadImageDetails();
   }, [finalImageId]);
+
+  // 加载当前上下文的所有图片（支持分类、城市、相似组、最近照片）
+  const loadContextImages = async (currentImageData) => {
+    try {
+      let images = [];
+      let contextType = '';
+      let contextValue = '';
+      
+      // 根据页面来源决定加载方式
+      console.log('🔍 上下文判断参数:', { fromScreen, similarityGroupId, city, category });
+      
+      // 如果props中的参数都是null，尝试从图片对象本身获取上下文信息
+      let actualCategory = category;
+      let actualCity = city;
+      let actualSimilarityGroupId = similarityGroupId;
+      
+      if (!actualCategory && !actualCity && !actualSimilarityGroupId && currentImageData) {
+        console.log('🔍 从图片对象获取上下文信息:', currentImageData);
+        actualCategory = currentImageData.category;
+        actualCity = currentImageData.city;
+        actualSimilarityGroupId = currentImageData.similarityGroupId;
+        console.log('🔍 提取的上下文信息:', { actualCategory, actualCity, actualSimilarityGroupId });
+      }
+      
+      if (fromScreen === 'Home') {
+        // 从HomeScreen的最近照片进入，加载最近照片列表
+        contextType = '最近照片';
+        contextValue = 'Home';
+        console.log(`📸 从HomeScreen进入，加载最近照片列表用于导航`);
+        images = await UnifiedDataService.readRecentImages(50); // 加载最近50张照片
+      } else if (actualSimilarityGroupId) {
+        // 从相似组进入
+        contextType = '相似组';
+        contextValue = actualSimilarityGroupId;
+        console.log(`📸 加载相似组 ${actualSimilarityGroupId} 的所有图片用于导航`);
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(actualSimilarityGroupId);
+        images = groupData.images || [];
+        // 过滤掉tobecleaned分类的照片
+        images = images.filter(img => img.category !== 'tobecleaned');
+      } else if (actualCity) {
+        // 从城市进入
+        contextType = '城市';
+        contextValue = actualCity;
+        console.log(`📸 加载城市 ${actualCity} 的所有图片用于导航`);
+        images = await UnifiedDataService.readImagesByLocation(actualCity, null);
+        // 过滤掉tobecleaned分类的照片
+        images = images.filter(img => img.category !== 'tobecleaned');
+      } else if (actualCategory) {
+        // 从分类进入
+        contextType = '分类';
+        contextValue = actualCategory;
+        console.log(`📸 加载分类 ${actualCategory} 的所有图片用于导航`);
+        images = await UnifiedDataService.readImagesByCategory(actualCategory);
+      } else {
+        console.log('❌ 无法确定图片上下文，无法加载导航图片');
+        setCategoryImages([]);
+        setCurrentImageIndex(-1);
+        return;
+      }
+      
+      setCategoryImages(images);
+      
+      // 找到当前图片在上下文中的索引
+      const currentIndex = images.findIndex(img => img.id === finalImageId);
+      setCurrentImageIndex(currentIndex);
+      console.log(`📸 当前图片在${contextType} ${contextValue}中的索引: ${currentIndex}/${images.length - 1}`);
+    } catch (error) {
+      console.error(`❌ 加载上下文图片失败:`, error);
+      setCategoryImages([]);
+      setCurrentImageIndex(-1);
+    }
+  };
 
   // 获取图片尺寸
   useEffect(() => {
@@ -147,10 +238,101 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
     }
   }, [currentImage?.uri]);
 
+  // 键盘快捷键支持
+  useEffect(() => {
+    const handleKeyPress = (event) => {
+      if (loading) return; // 如果正在加载，忽略键盘事件
+      
+      switch (event.key) {
+        case 'ArrowLeft':
+          event.preventDefault();
+          handlePreviousImage();
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          handleNextImage();
+          break;
+        case 'Escape':
+          event.preventDefault();
+          handleBack();
+          break;
+      }
+    };
+
+    // 添加键盘事件监听
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handleKeyPress);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('keydown', handleKeyPress);
+      }
+    };
+  }, [loading, currentImageIndex, categoryImages.length]);
+
   const handleBack = () => {
     // 使用传入的 onBack 回调
     if (onBack) {
       onBack();
+    }
+  };
+
+  // 导航到前一张图片
+  const handlePreviousImage = async () => {
+    if (currentImageIndex > 0 && categoryImages.length > 0) {
+      const previousImage = categoryImages[currentImageIndex - 1];
+      console.log(`📸 导航到前一张图片: ${previousImage.id}`);
+      
+      try {
+        setLoading(true);
+        const fullImageDetails = await UnifiedDataService.readImageDetailsById(previousImage.id);
+        if (fullImageDetails) {
+          setCurrentImage(fullImageDetails);
+          setCurrentImageIndex(currentImageIndex - 1);
+          
+          // 更新URL参数（如果支持）
+          if (typeof window !== 'undefined' && window.history) {
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.set('imageId', previousImage.id);
+            window.history.replaceState({}, '', newUrl.toString());
+          }
+        }
+      } catch (error) {
+        console.error('❌ 加载前一张图片失败:', error);
+        Alert.alert('错误', '加载前一张图片失败');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  // 导航到后一张图片
+  const handleNextImage = async () => {
+    if (currentImageIndex < categoryImages.length - 1 && categoryImages.length > 0) {
+      const nextImage = categoryImages[currentImageIndex + 1];
+      console.log(`📸 导航到后一张图片: ${nextImage.id}`);
+      
+      try {
+        setLoading(true);
+        const fullImageDetails = await UnifiedDataService.readImageDetailsById(nextImage.id);
+        if (fullImageDetails) {
+          setCurrentImage(fullImageDetails);
+          setCurrentImageIndex(currentImageIndex + 1);
+          
+          // 更新URL参数（如果支持）
+          if (typeof window !== 'undefined' && window.history) {
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.set('imageId', nextImage.id);
+            window.history.replaceState({}, '', newUrl.toString());
+          }
+        }
+      } catch (error) {
+        console.error('❌ 加载后一张图片失败:', error);
+        Alert.alert('错误', '加载后一张图片失败');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -400,6 +582,15 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
           {getDisplayFileName()}
+          {categoryImages.length > 0 && currentImageIndex >= 0 && (
+            <Text style={styles.imageCounter}>
+              {' '}({currentImageIndex + 1}/{categoryImages.length})
+              {fromScreen === 'Home' && ' - 最近照片'}
+              {similarityGroupId && ' - 相似组'}
+              {city && ` - ${city}`}
+              {category && !similarityGroupId && !city && fromScreen !== 'Home' && ` - ${UnifiedDataService.getCategoryDisplayName(category)}`}
+            </Text>
+          )}
         </Text>
         <TouchableOpacity
           style={styles.deleteButton}
@@ -416,33 +607,58 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
           <View style={styles.leftPanel}>
             {/* 图片显示区域 */}
             <View style={styles.imageContainer}>
-            {(() => {
-              const webUri = getWebAccessibleUri(currentImage.uri);
-              return webUri ? (
-                <Image
-                  source={{ uri: webUri }}
-                  style={styles.image}
-                  resizeMode="contain"
-                  onError={(error) => {
-                    console.log('Image load error:', error.nativeEvent?.error);
-                  }}
-                  onLoad={() => {
-                    console.log('Image loaded successfully');
-                  }}
-                />
-              ) : (
-                <View style={styles.imagePlaceholder}>
-                  <Text style={styles.placeholderText}>📷</Text>
-                  <Text style={styles.placeholderFileName}>
-                    {currentImage.fileName || 'Image Preview'}
-                  </Text>
-                  <Text style={styles.placeholderSubtext}>
-                    {currentImage.uri ? 'Local file' : 'No preview available'}
-                  </Text>
-                </View>
-              );
-            })()}
-          </View>
+              {/* 左侧导航按钮 */}
+              {currentImageIndex > 0 && categoryImages.length > 0 && (
+                <TouchableOpacity
+                  style={styles.navButtonLeft}
+                  onPress={handlePreviousImage}
+                  disabled={loading}
+                >
+                  <Text style={styles.navButtonText}>‹</Text>
+                </TouchableOpacity>
+              )}
+              
+              {/* 图片内容 */}
+              <View style={styles.imageContent}>
+                {(() => {
+                  const webUri = getWebAccessibleUri(currentImage.uri);
+                  return webUri ? (
+                    <Image
+                      source={{ uri: webUri }}
+                      style={styles.image}
+                      resizeMode="contain"
+                      onError={(error) => {
+                        console.log('Image load error:', error.nativeEvent?.error);
+                      }}
+                      onLoad={() => {
+                        console.log('Image loaded successfully');
+                      }}
+                    />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Text style={styles.placeholderText}>📷</Text>
+                      <Text style={styles.placeholderFileName}>
+                        {currentImage.fileName || 'Image Preview'}
+                      </Text>
+                      <Text style={styles.placeholderSubtext}>
+                        {currentImage.uri ? 'Local file' : 'No preview available'}
+                      </Text>
+                    </View>
+                  );
+                })()}
+              </View>
+              
+              {/* 右侧导航按钮 */}
+              {currentImageIndex < categoryImages.length - 1 && categoryImages.length > 0 && (
+                <TouchableOpacity
+                  style={styles.navButtonRight}
+                  onPress={handleNextImage}
+                  disabled={loading}
+                >
+                  <Text style={styles.navButtonText}>›</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
           {/* 分类选择器 - 与图片区域对齐 */}
           <View style={styles.categorySelector}>
@@ -767,6 +983,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
+  imageCounter: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666',
+  },
   deleteButton: {
     padding: 8,
     borderRadius: 6,
@@ -803,10 +1024,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     minHeight: 400, // 增加最小高度
+    position: 'relative', // 为导航按钮定位
+  },
+  imageContent: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  // 导航按钮样式
+  navButtonLeft: {
+    position: 'absolute',
+    left: 20,
+    top: '50%',
+    transform: [{ translateY: -25 }],
+    width: 50,
+    height: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  navButtonRight: {
+    position: 'absolute',
+    right: 20,
+    top: '50%',
+    transform: [{ translateY: -25 }],
+    width: 50,
+    height: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  navButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
   },
   // 右侧信息面板
   infoPanel: {

@@ -228,19 +228,31 @@ const HomeScreen = () => {
   const handleCategoryPress = (category) => {
     console.log('📂 点击分类:', category);
     setCurrentScreen('Category');
-    setScreenProps({ category, city: null });
+    setScreenProps(prev => ({
+      ...prev,
+      category, 
+      city: null,
+      similarityGroupId: null,
+      fromScreen: 'Category'
+    }));
   };
 
   // 处理城市点击
   const handleCityPress = (city) => {
     console.log('🏙️ 点击城市:', city);
     setCurrentScreen('Category');
-    setScreenProps({ category: null, city });
+    setScreenProps(prev => ({
+      ...prev,
+      category: null, 
+      city,
+      similarityGroupId: null,
+      fromScreen: 'City'
+    }));
   };
 
-  // 处理图片点击 - 直接通过URL参数传递图片ID
+  // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
   const handleImagePress = (image, fromScreen = 'Home', additionalProps = {}) => {
-    console.log('🖼️ 点击图片，接收到的参数:', image, '来源页面:', fromScreen);
+    console.log('🖼️ 点击图片，接收到的参数:', image, '来源页面:', fromScreen, '额外属性:', additionalProps);
     
     // 处理不同的参数格式
     let imageId;
@@ -257,10 +269,30 @@ const HomeScreen = () => {
     // 进入 ImagePreview 时重置强制刷新标志
     setCategoryDataChanged(false);
     
+    // 设置screenProps，包含上下文信息
+    setScreenProps(prev => ({
+      ...prev,
+      category: additionalProps.category || null,
+      city: additionalProps.city || null,
+      similarityGroupId: additionalProps.similarityGroupId || null,
+      fromScreen: fromScreen
+    }));
+    
     // 直接设置URL参数，不依赖screenProps
     const urlParams = new URLSearchParams();
     urlParams.set('imageId', imageId);
     urlParams.set('fromScreen', fromScreen);
+    
+    // 保存上下文信息到URL参数
+    if (additionalProps.category) {
+      urlParams.set('category', additionalProps.category);
+    }
+    if (additionalProps.city) {
+      urlParams.set('city', additionalProps.city);
+    }
+    if (additionalProps.similarityGroupId) {
+      urlParams.set('similarityGroupId', additionalProps.similarityGroupId);
+    }
     
     // 更新浏览器URL
     if (typeof window !== 'undefined') {
@@ -268,7 +300,7 @@ const HomeScreen = () => {
     }
     
     setCurrentScreen('ImagePreview');
-    console.log('🖼️ 设置URL参数，imageId:', imageId);
+    console.log('🖼️ 设置URL参数，imageId:', imageId, '上下文:', additionalProps);
   };
 
   // 处理刷新
@@ -426,11 +458,13 @@ const HomeScreen = () => {
           // 导航到相似照片详情页面
           console.log('点击相似照片组:', group.groupId);
           setCurrentScreen('Category');
-          setScreenProps({ 
+          setScreenProps(prev => ({
+            ...prev,
             category: null, 
             city: null, 
-            similarityGroupId: group.groupId 
-          });
+            similarityGroupId: group.groupId,
+            fromScreen: 'SimilarityGroup'
+          }));
         }}
       >
         {/* 缩略图占满整个卡片 */}
@@ -632,14 +666,21 @@ const HomeScreen = () => {
               <CategoryScreen 
                 {...screenProps} 
                 forceRefresh={categoryDataChanged}
+                // 调试日志
+                onDataChange={() => {
+                  console.log('🔍 CategoryScreen screenProps:', screenProps);
+                  setCategoryDataChanged(true);
+                }}
                 onBack={() => {
                   setCurrentScreen('Home');
                   console.log('🏠 从分类页面返回，重新加载数据');
                   loadData();
                 }}
                 navigation={{
-                  onImagePress: (image) => {
-                    handleImagePress(image, 'Category', screenProps);
+                  onImagePress: (image, fromScreen, contextProps) => {
+                    console.log('🔍 CategoryScreen onImagePress 参数:', { image, fromScreen, contextProps, screenProps });
+                    // 直接使用CategoryScreen传递的参数，不要使用screenProps
+                    handleImagePress(image, fromScreen, contextProps);
                   }
                 }}
               />
@@ -654,7 +695,10 @@ const HomeScreen = () => {
           <View style={styles.screenContainer}>
             {ImagePreviewScreen ? (
               <ImagePreviewScreen 
-                onDataChange={() => setCategoryDataChanged(true)}
+                onDataChange={() => {
+                  console.log('🔍 ImagePreviewScreen screenProps:', screenProps);
+                  setCategoryDataChanged(true);
+                }}
                 onBack={() => {
                   console.log('🔙 ImagePreview 返回按钮被点击');
                   
@@ -662,17 +706,25 @@ const HomeScreen = () => {
                   const urlParams = new URLSearchParams(window.location.search);
                   const fromScreen = urlParams.get('fromScreen') || 'Home';
                   const imageId = urlParams.get('imageId');
+                  const category = urlParams.get('category');
+                  const city = urlParams.get('city');
+                  const similarityGroupId = urlParams.get('similarityGroupId');
                   
-                  if (fromScreen === 'Category') {
-                    console.log('🔙 从分类页面返回，图片ID:', imageId);
+                  console.log('🔙 从URL参数获取的上下文:', { fromScreen, imageId, category, city, similarityGroupId });
+                  
+                  if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City') {
+                    console.log('🔙 从分类/相似组/城市页面返回，图片ID:', imageId);
                     setCurrentScreen('Category');
-                    // 如果有图片ID，设置滚动到该图片
-                    if (imageId) {
-                      setScreenProps(prev => ({
-                        ...prev,
-                        scrollToImageId: imageId
-                      }));
-                    }
+                    
+                    // 恢复上下文信息到screenProps
+                    setScreenProps(prev => ({
+                      ...prev,
+                      category: category || null,
+                      city: city || null,
+                      similarityGroupId: similarityGroupId || null,
+                      fromScreen: fromScreen,
+                      scrollToImageId: imageId || null
+                    }));
                   } else {
                     console.log('🔙 从首页返回');
                     setCurrentScreen('Home');
@@ -680,6 +732,11 @@ const HomeScreen = () => {
                     loadData();
                   }
                 }}
+                // 传递上下文参数
+                category={screenProps.category}
+                city={screenProps.city}
+                similarityGroupId={screenProps.similarityGroupId}
+                fromScreen={screenProps.fromScreen || 'Home'}
               />
             ) : <View style={styles.loadingContainer}><Text>Loading Preview...</Text></View>}
           </View>

@@ -150,8 +150,16 @@ const CategoryScreen = ({
   // 优先使用 prop 中的 similarityGroupId，然后是 route.params.similarityGroupId
   const similarityGroupId = propSimilarityGroupId || route?.params?.similarityGroupId;
   
-  // 调试日志（暂时禁用以减少渲染）
-  // console.log('🔍 CategoryScreen 接收到的参数:', { propCategory, city: propCity, category, city, forceRefresh });
+  // 调试日志
+  console.log('🔍 CategoryScreen 接收到的参数:', { 
+    propCategory, 
+    propCity, 
+    propSimilarityGroupId,
+    category, 
+    city, 
+    similarityGroupId,
+    forceRefresh 
+  });
   
   // 从统一数据服务获取数据
   const [allImages, setAllImages] = useState([]);
@@ -174,10 +182,14 @@ const CategoryScreen = ({
         // 过滤掉tobecleaned分类的照片
         images = images.filter(img => img.category !== 'tobecleaned');
         console.log(`📊 从城市获取图片: 总数=${images.length}, city=${city}, 已过滤tobecleaned`);
-      } else {
+      } else if (category) {
         // 按分类加载
         images = await UnifiedDataService.readImagesByCategory(category);
         console.log(`📊 从分类获取图片: 总数=${images.length}, category=${category}`);
+      } else {
+        // 没有有效的上下文参数，返回空数组
+        console.log('❌ 没有有效的上下文参数（category、city、similarityGroupId），无法加载图片');
+        images = [];
       }
       
       // 同时加载选中状态 - 统一使用getSelectedImages方法
@@ -334,10 +346,15 @@ const CategoryScreen = ({
     
     const grouped = {};
     
-    // 直接计算当前页面的图片，避免使用paginationData
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = Math.min(startIndex + itemsPerPage, allImages.length);
-    const currentPageImages = allImages.slice(startIndex, endIndex);
+    // 如果照片数量不超过100，显示所有照片；否则分页显示
+    let currentPageImages;
+    if (allImages.length <= 100) {
+      currentPageImages = allImages;
+    } else {
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const endIndex = Math.min(startIndex + itemsPerPage, allImages.length);
+      currentPageImages = allImages.slice(startIndex, endIndex);
+    }
     
     // 早期返回：如果当前页面没有图片，直接返回空结果
     if (currentPageImages.length === 0) {
@@ -456,6 +473,20 @@ const CategoryScreen = ({
   const paginationData = useMemo(() => {
     const safeImages = allImages || [];
     const total = safeImages.length;
+    
+    // 如果照片数量不超过100，显示所有照片，不分页
+    if (total <= 100) {
+      console.log(`📄 照片数量${total}张，不超过100张，显示全部照片`);
+      return {
+        currentPageImages: safeImages,
+        totalPages: 1,
+        startIndex: 0,
+        endIndex: total,
+        total
+      };
+    }
+    
+    // 照片数量超过100张，使用分页
     const totalPagesCount = Math.ceil(total / itemsPerPage);
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = Math.min(startIndex + itemsPerPage, total);
@@ -498,13 +529,34 @@ const CategoryScreen = ({
 
  
 
-  // Image click handler - 简化：只传递图片ID字符串
+  // Image click handler - 传递图片对象和上下文信息
   const handleImagePress = useCallback((image) => {
-    // 直接跳转到图片预览页面，只传递图片ID字符串
+    // 跳转到图片预览页面，传递图片对象和上下文信息
     if (navigation?.onImagePress) {
-      navigation.onImagePress(image.id);
+      // 根据当前上下文确定fromScreen
+      let fromScreen = 'Category';
+      if (similarityGroupId) {
+        fromScreen = 'SimilarityGroup';
+      } else if (city) {
+        fromScreen = 'City';
+      }
+      
+      // 完全不变地传递接收到的screenProps，不要修改任何内容
+      const contextProps = {
+        category,
+        city,
+        similarityGroupId
+      };
+      
+      console.log('🔍 CategoryScreen handleImagePress 完全不变地传递screenProps:', {
+        screenProps: { category, city, similarityGroupId },
+        fromScreen,
+        imageId: image.id
+      });
+      
+      navigation.onImagePress(image, fromScreen, contextProps);
     }
-  }, [navigation]);
+  }, [navigation, category, city, similarityGroupId]);
 
   // Image long press handler
   const handleImageLongPress = useCallback((image) => {
@@ -786,35 +838,37 @@ const CategoryScreen = ({
       </TouchableOpacity>
     </View>
       
-        {/* 分页控制 */}
-        <View style={styles.headerPagination}>
-          <TouchableOpacity
-            style={[styles.headerPageButton, currentPage === 1 && styles.headerPageButtonDisabled]}
-            onPress={goToPreviousPage}
-            disabled={currentPage === 1}
-          >
-            <Text style={styles.headerPageButtonText}>上一页</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.headerPageInfo}>
-            <Text style={styles.headerPageInfoText}>
-              第 {currentPage} 页 / 共 {paginationData.totalPages} 页
-            </Text>
+        {/* 分页控制 - 只在照片数量超过100时显示 */}
+        {allImages.length > 100 && (
+          <View style={styles.headerPagination}>
+            <TouchableOpacity
+              style={[styles.headerPageButton, currentPage === 1 && styles.headerPageButtonDisabled]}
+              onPress={goToPreviousPage}
+              disabled={currentPage === 1}
+            >
+              <Text style={styles.headerPageButtonText}>上一页</Text>
+            </TouchableOpacity>
+            
+            <View style={styles.headerPageInfo}>
+              <Text style={styles.headerPageInfoText}>
+                第 {currentPage} 页 / 共 {paginationData.totalPages} 页
+              </Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={[styles.headerPageButton, currentPage === paginationData.totalPages && styles.headerPageButtonDisabled]}
+              onPress={goToNextPage}
+              disabled={currentPage === paginationData.totalPages}
+            >
+              <Text style={styles.headerPageButtonText}>下一页</Text>
+            </TouchableOpacity>
+            
+            <View style={styles.headerItemsPerPageContainer}>
+              <Text style={styles.headerItemsPerPageLabel}>每页:</Text>
+              {renderDropdown()}
+            </View>
           </View>
-          
-          <TouchableOpacity 
-            style={[styles.headerPageButton, currentPage === paginationData.totalPages && styles.headerPageButtonDisabled]}
-            onPress={goToNextPage}
-            disabled={currentPage === paginationData.totalPages}
-          >
-            <Text style={styles.headerPageButtonText}>下一页</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.headerItemsPerPageContainer}>
-            <Text style={styles.headerItemsPerPageLabel}>每页:</Text>
-            {renderDropdown()}
-          </View>
-        </View>
+        )}
         
         {/* 间距 */}
         <View style={styles.headerSpacer} />

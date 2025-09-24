@@ -34,7 +34,11 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
               styles.imageContainer,
               (index + 1) % 3 === 0 && styles.lastInRow
             ]}
-            onPress={() => onImagePress(image)}
+            onPress={() => onImagePress(image, 'Home', {
+              category: image.category,
+              city: image.city,
+              similarityGroupId: image.similarityGroupId
+            })}
             activeOpacity={0.8}>
             
             {/* 尝试显示实际图片 */}
