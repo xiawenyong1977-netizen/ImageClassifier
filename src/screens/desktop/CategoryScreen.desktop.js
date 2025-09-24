@@ -537,8 +537,7 @@ const CategoryScreen = ({
         city,
         similarityGroupId
       };
-      
-      
+         
       navigation.onImagePress(image, fromScreen, contextProps);
     }
   }, [navigation, category, city, similarityGroupId]);
@@ -961,7 +960,7 @@ const CategoryScreen = ({
     return (
       <ScrollView
         style={{
-          marginTop: 60,
+          marginTop: 92, // 32 (top) + 60 (height) = 92
           flex: 1
         }}
         contentContainerStyle={{
@@ -1012,7 +1011,7 @@ const CategoryScreen = ({
     return (
       <ScrollView
         style={{
-          marginTop: 60,
+          marginTop: 92, // 32 (top) + 60 (height) = 92
           flex: 1
         }}
         contentContainerStyle={styles.timelineContainer}
