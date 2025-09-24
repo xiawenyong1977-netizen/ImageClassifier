@@ -31,12 +31,14 @@ const getAllCategories = () => {
     throw new Error('ConfigService未初始化或配置未加载');
   }
   
-  return configService.getAllCategoriesWithUI().map(category => ({
-    id: category.id,
-    name: category.chinese || category.english || category.id,
-    icon: '📷', // 默认图标
-    color: '#607D8B' // 默认颜色
-  }));
+  return configService.getAllCategoriesWithUI()
+    .filter(category => category.id !== 'tobecleaned') // 过滤掉tobecleaned分类
+    .map(category => ({
+      id: category.id,
+      name: category.chinese || category.english || category.id,
+      icon: '📷', // 默认图标
+      color: '#607D8B' // 默认颜色
+    }));
 };
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -155,57 +157,110 @@ const ImagePreviewScreen = ({ route = {}, navigation = {}, imageId, onBack, from
   const handleDelete = () => {
     console.log('🗑️ 删除按钮被点击，currentImage:', currentImage);
     console.log('🗑️ 图片ID:', currentImage?.id);
+    console.log('🗑️ 当前分类:', currentImage?.category);
     
     if (!currentImage || !currentImage.id) {
       console.error('🗑️ 错误：currentImage 或 currentImage.id 不存在');
-      Alert.alert('错误', '图片信息不完整，无法删除');
+      Alert.alert('错误', '图片信息不完整，无法操作');
       return;
     }
     
-    console.log('🗑️ 准备显示确认对话框...');
-    Alert.alert(
-      '确认删除',
-      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
-      [
-        { 
-          text: '取消', 
-          style: 'cancel',
-          onPress: () => console.log('🗑️ 用户取消删除')
-        },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: async () => {
-            console.log('🗑️ 用户确认删除，开始删除流程...');
-            try {
-              // 显示自定义进度对话框
-              setShowDeleteProgress(true);
-              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
-              
-              console.log('🗑️ 调用deleteImage方法...');
-              const result = await UnifiedDataService.writeDeleteImage(currentImage.id);
-              
-              console.log('🗑️ 删除结果:', result);
-              if (result.success) {
-                console.log('🗑️ 删除成功，准备返回上一页...');
-                // 延迟关闭进度对话框，让用户看到最终结果
-                setTimeout(() => {
-                  setShowDeleteProgress(false);
-                  handleBack();
-                }, 1000);
-              } else {
-                console.log('🗑️ 删除失败:', result.message);
-                setShowDeleteProgress(false);
-                Alert.alert('删除失败', result.message);
-              }
-            } catch (error) {
-              setShowDeleteProgress(false);
-              Alert.alert('错误', '删除失败，请重试');
-            }
+    const isToBeCleanedCategory = currentImage.category === 'tobecleaned';
+    
+    if (isToBeCleanedCategory) {
+      // 如果当前分类是tobecleaned，执行真正的删除
+      console.log('🗑️ 当前分类是tobecleaned，执行删除操作...');
+      Alert.alert(
+        '确认删除',
+        '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
+        [
+          { 
+            text: '取消', 
+            style: 'cancel',
+            onPress: () => console.log('🗑️ 用户取消删除')
           },
-        },
-      ]
-    );
+          {
+            text: '删除',
+            style: 'destructive',
+            onPress: async () => {
+              console.log('🗑️ 用户确认删除，开始删除流程...');
+              try {
+                // 显示自定义进度对话框
+                setShowDeleteProgress(true);
+                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
+                
+                console.log('🗑️ 调用deleteImage方法...');
+                const result = await UnifiedDataService.writeDeleteImage(currentImage.id);
+                
+                console.log('🗑️ 删除结果:', result);
+                if (result.success) {
+                  console.log('🗑️ 删除成功，准备返回上一页...');
+                  // 延迟关闭进度对话框，让用户看到最终结果
+                  setTimeout(() => {
+                    setShowDeleteProgress(false);
+                    handleBack();
+                  }, 1000);
+                } else {
+                  console.log('🗑️ 删除失败:', result.message);
+                  setShowDeleteProgress(false);
+                  Alert.alert('删除失败', result.message);
+                }
+              } catch (error) {
+                setShowDeleteProgress(false);
+                Alert.alert('错误', '删除失败，请重试');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      // 如果当前分类不是tobecleaned，标记为待清理
+      console.log('🗑️ 当前分类不是tobecleaned，标记为待清理...');
+      Alert.alert(
+        '标记为待清理',
+        '确定要将这张图片标记为待清理吗？\n\n图片将被移动到"待清理"分类中。',
+        [
+          { 
+            text: '取消', 
+            style: 'cancel',
+            onPress: () => console.log('🗑️ 用户取消标记为待清理')
+          },
+          {
+            text: '标记',
+            style: 'default',
+            onPress: async () => {
+              console.log('🗑️ 用户确认标记为待清理，开始更新分类...');
+              try {
+                // 更新分类为tobecleaned
+                await UnifiedDataService.updateImageCategory(
+                  currentImage.id, 
+                  'tobecleaned', 
+                  'manual'
+                );
+                
+                // 更新本地状态
+                setCurrentImage(prev => ({ 
+                  ...prev, 
+                  category: 'tobecleaned',
+                  confidence: 'manual'
+                }));
+                
+                console.log('🗑️ 标记为待清理成功');
+                Alert.alert('操作完成', '图片已标记为待清理');
+                
+                // 通知父组件数据已变化
+                if (onDataChange) {
+                  onDataChange();
+                }
+              } catch (error) {
+                console.error('标记为待清理失败:', error);
+                Alert.alert('错误', '标记为待清理失败，请重试');
+              }
+            },
+          },
+        ]
+      );
+    }
   };
 
   // 处理分类修改

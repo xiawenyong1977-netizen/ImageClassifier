@@ -505,49 +505,108 @@ const CategoryScreen = ({
     
     if (selectedCount === 0) return;
 
-    // 获取当前分类中选中的图片用于删除
+    // 获取当前分类中选中的图片
     const currentCategorySelectedImages = normalizedCategory 
       ? UnifiedDataService.getSelectedImagesByCategory(normalizedCategory)
       : (city ? UnifiedDataService.getSelectedImagesByCity(city) : []);
 
-    Alert.alert(
-      '确认删除',
-      `确定要删除选中的 ${selectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setShowDeleteProgress(true);
-              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedCount });
-              
-              const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
-              await UnifiedDataService.writeDeleteImages(
-                selectedImageIds,
-                (progress) => {
-                  setDeleteProgress(progress);
+    // 检查当前分类是否为tobecleaned
+    const isToBeCleanedCategory = normalizedCategory === 'tobecleaned';
+
+    if (isToBeCleanedCategory) {
+      // 如果是tobecleaned分类，执行真正的删除操作
+      Alert.alert(
+        '确认删除',
+        `确定要删除选中的 ${selectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '删除',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                setShowDeleteProgress(true);
+                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedCount });
+                
+                const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
+                await UnifiedDataService.writeDeleteImages(
+                  selectedImageIds,
+                  (progress) => {
+                    setDeleteProgress(progress);
+                  }
+                );
+                
+                // 清除选中状态
+                clearCategorySelections();
+                
+                // 重新加载图片数据
+                await loadImages();
+                
+                // 发送完成消息通知HomeScreen更新数据
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('scanProgress', {
+                    detail: {
+                      stage: 'completed',
+                      message: `已删除 ${selectedCount} 张图片`,
+                      filesProcessed: selectedCount,
+                      filesFailed: 0
+                    }
+                  }));
                 }
-              );
-              
-              // 清除选中状态
-              clearCategorySelections();
-              
-              // 重新加载图片数据
-              await loadImages();
-              
-              // 立即关闭删除进度对话框
-              setShowDeleteProgress(false);
-              
-            } catch (error) {
-              setShowDeleteProgress(false);
-              Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
-            }
+                
+                // 立即关闭删除进度对话框
+                setShowDeleteProgress(false);
+                
+              } catch (error) {
+                setShowDeleteProgress(false);
+                Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
+              }
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      // 如果不是tobecleaned分类，将选中的图片设置为tobecleaned分类
+      Alert.alert(
+        '标记为待清理',
+        `确定要将选中的 ${selectedCount} 张图片标记为待清理吗？\n\n这些图片将被移动到"待清理"分类中。`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '标记',
+            style: 'default',
+            onPress: async () => {
+              try {
+                const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
+                
+                // 清除选中状态
+                clearCategorySelections();
+                // 批量更新图片分类为tobecleaned
+                let processed = 0;
+                for (const imageId of selectedImageIds) {
+                  try {
+                    await UnifiedDataService.updateImageCategory(imageId, 'tobecleaned');
+                    processed++;
+                  } catch (error) {
+                    console.error(`Failed to update image ${imageId}:`, error);
+                  }
+                }
+                
+          
+                
+                // 重新加载图片数据
+                await loadImages();
+                
+                Alert.alert('操作完成', `已成功标记 ${processed} 张图片为待清理`);
+                
+              } catch (error) {
+                Alert.alert('操作失败', '标记图片时发生错误，请重试');
+              }
+            },
+          },
+        ]
+      );
+    }
   }, [category, city]);
 
   // Header 组件 - 可以重新渲染
@@ -674,7 +733,7 @@ const CategoryScreen = ({
               style={[styles.headerButton, styles.headerDeleteButton]}
             onPress={handleBatchDelete}>
               <Text style={[styles.headerButtonText, styles.headerDeleteButtonText]}>
-                删除 ({currentSelectedCount})
+                {normalizedCategory === 'tobecleaned' ? '删除' : '清理'} ({currentSelectedCount})
             </Text>
           </TouchableOpacity>
             

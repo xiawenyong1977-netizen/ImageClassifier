@@ -170,6 +170,29 @@ const HomeScreen = () => {
     }
   }, []);
 
+  // 处理扫描进度更新 - 添加防抖
+  const handleScanProgress = useCallback((progress) => {
+    console.log('🔄 HomeScreen 收到扫描进度更新:', progress);
+    
+    // 防抖：只在消息真正变化时更新
+    setGlobalMessage(prevMessage => {
+      const newMessage = progress.message || '处理中...';
+      if (prevMessage !== newMessage) {
+        return newMessage;
+      }
+      return prevMessage;
+    });
+    
+    // 扫描完成时刷新数据
+    if (progress.stage === 'completed') {
+      console.log('✅ 扫描完成，刷新数据');
+      // 重新加载扫描时间和统计信息
+      loadLastScanTime();
+      // 重新加载数据
+      loadData();
+    }
+  }, [loadData]);
+
   // 监听自定义事件（由 IPCListenerService 发送）
   useEffect(() => {
     const handleNavigateToSettings = (event) => {
@@ -178,14 +201,21 @@ const HomeScreen = () => {
       setScreenProps({});
     };
 
+    const handleScanProgressEvent = (event) => {
+      console.log('📨 收到扫描进度事件:', event.detail);
+      handleScanProgress(event.detail);
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('navigate-to-settings', handleNavigateToSettings);
+      window.addEventListener('scanProgress', handleScanProgressEvent);
       
       return () => {
         window.removeEventListener('navigate-to-settings', handleNavigateToSettings);
+        window.removeEventListener('scanProgress', handleScanProgressEvent);
       };
     }
-  }, []);
+  }, [handleScanProgress]);
 
   // 页面切换时加载对应组件
   useEffect(() => {
@@ -258,29 +288,6 @@ const HomeScreen = () => {
   const updateGlobalMessage = useCallback((message) => {
     setGlobalMessage(message);
   }, []);
-
-  // 处理扫描进度更新 - 添加防抖
-  const handleScanProgress = useCallback((progress) => {
-    console.log('🔄 HomeScreen 收到扫描进度更新:', progress);
-    
-    // 防抖：只在消息真正变化时更新
-    setGlobalMessage(prevMessage => {
-      const newMessage = progress.message || '处理中...';
-      if (prevMessage !== newMessage) {
-        return newMessage;
-      }
-      return prevMessage;
-    });
-    
-    // 扫描完成时刷新数据
-    if (progress.stage === 'completed') {
-      console.log('✅ 扫描完成，刷新数据');
-      // 重新加载扫描时间和统计信息
-      loadLastScanTime();
-      // 重新加载数据
-      loadData();
-    }
-  }, [loadData]);
 
   // 启动智能扫描
   const startSmartScan = useCallback(async () => {

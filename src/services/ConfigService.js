@@ -49,8 +49,9 @@ class ConfigService {
       } else {
         // Node.js环境使用fs模块
         try {
-          const fs = require('fs');
-          const path = require('path');
+          // 使用动态require避免webpack静态分析
+          const fs = eval('require')('fs');
+          const path = eval('require')('path');
           const fullPath = path.resolve(configPath);
           console.log('🔧 读取文件路径:', fullPath);
           

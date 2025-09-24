@@ -51,6 +51,10 @@
     "idcard": {
       "chinese": "证件照",
       "english": "ID Card"
+    },
+    "tobecleaned": {
+      "chinese": "待清理",
+      "english": "To Be Cleaned"
     }
   },
   "categoryDisplayOrder": [
@@ -61,7 +65,8 @@
     "foods",
     "idcard",
     "screenshot",
-    "other"
+    "other",
+    "tobecleaned"
   ],
   "objectMappings": {
     "animals": "pets", 
