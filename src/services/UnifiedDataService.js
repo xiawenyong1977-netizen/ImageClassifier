@@ -39,7 +39,6 @@ class UnifiedDataService {
    */
   async initialize() {
     if (this.isInitialized) {
-      console.log('🔄 UnifiedDataService 已经初始化');
       return true;
     }
 

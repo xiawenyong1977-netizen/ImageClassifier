@@ -39,7 +39,6 @@ class IndexedDBAdapter {
 
     // 尝试关闭可能存在的旧连接
     if (this.db) {
-      console.log('🔄 关闭旧数据库连接...');
       this.db.close();
       this.db = null;
       this.isInitialized = false;
@@ -53,12 +52,6 @@ class IndexedDBAdapter {
         reject(new Error('IndexedDB 初始化超时'));
       }, 5000); // 5秒超时
 
-      console.log(`🔄 尝试打开IndexedDB: ${this.dbName}, 版本: ${this.version}`);
-      console.log('🔄 IndexedDB 支持情况:', {
-        indexedDB: !!window.indexedDB,
-        IDBKeyRange: !!window.IDBKeyRange,
-        IDBTransaction: !!window.IDBTransaction
-      });
       
       // 添加请求状态监听
       let requestStarted = false;
@@ -66,21 +59,17 @@ class IndexedDBAdapter {
       
       // 监听请求开始
       request.addEventListener('success', () => {
-        console.log('🔄 IndexedDB 请求成功事件触发');
       });
       
       request.addEventListener('error', () => {
-        console.log('🔄 IndexedDB 请求错误事件触发');
       });
       
       request.addEventListener('upgradeneeded', () => {
-        console.log('🔄 IndexedDB 升级事件触发');
       });
       
       // 检查请求是否立即被阻塞
       setTimeout(() => {
         if (!requestStarted) {
-          console.log('🔄 IndexedDB 请求状态检查: 请求可能被阻塞');
         }
       }, 100);
       
