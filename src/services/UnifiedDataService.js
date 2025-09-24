@@ -1163,9 +1163,11 @@ class UnifiedDataService {
             city: image ? image.city : null,
             takenAt: image ? image.takenAt : null,
             similarityScore: imageInfo.similarity_score || 0,
+            similarityGroupIndex: groupId, // 添加相似组索引
             size: image ? image.size : 0,
             width: image ? image.width : 0,
-            height: image ? image.height : 0
+            height: image ? image.height : 0,
+            selected: image ? image.selected : false // 添加选中状态
           };
         });
       
