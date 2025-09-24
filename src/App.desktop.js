@@ -144,134 +144,58 @@ export default function App() {
   }
   
   return (
-    <View style={styles.container}>
+    <View style={styles.appContainer}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
-      {/* 自定义标题栏 */}
-      <View style={styles.titleBar}>
-        <View style={styles.titleBarLeft}>
-          <Text style={styles.titleBarTitle}>图片分类助手</Text>
-        </View>
-        <View style={styles.titleBarRight}>
-          <TouchableOpacity 
-            style={styles.titleBarButton}
-            onPress={() => {
-              console.log('🔧 设置按钮被点击');
-              if (window.require) {
-                window.require('electron').ipcRenderer.send('titlebar-settings-click');
-              }
-            }}
-          >
-            <Text style={styles.titleBarButtonText}>⚙️</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.titleBarButton}
-            onPress={() => {
-              if (window.require) {
-                const { remote } = window.require('electron');
-                remote.getCurrentWindow().minimize();
-              }
-            }}
-          >
-            <Text style={styles.titleBarButtonText}>−</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.titleBarButton}
-            onPress={() => {
-              if (window.require) {
-                const { remote } = window.require('electron');
-                const win = remote.getCurrentWindow();
-                if (win.isMaximized()) {
-                  win.unmaximize();
-                } else {
-                  win.maximize();
-                }
-              }
-            }}
-          >
-            <Text style={styles.titleBarButtonText}>□</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.titleBarCloseButton}
-            onPress={() => {
-              if (window.require) {
-                const { remote } = window.require('electron');
-                remote.getCurrentWindow().close();
-              }
-            }}
-          >
-            <Text style={styles.titleBarCloseButtonText}>×</Text>
-          </TouchableOpacity>
-        </View>
+      {/* 主内容区域 */}
+      <View style={styles.mainContent}>
+        <HomeScreen />
       </View>
       
-      <HomeScreen />
+      {/* 设置按钮 - 固定在视口右上角，不受滚动影响 */}
+      <TouchableOpacity 
+        style={styles.settingsButton}
+        onPress={() => {
+          console.log('🔧 设置按钮被点击');
+          if (window.require) {
+            window.require('electron').ipcRenderer.send('titlebar-settings-click');
+          }
+        }}
+      >
+        <Text style={styles.settingsButtonText}>⚙️</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  appContainer: {
     flex: 1,
     backgroundColor: '#F5FCFF',
-    paddingTop: 32, // 为标题栏留出空间
+    position: 'relative', // 为绝对定位的子元素提供参考
   },
-  titleBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 32,
-    backgroundColor: '#f0f0f0',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-    WebkitAppRegion: 'drag', // 整个标题栏可拖拽
-    zIndex: 1000,
-  },
-  titleBarLeft: {
+  mainContent: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 16,
-    WebkitAppRegion: 'drag',
+    // 主内容区域可以正常滚动
   },
-  titleBarTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    WebkitAppRegion: 'drag',
-  },
-  titleBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    WebkitAppRegion: 'no-drag', // 按钮区域不可拖拽
-  },
-  titleBarButton: {
-    width: 32,
-    height: 32,
+  settingsButton: {
+    position: 'fixed', // 使用fixed定位，相对于视口固定
+    bottom: 8, // 距离底部8px
+    right: 8,  // 距离右边8px
+    width: 40,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'transparent',
-    WebkitAppRegion: 'no-drag',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 9999, // 更高的层级
   },
-  titleBarButtonText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: 'bold',
-  },
-  titleBarCloseButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    WebkitAppRegion: 'no-drag',
-  },
-  titleBarCloseButtonText: {
+  settingsButtonText: {
     fontSize: 18,
     color: '#333',
     fontWeight: 'bold',

@@ -662,28 +662,30 @@ const HomeScreen = () => {
         )}
         
         {currentScreen === 'Category' && (
-          CategoryScreen ? (
-              <CategoryScreen 
-                {...screenProps} 
-                forceRefresh={categoryDataChanged}
-                onDataChange={() => setCategoryDataChanged(true)}
-                onBack={() => {
-                  setCurrentScreen('Home');
-                  console.log('🏠 从分类页面返回，重新加载数据');
-                  loadData();
-                }}
-                navigation={{
-                  onImagePress: (image, fromScreen, contextProps) => {
-                    // 直接使用CategoryScreen传递的参数，不要使用screenProps
-                    handleImagePress(image, fromScreen, contextProps);
-                  }
-                }}
-              />
-          ) : (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>正在加载分类页面...</Text>
+          <View style={styles.screenContainer}>
+            {CategoryScreen ? (
+                <CategoryScreen 
+                  {...screenProps} 
+                  forceRefresh={categoryDataChanged}
+                  onDataChange={() => setCategoryDataChanged(true)}
+                  onBack={() => {
+                    setCurrentScreen('Home');
+                    console.log('🏠 从分类页面返回，重新加载数据');
+                    loadData();
+                  }}
+                  navigation={{
+                    onImagePress: (image, fromScreen, contextProps) => {
+                      // 直接使用CategoryScreen传递的参数，不要使用screenProps
+                      handleImagePress(image, fromScreen, contextProps);
+                    }
+                  }}
+                />
+            ) : (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>正在加载分类页面...</Text>
+              </View>
+            )}
           </View>
-          )
         )}
         
         {currentScreen === 'ImagePreview' && (

@@ -960,7 +960,7 @@ const CategoryScreen = ({
     return (
       <ScrollView
         style={{
-          marginTop: 92, // 32 (top) + 60 (height) = 92
+          marginTop: 60, // 只有内部标题栏的高度
           flex: 1
         }}
         contentContainerStyle={{
@@ -1011,7 +1011,7 @@ const CategoryScreen = ({
     return (
       <ScrollView
         style={{
-          marginTop: 92, // 32 (top) + 60 (height) = 92
+          marginTop: 60, // 只有内部标题栏的高度
           flex: 1
         }}
         contentContainerStyle={styles.timelineContainer}
@@ -1290,7 +1290,7 @@ const CategoryScreen = ({
   console.log('🏷️ CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
   
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Fixed Header - 可以重新渲染 */}
       <View style={createFixedStyle(styles.fixedHeader)}>
         <HeaderComponent />
@@ -1325,7 +1325,7 @@ const CategoryScreen = ({
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -1333,6 +1333,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    position: 'relative',
+    overflow: 'hidden',
   },
   
   
@@ -1525,7 +1527,7 @@ const styles = StyleSheet.create({
   },
   fixedHeader: {
     position: 'absolute',
-    top: 32, // 为自定义标题栏留出空间
+    top: 0, // 原生标题栏不需要额外空间
     left: 0,
     right: 0,
     zIndex: 1000,
