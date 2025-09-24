@@ -74,71 +74,26 @@ export default function App() {
 
   if (!isServiceReady) {
     return (
-      <View style={styles.container}>
+      <View style={styles.appContainer}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        
-        {/* 自定义标题栏 */}
-        <View style={styles.titleBar}>
-          <View style={styles.titleBarLeft}>
-            <Text style={styles.titleBarTitle}>图片分类助手</Text>
-          </View>
-          <View style={styles.titleBarRight}>
-            <TouchableOpacity 
-              style={styles.titleBarButton}
-              onPress={() => {
-                console.log('🔧 设置按钮被点击');
-                if (window.require) {
-                  window.require('electron').ipcRenderer.send('titlebar-settings-click');
-                }
-              }}
-            >
-              <Text style={styles.titleBarButtonText}>⚙️</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.titleBarButton}
-              onPress={() => {
-                if (window.require) {
-                  const { remote } = window.require('electron');
-                  remote.getCurrentWindow().minimize();
-                }
-              }}
-            >
-              <Text style={styles.titleBarButtonText}>−</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.titleBarButton}
-              onPress={() => {
-                if (window.require) {
-                  const { remote } = window.require('electron');
-                  const win = remote.getCurrentWindow();
-                  if (win.isMaximized()) {
-                    win.unmaximize();
-                  } else {
-                    win.maximize();
-                  }
-                }
-              }}
-            >
-              <Text style={styles.titleBarButtonText}>□</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.titleBarCloseButton}
-              onPress={() => {
-                if (window.require) {
-                  const { remote } = window.require('electron');
-                  remote.getCurrentWindow().close();
-                }
-              }}
-            >
-              <Text style={styles.titleBarCloseButtonText}>×</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
         
         {/* 加载状态 */}
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>正在初始化...</Text>
         </View>
+        
+        {/* 设置按钮 - 固定在视口右下角，不受滚动影响 */}
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={() => {
+            console.log('🔧 设置按钮被点击');
+            if (window.require) {
+              window.require('electron').ipcRenderer.send('titlebar-settings-click');
+            }
+          }}
+        >
+          <Text style={styles.settingsButtonText}>⚙️</Text>
+        </TouchableOpacity>
       </View>
     );
   }

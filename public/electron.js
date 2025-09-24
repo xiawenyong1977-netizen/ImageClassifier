@@ -20,7 +20,7 @@ function createWindow() {
       backgroundThrottling: false  // 禁用后台节流
     },
     icon: path.join(__dirname, 'icon.png'),
-    title: '图片分类助手',
+    title: '芯图管家-智能分类，便捷管理，仅你可见',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
     titleBarStyle: 'default',  // 使用默认标题栏
     frame: true,  // 显示窗口框架
@@ -118,7 +118,7 @@ function createWindow() {
       const totalImages = stats.totalImages || 0;
       const classified = stats.classified || 0;
       const totalSize = stats.totalSize ? (stats.totalSize / 1024 / 1024).toFixed(1) : '0';
-      const titleText = `图片分类助手 | 总照片: ${totalImages} | 已分类: ${classified} | 大小: ${totalSize}MB`;
+      const titleText = `芯图管家-智能分类，便捷管理，仅你可见 | 总照片: ${totalImages} | 已分类: ${classified} | 大小: ${totalSize}MB`;
       
       // 更新窗口标题
       mainWindow.setTitle(titleText);

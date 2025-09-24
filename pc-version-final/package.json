@@ -1,7 +1,7 @@
 {
-  "name": "image-classifier-desktop-final",
+  "name": "芯图管家-智能分类，便捷管理，仅你可见",
   "version": "1.0.0",
-  "description": "图片分类整理桌面应用 - 真正的代码复用演示",
+  "description": "芯图管家-智能分类，便捷管理，仅你可见",
   "main": "public/electron.js",
   "homepage": "./",
   "scripts": {

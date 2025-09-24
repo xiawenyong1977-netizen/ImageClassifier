@@ -1,7 +1,7 @@
 {
-  "name": "image-classifier-app",
+  "name": "芯图管家-智能分类，便捷管理，仅你可见",
   "version": "1.0.0",
-  "description": "移动端图片分类整理APP",
+  "description": "芯图管家-智能分类，便捷管理，仅你可见",
   "main": "index.js",
   "scripts": {
     "android": "react-native run-android",
