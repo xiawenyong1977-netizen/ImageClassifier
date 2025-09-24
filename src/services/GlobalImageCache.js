@@ -458,6 +458,21 @@ class GlobalImageCache {
   getSelectedSimilarityGroupCounts() {
     return { ...this.cache.selectedSimilarityGroupCounts };
   }
+
+  // 手动更新相似组统计（用于相似组模式）
+  _updateSimilarityGroupStats(groupId, isSelected) {
+    if (isSelected) {
+      this.cache.selectedSimilarityGroupCounts[groupId] = (this.cache.selectedSimilarityGroupCounts[groupId] || 0) + 1;
+    } else {
+      if (this.cache.selectedSimilarityGroupCounts[groupId] > 0) {
+        this.cache.selectedSimilarityGroupCounts[groupId]--;
+        if (this.cache.selectedSimilarityGroupCounts[groupId] === 0) {
+          delete this.cache.selectedSimilarityGroupCounts[groupId];
+        }
+      }
+    }
+    console.log(`🔍 手动更新相似组统计: ${groupId} = ${this.cache.selectedSimilarityGroupCounts[groupId] || 0}`);
+  }
   
   // 删除单个图片
   removeImage(imageId) {

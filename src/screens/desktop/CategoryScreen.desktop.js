@@ -689,10 +689,11 @@ const CategoryScreen = ({
     // 使用UnifiedDataService获取当前分类中选中的图片数量
     const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
     const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
+    const selectedCountsBySimilarityGroup = UnifiedDataService.getSelectedCountsBySimilarityGroup();
     let currentSelectedCount;
     if (similarityGroupId) {
-      // 从相似组进入，直接使用selectedImages.length
-      currentSelectedCount = selectedImages.length;
+      // 从相似组进入，获取相似组的选中图片数量
+      currentSelectedCount = selectedCountsBySimilarityGroup[similarityGroupId] ?? 0;
     } else if (normalizedCategory) {
       currentSelectedCount = selectedCountsByCategory[normalizedCategory] ?? 0;
     } else if (city) {

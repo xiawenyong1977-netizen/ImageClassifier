@@ -1172,6 +1172,10 @@ class UnifiedDataService {
         .sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
         .map(imageInfo => {
           const image = imageMap.get(imageInfo.id);
+          if (image) {
+            // 确保缓存中的图片对象有similarityGroupIndex属性
+            image.similarityGroupIndex = groupId;
+          }
           return {
             id: imageInfo.id,
             fileName: image ? image.fileName : 'Unknown',
