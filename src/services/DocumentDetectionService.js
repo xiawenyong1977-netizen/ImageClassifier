@@ -16,6 +16,8 @@ class DocumentDetectionService {
       colorCount: 80,         // 颜色数量阈值（证件照通常颜色较少）
 
       
+
+      
     };
   }
 
