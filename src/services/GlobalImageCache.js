@@ -362,8 +362,12 @@ class GlobalImageCache {
     const category = this._normalizeCategoryId(image.category);
     this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
     
+    console.log(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}`);
     if (image.city) {
       this.cache.selectedCityCounts[image.city] = (this.cache.selectedCityCounts[image.city] || 0) + 1;
+      console.log(`🔍 城市选中统计更新: ${image.city} = ${this.cache.selectedCityCounts[image.city]}`);
+    } else {
+      console.log(`⚠️ 图片 ${image.id} 没有城市信息，跳过城市统计更新`);
     }
   }
 
@@ -591,6 +595,11 @@ class GlobalImageCache {
   // 获取指定城市的所有图片
   getImagesByCity(city) {
     return this.cache.allImages.filter(img => img.city === city);
+  }
+
+  // 获取指定相似组的所有图片
+  getImagesBySimilarityGroup(groupId) {
+    return this.cache.allImages.filter(img => img.similarityGroupIndex === groupId);
   }
 
   // 检查图片是否被选中

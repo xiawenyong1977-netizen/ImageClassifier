@@ -787,47 +787,74 @@ class UnifiedDataService {
   }
 
   /**
-   * 取消当前分类的所有选中状态
-   * 用于"取消选择"按钮
+   * 通用取消选中函数
+   * 取消选中指定范围内的所有图片
    */
-  clearCategorySelection(category) {
+  _deselectImagesByFilter(filterType, filterValue) {
     try {
-      const categoryImages = this.imageCache.getImagesByCategory(category);
-      const imageIds = categoryImages.map(img => img.id);
+      let images;
+      let logPrefix;
       
-      // 使用批量取消选择
-      this.imageCache.deselectBatch(imageIds);
+      if (filterType === 'category') {
+        images = this.imageCache.getImagesByCategory(filterValue);
+        logPrefix = '按分类取消选中图片';
+      } else if (filterType === 'city') {
+        images = this.imageCache.getImagesByCity(filterValue);
+        logPrefix = '按城市取消选中图片';
+      } else if (filterType === 'similarityGroup') {
+        images = this.imageCache.getImagesBySimilarityGroup(filterValue);
+        logPrefix = '按相似组取消选中图片';
+      } else {
+        throw new Error(`不支持的过滤类型: ${filterType}`);
+      }
       
+      const imageIds = images.map(img => img.id);
+      
+      imageIds.forEach(imageId => {
+        this.setImageSelection(imageId, false);
+        // 发送事件通知图片组件更新显示
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('imageSelectionChanged', {
+            detail: {
+              imageId: imageId,
+              isSelected: false
+            }
+          });
+          window.dispatchEvent(event);
+        }
+      });
+      
+      console.log(`📊 ${logPrefix}: ${filterValue}, 数量: ${imageIds.length}`);
       return imageIds.length;
       
     } catch (error) {
-      console.error('❌ 取消分类选中状态失败:', error);
+      console.error(`❌ ${filterType === 'category' ? '取消分类选中状态' : '按城市取消选中图片'}失败:`, error);
       return 0;
     }
   }
 
+  /**
+   * 取消当前分类的所有选中状态
+   * 用于"取消选择"按钮
+   */
+  clearCategorySelection(category) {
+    return this._deselectImagesByFilter('category', category);
+  }
 
   /**
    * 按城市取消选中图片
    * 取消选中指定城市的所有图片
    */
   deselectImagesByCity(city) {
-    try {
-      const cache = this.imageCache.getCache();
-      const cityImages = this.imageCache.getImagesByCity(city);
-      const imageIds = cityImages.map(img => img.id);
-      
-      imageIds.forEach(imageId => {
-        this.setImageSelection(imageId, false);
-      });
-      
-      console.log(`📊 按城市取消选中图片: ${city}, 数量: ${imageIds.length}`);
-      return imageIds.length;
-      
-    } catch (error) {
-      console.error('❌ 按城市取消选中图片失败:', error);
-      return 0;
-    }
+    return this._deselectImagesByFilter('city', city);
+  }
+
+  /**
+   * 按相似组取消选中图片
+   * 取消选中指定相似组的所有图片
+   */
+  deselectImagesBySimilarityGroup(groupId) {
+    return this._deselectImagesByFilter('similarityGroup', groupId);
   }
 
   /**
@@ -854,6 +881,21 @@ class UnifiedDataService {
       return cityImages;
     } catch (error) {
       console.error('❌ 获取城市选中图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取指定相似组的选中图片
+   */
+  getSelectedImagesBySimilarityGroup(groupId) {
+    try {
+      const groupImages = this.imageCache.getImagesBySimilarityGroup(groupId);
+      const selectedImages = groupImages.filter(img => img.selected === true);
+      console.log(`📊 获取相似组选中图片: ${groupId}, 数量: ${selectedImages.length}`);
+      return selectedImages;
+    } catch (error) {
+      console.error('❌ 获取相似组选中图片失败:', error);
       return [];
     }
   }

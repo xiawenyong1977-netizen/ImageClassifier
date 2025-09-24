@@ -177,8 +177,21 @@ const CategoryScreen = ({
         console.log(`📊 从分类获取图片: 总数=${images.length}, category=${category}`);
       }
       
-      // 同时加载选中状态
-      const selectedImages = await UnifiedDataService.getSelectedImages();
+      // 同时加载选中状态 - 根据当前模式获取对应的选中图片
+      let selectedImages;
+      if (similarityGroupId) {
+        // 从相似组进入，获取相似组的选中图片
+        selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+      } else if (city) {
+        // 从城市进入，获取城市的选中图片
+        selectedImages = await UnifiedDataService.getSelectedImages(null, city);
+      } else if (category) {
+        // 从分类进入，获取分类的选中图片
+        selectedImages = await UnifiedDataService.getSelectedImages(category, null);
+      } else {
+        // 其他情况，获取所有选中图片
+        selectedImages = await UnifiedDataService.getSelectedImages();
+      }
       const selectedImageIds = selectedImages.map(img => img.id);
       
       console.log(`📊 选中状态: ${selectedImageIds.length} 张图片被选中`);
@@ -244,18 +257,43 @@ const CategoryScreen = ({
     if (selectedImages.length === allImages.length) {
       // 如果全部选中，则取消全选
       setSelectedImages([]);
-      // 清除当前分类的所有选中状态
-      UnifiedDataService.clearCategorySelection(category);
+      // 根据当前模式清除选中状态
+      let filterType, filterValue, logPrefix;
+      if (similarityGroupId) {
+        filterType = 'similarityGroup';
+        filterValue = similarityGroupId;
+        logPrefix = '相似组';
+      } else if (city) {
+        filterType = 'city';
+        filterValue = city;
+        logPrefix = '城市';
+      } else {
+        filterType = 'category';
+        filterValue = category;
+        logPrefix = '分类';
+      }
+      const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
+      console.log(`🔄 ${logPrefix}取消全选: 操作了 ${deselectedCount} 张图片`);
     } else {
+
+      
       // 否则全选当前页面的所有图片
       const allImageIds = allImages.map(img => img.id);
       setSelectedImages(allImageIds);
       // 批量设置选中状态
       allImages.forEach(img => {
         UnifiedDataService.setImageSelection(img.id, true);
+        // 发送全选事件通知图片组件
+        const event = new CustomEvent('imageSelectionChanged', {
+          detail: {
+            imageId: img.id,
+            isSelected: true
+          }
+        });
+        window.dispatchEvent(event);
       });
     }
-  }, [selectedImages.length, allImages, category]);
+  }, [selectedImages.length, allImages, category, city, similarityGroupId]);
   
   console.log(`🔄 CategoryScreen 状态: selectedImages=${selectedImages.length}, getIsSelected函数引用=${getIsSelected}`);
   console.log(`🔄 CategoryScreen 渲染完成，准备渲染子组件`);
@@ -473,16 +511,27 @@ const CategoryScreen = ({
   }, []);
 
 
-  // Clear current category selections (只清除当前分类的选中状态)
+  // Clear current selections (清除当前分类或城市的选中状态)
   const clearCategorySelections = useCallback(() => {
-    // 清除全局状态 - 清除当前分类的所有选中状态
-    UnifiedDataService.clearCategorySelection(category);
+    // 根据当前模式清除选中状态
+    if (similarityGroupId) {
+      // 从相似组进入，清除相似组的所有选中状态
+      UnifiedDataService.deselectImagesBySimilarityGroup(similarityGroupId);
+      console.log(`🧹 清除相似组选中状态: groupId=${similarityGroupId}, 本地状态已清空`);
+    } else if (city) {
+      // 从城市进入，清除城市的所有选中状态
+      UnifiedDataService.deselectImagesByCity(city);
+      console.log(`🧹 清除城市选中状态: city=${city}, 本地状态已清空`);
+    } else if (category) {
+      // 从分类进入，清除分类的所有选中状态
+      UnifiedDataService.clearCategorySelection(category);
+      console.log(`🧹 清除分类选中状态: category=${category}, 本地状态已清空`);
+    }
+    
     // 清除本地状态
     setSelectedImages([]);
     setSelectAll(false);
-    
-    console.log(`🧹 清除选中状态: category=${category}, 本地状态已清空`);
-  }, [category]);
+  }, [category, city, similarityGroupId]);
 
 
   // Image right click handler
@@ -636,14 +685,27 @@ const CategoryScreen = ({
     
     // 使用UnifiedDataService获取当前分类中选中的图片数量
     const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
-    const currentSelectedCount = normalizedCategory 
-      ? (selectedCountsByCategory[normalizedCategory] ?? 0)
-      : (city ? (UnifiedDataService.getSelectedCountsByCity()[city] ?? 0) : 0);
+    const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
+    let currentSelectedCount;
+    if (similarityGroupId) {
+      // 从相似组进入，获取相似组的选中图片数量
+      const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+      currentSelectedCount = selectedImages.length;
+    } else if (normalizedCategory) {
+      currentSelectedCount = selectedCountsByCategory[normalizedCategory] ?? 0;
+    } else if (city) {
+      currentSelectedCount = selectedCountsByCity[city] ?? 0;
+    } else {
+      currentSelectedCount = 0;
+    }
     
     console.log(`🔄 HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
-    console.log(`🔍 选中统计详情:`, selectedCountsByCategory);
+    console.log(`🔍 分类选中统计详情:`, selectedCountsByCategory);
+    console.log(`🔍 城市选中统计详情:`, selectedCountsByCity);
     console.log(`🔍 查找分类 "${normalizedCategory}" 的选中数量:`, selectedCountsByCategory[normalizedCategory]);
+    console.log(`🔍 查找城市 "${city}" 的选中数量:`, selectedCountsByCity[city]);
     console.log(`🔍 所有分类的选中数量:`, Object.entries(selectedCountsByCategory).map(([cat, count]) => `${cat}: ${count}`).join(', '));
+    console.log(`🔍 所有城市的选中数量:`, Object.entries(selectedCountsByCity).map(([cityName, count]) => `${cityName}: ${count}`).join(', '));
     
     return (
     <View style={styles.header}>
@@ -748,7 +810,7 @@ const CategoryScreen = ({
         )}
       </View>
     );
-  }, [city, category, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, viewMode]);
+  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, viewMode]);
 
   // 懒加载图片容器组件
   const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress }) => {
