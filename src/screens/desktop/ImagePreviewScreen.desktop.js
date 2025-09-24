@@ -78,10 +78,6 @@ const ImagePreviewScreen = ({
   city = null,
   similarityGroupId = null
 }) => {
-  console.log('🚀 ImagePreviewScreen 组件开始渲染');
-  console.log('📸 接收到的图片ID:', imageId);
-  console.log('📸 接收到的route参数:', route);
-  console.log('📸 接收到的props参数:', { category, city, similarityGroupId, fromScreen });
   
   // 直接从URL参数获取图片ID
   const getImageIdFromURL = () => {
@@ -93,7 +89,6 @@ const ImagePreviewScreen = ({
   };
   
   const finalImageId = imageId || route.params?.imageId || getImageIdFromURL();
-  console.log('📸 最终使用的图片ID:', finalImageId);
   const [currentImage, setCurrentImage] = useState(null);
   const [imageDimensions, setImageDimensions] = useState(null);
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
@@ -154,32 +149,26 @@ const ImagePreviewScreen = ({
       let contextValue = '';
       
       // 根据页面来源决定加载方式
-      console.log('🔍 上下文判断参数:', { fromScreen, similarityGroupId, city, category });
-      
       // 如果props中的参数都是null，尝试从图片对象本身获取上下文信息
       let actualCategory = category;
       let actualCity = city;
       let actualSimilarityGroupId = similarityGroupId;
       
       if (!actualCategory && !actualCity && !actualSimilarityGroupId && currentImageData) {
-        console.log('🔍 从图片对象获取上下文信息:', currentImageData);
         actualCategory = currentImageData.category;
         actualCity = currentImageData.city;
         actualSimilarityGroupId = currentImageData.similarityGroupId;
-        console.log('🔍 提取的上下文信息:', { actualCategory, actualCity, actualSimilarityGroupId });
       }
       
       if (fromScreen === 'Home') {
         // 从HomeScreen的最近照片进入，加载最近照片列表
         contextType = '最近照片';
         contextValue = 'Home';
-        console.log(`📸 从HomeScreen进入，加载最近照片列表用于导航`);
         images = await UnifiedDataService.readRecentImages(50); // 加载最近50张照片
       } else if (actualSimilarityGroupId) {
         // 从相似组进入
         contextType = '相似组';
         contextValue = actualSimilarityGroupId;
-        console.log(`📸 加载相似组 ${actualSimilarityGroupId} 的所有图片用于导航`);
         const groupData = await UnifiedDataService.getSimilarityGroupImages(actualSimilarityGroupId);
         images = groupData.images || [];
         // 过滤掉tobecleaned分类的照片
@@ -188,7 +177,6 @@ const ImagePreviewScreen = ({
         // 从城市进入
         contextType = '城市';
         contextValue = actualCity;
-        console.log(`📸 加载城市 ${actualCity} 的所有图片用于导航`);
         images = await UnifiedDataService.readImagesByLocation(actualCity, null);
         // 过滤掉tobecleaned分类的照片
         images = images.filter(img => img.category !== 'tobecleaned');
@@ -196,10 +184,8 @@ const ImagePreviewScreen = ({
         // 从分类进入
         contextType = '分类';
         contextValue = actualCategory;
-        console.log(`📸 加载分类 ${actualCategory} 的所有图片用于导航`);
         images = await UnifiedDataService.readImagesByCategory(actualCategory);
       } else {
-        console.log('❌ 无法确定图片上下文，无法加载导航图片');
         setCategoryImages([]);
         setCurrentImageIndex(-1);
         return;

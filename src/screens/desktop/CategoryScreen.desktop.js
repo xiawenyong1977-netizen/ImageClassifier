@@ -150,16 +150,6 @@ const CategoryScreen = ({
   // 优先使用 prop 中的 similarityGroupId，然后是 route.params.similarityGroupId
   const similarityGroupId = propSimilarityGroupId || route?.params?.similarityGroupId;
   
-  // 调试日志
-  console.log('🔍 CategoryScreen 接收到的参数:', { 
-    propCategory, 
-    propCity, 
-    propSimilarityGroupId,
-    category, 
-    city, 
-    similarityGroupId,
-    forceRefresh 
-  });
   
   // 从统一数据服务获取数据
   const [allImages, setAllImages] = useState([]);
@@ -548,11 +538,6 @@ const CategoryScreen = ({
         similarityGroupId
       };
       
-      console.log('🔍 CategoryScreen handleImagePress 完全不变地传递screenProps:', {
-        screenProps: { category, city, similarityGroupId },
-        fromScreen,
-        imageId: image.id
-      });
       
       navigation.onImagePress(image, fromScreen, contextProps);
     }

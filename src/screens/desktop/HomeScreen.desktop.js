@@ -666,11 +666,7 @@ const HomeScreen = () => {
               <CategoryScreen 
                 {...screenProps} 
                 forceRefresh={categoryDataChanged}
-                // 调试日志
-                onDataChange={() => {
-                  console.log('🔍 CategoryScreen screenProps:', screenProps);
-                  setCategoryDataChanged(true);
-                }}
+                onDataChange={() => setCategoryDataChanged(true)}
                 onBack={() => {
                   setCurrentScreen('Home');
                   console.log('🏠 从分类页面返回，重新加载数据');
@@ -678,7 +674,6 @@ const HomeScreen = () => {
                 }}
                 navigation={{
                   onImagePress: (image, fromScreen, contextProps) => {
-                    console.log('🔍 CategoryScreen onImagePress 参数:', { image, fromScreen, contextProps, screenProps });
                     // 直接使用CategoryScreen传递的参数，不要使用screenProps
                     handleImagePress(image, fromScreen, contextProps);
                   }
@@ -695,10 +690,7 @@ const HomeScreen = () => {
           <View style={styles.screenContainer}>
             {ImagePreviewScreen ? (
               <ImagePreviewScreen 
-                onDataChange={() => {
-                  console.log('🔍 ImagePreviewScreen screenProps:', screenProps);
-                  setCategoryDataChanged(true);
-                }}
+                onDataChange={() => setCategoryDataChanged(true)}
                 onBack={() => {
                   console.log('🔙 ImagePreview 返回按钮被点击');
                   
@@ -710,7 +702,6 @@ const HomeScreen = () => {
                   const city = urlParams.get('city');
                   const similarityGroupId = urlParams.get('similarityGroupId');
                   
-                  console.log('🔙 从URL参数获取的上下文:', { fromScreen, imageId, category, city, similarityGroupId });
                   
                   if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City') {
                     console.log('🔙 从分类/相似组/城市页面返回，图片ID:', imageId);
