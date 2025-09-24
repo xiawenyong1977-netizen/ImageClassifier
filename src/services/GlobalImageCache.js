@@ -10,7 +10,8 @@ class GlobalImageCache {
       cityCounts: {},
       recentImages: [],
       selectedCategoryCounts: {}, // 选中图片的分类统计
-      selectedCityCounts: {} // 选中图片的城市统计
+      selectedCityCounts: {}, // 选中图片的城市统计
+      selectedSimilarityGroupCounts: {} // 选中图片的相似组统计
     };
     
     // ID到索引的映射，用于快速查找
@@ -362,12 +363,19 @@ class GlobalImageCache {
     const category = this._normalizeCategoryId(image.category);
     this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
     
-    console.log(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}`);
+    console.log(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}, similarityGroupIndex: ${image.similarityGroupIndex}`);
     if (image.city) {
       this.cache.selectedCityCounts[image.city] = (this.cache.selectedCityCounts[image.city] || 0) + 1;
       console.log(`🔍 城市选中统计更新: ${image.city} = ${this.cache.selectedCityCounts[image.city]}`);
     } else {
       console.log(`⚠️ 图片 ${image.id} 没有城市信息，跳过城市统计更新`);
+    }
+    
+    if (image.similarityGroupIndex) {
+      this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] || 0) + 1;
+      console.log(`🔍 相似组选中统计更新: ${image.similarityGroupIndex} = ${this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]}`);
+    } else {
+      console.log(`⚠️ 图片 ${image.id} 没有相似组信息，跳过相似组统计更新`);
     }
   }
 
@@ -391,12 +399,20 @@ class GlobalImageCache {
         delete this.cache.selectedCityCounts[image.city];
       }
     }
+    
+    if (image.similarityGroupIndex && this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] > 0) {
+      this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]--;
+      if (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] === 0) {
+        delete this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex];
+      }
+    }
   }
 
   // 清空选中统计
   _clearSelectedStats() {
     this.cache.selectedCategoryCounts = {};
     this.cache.selectedCityCounts = {};
+    this.cache.selectedSimilarityGroupCounts = {};
   }
 
   // 重新构建选中统计
@@ -404,6 +420,7 @@ class GlobalImageCache {
     console.log('📊 开始重新计算选中统计...');
     this.cache.selectedCategoryCounts = {};
     this.cache.selectedCityCounts = {};
+    this.cache.selectedSimilarityGroupCounts = {};
     
     this.cache.allImages.forEach(img => {
       if (img.selected) {
@@ -414,12 +431,16 @@ class GlobalImageCache {
         if (img.city) {
           this.cache.selectedCityCounts[img.city] = (this.cache.selectedCityCounts[img.city] || 0) + 1;
         }
+        if (img.similarityGroupIndex) {
+          this.cache.selectedSimilarityGroupCounts[img.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[img.similarityGroupIndex] || 0) + 1;
+        }
       }
     });
     
     console.log('📊 选中统计重建完成:', {
       selectedCategoryCounts: this.cache.selectedCategoryCounts,
-      selectedCityCounts: this.cache.selectedCityCounts
+      selectedCityCounts: this.cache.selectedCityCounts,
+      selectedSimilarityGroupCounts: this.cache.selectedSimilarityGroupCounts
     });
   }
 
@@ -431,6 +452,11 @@ class GlobalImageCache {
   // 获取选中图片的城市统计
   getSelectedCityCounts() {
     return { ...this.cache.selectedCityCounts };
+  }
+
+  // 获取选中图片的相似组统计
+  getSelectedSimilarityGroupCounts() {
+    return { ...this.cache.selectedSimilarityGroupCounts };
   }
   
   // 删除单个图片

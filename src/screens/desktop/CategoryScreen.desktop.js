@@ -178,21 +178,24 @@ const CategoryScreen = ({
       }
       
       // 同时加载选中状态 - 根据当前模式获取对应的选中图片
-      let selectedImages;
+      let selectedImageIds = [];
       if (similarityGroupId) {
-        // 从相似组进入，获取相似组的选中图片
-        selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+        // 从相似组进入，检查当前相似组图片中哪些被选中
+        selectedImageIds = images.filter(img => img.selected === true).map(img => img.id);
+        console.log(`📊 相似组选中状态: ${selectedImageIds.length} 张图片被选中`);
       } else if (city) {
         // 从城市进入，获取城市的选中图片
-        selectedImages = await UnifiedDataService.getSelectedImages(null, city);
+        const selectedImages = await UnifiedDataService.getSelectedImages(null, city);
+        selectedImageIds = selectedImages.map(img => img.id);
       } else if (category) {
         // 从分类进入，获取分类的选中图片
-        selectedImages = await UnifiedDataService.getSelectedImages(category, null);
+        const selectedImages = await UnifiedDataService.getSelectedImages(category, null);
+        selectedImageIds = selectedImages.map(img => img.id);
       } else {
         // 其他情况，获取所有选中图片
-        selectedImages = await UnifiedDataService.getSelectedImages();
+        const selectedImages = await UnifiedDataService.getSelectedImages();
+        selectedImageIds = selectedImages.map(img => img.id);
       }
-      const selectedImageIds = selectedImages.map(img => img.id);
       
       console.log(`📊 选中状态: ${selectedImageIds.length} 张图片被选中`);
       
@@ -686,17 +689,17 @@ const CategoryScreen = ({
     // 使用UnifiedDataService获取当前分类中选中的图片数量
     const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
     const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
+    const selectedCountsBySimilarityGroup = UnifiedDataService.getSelectedCountsBySimilarityGroup();
     let currentSelectedCount;
     if (similarityGroupId) {
       // 从相似组进入，获取相似组的选中图片数量
-      const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
-      currentSelectedCount = selectedImages.length;
+      currentSelectedCount = selectedCountsBySimilarityGroup[similarityGroupId] ?? 0;
     } else if (normalizedCategory) {
       currentSelectedCount = selectedCountsByCategory[normalizedCategory] ?? 0;
     } else if (city) {
       currentSelectedCount = selectedCountsByCity[city] ?? 0;
     } else {
-      currentSelectedCount = 0;
+      currentSelectedCount = selectedImages.length;
     }
     
     console.log(`🔄 HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);

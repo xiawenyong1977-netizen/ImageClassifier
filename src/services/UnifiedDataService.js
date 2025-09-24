@@ -688,6 +688,23 @@ class UnifiedDataService {
   }
 
   /**
+   * 获取按相似组的选中状态统计
+   * 返回每个相似组的选中图片数量
+   */
+  getSelectedCountsBySimilarityGroup() {
+    try {
+      // 直接使用预计算的统计，避免重复计算
+      const similarityGroupCounts = this.imageCache.getSelectedSimilarityGroupCounts();
+      console.log('📊 按相似组选中统计:', similarityGroupCounts);
+      return similarityGroupCounts;
+      
+    } catch (error) {
+      console.error('❌ 获取按相似组选中统计失败:', error);
+      return {};
+    }
+  }
+
+  /**
    * 获取选中图片的详细信息统计
    * 包括总数、按分类、按城市、按时间等统计
    */
