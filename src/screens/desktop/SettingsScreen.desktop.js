@@ -355,6 +355,30 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           <View style={styles.placeholder} />
         </View>
 
+        {/* Actions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>分类操作</Text>
+          
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleSmartScan}>
+            <Text style={styles.actionButtonText}>🤖 开始智能分类</Text>
+            <Text style={styles.actionButtonDescription}>
+              扫描配置的目录并自动分类图片
+            </Text>
+          </TouchableOpacity>
+          
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleClearData}>
+            <Text style={styles.actionButtonText}>🗑️ 清空分类信息</Text>
+            <Text style={styles.actionButtonDescription}>
+              清空所有照片的分类和位置信息
+            </Text>
+          </TouchableOpacity>
+
+        </View>
 
         {/* Gallery Paths Settings */}
         <View style={styles.section}>
@@ -396,33 +420,6 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
               </View>
             ))}
           </View>
-        </View>
-
-
-
-        {/* Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>分类数据</Text>
-          
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleSmartScan}>
-            <Text style={styles.actionButtonText}>🤖 开始智能分类</Text>
-            <Text style={styles.actionButtonDescription}>
-              扫描配置的目录并自动分类图片
-            </Text>
-          </TouchableOpacity>
-          
-
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleClearData}>
-            <Text style={styles.actionButtonText}>🗑️ 清空分类信息</Text>
-            <Text style={styles.actionButtonDescription}>
-              清空所有照片的分类和位置信息
-            </Text>
-          </TouchableOpacity>
-
         </View>
 
 

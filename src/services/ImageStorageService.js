@@ -1071,6 +1071,9 @@ class ImageStorageService {
       // 清空 IndexedDB
       await this.storage.removeItem(this.storageKeys.images);
       await this.storage.removeItem(this.storageKeys.stats);
+      // 清空相似度数据
+      await this.storage.removeItem(this.storageKeys.similarityData);
+      await this.storage.removeItem(this.storageKeys.similarityGroupIndex);
       console.log('✅ IndexedDB 数据已清空');
       
       // 同时清空 localStorage（防止数据重新迁移）
@@ -1081,7 +1084,7 @@ class ImageStorageService {
         console.log('✅ localStorage 数据已清空');
       }
       
-      console.log('✅ 所有存储数据已清空');
+      console.log('✅ 所有存储数据已清空（包括相似度数据）');
     } catch (error) {
       console.error('Failed to clear all images:', error);
       throw error;
