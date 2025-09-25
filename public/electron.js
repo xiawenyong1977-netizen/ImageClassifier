@@ -1,5 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const path = require('path');
+const { exec } = require('child_process');
+const fs = require('fs');
 const isDev = process.env.NODE_ENV === 'development';
 
 // 简单的日志系统
@@ -23,6 +25,36 @@ const logger = {
   // 禁用应用菜单
   Menu.setApplicationMenu(null);
 
+// 检查并安装 Visual C++ Redistributable
+function checkAndInstallVCRedist() {
+  if (isDev) return; // 开发环境跳过
+  
+  const redistPath = path.join(process.resourcesPath, 'redist');
+  const vcRedistPath = path.join(redistPath, 'vc_redist.x64.exe');
+  
+  if (fs.existsSync(vcRedistPath)) {
+    logger.info('检查 Visual C++ Redistributable...');
+    
+    // 检查是否已安装
+    exec('reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64"', (error) => {
+      if (error) {
+        logger.info('Visual C++ Redistributable 未安装，正在安装...');
+        
+        // 静默安装
+        exec(`"${vcRedistPath}" /quiet /norestart`, (installError) => {
+          if (installError) {
+            logger.warn('Visual C++ Redistributable 安装失败:', installError);
+          } else {
+            logger.info('Visual C++ Redistributable 安装成功');
+          }
+        });
+      } else {
+        logger.info('Visual C++ Redistributable 已安装');
+      }
+    });
+  }
+}
+
 function createWindow() {
   // 创建浏览器窗口
   const mainWindow = new BrowserWindow({
@@ -40,9 +72,13 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'),
     title: '芯图管家-智能分类，便捷管理，仅你可见',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
-    titleBarStyle: 'default',  // 使用默认标题栏
+    titleBarStyle: 'hiddenInset',  // 使用更大的标题栏样式
     frame: true,  // 显示窗口框架
-    // 移除 titleBarOverlay，使用原生标题栏
+    titleBarOverlay: {
+      color: '#2f3241',
+      symbolColor: '#74b1be',
+      height: 60  // 设置更大的标题栏高度
+    },
     resizable: true,
     minimizable: true,
     maximizable: true,
@@ -52,7 +88,7 @@ function createWindow() {
   // 加载应用
   const startUrl = isDev 
     ? 'http://localhost:3000' 
-    : `file://${path.join(process.cwd(), 'build/index.html')}`;
+    : `file://${path.join(__dirname, 'index.html')}`;
   
   mainWindow.loadURL(startUrl);
 
@@ -193,6 +229,7 @@ app.commandLine.appendSwitch('--disable-renderer-backgrounding');
 
 // 当Electron完成初始化并准备创建浏览器窗口时调用此方法
 app.whenReady().then(() => {
+  checkAndInstallVCRedist(); // 检查并安装运行库
   setupIpcHandlers();
   createWindow();
 });

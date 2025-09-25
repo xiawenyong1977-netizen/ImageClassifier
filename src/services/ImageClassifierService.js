@@ -70,7 +70,7 @@ class ImageClassifierService {
       
       // 根据环境选择模型路径
       const isWebEnvironment = typeof window !== 'undefined' && window.location;
-      const isDevelopment = isWebEnvironment && window.location.hostname === 'localhost';
+      const isDevelopment = isWebEnvironment && window.location.hostname === 'localhost' && window.location.port === '3000';
       const modelBasePath = isDevelopment ? 'http://localhost:3000/models' : './models';
 
       // 初始化模型配置

@@ -97,8 +97,14 @@ class ConfigService {
         href: window.location.href
       });
       
-      // 直接使用 localhost:3000，因为我们已经验证这个路径可以工作
-      return 'http://localhost:3000/initialSettings.json';
+      // 检查是否是开发环境
+      if (window.location.hostname === 'localhost' && window.location.port === '3000') {
+        // 开发环境
+        return 'http://localhost:3000/initialSettings.json';
+      } else {
+        // 生产环境 - 使用相对路径
+        return './initialSettings.json';
+      }
     }
     // 在纯Node.js环境中使用public目录下的文件
     return './public/initialSettings.json';
