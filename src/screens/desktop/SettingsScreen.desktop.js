@@ -3,13 +3,14 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityI
 import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
+import ImageStorageService from '../../services/ImageStorageService';
 
 const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmartScan }) => {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
-  const [galleryPaths, setGalleryPaths] = useState(['D:\\Pictures']); // 默认路径
+  const [galleryPaths, setGalleryPaths] = useState([]); // 默认路径，将在loadSettings中设置
   const [newPath, setNewPath] = useState(''); // 新路径输入
-  const [originalPaths, setOriginalPaths] = useState(['D:\\Pictures']); // 原始路径，用于比较变更
+  const [originalPaths, setOriginalPaths] = useState([]); // 原始路径，用于比较变更
   const [storageType, setStorageType] = useState('检测中...'); // 存储类型
   const [storageSize, setStorageSize] = useState('计算中...'); // 存储大小
 
@@ -23,9 +24,15 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
       const savedSettings = await UnifiedDataService.readSettings();
       
       // 从统一设置中加载照片目录配置
-      if (savedSettings.scanPaths) {
+      if (savedSettings.scanPaths && savedSettings.scanPaths.length > 0) {
         setGalleryPaths(savedSettings.scanPaths);
         setOriginalPaths([...savedSettings.scanPaths]); // 记录原始路径用于比较变更
+      } else {
+        // 如果没有保存的路径，使用默认路径
+        const imageStorageService = new ImageStorageService();
+        const defaultPaths = imageStorageService.getDefaultScanPaths();
+        setGalleryPaths(defaultPaths);
+        setOriginalPaths([...defaultPaths]);
       }
       
       

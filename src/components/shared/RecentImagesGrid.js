@@ -15,11 +15,23 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
   }
 
   const handleImageError = (imageId) => {
-    setImageErrors(prev => ({ ...prev, [imageId]: true }));
+    setImageErrors(prev => {
+      // 只有在状态真正变化时才更新，避免无限循环
+      if (prev[imageId] === true) {
+        return prev;
+      }
+      return { ...prev, [imageId]: true };
+    });
   };
 
   const handleImageLoad = (imageId) => {
-    setImageErrors(prev => ({ ...prev, [imageId]: false }));
+    setImageErrors(prev => {
+      // 只有在状态真正变化时才更新，避免无限循环
+      if (prev[imageId] === false) {
+        return prev;
+      }
+      return { ...prev, [imageId]: false };
+    });
   };
 
   return (

@@ -136,24 +136,25 @@ const styles = StyleSheet.create({
   },
   settingsButton: {
     position: 'fixed', // 使用fixed定位，相对于视口固定
-    bottom: 8, // 距离底部8px
-    right: 8,  // 距离右边8px
-    width: 40,
-    height: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 20,
+    bottom: 24, // 距离底部24px（稍微靠上一点）
+    right: 24,  // 距离右边24px
+    width: 48,  // 保持原来的大小
+    height: 48, // 保持原来的大小
+    backgroundColor: '#2196F3', // 蓝色背景，更醒目
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25, // 稍微深一点的阴影
     shadowRadius: 4,
     elevation: 5,
     zIndex: 9999, // 更高的层级
+    cursor: 'pointer',
   },
   settingsButtonText: {
-    fontSize: 18,
-    color: '#333',
+    fontSize: 20, // 保持原来的图标大小
+    color: '#fff', // 白色图标，在蓝色背景上更清晰
     fontWeight: 'bold',
   },
   loadingContainer: {

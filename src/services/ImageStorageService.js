@@ -713,23 +713,75 @@ class ImageStorageService {
       
       logger.debug(`🔄 更新图片分类: ${imageId} -> ${newCategory}`);
       
-      // 获取完整图片数据（包含检测结果）
-      const existingImages = await this._getFullImages();
-      const imageIndex = existingImages.findIndex(img => img.id === imageId);
+      // 使用IndexedDB的单条记录更新，避免全量读写丢失数据
+      // 确保storage已初始化
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB未初始化');
+        throw new Error('IndexedDB未初始化');
+      }
       
-      // 只更新分类相关字段，保留所有其他数据
-      existingImages[imageIndex].category = newCategory;
-      existingImages[imageIndex].confidence = newConfidence;
-      existingImages[imageIndex].updatedAt = new Date().toISOString();
-      
-      // 保存到数据库
-      await this.storage.setItem(this.storageKeys.images, existingImages);
-      
-      // 更新统计信息
-      await this.updateStats();
-      
-      logger.debug(`✅ 图片分类更新成功: ${imageId} -> ${newCategory}`);
-      return existingImages[imageIndex];
+      return new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readwrite');
+        const store = transaction.objectStore('images');
+        
+        // 直接使用id主键查找图片（id是keyPath，不需要索引）
+        const getRequest = store.get(imageId);
+        
+        getRequest.onsuccess = async () => {
+          const existingImage = getRequest.result;
+          
+          if (!existingImage) {
+            logger.error(`❌ 未找到图片: ${imageId}`);
+            reject(new Error(`图片不存在: ${imageId}`));
+            return;
+          }
+          
+          logger.debug(`📋 原始图片有检测结果:`, {
+            hasIdCardDetections: !!existingImage.idCardDetections,
+            hasGeneralDetections: !!existingImage.generalDetections,
+            hasMobileNetV3Detections: !!existingImage.mobileNetV3Detections
+          });
+          
+          // 只更新分类相关字段，保留所有检测结果和其他数据
+          const updatedImage = {
+            ...existingImage,
+            category: newCategory,
+            confidence: newConfidence,
+            updatedAt: new Date().toISOString()
+          };
+          
+          // 使用put更新记录（基于URI主键）
+          const putRequest = store.put(updatedImage);
+          
+          putRequest.onsuccess = async () => {
+            logger.debug(`✅ 图片分类更新成功: ${imageId} -> ${newCategory}`);
+            
+            // 更新统计信息
+            try {
+              await this.updateStats();
+            } catch (statsError) {
+              logger.warn('统计信息更新失败:', statsError);
+            }
+            
+            resolve(updatedImage);
+          };
+          
+          putRequest.onerror = () => {
+            logger.error(`❌ IndexedDB put失败:`, putRequest.error);
+            reject(putRequest.error);
+          };
+        };
+        
+        getRequest.onerror = () => {
+          logger.error(`❌ IndexedDB get失败:`, getRequest.error);
+          reject(getRequest.error);
+        };
+        
+        transaction.onerror = () => {
+          logger.error(`❌ IndexedDB 事务失败:`, transaction.error);
+          reject(transaction.error);
+        };
+      });
       
     } catch (error) {
       logger.error(' 更新图片分类失败:', error);
@@ -974,7 +1026,31 @@ class ImageStorageService {
   // 获取默认扫描路径（平台相关）
   getDefaultScanPaths() {
     if (Platform.OS === 'web') {
-      return ['D:\\Pictures'];
+      // Web环境（Electron）：使用Electron API获取用户目录
+      try {
+        // 只在Electron环境中运行时动态加载os模块
+        if (typeof window !== 'undefined' && window.require) {
+          try {
+            const os = window.require('os');
+            const homeDir = os.homedir();
+            return [
+              `${homeDir}\\Pictures`,
+              `${homeDir}\\Documents`,
+              `${homeDir}\\Desktop`,
+              `${homeDir}\\Downloads`
+            ];
+          } catch (requireError) {
+            console.warn('Failed to require os module:', requireError);
+            return ['C:\\Users\\Public\\Pictures'];
+          }
+        } else {
+          // 如果Electron不可用，使用默认路径
+          return ['C:\\Users\\Public\\Pictures'];
+        }
+      } catch (error) {
+        console.warn('Failed to get user home directory:', error);
+        return ['C:\\Users\\Public\\Pictures'];
+      }
     } else {
       return [
         '/storage/emulated/0/DCIM/Camera',
@@ -1085,40 +1161,75 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      const allImages = await this.getImages();
-      const imageIndex = allImages.findIndex(img => img.id === imageId);
+      logger.debug(`🗑️ 删除图片: ${imageId}`);
       
-      if (imageIndex === -1) {
-        throw new Error('Image not found');
+      // 使用IndexedDB的单条记录删除，避免全量读写丢失数据
+      // 确保storage已初始化
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB未初始化');
+        throw new Error('IndexedDB未初始化');
       }
       
-      const image = allImages[imageIndex];
-      logger.debug(`Deleting image: ${image.fileName}`);
+      // 先删除数据库记录
+      const result = await new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readwrite');
+        const store = transaction.objectStore('images');
+        
+        // 直接使用id主键查找图片（id是keyPath，不需要索引）
+        const getRequest = store.get(imageId);
+        
+        getRequest.onsuccess = () => {
+          const existingImage = getRequest.result;
+          
+          if (!existingImage) {
+            logger.error(`❌ 未找到图片: ${imageId}`);
+            reject(new Error(`图片不存在: ${imageId}`));
+            return;
+          }
+          
+          logger.debug(`🗑️ 找到要删除的图片: ${existingImage.fileName}`);
+          
+          // 使用delete删除记录（基于id主键）
+          const deleteRequest = store.delete(imageId);
+          
+          deleteRequest.onsuccess = () => {
+            logger.debug(`✅ 图片删除成功: ${existingImage.fileName}`);
+            resolve({
+              success: true,
+              message: 'Image deleted successfully',
+              image: existingImage
+            });
+          };
+          
+          deleteRequest.onerror = () => {
+            logger.error(`❌ 图片删除失败: ${deleteRequest.error}`);
+            reject(deleteRequest.error);
+          };
+        };
+        
+        getRequest.onerror = () => {
+          logger.error(`❌ 查找图片失败: ${getRequest.error}`);
+          reject(getRequest.error);
+        };
+      });
       
-      // Try to delete physical file
+      // 删除物理文件（在事务完成后）
       try {
-        if (image.uri && image.uri.startsWith('file://')) {
-          const filePath = image.uri.replace('file://', '');
+        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
+          const filePath = result.image.uri.replace('file://', '');
           const exists = await RNFS.exists(filePath);
           if (exists) {
             await RNFS.unlink(filePath);
-            logger.debug(`Physical file deleted: ${filePath}`);
+            logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
           }
         }
       } catch (fileError) {
         console.warn('Failed to delete physical file:', fileError);
       }
       
-      // Remove from storage
-      allImages.splice(imageIndex, 1);
-      await this.storage.setItem(this.storageKeys.images, allImages);
-      
-      // Update statistics
+      // 更新统计信息（在事务完成后）
       await this.updateStats();
       
-      logger.debug(`Image deleted successfully: ${image.fileName}`);
-
-
       return {
         success: true,
         message: 'Image deleted successfully'
@@ -1184,21 +1295,15 @@ class ImageStorageService {
       console.log('🗑️ deleteImageWithResult 开始执行，图片ID:', imageId);
       await this.ensureInitialized();
       
-      const allImages = await this.getImages();
-      console.log('🗑️ 当前图片总数:', allImages.length);
-      const imageIndex = allImages.findIndex(img => img.id === imageId);
-      console.log('🗑️ 图片索引:', imageIndex);
-      
-      if (imageIndex === -1) {
-        console.log('🗑️ 图片未找到');
+      // 使用IndexedDB的单条记录删除，避免全量读写丢失数据
+      // 确保storage已初始化
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB未初始化');
         return {
           success: false,
-          message: 'Image not found'
+          message: 'IndexedDB未初始化'
         };
       }
-      
-      const image = allImages[imageIndex];
-      logger.debug(`Deleting image: ${image.fileName}`);
       
       // 初始化进度
       if (onProgress) {
@@ -1209,15 +1314,71 @@ class ImageStorageService {
         });
       }
       
-      // Try to delete physical file
+      // 先删除数据库记录
+      const result = await new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readwrite');
+        const store = transaction.objectStore('images');
+        
+        // 直接使用id主键查找图片（id是keyPath，不需要索引）
+        const getRequest = store.get(imageId);
+        
+        getRequest.onsuccess = () => {
+          const existingImage = getRequest.result;
+          
+          if (!existingImage) {
+            console.log('🗑️ 图片未找到');
+            resolve({
+              success: false,
+              message: 'Image not found'
+            });
+            return;
+          }
+          
+          logger.debug(`🗑️ 找到要删除的图片: ${existingImage.fileName}`);
+          
+          // 使用delete删除记录（基于id主键）
+          const deleteRequest = store.delete(imageId);
+          
+          deleteRequest.onsuccess = () => {
+            logger.debug(`✅ 图片删除成功: ${existingImage.fileName}`);
+            resolve({
+              success: true,
+              message: 'Image deleted successfully',
+              image: existingImage
+            });
+          };
+          
+          deleteRequest.onerror = () => {
+            logger.error(`❌ 图片删除失败: ${deleteRequest.error}`);
+            resolve({
+              success: false,
+              message: `Failed to delete image: ${deleteRequest.error.message}`
+            });
+          };
+        };
+        
+        getRequest.onerror = () => {
+          logger.error(`❌ 查找图片失败: ${getRequest.error}`);
+          resolve({
+            success: false,
+            message: `Failed to find image: ${getRequest.error.message}`
+          });
+        };
+      });
+      
+      if (!result.success) {
+        return result;
+      }
+      
+      // 删除物理文件（在事务完成后）
       let fileDeleted = false;
       try {
-        if (image.uri && image.uri.startsWith('file://')) {
-          const filePath = image.uri.replace('file://', '');
+        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
+          const filePath = result.image.uri.replace('file://', '');
           const exists = await RNFS.exists(filePath);
           if (exists) {
             await RNFS.unlink(filePath);
-            logger.debug(`Physical file deleted: ${filePath}`);
+            logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
             fileDeleted = true;
           }
         }
@@ -1229,11 +1390,7 @@ class ImageStorageService {
         };
       }
       
-      // Remove from storage
-      allImages.splice(imageIndex, 1);
-      await this.storage.setItem(this.storageKeys.images, allImages);
-      
-      // Update statistics
+      // 更新统计信息（在事务完成后）
       await this.updateStats();
       
       // 更新最终进度
@@ -1245,7 +1402,6 @@ class ImageStorageService {
         });
       }
       
-      logger.debug(`Image deleted successfully: ${image.fileName}`);
       return {
         success: true,
         message: 'Image deleted successfully'
@@ -1578,24 +1734,75 @@ class ImageStorageService {
       
       logger.debug(`Starting to remove ${urisToRemove.length} images by URIs...`);
       
+      // 使用IndexedDB的单条记录删除，避免全量读写丢失数据
+      // 确保storage已初始化
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB未初始化');
+        throw new Error('IndexedDB未初始化');
+      }
+      
       const allImages = await this.getImages();
       const urisSet = new Set(urisToRemove);
+      const imagesToRemove = allImages.filter(img => urisSet.has(img.uri));
       
-      // 过滤出需要保留的图片
-      const remainingImages = allImages.filter(img => !urisSet.has(img.uri));
+      logger.debug(`Found ${imagesToRemove.length} images to remove out of ${allImages.length} total`);
       
-      logger.debug(`Found ${allImages.length} total images, removing ${allImages.length - remainingImages.length} images`);
+      // 在一个事务中批量删除图片记录
+      const result = await new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readwrite');
+        const store = transaction.objectStore('images');
+        
+        let removedCount = 0;
+        let failedCount = 0;
+        let completedCount = 0;
+        
+        // 批量发起删除请求
+        imagesToRemove.forEach((image) => {
+          const deleteRequest = store.delete(image.id);
+          
+          deleteRequest.onsuccess = () => {
+            logger.debug(`✅ 图片记录已删除: ${image.fileName}`);
+            removedCount++;
+            completedCount++;
+            
+            // 所有删除操作完成后 resolve
+            if (completedCount === imagesToRemove.length) {
+              resolve({ removedCount, failedCount });
+            }
+          };
+          
+          deleteRequest.onerror = () => {
+            logger.error(`❌ 图片记录删除失败: ${deleteRequest.error}`);
+            failedCount++;
+            completedCount++;
+            
+            // 所有删除操作完成后 resolve
+            if (completedCount === imagesToRemove.length) {
+              resolve({ removedCount, failedCount });
+            }
+          };
+        });
+        
+        // 如果没有要删除的图片
+        if (imagesToRemove.length === 0) {
+          resolve({ removedCount: 0, failedCount: 0 });
+        }
+        
+        transaction.onerror = () => {
+          reject(transaction.error);
+        };
+      });
       
-      // 保存更新后的图片列表
-      await this.storage.setItem(this.storageKeys.images, remainingImages);
-      
-      // 更新统计信息
+      // 更新统计信息（在事务完成后）
       await this.updateStats();
       
-      logger.debug(`Successfully removed ${allImages.length - remainingImages.length} images`);
+      logger.debug(`Successfully removed ${result.removedCount} images, ${result.failedCount} failed`);
+      
       return { 
         success: true, 
-        removedCount: allImages.length - remainingImages.length 
+        removedCount: result.removedCount,
+        failedCount: result.failedCount,
+        totalRequested: urisToRemove.length
       };
       
     } catch (error) {

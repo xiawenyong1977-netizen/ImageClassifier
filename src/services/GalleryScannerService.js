@@ -650,11 +650,14 @@ class GalleryScannerService {
 
         } else if (this.isImageFile(item.name)) {
 
+          // 规范化路径：将反斜杠转换为正斜杠（Windows路径兼容）
+          const normalizedPath = item.path.replace(/\\/g, '/');
+
           const fileUri = Platform.OS === 'web' 
 
-            ? `file:///${item.path}` 
+            ? `file:///${normalizedPath}` 
 
-            : `file://${item.path}`;
+            : `file://${normalizedPath}`;
 
           
 

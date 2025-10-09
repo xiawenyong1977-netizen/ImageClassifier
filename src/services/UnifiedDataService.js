@@ -1178,7 +1178,12 @@ class UnifiedDataService {
           return null;
         })
         .filter(img => img !== null) // 过滤掉不存在的图片
-        .sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)); // 按相似度排序
+        .sort((a, b) => {
+          // 按时间排序（最新的在前）
+          const timeA = a.takenAt || a.timestamp || a.createdAt || a.modifiedAt || 0;
+          const timeB = b.takenAt || b.timestamp || b.createdAt || b.modifiedAt || 0;
+          return new Date(timeB) - new Date(timeA);
+        });
       
       const result = {
         groupId: group.id,

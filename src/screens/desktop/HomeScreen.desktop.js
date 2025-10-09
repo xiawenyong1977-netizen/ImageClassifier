@@ -98,6 +98,15 @@ const HomeScreen = () => {
       logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
       logger.debug('准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
       
+      // 验证和记录最近图片的URI格式
+      if (recentImagesData.length > 0) {
+        logger.debug('📷 最近图片URI示例:', recentImagesData.slice(0, 3).map(img => ({
+          id: img.id,
+          uri: img.uri,
+          fileName: img.fileName
+        })));
+      }
+      
       setRecentImages(recentImagesData);
       setCategoryCounts(categoryCountsData);
       setCityCounts(cityCountsData);
@@ -234,7 +243,10 @@ const HomeScreen = () => {
       category, 
       city: null,
       similarityGroupId: null,
-      fromScreen: 'Category'
+      fromScreen: 'Category',
+      currentImageId: null, // 清除返回时的图片ID
+      currentPage: null, // 清除返回时的页码
+      viewMode: null // 清除返回时的视图模式
     }));
   };
 
@@ -247,7 +259,10 @@ const HomeScreen = () => {
       category: null, 
       city,
       similarityGroupId: null,
-      fromScreen: 'City'
+      fromScreen: 'City',
+      currentImageId: null, // 清除返回时的图片ID
+      currentPage: null, // 清除返回时的页码
+      viewMode: null // 清除返回时的视图模式
     }));
   };
 
@@ -276,7 +291,8 @@ const HomeScreen = () => {
       category: additionalProps.category || null,
       city: additionalProps.city || null,
       similarityGroupId: additionalProps.similarityGroupId || null,
-      fromScreen: fromScreen
+      fromScreen: fromScreen,
+      currentImageId: null // 清除之前的currentImageId
     }));
     
     // 直接设置URL参数，不依赖screenProps
@@ -293,6 +309,12 @@ const HomeScreen = () => {
     }
     if (additionalProps.similarityGroupId) {
       urlParams.set('similarityGroupId', additionalProps.similarityGroupId);
+    }
+    if (additionalProps.currentPage !== undefined && additionalProps.currentPage !== null) {
+      urlParams.set('currentPage', additionalProps.currentPage.toString());
+    }
+    if (additionalProps.viewMode) {
+      urlParams.set('viewMode', additionalProps.viewMode);
     }
     
     // 更新浏览器URL
@@ -694,30 +716,39 @@ const HomeScreen = () => {
             {ImagePreviewScreen ? (
               <ImagePreviewScreen 
                 onDataChange={() => setCategoryDataChanged(true)}
-                onBack={() => {
-                  logger.debug('ImagePreview 返回按钮被点击');
+                onBack={(returnedImageId) => {
+                  logger.debug('ImagePreview 返回按钮被点击，返回的图片ID:', returnedImageId);
                   
                   // 从URL参数获取来源页面和图片ID
                   const urlParams = new URLSearchParams(window.location.search);
                   const fromScreen = urlParams.get('fromScreen') || 'Home';
-                  const imageId = urlParams.get('imageId');
+                  const imageId = returnedImageId || urlParams.get('imageId');
                   const category = urlParams.get('category');
                   const city = urlParams.get('city');
                   const similarityGroupId = urlParams.get('similarityGroupId');
+                  const savedCurrentPage = urlParams.get('currentPage');
+                  const savedViewMode = urlParams.get('viewMode');
                   
                   
                   if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City') {
-                    logger.debug('从分类/相似组/城市页面返回，图片ID:', imageId);
+                    logger.debug('从分类/相似组/城市页面返回', { 
+                      imageId, 
+                      currentPage: savedCurrentPage, 
+                      viewMode: savedViewMode 
+                    });
+                    
                     setCurrentScreen('Category');
                     
-                    // 恢复上下文信息到screenProps
+                    // 恢复上下文信息到screenProps，包括页码、视图模式和当前图片ID
                     setScreenProps(prev => ({
                       ...prev,
                       category: category || null,
                       city: city || null,
                       similarityGroupId: similarityGroupId || null,
                       fromScreen: fromScreen,
-                      scrollToImageId: imageId || null
+                      currentImageId: imageId || null, // 传递当前图片ID
+                      currentPage: savedCurrentPage ? parseInt(savedCurrentPage, 10) : null, // 恢复页码
+                      viewMode: savedViewMode || null // 恢复视图模式
                     }));
                   } else {
                     logger.debug('从首页返回');

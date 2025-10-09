@@ -382,22 +382,22 @@ const ImagePreviewScreen = ({
         ]
       );
     } else {
-      // 如果当前分类不是tobecleaned，标记为待清理
-      logger.debug('当前分类不是tobecleaned，标记为待清理...');
+      // 如果当前分类不是tobecleaned，标记为待处置
+      logger.debug('当前分类不是tobecleaned，标记为待处置...');
       Alert.alert(
-        '标记为待清理',
-        '确定要将这张图片标记为待清理吗？\n\n图片将被移动到"待清理"分类中。',
+        '标记为待处置',
+        '确定要将这张图片标记为待处置吗？\n\n图片将被移动到"待处置"分类中。',
         [
           { 
             text: '取消', 
             style: 'cancel',
-            onPress: () => logger.debug('用户取消标记为待清理')
+            onPress: () => logger.debug('用户取消标记为待处置')
           },
           {
             text: '标记',
             style: 'default',
             onPress: async () => {
-              logger.debug('用户确认标记为待清理，开始更新分类...');
+              logger.debug('用户确认标记为待处置，开始更新分类...');
               try {
                 // 更新分类为tobecleaned
                 await UnifiedDataService.updateImageCategory(
@@ -424,16 +424,16 @@ const ImagePreviewScreen = ({
                   similarityGroupType: null
                 }));
                 
-                logger.debug('标记为待清理成功');
-                Alert.alert('操作完成', '图片已标记为待清理');
+                logger.debug('标记为待处置成功');
+                Alert.alert('操作完成', '图片已标记为待处置');
                 
                 // 通知父组件数据已变化
                 if (onDataChange) {
                   onDataChange();
                 }
               } catch (error) {
-                logger.error('标记为待清理失败:', error);
-                Alert.alert('错误', '标记为待清理失败，请重试');
+                logger.error('标记为待处置失败:', error);
+                Alert.alert('错误', '标记为待处置失败，请重试');
               }
             },
           },
