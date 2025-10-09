@@ -1,8 +1,8 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, clipboard } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const fs = require('fs');
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_IS_DEV === '1' || !app.isPackaged;
 
 // 简单的日志系统
 const logger = {
@@ -64,20 +64,21 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
       enableRemoteModule: true,
+      webSecurity: false,  // 开发环境需要禁用以加载本地文件
       // GPU 相关配置，解决 GPU 状态错误
       hardwareAcceleration: false,  // 禁用硬件加速
       offscreen: false,  // 禁用离屏渲染
       backgroundThrottling: false  // 禁用后台节流
     },
-    icon: path.join(__dirname, 'icon.png'),
-    title: '芯图管家-智能分类，便捷管理，仅你可见',
+    icon: path.join(__dirname, '../icons/imageclassify.png'),  // 使用更高分辨率的图标
+    title: '芯图相册-智能分类，便捷管理，仅你可见',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
-    titleBarStyle: 'hiddenInset',  // 使用更大的标题栏样式
-    frame: true,  // 显示窗口框架
+    titleBarStyle: 'hidden',  // 隐藏原生标题栏
+    frame: true,  // 保持窗口框架
     titleBarOverlay: {
-      color: '#2f3241',
-      symbolColor: '#74b1be',
-      height: 60  // 设置更大的标题栏高度
+      color: '#2f3241',  // 标题栏背景色
+      symbolColor: '#74b1be',  // 控制按钮颜色
+      height: 60  // 标题栏高度
     },
     resizable: true,
     minimizable: true,
@@ -86,10 +87,18 @@ function createWindow() {
   });
 
   // 加载应用
+  logger.info('开发环境检测:', {
+    NODE_ENV: process.env.NODE_ENV,
+    ELECTRON_IS_DEV: process.env.ELECTRON_IS_DEV,
+    isPackaged: app.isPackaged,
+    isDev: isDev
+  });
+  
   const startUrl = isDev 
     ? 'http://localhost:3000' 
     : `file://${path.join(__dirname, 'index.html')}`;
   
+  logger.info('加载应用:', startUrl);
   mainWindow.loadURL(startUrl);
 
 
@@ -172,12 +181,103 @@ function createWindow() {
       const totalImages = stats.totalImages || 0;
       const classified = stats.classified || 0;
       const totalSize = stats.totalSize ? (stats.totalSize / 1024 / 1024).toFixed(1) : '0';
-      const titleText = `芯图管家-智能分类，便捷管理，仅你可见 | 总照片: ${totalImages} | 已分类: ${classified} | 大小: ${totalSize}MB`;
+      const titleText = `芯图相册-智能分类，便捷管理，仅你可见 | 总照片: ${totalImages} | 已分类: ${classified} | 大小: ${totalSize}MB`;
       
       // 更新窗口标题
       mainWindow.setTitle(titleText);
     } catch (error) {
       logger.error(`更新标题栏统计信息失败:`, error);
+    }
+  });
+
+  // 监听复制文件到剪贴板请求
+  ipcMain.on('copy-files-to-clipboard', (event, filePaths) => {
+    logger.info(`📋 收到复制文件请求，数量: ${filePaths.length}`);
+    
+    try {
+      if (!Array.isArray(filePaths) || filePaths.length === 0) {
+        logger.warn('文件路径列表为空');
+        event.reply('copy-files-result', { success: false, error: '文件路径列表为空' });
+        return;
+      }
+
+      logger.debug(`📋 文件路径列表:`, filePaths);
+
+      // 验证所有文件是否存在
+      const existingFiles = [];
+      const missingFiles = [];
+      
+      for (const filePath of filePaths) {
+        if (fs.existsSync(filePath)) {
+          existingFiles.push(filePath);
+          logger.debug(`✅ 文件存在: ${filePath}`);
+        } else {
+          missingFiles.push(filePath);
+          logger.warn(`❌ 文件不存在: ${filePath}`);
+        }
+      }
+
+      if (existingFiles.length === 0) {
+        logger.error('所有文件都不存在');
+        event.reply('copy-files-result', { 
+          success: false, 
+          error: '所有文件都不存在' 
+        });
+        return;
+      }
+
+      logger.info(`📋 准备复制 ${existingFiles.length} 个文件到剪贴板`);
+      logger.debug(`📋 文件列表:`, existingFiles);
+
+      // 使用PowerShell脚本复制文件到剪贴板（Windows最可靠的方法）
+      // 构建PowerShell命令
+      const filePathsForPS = existingFiles.map(p => `'${p.replace(/'/g, "''")}'`).join(', ');
+      const psCommand = `
+        Add-Type -AssemblyName System.Windows.Forms;
+        $files = New-Object System.Collections.Specialized.StringCollection;
+        $filePaths = @(${filePathsForPS});
+        foreach ($filePath in $filePaths) {
+          if (Test-Path $filePath) {
+            [void]$files.Add($filePath);
+            Write-Host "Added: $filePath";
+          } else {
+            Write-Host "File not found: $filePath";
+          }
+        }
+        [System.Windows.Forms.Clipboard]::SetFileDropList($files);
+        Write-Host "Copied $($files.Count) files to clipboard";
+      `;
+      
+      logger.debug(`📋 PowerShell命令:`, psCommand);
+      
+      exec(`powershell -NoProfile -Command "${psCommand.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (error, stdout, stderr) => {
+        if (error) {
+          logger.error(`❌ PowerShell执行失败:`, error);
+          logger.error(`stderr:`, stderr);
+          event.reply('copy-files-result', { 
+            success: false, 
+            error: `复制失败: ${error.message}` 
+          });
+        } else {
+          logger.info(`✅ PowerShell执行成功`);
+          logger.debug(`stdout:`, stdout);
+          if (stderr) {
+            logger.warn(`stderr:`, stderr);
+          }
+          
+          event.reply('copy-files-result', { 
+            success: true, 
+            copiedCount: existingFiles.length,
+            skippedCount: missingFiles.length
+          });
+        }
+      });
+    } catch (error) {
+      logger.error(`❌ 复制文件到剪贴板失败:`, error);
+      event.reply('copy-files-result', { 
+        success: false, 
+        error: error.message 
+      });
     }
   });
 
@@ -197,6 +297,29 @@ function createWindow() {
 
 // IPC处理函数
 function setupIpcHandlers() {
+  // 处理窗口控制请求
+  ipcMain.handle('window-minimize', () => {
+    if (mainWindow) {
+      mainWindow.minimize();
+    }
+  });
+  
+  ipcMain.handle('window-maximize', () => {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    }
+  });
+  
+  ipcMain.handle('window-close', () => {
+    if (mainWindow) {
+      mainWindow.close();
+    }
+  });
+
   // 处理文件夹选择请求
   ipcMain.handle('select-folder', async () => {
     try {

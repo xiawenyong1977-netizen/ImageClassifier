@@ -8,8 +8,73 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 // 使用统一数据服务
 
 
+// 时间轴标题组件 - 独立监听选中状态变化
+const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPress }) => {
+  const [selectedCount, setSelectedCount] = useState(0);
+  const [allSelected, setAllSelected] = useState(false);
+  
+  // 计算选中状态
+  const updateSelectionState = useCallback(() => {
+    const imageIds = imagesForDate.map(img => img.id);
+    let count = 0;
+    for (const id of imageIds) {
+      if (UnifiedDataService.isImageSelected(id)) {
+        count++;
+      }
+    }
+    setSelectedCount(count);
+    setAllSelected(count === imageIds.length && count > 0);
+  }, [imagesForDate]);
+  
+  // 初始化选中状态
+  useEffect(() => {
+    updateSelectionState();
+  }, [updateSelectionState]);
+  
+  // 监听选中状态变化
+  useEffect(() => {
+    const handleSelectionChange = (event) => {
+      const imageIds = imagesForDate.map(img => img.id);
+      if (imageIds.includes(event.detail.imageId)) {
+        updateSelectionState();
+      }
+    };
+    
+    window.addEventListener('imageSelectionChanged', handleSelectionChange);
+    return () => {
+      window.removeEventListener('imageSelectionChanged', handleSelectionChange);
+    };
+  }, [imagesForDate, updateSelectionState]);
+  
+  const someSelected = selectedCount > 0;
+  
+  return (
+    <TouchableOpacity 
+      style={styles.timelineHeader}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.timelineHeaderContent}>
+        <Text style={styles.timelineDate}>{formattedDate}</Text>
+        <Text style={styles.timelineCount}>
+          ({imagesForDate.length} 张
+          {someSelected && ` · 已选 ${selectedCount}`}
+          )
+        </Text>
+      </View>
+      {someSelected && (
+        <View style={styles.timelineSelectionIndicator}>
+          <Text style={styles.timelineSelectionText}>
+            {allSelected ? '✓ 全选' : '○ 部分选中'}
+          </Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+});
+
 // Simplified image item component
-const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVisible = true }) => {
+const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, onLongPress, onRightPress, isVisible = true }, ref) => {
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
@@ -56,10 +121,13 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
   
   return (
     <TouchableOpacity
+      ref={ref}
+      dataSet={{ imageId: item.id }}
       style={[
         styles.imageItem, 
         isSelected && styles.selectedImage,
-        isHovered && styles.imageHovered
+        isHovered && styles.imageHovered,
+        isHighlighted && styles.highlightedImage
       ]}
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
@@ -128,12 +196,15 @@ const ImageItem = ({ item, isSelected, onPress, onLongPress, onRightPress, isVis
       )}
     </TouchableOpacity>
   );
-};
+});
+ImageItem.displayName = 'ImageItem';
 
 const CategoryScreen = ({ 
   category: propCategory, 
   city: propCity, 
   similarityGroupId: propSimilarityGroupId, // 添加相似组ID参数
+  currentImageId: propCurrentImageId, // 从ImagePreview返回时的当前图片ID
+  currentPage: propCurrentPage, // 从ImagePreview返回时恢复的页码
   onBack, 
   forceRefresh = true, 
   scrollToImageId = null,
@@ -153,6 +224,11 @@ const CategoryScreen = ({
   
   // 从统一数据服务获取数据
   const [allImages, setAllImages] = useState([]);
+  
+  // 高亮图片状态（从ImagePreview返回时使用）
+  const [highlightedImageId, setHighlightedImageId] = useState(null);
+  const scrollViewRef = useRef(null);
+  const imageRefs = useRef({});
   
   // 加载图片数据的函数
   const loadImages = useCallback(async () => {
@@ -218,9 +294,6 @@ const CategoryScreen = ({
   useEffect(() => {
     loadImages();
   }, [loadImages]);
-
-  // 页面重新挂载时重新加载数据（通过页面切换实现）
-  // 不再监听缓存变化，每次挂载都重新建立快照
 
   // 必要的UI状态
   const [selectAll, setSelectAll] = useState(false);
@@ -309,8 +382,40 @@ const CategoryScreen = ({
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 0 });
   
-  // 分页相关状态
-  const [currentPage, setCurrentPage] = useState(initialPage);
+  // 操作菜单状态
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [showCategorySubmenu, setShowCategorySubmenu] = useState(false);
+  const [selectionVersion, setSelectionVersion] = useState(0); // 用于强制刷新选中计数
+  
+  // 监听选中状态变化，强制刷新Header
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      setSelectionVersion(v => v + 1);
+    };
+    
+    window.addEventListener('imageSelectionChanged', handleSelectionChange);
+    return () => {
+      window.removeEventListener('imageSelectionChanged', handleSelectionChange);
+    };
+  }, []);
+  
+  // 点击外部关闭操作菜单
+  useEffect(() => {
+    if (showActionMenu) {
+      const handleClickOutside = () => {
+        setShowActionMenu(false);
+        setShowCategorySubmenu(false);
+      };
+      
+      document.addEventListener('click', handleClickOutside);
+      return () => {
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  }, [showActionMenu]);
+  
+  // 分页相关状态 - 优先使用从prop传递的值（返回时恢复）
+  const [currentPage, setCurrentPage] = useState(propCurrentPage || initialPage);
   const [itemsPerPage, setItemsPerPage] = useState(propItemsPerPage);
   const [totalPages, setTotalPages] = useState(0);
   const [pageInput, setPageInput] = useState('');
@@ -319,8 +424,108 @@ const CategoryScreen = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownOptions = [20, 50, 100, 1000];
   
-  // 视图模式状态
-  const [viewMode, setViewMode] = useState('timeline'); // 'grid' or 'timeline'
+  // 监听从ImagePreview返回时的页码，恢复状态
+  useEffect(() => {
+    if (propCurrentPage !== undefined && propCurrentPage !== null) {
+      // 计算当前数据的总页数
+      const totalPagesForCurrentData = Math.max(1, Math.ceil(allImages.length / itemsPerPage));
+      
+      // 验证页码是否在有效范围内
+      if (propCurrentPage > 0 && propCurrentPage <= totalPagesForCurrentData) {
+        logger.debug('📄 恢复页码:', propCurrentPage, `(总页数: ${totalPagesForCurrentData})`);
+        setCurrentPage(propCurrentPage);
+      } else {
+        logger.warn(`⚠️ 页码超出范围: ${propCurrentPage} > ${totalPagesForCurrentData}，重置为第1页`);
+        setCurrentPage(1);
+      }
+    }
+  }, [propCurrentPage, allImages.length, itemsPerPage]);
+  
+  // 监听从ImagePreview返回时的currentImageId，进行高亮和滚动
+  useEffect(() => {
+    const currentImageId = propCurrentImageId || route?.params?.currentImageId;
+    if (currentImageId) {
+      // 验证图片是否在当前分类/城市/相似组中
+      const imageExists = allImages.some(img => img.id === currentImageId);
+      
+      if (imageExists) {
+        logger.debug('🎯 检测到返回的图片ID，准备高亮和滚动:', currentImageId);
+        
+        // 设置高亮状态
+        setHighlightedImageId(currentImageId);
+      } else {
+        logger.warn('⚠️ 图片不在当前列表中，跳过高亮:', currentImageId);
+        return; // 提前返回，不执行高亮和滚动
+      }
+      
+      // 3秒后自动取消高亮
+      const highlightTimer = setTimeout(() => {
+        setHighlightedImageId(null);
+      }, 3000);
+      
+      // 滚动到该图片位置 - 在Web环境使用DOM API
+      const scrollTimer = setTimeout(() => {
+        logger.debug('🔍 开始查找图片元素，currentImageId:', currentImageId);
+        
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          // Web环境：使用DOM查询和scrollIntoView
+          // 方法1：通过data-image-id属性查找
+          const domElement = document.querySelector(`[data-image-id="${currentImageId}"]`);
+          
+          logger.debug('📊 DOM查询结果:', { 
+            hasDomElement: !!domElement,
+            elementTag: domElement?.tagName,
+            elementClass: domElement?.className
+          });
+          
+          if (domElement) {
+            try {
+              logger.debug('🌐 使用DOM scrollIntoView滚动到图片');
+              domElement.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center',
+                inline: 'nearest'
+              });
+              logger.debug('✅ scrollIntoView 调用成功');
+            } catch (error) {
+              logger.error('❌ scrollIntoView失败:', error);
+            }
+          } else {
+            logger.warn('❌ 未找到DOM元素，尝试查找所有可能的图片元素');
+            // 输出调试信息
+            const allImageElements = document.querySelectorAll('[data-image-id]');
+            logger.debug('📋 页面上所有图片元素数量:', allImageElements.length);
+            if (allImageElements.length > 0) {
+              logger.debug('📋 前3个图片ID:', 
+                Array.from(allImageElements).slice(0, 3).map(el => el.getAttribute('data-image-id'))
+              );
+            }
+          }
+        } else {
+          // 非Web环境的降级方案
+          logger.debug('📱 非Web环境，使用React Native API');
+          const imageElement = imageRefs.current[currentImageId];
+          if (imageElement && scrollViewRef.current) {
+            imageElement.measureLayout(
+              scrollViewRef.current,
+              (x, y) => {
+                logger.debug('✅ 测量到图片位置:', { x, y });
+                scrollViewRef.current.scrollTo({ y: y - 100, animated: true });
+              },
+              (error) => {
+                logger.warn('❌ measureLayout失败:', error);
+              }
+            );
+          }
+        }
+      }, 500); // 增加延迟到500ms，确保DOM已完全渲染
+      
+      return () => {
+        clearTimeout(highlightTimer);
+        clearTimeout(scrollTimer);
+      };
+    }
+  }, [propCurrentImageId, route?.params?.currentImageId, allImages]);
   
   // 关闭下拉框
   const closeDropdown = useCallback(() => {
@@ -406,9 +611,6 @@ const CategoryScreen = ({
     itemHeight: 120,
     gap: 12
   };
-  
-  // Refs
-  const scrollViewRef = useRef(null);
   
   // 滚动到指定图片的函数（分页版本）
   // 使用ref来存储最新的currentPage值，避免循环依赖
@@ -503,12 +705,10 @@ const CategoryScreen = ({
   // 移除无用的初始化useEffect（只打印日志，无实际作用）
 
   // 当初始页面或每页数量参数变化时更新状态
-  useEffect(() => {
-    if (initialPage !== currentPage) {
-      logger.debug(`初始页面参数变化: ${initialPage}`);
-      setCurrentPage(initialPage);
-    }
-  }, [initialPage]); // 只依赖initialPage，不依赖currentPage
+  // 注意：不再需要监听initialPage变化，因为：
+  // 1. useState已经在初始化时使用了propCurrentPage || initialPage
+  // 2. 从ImagePreview返回时通过propCurrentPage的useEffect恢复
+  // 3. 这个useEffect会错误地将已恢复的currentPage重置回initialPage
 
   useEffect(() => {
     if (propItemsPerPage !== itemsPerPage) {
@@ -535,12 +735,13 @@ const CategoryScreen = ({
       const contextProps = {
         category,
         city,
-        similarityGroupId
+        similarityGroupId,
+        currentPage // 保存当前页码，返回时恢复
       };
          
       navigation.onImagePress(image, fromScreen, contextProps);
     }
-  }, [navigation, category, city, similarityGroupId]);
+  }, [navigation, category, city, similarityGroupId, currentPage]);
 
   // Image long press handler
   const handleImageLongPress = useCallback((image) => {
@@ -584,6 +785,159 @@ const CategoryScreen = ({
     // 右键点击直接切换图片的选中状态
     toggleImageSelection(image.id);
   }, [toggleImageSelection]);
+
+  // 复制选中的图片到剪贴板
+  const handleCopyToClipboard = useCallback(async () => {
+    try {
+      // 获取当前分类的选中图片对象数组
+      const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
+      const currentCategorySelectedImages = normalizedCategory 
+        ? UnifiedDataService.getSelectedImagesByCategory(normalizedCategory)
+        : [];
+      
+      logger.debug(`📋 复制操作 - 选中图片数量: ${currentCategorySelectedImages.length}`);
+      logger.debug(`📋 第一个图片对象:`, currentCategorySelectedImages[0]);
+      
+      if (currentCategorySelectedImages.length === 0) {
+        Alert.alert('提示', '请先选择要复制的图片');
+        return;
+      }
+
+      // 获取选中图片的文件路径
+      const filePaths = [];
+      for (const image of currentCategorySelectedImages) {
+        logger.debug(`📋 处理图片:`, {
+          id: image?.id,
+          uri: image?.uri,
+          path: image?.path,
+          fileName: image?.fileName
+        });
+        
+        // 优先使用path，其次使用uri
+        const imagePath = image?.path || image?.uri;
+        if (imagePath) {
+          // 使用normalizeFilePath确保路径格式正确
+          const normalizedPath = imagePath.replace(/^file:\/\/\//, '').replace(/\//g, '\\');
+          logger.debug(`📋 标准化路径: ${normalizedPath}`);
+          filePaths.push(normalizedPath);
+        } else {
+          logger.warn(`📋 图片缺少路径信息:`, image);
+        }
+      }
+
+      logger.debug(`📋 最终文件路径列表:`, filePaths);
+
+      if (filePaths.length === 0) {
+        Alert.alert('错误', '未找到有效的图片路径');
+        return;
+      }
+
+      // 在Electron环境中调用IPC复制文件到剪贴板
+      if (typeof window !== 'undefined' && window.require) {
+        const { ipcRenderer } = window.require('electron');
+        
+        // 发送复制请求到主进程
+        ipcRenderer.send('copy-files-to-clipboard', filePaths);
+        
+        // 监听复制结果
+        ipcRenderer.once('copy-files-result', (event, result) => {
+          if (result.success) {
+            Alert.alert('成功', `已将 ${filePaths.length} 个文件复制到剪贴板\n\n可以在资源管理器中粘贴（Ctrl+V）`);
+          } else {
+            Alert.alert('失败', `复制失败: ${result.error}`);
+          }
+        });
+      } else {
+        Alert.alert('错误', '当前环境不支持文件复制功能');
+      }
+    } catch (error) {
+      logger.error('复制文件到剪贴板失败:', error);
+      Alert.alert('错误', `复制失败: ${error.message}`);
+    }
+  }, [category]);
+
+  // 批量修改分类
+  const handleBatchChangeCategory = useCallback(async (newCategory) => {
+    try {
+      const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
+      
+      // 获取选中图片
+      let selectedImagesList = [];
+      if (similarityGroupId) {
+        selectedImagesList = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+      } else if (normalizedCategory) {
+        selectedImagesList = UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
+      } else if (city) {
+        selectedImagesList = UnifiedDataService.getSelectedImagesByCity(city);
+      }
+      
+      const selectedCount = selectedImagesList.length;
+      
+      if (selectedCount === 0) {
+        Alert.alert('提示', '请先选择要修改的图片');
+        return;
+      }
+      
+      // 获取目标分类的显示名称
+      const configService = UnifiedDataService.configService;
+      const categoryMap = configService.getCategoryNameMap();
+      const targetCategoryName = categoryMap[newCategory]?.chinese || newCategory;
+      
+      Alert.alert(
+        '修改分类',
+        `确定要将选中的 ${selectedCount} 张图片修改为"${targetCategoryName}"分类吗？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确定',
+            style: 'default',
+            onPress: async () => {
+              try {
+                let processed = 0;
+                
+                for (const image of selectedImagesList) {
+                  await UnifiedDataService.updateImageCategory(image.id, newCategory, 'manual');
+                  processed++;
+                }
+                
+                // 批量清除选中状态
+                for (const image of selectedImagesList) {
+                  UnifiedDataService.setImageSelection(image.id, false);
+                }
+                
+                logger.debug('✅ 已清除选中状态，准备重新加载数据');
+                
+                // 检查清除后的统计
+                const afterClearCounts = UnifiedDataService.getSelectedCountsByCategory();
+                logger.debug('🔍 清除后的分类选中统计:', afterClearCounts);
+                logger.debug('🔍 当前分类的选中数:', afterClearCounts[normalizedCategory]);
+                
+                // 重新加载图片数据
+                await loadImages();
+                
+                logger.debug('✅ 数据重新加载完成');
+                
+                // 强制刷新Header以更新选中计数
+                setSelectionVersion(v => v + 1);
+                
+                logger.debug('✅ 已触发Header刷新');
+                
+                Alert.alert('操作完成', `已成功修改 ${processed} 张图片到"${targetCategoryName}"分类`);
+                
+              } catch (error) {
+                logger.error('批量修改分类失败:', error);
+                Alert.alert('操作失败', '修改分类时发生错误，请重试');
+              }
+            },
+          },
+        ]
+      );
+      
+    } catch (error) {
+      logger.error('批量修改分类失败:', error);
+      Alert.alert('错误', '操作失败，请重试');
+    }
+  }, [category, city, similarityGroupId, loadImages]);
 
   // Batch delete
   const handleBatchDelete = useCallback(() => {
@@ -678,8 +1032,8 @@ const CategoryScreen = ({
     } else {
       // 如果不是tobecleaned分类，将选中的图片设置为tobecleaned分类
       Alert.alert(
-        '标记为待清理',
-        `确定要将选中的 ${selectedCount} 张图片标记为待清理吗？\n\n这些图片将被移动到"待清理"分类中。`,
+        '暂存',
+        `确定要将选中的 ${selectedCount} 张图片暂存到待处置吗？\n\n这些图片将被移动到"待处置"分类中。`,
         [
           { text: '取消', style: 'cancel' },
           {
@@ -717,7 +1071,7 @@ const CategoryScreen = ({
                   const remainingImages = UnifiedDataService.imageCache.getImagesBySimilarityGroup(similarityGroupId);
                   if (remainingImages.length <= 1) {
                     logger.debug(`相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
-                    Alert.alert('操作完成', `已成功标记 ${processed} 张图片为待清理\n\n相似组已被删除，返回主页面`, [
+                    Alert.alert('操作完成', `已成功暂存 ${processed} 张图片到待处置\n\n相似组已被删除，返回主页面`, [
                       { text: '确定', onPress: () => onBack() }
                     ]);
                     return;
@@ -727,7 +1081,7 @@ const CategoryScreen = ({
                 // 重新加载图片数据
                 await loadImages();
                 
-                Alert.alert('操作完成', `已成功标记 ${processed} 张图片为待清理`);
+                Alert.alert('操作完成', `已成功暂存 ${processed} 张图片到待处置`);
                 
               } catch (error) {
                 Alert.alert('操作失败', '标记图片时发生错误，请重试');
@@ -745,42 +1099,27 @@ const CategoryScreen = ({
     // 使用UnifiedDataService获取标准化的分类ID
     const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
     
-    
-    // 检查配置服务状态
+    // 获取所有分类列表（排除tobecleaned）
     const configService = UnifiedDataService.configService;
-    logger.debug('调试信息 - configService是否存在:', !!configService);
-    logger.debug('调试信息 - configService是否已加载:', configService?.isConfigLoaded());
-    
+    let availableCategories = [];
     if (configService?.isConfigLoaded()) {
       const categoryMap = configService.getCategoryNameMap();
-      logger.debug('调试信息 - categoryMap:', categoryMap);
-      logger.debug('调试信息 - categoryMap中的键:', Object.keys(categoryMap));
-      logger.debug('调试信息 - 查找category在categoryMap中:', categoryMap[category]);
+      availableCategories = Object.entries(categoryMap)
+        .filter(([id]) => id !== 'tobecleaned')
+        .map(([id, names]) => ({
+          id,
+          chinese: names.chinese,
+          english: names.english
+        }));
+      
+      logger.debug('调试信息 - 可用分类:', availableCategories);
     }
     
-    // 使用UnifiedDataService获取当前分类中选中的图片数量
-    const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
-    const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
-    const selectedCountsBySimilarityGroup = UnifiedDataService.getSelectedCountsBySimilarityGroup();
-    let currentSelectedCount;
-    if (similarityGroupId) {
-      // 从相似组进入，获取相似组的选中图片数量
-      currentSelectedCount = selectedCountsBySimilarityGroup[similarityGroupId] ?? 0;
-    } else if (normalizedCategory) {
-      currentSelectedCount = selectedCountsByCategory[normalizedCategory] ?? 0;
-    } else if (city) {
-      currentSelectedCount = selectedCountsByCity[city] ?? 0;
-    } else {
-      currentSelectedCount = selectedImages.length;
-    }
+    // 使用本地selectedImages state计算选中数量
+    // 这个state在loadImages时已经根据当前分类/城市/相似组过滤过了
+    const currentSelectedCount = selectedImages.length;
     
     logger.debug(`HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
-    logger.debug(`分类选中统计详情:`, selectedCountsByCategory);
-    logger.debug(`城市选中统计详情:`, selectedCountsByCity);
-    logger.debug(`查找分类 "${normalizedCategory}" 的选中数量:`, selectedCountsByCategory[normalizedCategory]);
-    logger.debug(`查找城市 "${city}" 的选中数量:`, selectedCountsByCity[city]);
-    logger.debug(`所有分类的选中数量:`, Object.entries(selectedCountsByCategory).map(([cat, count]) => `${cat}: ${count}`).join(', '));
-    logger.debug(`所有城市的选中数量:`, Object.entries(selectedCountsByCity).map(([cityName, count]) => `${cityName}: ${count}`).join(', '));
     
     return (
     <View style={styles.header}>
@@ -804,23 +1143,6 @@ const CategoryScreen = ({
         }
       </Text>
       
-      {/* 视图模式切换 */}
-      <View style={styles.viewModeContainer}>
-      <TouchableOpacity
-          style={[styles.viewModeButton, viewMode === 'grid' && styles.viewModeButtonActive]}
-          onPress={() => setViewMode('grid')}>
-          <Text style={[styles.viewModeButtonText, viewMode === 'grid' && styles.viewModeButtonTextActive]}>
-            网格
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.viewModeButton, viewMode === 'timeline' && styles.viewModeButtonActive]}
-          onPress={() => setViewMode('timeline')}>
-          <Text style={[styles.viewModeButtonText, viewMode === 'timeline' && styles.viewModeButtonTextActive]}>
-            时间轴
-        </Text>
-      </TouchableOpacity>
-    </View>
       
         {/* 分页控制 - 只在照片数量超过100时显示 */}
         {allImages.length > 100 && (
@@ -857,42 +1179,151 @@ const CategoryScreen = ({
         {/* 间距 */}
         <View style={styles.headerSpacer} />
         
-        <TouchableOpacity
-          style={[styles.headerButton, selectAll && styles.headerButtonActive]}
-          onPress={toggleSelectAll}>
-          <Text style={[styles.headerButtonText, selectAll && styles.headerButtonTextActive]}>
-            全选
-          </Text>
-        </TouchableOpacity>
-        
-        {/* 删除按钮和取消选择按钮 - 只在有选中图片时显示 */}
-        {currentSelectedCount > 0 && (
-          <>
+        {/* 没有选中图片时：只显示全选按钮 */}
+        {currentSelectedCount === 0 ? (
           <TouchableOpacity
-              style={[styles.headerButton, styles.headerDeleteButton]}
-            onPress={handleBatchDelete}>
-              <Text style={[styles.headerButtonText, styles.headerDeleteButtonText]}>
-                {normalizedCategory === 'tobecleaned' ? '删除' : '清理'} ({currentSelectedCount})
+            style={[styles.headerButton, selectAll && styles.headerButtonActive]}
+            onPress={toggleSelectAll}>
+            <Text style={[styles.headerButtonText, selectAll && styles.headerButtonTextActive]}>
+              全选
             </Text>
           </TouchableOpacity>
-            
+        ) : (
+          /* 有选中图片时：显示操作菜单 */
+          <View style={styles.actionMenuContainer}>
             <TouchableOpacity
-              style={[styles.headerButton, styles.headerCancelButton]}
-              onPress={clearCategorySelections}>
-              <Text style={[styles.headerButtonText, styles.headerCancelButtonText]}>
-                取消选择
+              style={[styles.headerButton, styles.actionMenuButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                setShowActionMenu(!showActionMenu);
+              }}>
+              <Text style={[styles.headerButtonText, styles.actionMenuButtonText]}>
+                操作 ({currentSelectedCount}) ▼
               </Text>
             </TouchableOpacity>
-          </>
+            
+            {/* 下拉菜单 */}
+            {showActionMenu && (
+              <View style={styles.actionMenuDropdown}>
+                {/* 全选 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={() => {
+                    setShowActionMenu(false);
+                    toggleSelectAll();
+                  }}>
+                  <Text style={styles.actionMenuItemText}>
+                    {selectAll ? '✓ 全选' : '☐ 全选'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {/* 取消选择 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={() => {
+                    setShowActionMenu(false);
+                    setShowCategorySubmenu(false);
+                    clearCategorySelections();
+                  }}>
+                  <Text style={styles.actionMenuItemText}>✕ 取消选择</Text>
+                </TouchableOpacity>
+                
+                {/* 设置分类 - 带二级菜单 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  activeOpacity={1}
+                  onMouseEnter={() => {
+                    logger.debug('🖱️ 鼠标进入设置分类菜单项');
+                    logger.debug('📋 可用分类数量:', availableCategories.length);
+                    setShowCategorySubmenu(true);
+                  }}
+                  onMouseLeave={() => {
+                    logger.debug('🖱️ 鼠标离开设置分类菜单项');
+                    setShowCategorySubmenu(false);
+                  }}
+                >
+                  <View style={styles.actionMenuItemWithSubmenu}>
+                    <Text style={styles.actionMenuItemText}>🏷️ 设置分类 ›</Text>
+                    
+                    {/* 二级菜单：分类列表 */}
+                    {showCategorySubmenu && availableCategories.length > 0 && (
+                      <View 
+                        style={styles.categorySubmenu}
+                        onMouseEnter={() => setShowCategorySubmenu(true)}
+                        onMouseLeave={() => setShowCategorySubmenu(false)}
+                      >
+                        {availableCategories.map((cat) => (
+                          <TouchableOpacity
+                            key={cat.id}
+                            style={styles.categorySubmenuItem}
+                            onPress={() => {
+                              logger.debug('选择分类:', cat.id, cat.chinese);
+                              setShowActionMenu(false);
+                              setShowCategorySubmenu(false);
+                              handleBatchChangeCategory(cat.id);
+                            }}>
+                            <Text style={styles.categorySubmenuItemText}>
+                              {cat.chinese}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+                
+                {/* 非tobecleaned分类：暂存 */}
+                {normalizedCategory !== 'tobecleaned' && (
+                  <TouchableOpacity
+                    style={styles.actionMenuItem}
+                    onPress={() => {
+                      setShowActionMenu(false);
+                      setShowCategorySubmenu(false);
+                      handleBatchDelete();
+                    }}>
+                    <Text style={styles.actionMenuItemText}>📌 暂存</Text>
+                  </TouchableOpacity>
+                )}
+                
+                {/* tobecleaned分类：删除 + 复制 */}
+                {normalizedCategory === 'tobecleaned' && (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.actionMenuItem, styles.actionMenuItemDanger]}
+                      onPress={() => {
+                        setShowActionMenu(false);
+                        setShowCategorySubmenu(false);
+                        handleBatchDelete();
+                      }}>
+                      <Text style={[styles.actionMenuItemText, styles.actionMenuItemTextDanger]}>
+                        🗑️ 删除
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.actionMenuItem}
+                      onPress={() => {
+                        setShowActionMenu(false);
+                        setShowCategorySubmenu(false);
+                        handleCopyToClipboard();
+                      }}>
+                      <Text style={styles.actionMenuItemText}>📋 复制到剪贴板</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
+          </View>
         )}
       </View>
     );
-  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, viewMode]);
+  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, handleCopyToClipboard, showActionMenu, showCategorySubmenu, handleBatchChangeCategory, handleBatchDelete, clearCategorySelections, toggleSelectAll, selectionVersion]);
 
   // 懒加载图片容器组件
-  const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress }) => {
+  const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress, highlightedId, setRef }) => {
     const [selected, setSelected] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
+    const isHighlighted = highlightedId === item.id;
     
     // 初始化选中状态 - 只在组件挂载时执行一次
     useEffect(() => {
@@ -905,7 +1336,7 @@ const CategoryScreen = ({
       const handleSelectionChange = (event) => {
         if (event.detail.imageId === item.id) {
           setSelected(event.detail.isSelected);
-          logger.debug(`选中状态变化: ${item.id}, ${selected} -> ${event.detail.isSelected}`);
+          logger.debug(`选中状态变化: ${item.id} -> ${event.detail.isSelected}`);
         }
       };
       
@@ -915,7 +1346,7 @@ const CategoryScreen = ({
       return () => {
         window.removeEventListener('imageSelectionChanged', handleSelectionChange);
       };
-    }, [item.id, selected]);
+    }, [item.id]); // 只依赖 item.id，不依赖 selected
     
     logger.debug(`LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
     
@@ -944,8 +1375,10 @@ const CategoryScreen = ({
     return (
       <View style={styles.imageItemContainer}>
         <ImageItem
+          ref={(el) => setRef && setRef(item.id, el)}
           item={item}
           isSelected={selected}
+          isHighlighted={isHighlighted}
           onPress={onPress}
           onLongPress={onLongPress}
           onRightPress={handleRightPress}
@@ -987,6 +1420,46 @@ const CategoryScreen = ({
     );
   }, [paginationData.currentPageImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress]);
 
+  // 时间轴标题点击处理 - 全选/取消全选该时间段的所有图片
+  const handleTimelineHeaderPress = useCallback((imagesForDate) => {
+    const imageIds = imagesForDate.map(img => img.id);
+    
+    // 使用setSelectedImages的prev参数来获取当前选中状态，避免依赖selectedImages
+    setSelectedImages(prev => {
+      const allSelectedInGroup = imageIds.every(id => prev.includes(id));
+      
+      if (allSelectedInGroup) {
+        // 全部选中，则取消全选
+        const newSelection = prev.filter(id => !imageIds.includes(id));
+        
+        // 同时更新 UnifiedDataService 的全局状态和发送事件
+        imageIds.forEach(id => {
+          UnifiedDataService.setImageSelection(id, false);
+          window.dispatchEvent(new CustomEvent('imageSelectionChanged', {
+            detail: { imageId: id, isSelected: false }
+          }));
+        });
+        
+        return newSelection;
+      } else {
+        // 未全部选中，则全选
+        const newSelection = [...prev];
+        const idsToAdd = imageIds.filter(id => !newSelection.includes(id));
+        idsToAdd.forEach(id => newSelection.push(id));
+        
+        // 同时更新 UnifiedDataService 的全局状态和发送事件
+        imageIds.forEach(id => {
+          UnifiedDataService.setImageSelection(id, true);
+          window.dispatchEvent(new CustomEvent('imageSelectionChanged', {
+            detail: { imageId: id, isSelected: true }
+          }));
+        });
+        
+        return newSelection;
+      }
+    });
+  }, []); // 不依赖任何状态，使用prev参数获取当前值
+
   // 时间轴渲染函数
   const renderTimeline = useCallback(() => {
     const { grouped, sortedDates } = groupedImages;
@@ -1010,6 +1483,7 @@ const CategoryScreen = ({
     
     return (
       <ScrollView
+        ref={scrollViewRef}
         style={{
           marginTop: 60, // 只有内部标题栏的高度
           flex: 1
@@ -1035,10 +1509,12 @@ const CategoryScreen = ({
           
           return (
             <View key={dateKey} style={styles.timelineSection}>
-              <View style={styles.timelineHeader}>
-                <Text style={styles.timelineDate}>{formattedDate}</Text>
-                <Text style={styles.timelineCount}>({imagesForDate.length} 张)</Text>
-              </View>
+              <TimelineHeader
+                dateKey={dateKey}
+                formattedDate={formattedDate}
+                imagesForDate={imagesForDate}
+                onPress={() => handleTimelineHeaderPress(imagesForDate)}
+              />
               
               <View style={styles.timelineImages}>
                 {imagesForDate.map((image, index) => (
@@ -1048,10 +1524,16 @@ const CategoryScreen = ({
                     index={index}
                     total={imagesForDate.length}
                     getIsSelected={getIsSelected}
-                        onPress={handleImagePress}
-                        onLongPress={handleImageLongPress}
+                    onPress={handleImagePress}
+                    onLongPress={handleImageLongPress}
                     onRightPress={handleImageRightPress}
-                      />
+                    highlightedId={highlightedImageId}
+                    setRef={(id, el) => {
+                      if (el) {
+                        imageRefs.current[id] = el;
+                      }
+                    }}
+                  />
                 ))}
               </View>
                     </View>
@@ -1059,7 +1541,7 @@ const CategoryScreen = ({
                 })}
       </ScrollView>
     );
-  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, city]);
+  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, city, handleTimelineHeaderPress]);
 
   // 分页控制已集成到头部区域
 
@@ -1296,13 +1778,9 @@ const CategoryScreen = ({
         <HeaderComponent />
       </View>
       
-      {/* 根据视图模式渲染不同内容 */}
+      {/* 渲染时间轴视图 */}
       {allImages.length > 0 ? (
-        viewMode === 'grid' ? (
-          <ScrollViewComponent />
-        ) : (
-          renderTimeline()
-        )
+        renderTimeline()
       ) : (
         renderEmpty()
       )}
@@ -1527,7 +2005,7 @@ const styles = StyleSheet.create({
   },
   fixedHeader: {
     position: 'absolute',
-    top: 0, // 原生标题栏不需要额外空间
+    top: 60, // 为自定义标题栏留出空间
     left: 0,
     right: 0,
     zIndex: 1000,
@@ -1623,11 +2101,23 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 20,
   },
+  headerCopyButton: {
+    backgroundColor: '#34C759',
+  },
+  headerCopyButtonText: {
+    color: '#fff',
+  },
   headerDeleteButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#f0f0f0', // 暂存按钮：和全选按钮保持一致（浅灰色）
   },
   headerDeleteButtonText: {
-    color: '#fff',
+    color: '#333', // 暂存按钮：深色文字配合浅色背景
+  },
+  headerRealDeleteButton: {
+    backgroundColor: '#FF3B30', // 真正的删除按钮：红色警告
+  },
+  headerRealDeleteButtonText: {
+    color: '#fff', // 真正的删除按钮：白色文字
   },
   headerCancelButton: {
     backgroundColor: '#8E8E93',
@@ -1796,6 +2286,15 @@ const styles = StyleSheet.create({
    shadowRadius: 8,
    elevation: 6,
   },
+  highlightedImage: {
+    borderWidth: 3,
+    borderColor: '#FF9500',
+    shadowColor: '#FF9500',
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
+    elevation: 8,
+    transform: [{ scale: 1.05 }],
+  },
   selectionIndicator: {
     position: 'absolute',
     top: 8,
@@ -1938,10 +2437,20 @@ const styles = StyleSheet.create({
   timelineHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 12,
     paddingBottom: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    borderRadius: 4,
+    cursor: 'pointer',
+  },
+  timelineHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   timelineDate: {
     fontSize: 16,
@@ -1953,11 +2462,100 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: 8,
   },
+  timelineSelectionIndicator: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  timelineSelectionText: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '500',
+  },
   timelineImages: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
- },
+  },
+  
+  // 操作菜单样式
+  actionMenuContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
+  actionMenuButton: {
+    backgroundColor: '#2196F3',
+  },
+  actionMenuButtonText: {
+    color: '#fff',
+  },
+  actionMenuDropdown: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: 4,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+    minWidth: 180,
+    zIndex: 1001,
+  },
+  actionMenuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    cursor: 'pointer',
+  },
+  actionMenuItemDanger: {
+    backgroundColor: '#fff5f5',
+  },
+  actionMenuItemText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  actionMenuItemTextDanger: {
+    color: '#FF3B30',
+    fontWeight: '500',
+  },
+  actionMenuItemWithSubmenu: {
+    position: 'relative',
+  },
+  categorySubmenu: {
+    position: 'absolute',
+    right: '100%', // 向左展开，避免超出窗口右侧
+    top: 0,
+    marginRight: 4,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+    minWidth: 150,
+    zIndex: 1002,
+  },
+  categorySubmenuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    cursor: 'pointer',
+  },
+  categorySubmenuItemText: {
+    fontSize: 13,
+    color: '#333',
+  },
 });
 
 export default CategoryScreen;
