@@ -510,6 +510,18 @@ class UnifiedDataService {
     }
   }
 
+  /**
+   * 获取客户端唯一ID
+   */
+  async getClientId() {
+    try {
+      return await this.imageStorageService.getClientId();
+    } catch (error) {
+      logger.error('获取客户端ID失败:', error);
+      throw error;
+    }
+  }
+
   // ==================== 工具方法 ====================
   
   /**

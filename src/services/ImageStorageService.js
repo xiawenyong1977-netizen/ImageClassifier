@@ -445,6 +445,9 @@ class ImageStorageService {
       }
       this.isInitialized = true;
       logger.debug(' 存储服务初始化成功，使用IndexedDB');
+      
+      // 初始化客户端唯一ID
+      await this.initializeClientId();
     } catch (error) {
       logger.error(' IndexedDB初始化失败:', error);
       
@@ -1062,6 +1065,59 @@ class ImageStorageService {
         '/storage/emulated/0/Telegram',
         '/storage/emulated/0/WhatsApp/Media/WhatsApp Images',
       ];
+    }
+  }
+
+  /**
+   * 生成UUID（通用唯一标识符）
+   */
+  generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * 初始化客户端唯一ID
+   * 如果不存在则生成新ID，存在则不做任何操作
+   */
+  async initializeClientId() {
+    try {
+      const settings = await this.getSettings();
+      
+      // 如果没有客户端ID，生成一个新的
+      if (!settings.clientId) {
+        const clientId = this.generateUUID();
+        settings.clientId = clientId;
+        settings.clientIdCreatedAt = new Date().toISOString();
+        
+        await this.saveSettings(settings);
+        
+        logger.debug('🆔 客户端ID已生成:', clientId);
+        console.log('🆔 新客户端ID:', clientId);
+      } else {
+        logger.debug('🆔 客户端ID已存在:', settings.clientId);
+      }
+      
+      return settings.clientId;
+    } catch (error) {
+      logger.error('初始化客户端ID失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取客户端唯一ID
+   */
+  async getClientId() {
+    try {
+      const settings = await this.getSettings();
+      return settings.clientId || null;
+    } catch (error) {
+      logger.error('获取客户端ID失败:', error);
+      return null;
     }
   }
 

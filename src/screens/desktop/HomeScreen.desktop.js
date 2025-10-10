@@ -983,6 +983,20 @@ const HomeScreen = () => {
     
     return (
       <SafeAreaView style={styles.container}>
+        {/* 自定义标题栏 */}
+        <View style={styles.customTitleBar}>
+          <View style={styles.titleBarLeft}>
+            <Image 
+              source={{ uri: '/icon.png' }}
+              style={styles.titleBarIcon}
+              resizeMode="contain"
+            />
+            <Text style={styles.titleBarTitle}>芯图相册</Text>
+          </View>
+          <View style={styles.titleBarRight}>
+            {/* 右侧留空，为系统控制按钮让出空间 */}
+          </View>
+        </View>
 
         {/* 根据当前屏幕渲染对应页面 */}
         {currentScreen === 'Home' && (
@@ -1144,12 +1158,50 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingTop: 60, // 为 titleBarOverlay 留出空间
   },
   screenContainer: {
     flex: 1,
+    height: '100%', // 明确设置高度
   },
   scrollView: {
     flex: 1,
+  },
+  // 混合模式自定义标题栏样式
+  customTitleBar: {
+    position: 'fixed', // 使用 fixed 定位，相对于视口固定
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#2f3241', // 恢复背景色，与 titleBarOverlay 一致
+    height: 60,
+    paddingRight: 120, // 为系统控制按钮留出空间
+    zIndex: 1000,
+  },
+  titleBarLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  titleBarIcon: {
+    width: 32, // 使用32x32px图标，更清晰
+    height: 32,
+    marginRight: 12,
+  },
+  titleBarTitle: {
+    fontSize: 16, // 增大字体
+    fontWeight: '600',
+    color: '#74b1be',
+    lineHeight: 22,
+  },
+  titleBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   // 扫描进度提示区样式
   scanProgressBanner: {

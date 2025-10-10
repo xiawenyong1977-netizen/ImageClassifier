@@ -2,7 +2,7 @@
 {
   "name": "imageclassifier-app",
   "version": "1.0.0",
-  "description": "芯图管家-智能分类，便捷管理，仅你可见",
+  "description": "芯图相册-智能分类，便捷管理，仅你可见",
   "author": "ImageClassifier Team",
   "main": "public/electron.js",
   "homepage": "./",
@@ -59,7 +59,7 @@
   },
   "build": {
     "appId": "com.imageclassifier.app",
-    "productName": "芯图管家-智能分类，便捷管理，仅你可见",
+    "productName": "芯图相册-智能分类，便捷管理，仅你可见",
     "directories": {
       "output": "dist"
     },

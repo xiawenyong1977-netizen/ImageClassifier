@@ -539,6 +539,20 @@ const ImagePreviewScreen = ({
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
+        {/* 顶部导航栏 */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBack}>
+            <Text style={styles.backIcon}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
+            正在加载...
+          </Text>
+          <View style={styles.deleteButton}>
+            <Text style={styles.deleteButtonText}>🗑️</Text>
+          </View>
+        </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
           <Text style={styles.loadingText}>正在加载图片详情...</Text>
@@ -550,6 +564,20 @@ const ImagePreviewScreen = ({
   if (!currentImage) {
     return (
       <SafeAreaView style={styles.container}>
+        {/* 顶部导航栏 */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBack}>
+            <Text style={styles.backIcon}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
+            图片未找到
+          </Text>
+          <View style={styles.deleteButton}>
+            <Text style={styles.deleteButtonText}>🗑️</Text>
+          </View>
+        </View>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>图片未找到</Text>
         </View>
@@ -775,7 +803,11 @@ const ImagePreviewScreen = ({
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>🔍 检测结果:</Text>
                     <Text style={styles.infoValue}>
-                      {((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))} 个物体
+                      {/* 如果有 message 且不是默认消息，显示 AI 描述 */}
+                      {currentImage.message && currentImage.message !== '图像分类完成' ? 
+                        currentImage.message : 
+                        `${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))} 个物体`
+                      }
                     </Text>
                   </View>
 
@@ -857,7 +889,13 @@ const ImagePreviewScreen = ({
               ) : (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>🔍 检测结果:</Text>
-                  <Text style={styles.infoValue}>未检测到物体</Text>
+                  <Text style={styles.infoValue}>
+                    {/* 如果有 message 且不是默认消息，显示 AI 描述 */}
+                    {currentImage.message && currentImage.message !== '图像分类完成' ? 
+                      currentImage.message : 
+                      '未检测到物体'
+                    }
+                  </Text>
                 </View>
               )}
             </View>

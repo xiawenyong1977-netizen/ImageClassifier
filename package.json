@@ -1,7 +1,7 @@
 {
-  "name": "芯图管家-智能分类，便捷管理，仅你可见",
+  "name": "芯图相册-智能分类，便捷管理，仅你可见",
   "version": "1.0.0",
-  "description": "芯图管家-智能分类，便捷管理，仅你可见",
+  "description": "芯图相册-智能分类，便捷管理，仅你可见",
   "main": "index.js",
   "scripts": {
     "android": "react-native run-android",

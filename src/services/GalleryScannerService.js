@@ -1131,7 +1131,7 @@ class GalleryScannerService {
         
         // 图片分类
         const classificationStartTime = Date.now();
-        const classification = await this.imageClassifier.classifyImage(image.uri);
+        const classification = await this.imageClassifier.classifyImageHybrid(image.uri);
         const classificationTime = Date.now() - classificationStartTime;
         
         // 检查分类结果
@@ -1189,7 +1189,9 @@ class GalleryScannerService {
           idCardDetections: classification.idCardDetections || [],
           generalDetections: classification.generalDetections || [],
           mobileNetV3Detections: classification.mobileNetV3Detections || null,
-          imageDimensions: classification.imageDimensions || null
+          imageDimensions: classification.imageDimensions || null,
+          // AI 描述（远程分类时会有）
+          message: classification.message || null
         };
         
         // 调试：详细检查分类结果和保存数据

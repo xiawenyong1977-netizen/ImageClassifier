@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     // 主内容区域可以正常滚动
   },
   settingsButton: {
-    position: 'fixed', // 使用fixed定位，相对于视口固定
+    position: 'fixed', // 使用 fixed 定位，相对于视口固定
     bottom: 24, // 距离底部24px（稍微靠上一点）
     right: 24,  // 距离右边24px
     width: 48,  // 保持原来的大小
@@ -150,7 +150,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
     zIndex: 9999, // 更高的层级
-    cursor: 'pointer',
   },
   settingsButtonText: {
     fontSize: 20, // 保持原来的图标大小

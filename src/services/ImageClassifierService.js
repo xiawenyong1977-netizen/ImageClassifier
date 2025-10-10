@@ -595,8 +595,7 @@ class ImageClassifierService {
     return intersectionArea / unionArea;
   }
 
-
-
+ 
   // Classify image (simplified version, directly using time classification)
   async classifyImage(imageUri) {
     try {
@@ -1562,6 +1561,398 @@ class ImageClassifierService {
         confidence: 0,
         model: 'mobilenetv3',
         processingTime: Date.now()
+      };
+    }
+  }
+
+  // ==================== 后端分类服务方法 ====================
+  
+  /**
+   * API配置
+   */
+  getAPIConfig() {
+    return {
+      baseURL: 'http://123.57.68.4:8000',
+      timeout: 30000, // 30秒超时
+      categoryMap: {
+        "social_activities": "social_activities",
+        "pets": "pets",
+        "single_person": "single_person",
+        "foods": "foods",
+        "travel_scenery": "travel_scenery",
+        "screenshot": "screenshot",
+        "idcard": "idcard",
+        "other": "other"
+      }
+    };
+  }
+
+  /**
+   * 检查后端服务健康状态
+   * 
+   * @returns {Promise<Object>} 健康状态信息
+   */
+  async checkHealth() {
+    const config = this.getAPIConfig();
+    
+    try {
+      logger.debug('🏥 检查后端服务健康状态...');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+      
+      const response = await fetch(`${config.baseURL}/api/v1/health`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        return {
+          available: false,
+          reason: `HTTP错误: ${response.status}`
+        };
+      }
+      
+      const data = await response.json();
+      
+      // 判断服务是否完全可用
+      const isHealthy = 
+        data.status === 'healthy' && 
+        data.database === 'connected' && 
+        data.model_api === 'available';
+      
+      logger.debug('✅ 服务健康检查完成:', {
+        available: isHealthy,
+        status: data.status,
+        database: data.database,
+        modelApi: data.model_api
+      });
+      
+      return {
+        available: isHealthy,
+        status: data.status,
+        database: data.database,
+        modelApi: data.model_api,
+        timestamp: data.timestamp
+      };
+      
+    } catch (error) {
+      logger.error('❌ 健康检查失败:', error);
+      return {
+        available: false,
+        reason: error.name === 'AbortError' ? '请求超时' : '网络错误或服务不可达'
+      };
+    }
+  }
+
+  /**
+   * 计算文件的SHA-256哈希
+   * 
+   * @param {Blob|File} imageFile - 图片文件
+   * @returns {Promise<string>} SHA-256哈希值
+   */
+  async calculateSHA256(imageFile) {
+    try {
+      const arrayBuffer = await imageFile.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex;
+    } catch (error) {
+      logger.error('计算SHA-256失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 查询缓存
+   * 
+   * @param {string} imageHash - 图片SHA-256哈希
+   * @param {string} clientId - 客户端ID
+   * @returns {Promise<Object>} 缓存查询结果
+   */
+  async checkCache(imageHash, clientId) {
+    const config = this.getAPIConfig();
+    
+    try {
+      logger.debug('🔍 查询缓存...', imageHash.substring(0, 16) + '...');
+      
+      const response = await fetch(`${config.baseURL}/api/v1/classify/check-cache`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-ID': clientId || ''
+        },
+        body: JSON.stringify({
+          image_hash: imageHash
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP错误: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.cached) {
+        logger.debug('✅ 缓存命中！');
+      } else {
+        logger.debug('❌ 缓存未命中');
+      }
+      
+      return result;
+      
+    } catch (error) {
+      logger.error('❌ 查询缓存失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 上传图片并分类
+   * 
+   * @param {Blob|File} imageFile - 图片文件
+   * @param {string} imageHash - 图片SHA-256哈希（可选）
+   * @param {string} clientId - 客户端ID
+   * @returns {Promise<Object>} 分类结果
+   */
+  async uploadAndClassify(imageFile, imageHash = null, clientId) {
+    const config = this.getAPIConfig();
+    
+    try {
+      logger.debug('⬆️  上传图片进行分类...');
+      
+      const formData = new FormData();
+      formData.append('image', imageFile);
+      
+      if (imageHash) {
+        formData.append('image_hash', imageHash);
+      }
+      
+      const headers = {};
+      if (clientId) {
+        headers['X-User-ID'] = clientId;
+      }
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), config.timeout);
+      
+      const response = await fetch(`${config.baseURL}/api/v1/classify`, {
+        method: 'POST',
+        headers: headers,
+        body: formData,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP错误: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      logger.debug('✅ 分类完成:', result.data?.category);
+      
+      return result;
+      
+    } catch (error) {
+      logger.error('❌ 上传分类失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 完整的远程图片分类流程
+   * 
+   * @param {Blob|File|string} imageInput - 图片文件或URI
+   * @param {Object} options - 选项
+   * @param {boolean} options.checkHealthFirst - 是否先检查健康状态
+   * @returns {Promise<Object>} 分类结果
+   */
+  async classifyImageRemote(imageInput, options = {}) {
+    const {
+      checkHealthFirst = false
+    } = options;
+    
+    try {
+      logger.debug('🚀 开始远程图片分类...');
+      
+      // 步骤0: 检查服务可用性（可选）
+      if (checkHealthFirst) {
+        logger.debug('🏥 检查服务状态...');
+        const health = await this.checkHealth();
+        
+        if (!health.available) {
+          throw new Error(`服务不可用: ${health.reason || '未知原因'}`);
+        }
+        
+        logger.debug('✅ 服务正常');
+      }
+      
+      // 获取客户端ID
+      const clientId = await UnifiedDataService.getClientId();
+      logger.debug('🆔 客户端ID:', clientId);
+      
+      // 将imageInput转换为Blob/File
+      let imageFile = imageInput;
+      
+      // 如果输入是URI字符串，需要转换为Blob
+      if (typeof imageInput === 'string') {
+        logger.debug('📥 从URI加载图片...');
+        const response = await fetch(imageInput);
+        const blob = await response.blob();
+        imageFile = new File([blob], 'image.jpg', { type: blob.type || 'image/jpeg' });
+      }
+      
+      // 步骤1: 计算哈希
+      logger.debug('🔑 计算图片哈希...');
+      const imageHash = await this.calculateSHA256(imageFile);
+      logger.debug(`🔑 哈希: ${imageHash.substring(0, 16)}...`);
+      
+      // 步骤2: 查询缓存（强制使用）
+      logger.debug('🔍 查询缓存...');
+      const cacheResult = await this.checkCache(imageHash, clientId);
+      
+      if (cacheResult.cached) {
+        // 缓存命中！
+        logger.debug('✅ 缓存命中！节省上传带宽');
+        
+        // 返回结构兼容本地分类格式
+        return {
+          success: true,
+          categoryId: cacheResult.data.category,
+          confidence: cacheResult.data.confidence,
+          message: cacheResult.data.description || '从缓存获取分类结果',
+          // 保持与本地分类兼容的空字段
+          idCardDetections: [],
+          generalDetections: [],
+          mobileNetV3Detections: [],
+          imageDimensions: null,
+          allModelResults: {}
+        };
+      }
+      
+      // 步骤3: 缓存未命中，上传图片
+      logger.debug('⬆️  上传图片分类...');
+      const result = await this.uploadAndClassify(imageFile, imageHash, clientId);
+      
+      if (result.success) {
+        logger.debug('✅ 远程分类成功:', result.data.category);
+        
+        // 返回结构兼容本地分类格式
+        return {
+          success: true,
+          categoryId: result.data.category,
+          confidence: result.data.confidence,
+          message: result.data.description || '图片分类完成',
+          // 保持与本地分类兼容的空字段
+          idCardDetections: [],
+          generalDetections: [],
+          mobileNetV3Detections: [],
+          imageDimensions: null,
+          allModelResults: {}
+        };
+      } else {
+        throw new Error(result.error || '分类失败');
+      }
+      
+    } catch (error) {
+      logger.error('❌ 远程分类失败:', error);
+      
+      // 返回结构兼容本地分类格式
+      return {
+        success: false,
+        error: error.message,
+        categoryId: 'other',
+        confidence: 0,
+        message: `远程分类失败: ${error.message}`,
+        // 保持与本地分类兼容的空字段
+        idCardDetections: [],
+        generalDetections: [],
+        mobileNetV3Detections: [],
+        imageDimensions: null,
+        allModelResults: {}
+      };
+    }
+  }
+
+  /**
+   * 混合分类策略：优先使用远程分类，失败时降级到本地分类
+   * 
+   * @param {string|Blob|File} imageInput - 图片输入
+   * @param {Object} options - 选项
+   * @returns {Promise<Object>} 分类结果
+   */
+  async classifyImageHybrid(imageInput, options = {}) {
+    const {
+      preferRemote = true,
+      fallbackToLocal = true
+    } = options;
+    
+    try {
+      if (preferRemote) {
+        logger.debug('🌐 尝试远程分类...');
+        
+        // 尝试远程分类
+        const remoteResult = await this.classifyImageRemote(imageInput, {
+          checkHealthFirst: true
+        });
+        
+        if (remoteResult.success) {
+          logger.debug('✅ 远程分类成功');
+          return {
+            ...remoteResult,
+            classificationMethod: 'remote'
+          };
+        }
+        
+        if (!fallbackToLocal) {
+          return remoteResult;
+        }
+        
+        logger.warn('⚠️ 远程分类失败，降级到本地分类');
+      }
+      
+      // 降级到本地分类
+      logger.debug('🖥️ 使用本地分类...');
+      
+      // 如果输入是Blob/File，需要转换为URI
+      let imageUri = imageInput;
+      if (imageInput instanceof Blob || imageInput instanceof File) {
+        imageUri = URL.createObjectURL(imageInput);
+      }
+      
+      const localResult = await this.classifyImage(imageUri);
+      
+      // 清理临时URL
+      if (imageUri !== imageInput && imageUri.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUri);
+      }
+      
+      return {
+        ...localResult,
+        classificationMethod: 'local'
+      };
+      
+    } catch (error) {
+      logger.error('❌ 混合分类失败:', error);
+      
+      // 返回结构兼容本地分类格式
+      return {
+        success: false,
+        error: error.message,
+        categoryId: 'other',
+        confidence: 0,
+        message: `分类失败: ${error.message}`,
+        // 保持与本地分类兼容的空字段
+        idCardDetections: [],
+        generalDetections: [],
+        mobileNetV3Detections: [],
+        imageDimensions: null,
+        allModelResults: {}
       };
     }
   }

@@ -73,8 +73,9 @@ function createWindow() {
     icon: path.join(__dirname, '../icons/imageclassify.png'),  // 使用更高分辨率的图标
     title: '芯图相册-智能分类，便捷管理，仅你可见',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
-    titleBarStyle: 'hidden',  // 隐藏原生标题栏
-    frame: true,  // 保持窗口框架
+    // 混合模式：titleBarOverlay + 自定义内容
+    titleBarStyle: 'hidden',
+    frame: true,
     titleBarOverlay: {
       color: '#2f3241',  // 标题栏背景色
       symbolColor: '#74b1be',  // 控制按钮颜色

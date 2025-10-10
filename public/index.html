@@ -8,51 +8,19 @@
     <meta name="description" content="芯图相册-智能分类，便捷管理，仅你可见"/>
     <title>芯图相册-智能分类，便捷管理，仅你可见</title>
     <style>
-      /* 混合模式：titleBarOverlay + 自定义内容 */
-      .custom-titlebar {
-        height: 60px;  /* 与 titleBarOverlay.height 一致 */
-        background: #2f3241;  /* 与 titleBarOverlay.color 一致 */
-        color: #74b1be;
-        display: flex;
-        align-items: center;
-        padding: 0 20px;
-        -webkit-app-region: drag;  /* 允许拖拽 */
-        user-select: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 9999;
-        /* 为系统控制按钮留出空间 */
-        padding-right: 140px;
-      }
-      
-      .titlebar-icon {
-        width: 32px;
-        height: 32px;
-        margin-right: 12px;
-        -webkit-app-region: no-drag;  /* 图标区域不可拖拽 */
-      }
-      
-      .titlebar-title {
-        flex: 1;
-        font-size: 16px;
-        font-weight: 500;
-      }
-      
-      /* 确保应用内容不被标题栏遮挡 */
       body {
         margin: 0;
-        padding-top: 60px;  /* 为自定义标题栏留出空间 */
+        padding: 0;
+        overflow: auto; /* 允许滚动 */
+      }
+      #root {
+        height: 100vh;
+        overflow: auto; /* 允许滚动 */
       }
     </style>
   </head>
   <body>
     <noscript>您需要启用JavaScript才能运行此应用程序。</noscript>
-    <div class="custom-titlebar">
-      <img src="./icon.png" alt="App Icon" class="titlebar-icon">
-      <div class="titlebar-title">芯图相册-智能分类，便捷管理，仅你可见</div>
-    </div>
     <div id="root"></div>
   </body>
 </html>
