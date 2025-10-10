@@ -1812,6 +1812,11 @@ class ImageClassifierService {
       const imageHash = await this.calculateSHA256(imageFile);
       logger.debug(`🔑 哈希: ${imageHash.substring(0, 16)}...`);
       
+      // 步骤1.5: 缩放图像到1024x1024（保持宽高比）
+      logger.debug('🖼️ 缩放图像到1024x1024...');
+      const resizedImageFile = await this.resizeImageTo1024(imageFile);
+      logger.debug('✅ 图像缩放完成');
+      
       // 步骤2: 查询缓存（强制使用）
       logger.debug('🔍 查询缓存...');
       const cacheResult = await this.checkCache(imageHash, clientId);
@@ -1837,7 +1842,7 @@ class ImageClassifierService {
       
       // 步骤3: 缓存未命中，上传图片
       logger.debug('⬆️  上传图片分类...');
-      const result = await this.uploadAndClassify(imageFile, imageHash, clientId);
+      const result = await this.uploadAndClassify(resizedImageFile, imageHash, clientId);
       
       if (result.success) {
         logger.debug('✅ 远程分类成功:', result.data.category);
@@ -1896,24 +1901,32 @@ class ImageClassifierService {
       if (preferRemote) {
         logger.debug('🌐 尝试远程分类...');
         
-        // 尝试远程分类
-        const remoteResult = await this.classifyImageRemote(imageInput, {
-          checkHealthFirst: true
-        });
-        
-        if (remoteResult.success) {
-          logger.debug('✅ 远程分类成功');
-          return {
-            ...remoteResult,
-            classificationMethod: 'remote'
-          };
+        try {
+          // 尝试远程分类
+          const remoteResult = await this.classifyImageRemote(imageInput, {
+            checkHealthFirst: true
+          });
+          
+          if (remoteResult.success) {
+            logger.debug('✅ 远程分类成功');
+            return {
+              ...remoteResult,
+              classificationMethod: 'remote'
+            };
+          }
+          
+          if (!fallbackToLocal) {
+            return remoteResult;
+          }
+          
+          logger.warn('⚠️ 远程分类失败，降级到本地分类');
+        } catch (remoteError) {
+          logger.warn('⚠️ 远程分类异常，降级到本地分类:', remoteError.message);
+          
+          if (!fallbackToLocal) {
+            throw remoteError;
+          }
         }
-        
-        if (!fallbackToLocal) {
-          return remoteResult;
-        }
-        
-        logger.warn('⚠️ 远程分类失败，降级到本地分类');
       }
       
       // 降级到本地分类
@@ -1955,6 +1968,72 @@ class ImageClassifierService {
         allModelResults: {}
       };
     }
+  }
+
+  /**
+   * 将图像缩放到1024x1024，保持宽高比
+   * @param {File} imageFile - 原始图像文件
+   * @returns {Promise<File>} - 缩放后的图像文件
+   */
+  async resizeImageTo1024(imageFile) {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        // 计算缩放比例，保持宽高比
+        const maxSize = 1024;
+        let { width, height } = img;
+        
+        if (width > height) {
+          if (width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+        }
+        
+        // 设置canvas尺寸
+        canvas.width = width;
+        canvas.height = height;
+        
+        // 绘制缩放后的图像
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // 转换为Blob
+        canvas.toBlob((blob) => {
+          if (blob) {
+            // 创建新的File对象
+            const resizedFile = new File([blob], imageFile.name, {
+              type: blob.type || 'image/jpeg',
+              lastModified: Date.now()
+            });
+            resolve(resizedFile);
+          } else {
+            reject(new Error('图像缩放失败'));
+          }
+        }, 'image/jpeg', 0.9); // 使用90%质量
+      };
+      
+      img.onerror = () => {
+        reject(new Error('图像加载失败'));
+      };
+      
+      // 加载图像
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target.result;
+      };
+      reader.onerror = () => {
+        reject(new Error('文件读取失败'));
+      };
+      reader.readAsDataURL(imageFile);
+    });
   }
 }
 
