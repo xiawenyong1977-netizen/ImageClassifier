@@ -38,6 +38,10 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [totalImagesCount, setTotalImagesCount] = useState(0);
+  const [readmeContent, setReadmeContent] = useState('');
+  const [forceShowReadme, setForceShowReadme] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   
   // 使用 ref 存储设置值，避免异步状态更新问题
   const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
@@ -49,12 +53,13 @@ const HomeScreen = () => {
       setIsLoading(true);
       
       // 并行加载所有数据
-      const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings] = await Promise.all([
+      const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings, allImages] = await Promise.all([
         UnifiedDataService.readRecentImages(20),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
-        UnifiedDataService.readSettings()
+        UnifiedDataService.readSettings(),
+        UnifiedDataService.readAllImages()
       ]);
       
       // 加载各分类的最近图片
@@ -116,7 +121,11 @@ const HomeScreen = () => {
       setHideEmptyCategories(settings.hideEmptyCategories === true);
       hideEmptyCategoriesRef.current = settings.hideEmptyCategories === true;
       
-      logger.debug('HomeScreen 数据加载完成');
+      const totalCount = Array.isArray(allImages) ? allImages.length : 0;
+      setTotalImagesCount(totalCount);
+      
+      logger.debug('HomeScreen 数据加载完成, 图片总数:', totalCount);
+      logger.debug('allImages 类型:', typeof allImages, 'isArray:', Array.isArray(allImages));
       
       // 使用 setTimeout 确保状态更新后再设置 isLoading
       setTimeout(() => {
@@ -135,10 +144,144 @@ const HomeScreen = () => {
     logger.debug('更新 hideEmptyCategoriesRef.current:', hideEmptyCategories);
   }, [hideEmptyCategories]);
   
+  // 加载 readme 内容
+  const loadReadme = useCallback(async () => {
+    try {
+      // 方法1: 尝试从 public 目录通过 fetch 加载（推荐）
+      try {
+        logger.debug('尝试从 public 目录加载 readme');
+        const response = await fetch('/readme/readme.md');
+        if (response.ok) {
+          let content = await response.text();
+          logger.debug('从 public 目录读取 readme 成功，长度:', content.length);
+          
+          // 处理图片路径，将相对路径转换为 public 目录下的路径
+          content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
+            const imagePath = `/readme/${filename}`;
+            logger.debug('转换图片路径:', filename, '->', imagePath);
+            return `src="${imagePath}"`;
+          });
+          
+          setReadmeContent(content);
+          return;
+        }
+      } catch (fetchError) {
+        logger.debug('从 public 目录加载失败:', fetchError);
+      }
+
+      // 方法2: 尝试从文件系统读取（fallback）
+      if (typeof window !== 'undefined' && window.require) {
+        const fs = window.require('fs');
+        const path = window.require('path');
+        
+        // 尝试不同的路径
+        const possiblePaths = [
+          path.join(process.cwd(), 'public', 'readme', 'readme.md'),
+          path.join(process.cwd(), 'readme', 'readme.md'),
+          path.join(process.cwd(), '..', 'readme', 'readme.md'), // 上一级目录
+          path.join(__dirname, 'readme', 'readme.md'),
+          path.join(__dirname, '..', '..', 'readme', 'readme.md'), // 上两级目录
+          path.join(process.resourcesPath || '', 'readme', 'readme.md'),
+          path.join(process.cwd(), '..', '..', 'readme', 'readme.md'), // 项目根目录
+          'readme/readme.md',
+          '../readme/readme.md',
+          '../../readme/readme.md'
+        ];
+        
+        let content = '';
+        let readmePath = '';
+        let readmeDir = '';
+        
+        for (const testPath of possiblePaths) {
+          try {
+            logger.debug('尝试读取 readme 文件:', testPath);
+            if (fs.existsSync(testPath)) {
+              content = fs.readFileSync(testPath, 'utf-8');
+              readmePath = testPath;
+              readmeDir = path.dirname(testPath);
+              logger.debug('readme 文件读取成功，路径:', readmePath);
+              break;
+            }
+          } catch (e) {
+            logger.debug('路径不存在或读取失败:', testPath);
+          }
+        }
+        
+        if (content) {
+          // 处理图片路径，将相对路径转换为绝对路径
+          content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
+            const imagePath = path.join(readmeDir, filename).replace(/\\/g, '/');
+            logger.debug('转换图片路径:', filename, '->', imagePath);
+            return `src="file:///${imagePath}"`;
+          });
+          
+          setReadmeContent(content);
+          logger.debug('readme 内容设置成功，长度:', content.length);
+          return;
+        }
+      }
+
+      // 方法3: 使用 fallback 内容
+      logger.warn('未找到 readme 文件，使用 fallback 内容');
+      const fallbackContent = `您是否也曾经历过这样的时刻？
+
+在旅途中，我们举起镜头，想要留住山河壮阔的壮丽瞬间；在聚会时，我们按下快门，渴望定格与好友欢聚的每一张笑脸；回到家中，我们随手一拍，记录下家人的温情陪伴与宠物的暖心依赖；甚至当美食上桌，我们也习惯性地"咔嚓"一声，将色香味俱全的体验封存为永恒的记忆……
+
+科技让拍照变得轻而易举，却也带来了"幸福的烦恼"。为了捕捉最完美的瞬间，我们常常对同一场景连拍数张；工作之中，相机也成为得力助手——会议实录、资料拍摄、事实留存、沟通截图……大量的图片无声地堆积在手机相册中，其中有珍贵的文档、美好的回忆，也有重要的凭证。
+
+日积月累，手机存储空间频频告急，而云备份又让人担忧隐私安全。如何高效整理海量照片，在释放空间的同时，守护每一份珍贵记忆，已成为我们每个人都需要面对的日常课题。
+
+芯图相册，正是为您解决这一难题而生的智能伙伴。
+
+我们运用最新AI技术，在您的设备本地即可对照片进行智能识别与分类。无需登录、无需网络、更无任何内嵌广告——从根源上杜绝隐私泄露风险，给您纯粹、安心的整理体验。
+
+📁 核心功能：智能分类，便捷管理
+
+· 第一版已支持按内容、城市、相似度三大维度进行分类
+· 内容识别覆盖七大常见类别：手机截图、证件照片、单人照、社会活动（多人照）、自然风景、美食与萌宠
+· 经过严格测试，分类准确率稳定在90%以上
+· 如有个别分类有误，您也可手动调整，灵活又贴心
+
+操作指引：四步完成相册焕新
+
+以手机相册清理为例，轻松上手：
+
+1. 连接与设置
+       使用数据线连接手机与电脑，在设置页面选定需要整理的相册目录。
+
+2. 一键智能分类
+       点击"开始智能分类"，AI将自动扫描识别，首页清晰展示分类进度与图片统计。
+
+3. 便捷拣选暂存
+       分类完成后，可逐类浏览，轻松勾选需要处理的作品，一键移入暂存箱。
+
+4. 最终清理或归档
+       进入暂存箱二次确认，无误后全选删除，或复制到指定文件夹完成归档。`;
+      setReadmeContent(fallbackContent);
+      
+    } catch (error) {
+      logger.error('读取 readme 文件失败:', error);
+      setReadmeContent('');
+    }
+  }, []);
+
+  // 检查是否需要强制显示 readme（用于测试）
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const showReadme = urlParams.get('showReadme');
+      if (showReadme === 'true') {
+        setForceShowReadme(true);
+        logger.debug('强制显示 readme 模式已启用');
+      }
+    }
+  }, []);
+
   // 初始化数据加载
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadReadme();
+  }, [loadData, loadReadme]);
   
   // 页面重新挂载时重新加载数据（通过页面切换实现）
   // 不再监听缓存变化，每次挂载都重新建立快照
@@ -184,6 +327,23 @@ const HomeScreen = () => {
   const handleScanProgress = useCallback((progress) => {
     logger.debug('HomeScreen 收到扫描进度更新:', progress);
     
+    // 如果开始扫描，立即切换到扫描模式
+    if (progress.stage === 'started' || progress.stage === 'scanning' || progress.stage === 'processing') {
+      setForceShowReadme(false);
+      setIsScanning(true);
+      logger.debug('扫描开始，清除强制显示 readme 状态，切换到正常显示模式');
+    }
+    
+    // 扫描完成时切换回正常模式
+    if (progress.stage === 'completed') {
+      setIsScanning(false);
+      logger.debug('扫描完成，切换到正常模式');
+      // 重新加载扫描时间和统计信息
+      loadLastScanTime();
+      // 重新加载数据
+      loadData();
+    }
+    
     // 防抖：只在消息真正变化时更新
     setGlobalMessage(prevMessage => {
       const newMessage = progress.message || '处理中...';
@@ -192,15 +352,6 @@ const HomeScreen = () => {
       }
       return prevMessage;
     });
-    
-    // 扫描完成时刷新数据
-    if (progress.stage === 'completed') {
-      logger.debug('扫描完成，刷新数据');
-      // 重新加载扫描时间和统计信息
-      loadLastScanTime();
-      // 重新加载数据
-      loadData();
-    }
   }, [loadData]);
 
   // 监听自定义事件（由 IPCListenerService 发送）
@@ -349,8 +500,12 @@ const HomeScreen = () => {
     try {
       logger.debug('HomeScreen 启动智能扫描');
       
-      // 显示开始扫描消息
+      // 立即设置扫描状态，清除强制显示 readme 状态
+      setForceShowReadme(false);
+      setIsScanning(true);
       setGlobalMessage('初始化扫描: 准备扫描环境');
+      
+      logger.debug('扫描状态已设置，切换到正常显示模式');
       
       // 调用GalleryScannerService的扫描接口
       const galleryScannerService = new GalleryScannerService();
@@ -364,6 +519,7 @@ const HomeScreen = () => {
     } catch (error) {
       logger.error('智能扫描失败:', error);
       setGlobalMessage('扫描失败: ' + error.message);
+      setIsScanning(false); // 扫描失败时也要重置状态
       throw error;
     }
   }, [handleScanProgress]);
@@ -509,6 +665,163 @@ const HomeScreen = () => {
           <Text style={styles.categoryCount}>{group.imageCount}</Text>
         </View>
       </TouchableOpacity>
+    );
+  };
+
+  // 渲染 Readme 内容的组件
+  const ReadmeView = () => {
+    logger.debug('ReadmeView 被渲染，readmeContent 长度:', readmeContent.length);
+    
+    // 如果 readme 内容为空，显示提示信息
+    if (!readmeContent || readmeContent.length === 0) {
+      return (
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          <View style={styles.readmeContainer}>
+            <Text style={styles.readmeH1}>欢迎使用芯图相册</Text>
+            <Text style={styles.readmeParagraph}>智能分类，便捷管理，仅你可见</Text>
+            <TouchableOpacity
+              style={styles.getStartedButton}
+              onPress={() => {
+                setCurrentScreen('Settings');
+                setScreenProps({});
+              }}
+            >
+              <Text style={styles.getStartedButtonText}>进入设置 →</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      );
+    }
+    
+    return (
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        <View style={styles.readmeContainer}>
+          <View style={styles.readmeContent}>
+            {/* 解析并渲染 markdown 内容 */}
+            {readmeContent.split('\n').map((line, index) => {
+              // 标题
+              if (line.startsWith('# ')) {
+                return <Text key={index} style={styles.readmeH1}>{line.substring(2)}</Text>;
+              } else if (line.startsWith('## ')) {
+                return <Text key={index} style={styles.readmeH2}>{line.substring(3)}</Text>;
+              } else if (line.startsWith('### ')) {
+                return <Text key={index} style={styles.readmeH3}>{line.substring(4)}</Text>;
+              }
+              // 列表项
+              else if (line.startsWith('· ')) {
+                return <Text key={index} style={styles.readmeListItem}>• {line.substring(2)}</Text>;
+              }
+              // 数字列表
+              else if (/^\d+\.\s/.test(line)) {
+                return <Text key={index} style={styles.readmeNumberedItem}>{line}</Text>;
+              }
+              // HTML 图片标签 - 解析并渲染为 React Native 组件
+              else if (line.includes('<div') || line.includes('<img') || line.includes('</div>')) {
+                // 解析 HTML 内容，提取图片路径
+                const imgMatches = line.match(/src="([^"]+)"/g);
+                if (imgMatches && imgMatches.length > 0) {
+                  const imageSources = imgMatches.map(match => {
+                    const src = match.replace('src="', '').replace('"', '');
+                    return src;
+                  });
+                  
+                  // 如果是水平排列的图片（2张图片）
+                  if (imageSources.length === 2) {
+                    return (
+                      <View key={index} style={styles.readmeHorizontalImages}>
+                        <Image 
+                          source={{ uri: imageSources[0] }} 
+                          style={styles.readmeImageHorizontal}
+                          resizeMode="cover"
+                        />
+                        <Image 
+                          source={{ uri: imageSources[1] }} 
+                          style={styles.readmeImageHorizontal}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    );
+                  } 
+                  // 如果是单张图片
+                  else if (imageSources.length === 1) {
+                    return (
+                      <View key={index} style={styles.readmeSingleImage}>
+                        <Image 
+                          source={{ uri: imageSources[0] }} 
+                          style={styles.readmeImageSingle}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    );
+                  }
+                }
+                
+                // 如果无法解析，尝试使用 dangerouslySetInnerHTML（fallback）
+                if (typeof window !== 'undefined') {
+                  return (
+                    <View key={index} style={styles.readmeImageContainer}>
+                      <div dangerouslySetInnerHTML={{ __html: line }} />
+                    </View>
+                  );
+                }
+                return null;
+              }
+              // 空行
+              else if (line.trim() === '') {
+                return <View key={index} style={styles.readmeEmptyLine} />;
+              }
+              // 普通段落
+              else {
+                // 检查是否包含加粗文本 **文本**
+                if (line.includes('**')) {
+                  const parts = line.split(/(\*\*[^*]+\*\*)/g);
+                  return (
+                    <Text key={index} style={styles.readmeParagraph}>
+                      {parts.map((part, partIndex) => {
+                        if (part.startsWith('**') && part.endsWith('**')) {
+                          // 加粗文本
+                          const boldText = part.slice(2, -2);
+                          return (
+                            <Text key={partIndex} style={styles.readmeBoldText}>
+                              {boldText}
+                            </Text>
+                          );
+                        } else {
+                          // 普通文本
+                          return part;
+                        }
+                      })}
+                    </Text>
+                  );
+                } else {
+                  return <Text key={index} style={styles.readmeParagraph}>{line}</Text>;
+                }
+              }
+            })}
+          </View>
+          
+          {/* 开始使用按钮 */}
+          <TouchableOpacity
+            style={styles.getStartedButton}
+            onPress={() => {
+              setCurrentScreen('Settings');
+              setScreenProps({});
+            }}
+          >
+            <Text style={styles.getStartedButtonText}>进入设置 →</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     );
   };
 
@@ -674,13 +987,28 @@ const HomeScreen = () => {
         {/* 根据当前屏幕渲染对应页面 */}
         {currentScreen === 'Home' && (
           <View style={styles.screenContainer}>
-            {/* 消息提示区 - 只在HomeScreen中显示 */}
-            <View style={styles.scanProgressBanner}>
-              <Text style={styles.scanProgressMessage}>
-                {globalMessage}
-              </Text>
-            </View>
-            {renderHomeContent()}
+            {/* 消息提示区 - 只在显示正常内容时显示，readme时不显示 */}
+            {(() => {
+              const shouldShowReadme = (forceShowReadme || totalImagesCount === 0) && !isScanning;
+              // 只有在不显示 readme 时才显示提示条
+              return !shouldShowReadme ? (
+                <View style={styles.scanProgressBanner}>
+                  <Text style={styles.scanProgressMessage}>
+                    {globalMessage}
+                  </Text>
+                </View>
+              ) : null;
+            })()}
+            {/* 当没有图片时显示 readme，否则显示正常内容 */}
+            {(() => {
+              logger.debug('检查显示条件 - totalImagesCount:', totalImagesCount);
+              logger.debug('forceShowReadme:', forceShowReadme);
+              logger.debug('isScanning:', isScanning);
+              logger.debug('readmeContent 长度:', readmeContent.length);
+              const shouldShowReadme = (forceShowReadme || totalImagesCount === 0) && !isScanning;
+              logger.debug('shouldShowReadme:', shouldShowReadme);
+              return shouldShowReadme ? <ReadmeView /> : renderHomeContent();
+            })()}
           </View>
         )}
         
@@ -787,7 +1115,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh]);
 
   // 显示加载状态
   if (isLoading) {
@@ -1000,6 +1328,119 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // Readme 样式
+  readmeContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 24,
+    margin: 16,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  readmeContent: {
+    flex: 1,
+  },
+  readmeH1: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginVertical: 8,
+    lineHeight: 24,
+  },
+  readmeH2: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#444',
+    marginVertical: 10,
+    lineHeight: 30,
+  },
+  readmeH3: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#555',
+    marginVertical: 8,
+    lineHeight: 26,
+  },
+  readmeParagraph: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 24,
+    marginVertical: 4,
+  },
+  readmeBoldText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    lineHeight: 24,
+  },
+  readmeListItem: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 24,
+    marginLeft: 16,
+    marginVertical: 2,
+  },
+  readmeNumberedItem: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#555',
+    lineHeight: 26,
+    marginVertical: 6,
+  },
+  readmeEmptyLine: {
+    height: 8,
+  },
+  readmeImageContainer: {
+    marginVertical: 12,
+    alignItems: 'center',
+  },
+  readmeHorizontalImages: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 12,
+    gap: 10,
+  },
+  readmeImageHorizontal: {
+    width: '48%',
+    height: 200,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  readmeSingleImage: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  readmeImageSingle: {
+    width: '80%',
+    maxWidth: 400,
+    height: 250,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  getStartedButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    marginTop: 24,
+    alignSelf: 'center',
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  getStartedButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
   },
 });
 
