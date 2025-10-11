@@ -150,14 +150,14 @@ const HomeScreen = () => {
       // 方法1: 尝试从 public 目录通过 fetch 加载（推荐）
       try {
         logger.debug('尝试从 public 目录加载 readme');
-        const response = await fetch('/readme/readme.md');
+        const response = await fetch('./readme/readme.md');
         if (response.ok) {
           let content = await response.text();
           logger.debug('从 public 目录读取 readme 成功，长度:', content.length);
           
           // 处理图片路径，将相对路径转换为 public 目录下的路径
           content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
-            const imagePath = `/readme/${filename}`;
+            const imagePath = `./readme/${filename}`;
             logger.debug('转换图片路径:', filename, '->', imagePath);
             return `src="${imagePath}"`;
           });
@@ -987,7 +987,7 @@ const HomeScreen = () => {
         <View style={styles.customTitleBar}>
           <View style={styles.titleBarLeft}>
             <Image 
-              source={{ uri: '/icon.png' }}
+              source={{ uri: './icon.png' }}
               style={styles.titleBarIcon}
               resizeMode="contain"
             />

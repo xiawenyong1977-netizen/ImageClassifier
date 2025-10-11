@@ -324,11 +324,16 @@ function setupIpcHandlers() {
   // 处理文件夹选择请求
   ipcMain.handle('select-folder', async () => {
     try {
+      // 动态获取用户的 Pictures 目录
+      const os = require('os');
+      const path = require('path');
+      const defaultPath = path.join(os.homedir(), 'Pictures');
+      
       const result = await dialog.showOpenDialog({
         properties: ['openDirectory'],
         title: '选择照片目录',
         buttonLabel: '选择',
-        defaultPath: 'D:\\Pictures'
+        defaultPath: defaultPath
       });
       
       if (!result.canceled && result.filePaths.length > 0) {
