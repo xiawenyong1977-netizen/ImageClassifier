@@ -1,5 +1,6 @@
 // 城市坐标查找服务 - 跨平台实现
 import citiesData from '../data/china-cities.json';
+import { logger } from '../adapters/WebAdapters.js';
 
 class CityLocationService {
   constructor() {
@@ -41,10 +42,10 @@ class CityLocationService {
       
       const cities = await response.json();
       
-      console.log('🔍 远程API返回附近城市数量:', cities.length);
+      logger.debug('🔍 远程API返回附近城市数量:', cities.length);
       
       if (!cities || cities.length === 0) {
-        console.warn('⚠️ 未找到附近的城市');
+        logger.warn('⚠️ 未找到附近的城市');
         return null;
       }
       
@@ -53,7 +54,7 @@ class CityLocationService {
       
       const mainCity = sortedByPopulation[0];
       
-      console.log('🔍 人口最多的城市:', {
+      logger.debug('🔍 人口最多的城市:', {
         name: mainCity.name,
         name_zh: mainCity.name_zh,
         population: mainCity.population,
@@ -73,14 +74,14 @@ class CityLocationService {
         source: 'remote'
       };
       
-      console.log(`✅ 远程API查询成功: ${mainCity.name} → ${chineseName}, 距离: ${city.distance}km`);
+      logger.debug(`✅ 远程API查询成功: ${mainCity.name} → ${chineseName}, 距离: ${city.distance}km`);
       return city;
       
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.warn('⚠️ 远程API查询超时');
+        logger.warn('⚠️ 远程API查询超时');
       } else {
-        console.warn('⚠️ 远程API查询失败:', error.message);
+        logger.warn('⚠️ 远程API查询失败:', error.message);
       }
       return null;
     }
@@ -96,7 +97,7 @@ class CityLocationService {
   findNearestCity(latitude, longitude, maxDistance = 200) {
     // 参数验证
     if (!this.isValidCoordinate(latitude, longitude)) {
-      console.warn('Invalid coordinates provided');
+      logger.warn('Invalid coordinates provided');
       return null;
     }
 
@@ -128,9 +129,9 @@ class CityLocationService {
     }
 
     if (nearestCity) {
-      console.log(`✅ 本地查询成功: ${nearestCity.name}, 距离: ${nearestCity.distance}km`);
+      logger.debug(`✅ 本地查询成功: ${nearestCity.name}, 距离: ${nearestCity.distance}km`);
     } else {
-      console.warn('⚠️ 本地未找到匹配的城市');
+      logger.warn('⚠️ 本地未找到匹配的城市');
     }
 
     return nearestCity;
@@ -146,7 +147,7 @@ class CityLocationService {
   async findNearestCityAsync(latitude, longitude, maxDistance = 200) {
     // 参数验证
     if (!this.isValidCoordinate(latitude, longitude)) {
-      console.warn('Invalid coordinates provided');
+      logger.warn('Invalid coordinates provided');
       return null;
     }
 
@@ -160,18 +161,18 @@ class CityLocationService {
 
     try {
       // 1. 优先尝试远程API
-      console.log('🌐 尝试远程API查询城市信息...');
+      logger.debug('🌐 尝试远程API查询城市信息...');
       nearestCity = await this.findNearestCityRemote(latitude, longitude);
       
       // 如果远程API失败或未找到结果，回退到本地查询
       if (!nearestCity) {
-        console.log('⚠️ 远程API查询失败，降级到本地查询...');
+        logger.debug('⚠️ 远程API查询失败，降级到本地查询...');
         nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
       }
       
     } catch (error) {
       // 如果远程API调用异常，回退到本地查询
-      console.warn('⚠️ 远程API调用异常，降级到本地查询:', error.message);
+      logger.warn('⚠️ 远程API调用异常，降级到本地查询:', error.message);
       nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
     }
 

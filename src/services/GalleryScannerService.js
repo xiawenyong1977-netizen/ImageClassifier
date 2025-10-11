@@ -1151,7 +1151,7 @@ class GalleryScannerService {
         
         // 图片分类
         const classificationStartTime = Date.now();
-        const classification = await this.imageClassifier.classifyImageHybrid(image.uri);
+        const classification = await this.imageClassifier.classifyImage(image.uri);
         const classificationTime = Date.now() - classificationStartTime;
         
         // 检查分类结果

@@ -629,21 +629,76 @@ class ImageClassifierService {
       }
       console.log('❌ 不是手机截图，继续下一步');
 
-     
-    
-
-    
-      // 第二步到第四步：并行执行所有模型推理
-      console.log('🔍 并行执行所有模型推理...');
-      const parallelResults = await this.runParallelInference(imageUri);
+      // ✨ 新增：尝试远程分类
+      let allModelResults = null;
+      let useRemoteInference = false;
       
-      // 保存所有模型的原始结果
-      const allModelResults = {
-        mobileScreenshot: false,
-        idCard: parallelResults.idCard || [],
-        general: parallelResults.general || [],
-        mobileNetV3: parallelResults.mobileNetV3 || []
-      };
+      try {
+        logger.debug('🌐 尝试远程分类...');
+        const remoteResult = await this.classifyImageRemote(imageUri, {
+          checkHealthFirst: true
+        });
+        
+        if (remoteResult.success) {
+          // 远程分类成功
+          const data = remoteResult.data;
+          
+          // 判断是大模型推理还是小模型推理
+          if (data.category && data.category !== '') {
+            // 大模型推理 - 直接返回结果
+            logger.debug('✅ 远程大模型推理成功:', data.category);
+            return {
+              success: true,
+              categoryId: data.category,
+              confidence: data.confidence || 0.9,
+              message: data.description || '图像分类完成',
+              idCardDetections: [],
+              generalDetections: [],
+              mobileNetV3Detections: [],
+              imageDimensions: imageDimensions,
+              allModelResults: {},
+              classificationMethod: 'remote_llm'
+            };
+          } else if (data.local_inference_result) {
+            // 小模型推理 - 保存检测结果，跳过本地并行推理
+            logger.debug('✅ 远程小模型推理成功，使用服务器返回的检测结果');
+            const localResult = data.local_inference_result;
+            
+            // 构造 allModelResults 对象，使用服务器返回的结果
+            allModelResults = {
+              mobileScreenshot: false,
+              idCard: localResult.idCardDetections || [],
+              general: localResult.generalDetections || [],
+              mobileNetV3: localResult.mobileNetV3Detections || {}
+            };
+            
+            useRemoteInference = true;
+            logger.debug('🔄 跳过本地推理，使用服务器检测结果');
+          }
+        }
+        
+        if (!useRemoteInference) {
+          // 远程分类失败，继续本地推理
+          logger.warn('⚠️ 远程分类失败，降级到本地推理');
+        }
+      } catch (remoteError) {
+        logger.warn('⚠️ 远程分类异常，降级到本地推理:', remoteError.message);
+      }
+
+      // 如果没有使用远程推理，则执行本地并行推理
+      if (!useRemoteInference) {
+        // 第二步到第四步：并行执行所有模型推理
+        console.log('🔍 并行执行所有模型推理...');
+        const parallelResults = await this.runParallelInference(imageUri);
+        
+        // 保存所有模型的原始结果
+        allModelResults = {
+          mobileScreenshot: false,
+          idCard: parallelResults.idCard || [],
+          general: parallelResults.general || [],
+          mobileNetV3: parallelResults.mobileNetV3 || []
+        };
+      }
 
       // 统计检测结果
       const idCardCount = allModelResults.idCard.length;
@@ -1825,18 +1880,12 @@ class ImageClassifierService {
         // 缓存命中！
         logger.debug('✅ 缓存命中！节省上传带宽');
         
-        // 返回结构兼容本地分类格式
+        // 直接返回完整的缓存结果
         return {
           success: true,
-          categoryId: cacheResult.data.category,
-          confidence: cacheResult.data.confidence,
-          message: cacheResult.data.description || '从缓存获取分类结果',
-          // 保持与本地分类兼容的空字段
-          idCardDetections: [],
-          generalDetections: [],
-          mobileNetV3Detections: [],
-          imageDimensions: null,
-          allModelResults: {}
+          data: cacheResult.data,  // 保留完整的 data 对象
+          from_cache: true,
+          request_id: cacheResult.request_id
         };
       }
       
@@ -1845,20 +1894,15 @@ class ImageClassifierService {
       const result = await this.uploadAndClassify(resizedImageFile, imageHash, clientId);
       
       if (result.success) {
-        logger.debug('✅ 远程分类成功:', result.data.category);
+        logger.debug('✅ 远程分类成功');
         
-        // 返回结构兼容本地分类格式
+        // 直接返回完整的服务器响应
         return {
           success: true,
-          categoryId: result.data.category,
-          confidence: result.data.confidence,
-          message: result.data.description || '图片分类完成',
-          // 保持与本地分类兼容的空字段
-          idCardDetections: [],
-          generalDetections: [],
-          mobileNetV3Detections: [],
-          imageDimensions: null,
-          allModelResults: {}
+          data: result.data,  // 保留完整的 data 对象
+          from_cache: false,
+          processing_time_ms: result.processing_time_ms,
+          request_id: result.request_id
         };
       } else {
         throw new Error(result.error || '分类失败');

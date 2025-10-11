@@ -76,6 +76,10 @@
         {
           "target": "portable",
           "arch": ["x64"]
+        },
+        {
+          "target": "appx",
+          "arch": ["x64"]
         }
       ],
       "requestedExecutionLevel": "asInvoker",
@@ -86,6 +90,17 @@
           "filter": ["**/*"]
         }
       ]
+    },
+    "appx": {
+      "applicationId": "ImageClassifier",
+      "displayName": "芯图相册",
+      "publisherDisplayName": "ImageClassifier Team",
+      "identityName": "ImageClassifier.App",
+      "publisher": "CN=ImageClassifier",
+      "backgroundColor": "#2f3241",
+      "languages": ["zh-CN", "en-US"],
+      "addAutoLaunchExtension": false,
+      "showNameOnTiles": true
     },
     "mac": {
       "icon": "public/icon.icns",
