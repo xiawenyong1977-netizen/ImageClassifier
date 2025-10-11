@@ -69,9 +69,16 @@ const createDefaultLocationInfo = (source = 'none') => ({
 
 // 从exif-parser数据中提取GPS信息
 
-const extractGPSFromExifParser = (exifData) => {
+const extractGPSFromExifParser = async (exifData) => {
 
-  if (!exifData?.tags) return null;
+  console.log('========== extractGPSFromExifParser 被调用 ==========');
+
+  
+
+  if (!exifData?.tags) {
+    console.log('❌ 没有tags');
+    return null;
+  }
 
   
 
@@ -79,13 +86,26 @@ const extractGPSFromExifParser = (exifData) => {
 
   
 
-  if (!GPSLatitude || !GPSLongitude) return null;
+  if (!GPSLatitude || !GPSLongitude) {
+    console.log('❌ 没有GPS坐标');
+    return null;
+  }
 
   
 
-  // 查找最近的城市信息
+  console.log(`✅ 发现GPS坐标: ${GPSLatitude}, ${GPSLongitude}`);
 
-  const nearestCity = cityLocationService.findNearestCity(GPSLatitude, GPSLongitude);
+  console.log('准备调用 findNearestCityAsync...');
+
+  
+
+  // 查找最近的城市信息（优先远程API，失败降级到本地）
+
+  const nearestCity = await cityLocationService.findNearestCityAsync(GPSLatitude, GPSLongitude);
+
+  
+
+  console.log('findNearestCityAsync 返回结果:', nearestCity);
 
   
 
@@ -117,7 +137,7 @@ const extractGPSFromExifParser = (exifData) => {
 
 // 从react-native-exif数据中提取GPS信息
 
-const extractGPSFromNativeExif = (exifData) => {
+const extractGPSFromNativeExif = async (exifData) => {
 
   if (!exifData?.GPSLatitude || !exifData?.GPSLongitude) return null;
 
@@ -129,9 +149,9 @@ const extractGPSFromNativeExif = (exifData) => {
 
   
 
-  // 查找最近的城市信息
+  // 查找最近的城市信息（优先远程API，失败降级到本地）
 
-  const nearestCity = cityLocationService.findNearestCity(latitude, longitude);
+  const nearestCity = await cityLocationService.findNearestCityAsync(latitude, longitude);
 
   
 
@@ -177,7 +197,7 @@ const tryExifParser = async (filePath) => {
 
     
 
-    return extractGPSFromExifParser(exifData);
+    return await extractGPSFromExifParser(exifData);
 
   } catch (error) {
 
@@ -203,7 +223,7 @@ const tryNativeExif = async (normalizedPath) => {
 
     
 
-    return extractGPSFromNativeExif(exifData);
+    return await extractGPSFromNativeExif(exifData);
 
   } catch (error) {
 
@@ -276,7 +296,7 @@ const extractExifData = async (filePath) => {
       
 
       // 提取GPS信息
-      const gpsInfo = extractGPSFromExifParser(exifData);
+      const gpsInfo = await extractGPSFromExifParser(exifData);
 
       const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
 
@@ -367,7 +387,7 @@ const extractExifData = async (filePath) => {
         
 
         // 提取GPS信息
-        const gpsInfo = extractGPSFromNativeExif(exifData);
+        const gpsInfo = await extractGPSFromNativeExif(exifData);
 
         const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
 
@@ -851,9 +871,9 @@ class GalleryScannerService {
 
             
 
-            // 查找最近的城市
+            // 查找最近的城市（异步调用远程API，失败降级到本地）
 
-            const nearestCity = cityLocationService.findNearestCity(image.latitude, image.longitude);
+            const nearestCity = await cityLocationService.findNearestCityAsync(image.latitude, image.longitude);
 
             
 

@@ -6,10 +6,88 @@ class CityLocationService {
     this.cities = citiesData;
     this.cache = new Map(); // 缓存最近查找结果
     this.maxCacheSize = 1000; // 最大缓存数量
+    
+    // API配置
+    this.apiConfig = {
+      baseURL: 'http://123.57.68.4:8000',
+      timeout: 5000, // 5秒超时
+      endpoints: {
+        nearestCity: '/api/v1/location/nearest-city',
+        nearbyCities: '/api/v1/location/nearby-cities'
+      }
+    };
   }
 
   /**
-   * 根据坐标查找最近的城市
+   * 调用远程API查找最近的城市（使用附近城市列表，按人口筛选真正的城市）
+   * @param {number} latitude - 纬度
+   * @param {number} longitude - 经度
+   * @returns {Promise<Object|null>} 城市信息对象或null
+   */
+  async findNearestCityRemote(latitude, longitude) {
+    // 使用附近城市列表API，查询50公里内的前10个城市
+    const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearbyCities}?latitude=${latitude}&longitude=${longitude}&limit=10&max_distance_km=50`;
+    
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.apiConfig.timeout);
+      
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const cities = await response.json();
+      
+      console.log('🔍 远程API返回附近城市数量:', cities.length);
+      
+      if (!cities || cities.length === 0) {
+        console.warn('⚠️ 未找到附近的城市');
+        return null;
+      }
+      
+      // 按人口排序，选择人口最多的城市（通常是真正的市级单位，而不是区）
+      const sortedByPopulation = [...cities].sort((a, b) => b.population - a.population);
+      
+      const mainCity = sortedByPopulation[0];
+      
+      console.log('🔍 人口最多的城市:', {
+        name: mainCity.name,
+        name_zh: mainCity.name_zh,
+        population: mainCity.population,
+        distance: mainCity.distance_km
+      });
+      
+      // 使用API返回的中文名称
+      const chineseName = mainCity.name_zh || mainCity.name;
+      
+      // 转换API返回格式到本地格式
+      const city = {
+        name: chineseName,
+        province: chineseName, // 使用中文名作为省份（暂时）
+        lat: mainCity.latitude,
+        lng: mainCity.longitude,
+        distance: Math.round(mainCity.distance_km * 100) / 100,
+        source: 'remote'
+      };
+      
+      console.log(`✅ 远程API查询成功: ${mainCity.name} → ${chineseName}, 距离: ${city.distance}km`);
+      return city;
+      
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.warn('⚠️ 远程API查询超时');
+      } else {
+        console.warn('⚠️ 远程API查询失败:', error.message);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * 根据坐标查找最近的城市（同步，仅本地查询）
    * @param {number} latitude - 纬度
    * @param {number} longitude - 经度
    * @param {number} maxDistance - 最大搜索距离(公里)，默认200公里
@@ -27,7 +105,6 @@ class CityLocationService {
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey);
     }
-
     let nearestCity = null;
     let minDistance = Infinity;
 
@@ -44,9 +121,58 @@ class CityLocationService {
         minDistance = distance;
         nearestCity = {
           ...city,
-          distance: Math.round(distance * 100) / 100 // 保留两位小数
+          distance: Math.round(distance * 100) / 100, // 保留两位小数
+          source: 'local'
         };
       }
+    }
+
+    if (nearestCity) {
+      console.log(`✅ 本地查询成功: ${nearestCity.name}, 距离: ${nearestCity.distance}km`);
+    } else {
+      console.warn('⚠️ 本地未找到匹配的城市');
+    }
+
+    return nearestCity;
+  }
+
+  /**
+   * 根据坐标查找最近的城市（混合模式：优先远程API，失败时回退到本地）
+   * @param {number} latitude - 纬度
+   * @param {number} longitude - 经度
+   * @param {number} maxDistance - 最大搜索距离(公里)，默认200公里
+   * @returns {Promise<Object|null>} 城市信息对象或null
+   */
+  async findNearestCityAsync(latitude, longitude, maxDistance = 200) {
+    // 参数验证
+    if (!this.isValidCoordinate(latitude, longitude)) {
+      console.warn('Invalid coordinates provided');
+      return null;
+    }
+
+    // 检查缓存
+    const cacheKey = this.getCacheKey(latitude, longitude);
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey);
+    }
+
+    let nearestCity = null;
+
+    try {
+      // 1. 优先尝试远程API
+      console.log('🌐 尝试远程API查询城市信息...');
+      nearestCity = await this.findNearestCityRemote(latitude, longitude);
+      
+      // 如果远程API失败或未找到结果，回退到本地查询
+      if (!nearestCity) {
+        console.log('⚠️ 远程API查询失败，降级到本地查询...');
+        nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
+      }
+      
+    } catch (error) {
+      // 如果远程API调用异常，回退到本地查询
+      console.warn('⚠️ 远程API调用异常，降级到本地查询:', error.message);
+      nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
     }
 
     // 缓存结果
