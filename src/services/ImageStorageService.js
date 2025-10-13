@@ -189,7 +189,7 @@ class IndexedDBAdapter {
       };
       
       request.onerror = () => {
-        console.error(`❌ IndexedDB 读取失败 (${key}):`, request.error);
+        logger.error(`❌ IndexedDB 读取失败 (${key}):`, request.error);
         reject(request.error);
       };
     });
@@ -220,7 +220,7 @@ class IndexedDBAdapter {
       };
       
       transaction.onerror = () => {
-        console.error(`❌ IndexedDB 保存失败 (${key}):`, transaction.error);
+        logger.error(`❌ IndexedDB 保存失败 (${key}):`, transaction.error);
         reject(transaction.error);
       };
     });
@@ -265,7 +265,7 @@ class IndexedDBAdapter {
       };
       
       getRequest.onerror = () => {
-        console.error(`❌ IndexedDB 查找图片失败:`, getRequest.error);
+        logger.error(`❌ IndexedDB 查找图片失败:`, getRequest.error);
         reject(getRequest.error);
       };
       
@@ -275,7 +275,7 @@ class IndexedDBAdapter {
       };
       
       transaction.onerror = () => {
-        console.error(`❌ IndexedDB 单条记录操作失败:`, transaction.error);
+        logger.error(`❌ IndexedDB 单条记录操作失败:`, transaction.error);
         reject(transaction.error);
       };
     });
@@ -312,12 +312,12 @@ class IndexedDBAdapter {
       };
       
       getAllRequest.onerror = () => {
-        console.error(`❌ IndexedDB 读取现有数据失败:`, getAllRequest.error);
+        logger.error(`❌ IndexedDB 读取现有数据失败:`, getAllRequest.error);
         reject(getAllRequest.error);
       };
       
       transaction.onerror = () => {
-        console.error(`❌ IndexedDB 批量增量更新失败:`, transaction.error);
+        logger.error(`❌ IndexedDB 批量增量更新失败:`, transaction.error);
         reject(transaction.error);
       };
     });
@@ -343,7 +343,7 @@ class IndexedDBAdapter {
       };
       
       transaction.onerror = () => {
-        console.error(`❌ IndexedDB 删除失败 (${key}):`, transaction.error);
+        logger.error(`❌ IndexedDB 删除失败 (${key}):`, transaction.error);
         reject(transaction.error);
       };
     });
@@ -429,22 +429,17 @@ class ImageStorageService {
     try {
       if (Platform.OS === 'web') {
         // Web环境初始化IndexedDB
-        console.log('🌐 开始初始化IndexedDB...');
+        logger.debug('🌐 开始初始化IndexedDB...');
         await this.storage.init();
         logger.debug(' IndexedDB初始化完成');
-        
-        // 检查是否需要从localStorage迁移数据
-        logger.debug(' 开始检查localStorage迁移...');
-        await this.migrateFromLocalStorage();
-        logger.debug(' localStorage迁移检查完成');
       } else {
         // 移动端初始化AsyncStorage
-        console.log('📱 开始初始化AsyncStorage...');
+        logger.debug('📱 开始初始化AsyncStorage...');
         await this.storage.getItem('test');
         logger.debug(' AsyncStorage初始化完成');
       }
       this.isInitialized = true;
-      logger.debug(' 存储服务初始化成功，使用IndexedDB');
+      logger.debug(' 存储服务初始化成功');
       
       // 初始化客户端唯一ID
       await this.initializeClientId();
@@ -458,7 +453,7 @@ class ImageStorageService {
           this.storage = this.fallbackStorage;
           await this.storage.getItem('test');
           this.isInitialized = true;
-          console.log('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
+          logger.warn('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
           return;
         } catch (fallbackError) {
           logger.error(' localStorage降级也失败:', fallbackError);
@@ -474,7 +469,7 @@ class ImageStorageService {
           logger.debug(' 数据库删除成功，准备重新创建');
         };
         deleteRequest.onerror = () => {
-          console.log('⚠️ 数据库删除失败，继续尝试');
+          logger.warn('⚠️ 数据库删除失败，继续尝试');
         };
         
         // 等待删除完成
@@ -486,9 +481,6 @@ class ImageStorageService {
         logger.debug(' 重试IndexedDB初始化...');
         await this.storage.init();
         logger.debug(' 重试IndexedDB初始化成功');
-        logger.debug(' 重试localStorage迁移...');
-        await this.migrateFromLocalStorage();
-        logger.debug(' 重试localStorage迁移完成');
         this.isInitialized = true;
         logger.debug(' 重试成功，IndexedDB初始化完成');
       } catch (retryError) {
@@ -498,65 +490,11 @@ class ImageStorageService {
         this.storage = this.fallbackStorage;
         await this.storage.getItem('test');
         this.isInitialized = true;
-        console.log('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
+        logger.warn('⚠️ 当前使用localStorage存储，检测结果可能不会显示在IndexedDB中');
       }
     }
   }
 
-  // 从localStorage迁移数据到IndexedDB
-  async migrateFromLocalStorage() {
-    if (Platform.OS !== 'web' || !this.fallbackStorage) return;
-    
-    try {
-      // 检查IndexedDB中是否已有数据
-      const existingImages = await this.storage.getItem(this.storageKeys.images);
-      if (existingImages && existingImages.length > 0) {
-        logger.debug(' IndexedDB中已有数据，跳过迁移');
-        return;
-      }
-      
-      // 临时：自动清空localStorage中的旧数据（包含'people'分类）
-      console.log('🧹 自动清理localStorage中的旧数据...');
-      await this.fallbackStorage.removeItem('classified_images');
-      await this.fallbackStorage.removeItem('image_stats');
-      await this.fallbackStorage.removeItem('app_settings');
-      logger.debug(' localStorage旧数据已清理');
-      
-      // 检查localStorage中是否有数据
-      const oldImages = await this.fallbackStorage.getItem('classified_images');
-      const oldStats = await this.fallbackStorage.getItem('image_stats');
-      const oldSettings = await this.fallbackStorage.getItem('app_settings');
-      
-      if (oldImages || oldStats || oldSettings) {
-        logger.debug(' 开始从localStorage迁移数据到IndexedDB...');
-        
-        // 迁移图片数据
-        if (oldImages) {
-          const images = JSON.parse(oldImages);
-          await this.storage.setItem(this.storageKeys.images, images);
-          logger.debug(`✅ 迁移了 ${images.length} 张图片数据`);
-        }
-        
-        // 迁移统计数据
-        if (oldStats) {
-          const stats = JSON.parse(oldStats);
-          await this.storage.setItem(this.storageKeys.stats, stats);
-          logger.debug(' 迁移了统计数据');
-        }
-        
-        // 迁移设置数据
-        if (oldSettings) {
-          const settings = JSON.parse(oldSettings);
-          await this.storage.setItem(this.storageKeys.settings, settings);
-          logger.debug(' 迁移了设置数据');
-        }
-        
-        console.log('🎉 数据迁移完成！');
-      }
-    } catch (error) {
-      console.warn('数据迁移失败，继续使用现有存储:', error);
-    }
-  }
 
   // 批量保存图片详细信息
   async saveImageDetailedInfo(imageDataArray) {
@@ -569,7 +507,7 @@ class ImageStorageService {
       
       // 等待之前的保存操作完成
       while (this.saveLock) {
-        console.log('⏳ 等待之前的保存操作完成...');
+        logger.debug('⏳ 等待之前的保存操作完成...');
         await this.saveLock;
       }
       
@@ -581,7 +519,7 @@ class ImageStorageService {
       return result;
       
     } catch (error) {
-      console.error('Batch save failed:', error);
+      logger.error('Batch save failed:', error);
       this.saveLock = null; // 确保锁被释放
       throw error;
     }
@@ -704,7 +642,7 @@ class ImageStorageService {
       
       return images;
     } catch (error) {
-      console.error('Failed to get full images:', error);
+      logger.error('Failed to get full images:', error);
       throw error;
     }
   }
@@ -874,7 +812,7 @@ class ImageStorageService {
       return imageRecord;
       
     } catch (error) {
-      console.error('Failed to save image classification:', error);
+      logger.error('Failed to save image classification:', error);
       throw error;
     }
   }
@@ -894,7 +832,7 @@ class ImageStorageService {
       const simplifiedImages = fullImages.map(img => {
         // 调试：检查原始数据中的分类信息
         if (!img.category) {
-          console.warn(`⚠️ 图片 ${img.id} 在数据库中缺少分类信息:`, {
+          logger.warn(`⚠️ 图片 ${img.id} 在数据库中缺少分类信息:`, {
             id: img.id,
             fileName: img.fileName,
             category: img.category,
@@ -919,7 +857,7 @@ class ImageStorageService {
       return simplifiedImages;
       
     } catch (error) {
-      console.error('Failed to get images:', error);
+      logger.error('Failed to get images:', error);
       return [];
     }
   }
@@ -931,7 +869,7 @@ class ImageStorageService {
       const image = allImages.find(img => img.id === imageId);
       return image || null;
     } catch (error) {
-      console.error('Failed to get image by ID:', error);
+      logger.error('Failed to get image by ID:', error);
       return null;
     }
   }
@@ -1096,7 +1034,7 @@ class ImageStorageService {
         await this.saveSettings(settings);
         
         logger.debug('🆔 客户端ID已生成:', clientId);
-        console.log('🆔 新客户端ID:', clientId);
+        logger.debug('🆔 新客户端ID:', clientId);
       } else {
         logger.debug('🆔 客户端ID已存在:', settings.clientId);
       }
@@ -1176,7 +1114,7 @@ class ImageStorageService {
       
       await this.storage.setItem(this.storageKeys.settings, settings);
       
-      console.log('Settings saved:', settings);
+      logger.debug('Settings saved:', settings);
       
     } catch (error) {
       console.error('Failed to save settings:', error);
@@ -1348,7 +1286,7 @@ class ImageStorageService {
   // Delete image with progress callback and result
   async deleteImageWithResult(imageId, onProgress) {
     try {
-      console.log('🗑️ deleteImageWithResult 开始执行，图片ID:', imageId);
+      logger.debug('🗑️ deleteImageWithResult 开始执行，图片ID:', imageId);
       await this.ensureInitialized();
       
       // 使用IndexedDB的单条记录删除，避免全量读写丢失数据
@@ -1382,7 +1320,7 @@ class ImageStorageService {
           const existingImage = getRequest.result;
           
           if (!existingImage) {
-            console.log('🗑️ 图片未找到');
+            logger.debug('🗑️ 图片未找到');
             resolve({
               success: false,
               message: 'Image not found'
@@ -1516,7 +1454,7 @@ class ImageStorageService {
       // Save statistics
       await this.storage.setItem(this.storageKeys.stats, stats);
       
-      console.log('Statistics updated successfully');
+      logger.debug('Statistics updated successfully');
       return stats;
       
     } catch (error) {
@@ -1545,7 +1483,7 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      console.log('Clearing all image data...');
+      logger.debug('Clearing all image data...');
       
       // Clear images
       await this.storage.removeItem(this.storageKeys.images);
@@ -1556,7 +1494,7 @@ class ImageStorageService {
       // Clear settings
       await this.storage.removeItem(this.storageKeys.settings);
       
-      console.log('All data cleared successfully');
+      logger.debug('All data cleared successfully');
       return true;
       
     } catch (error) {
@@ -1609,7 +1547,7 @@ class ImageStorageService {
         await this.updateStats();
       }
       
-      console.log('Data imported successfully');
+      logger.debug('Data imported successfully');
       return true;
       
     } catch (error) {
@@ -1784,7 +1722,7 @@ class ImageStorageService {
       await this.ensureInitialized();
       
       if (!urisToRemove || urisToRemove.length === 0) {
-        console.log('No images to remove');
+        logger.debug('No images to remove');
         return { success: true, removedCount: 0 };
       }
       

@@ -1,14 +1,12 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
-import ImageSimilarityService from './ImageSimilarityService.js';
 import configService from './ConfigService.js';
 import { logger } from '../adapters/WebAdapters.js';
 
 class UnifiedDataService {
   constructor() {
     this.imageStorageService = new ImageStorageService();
-    this.imageSimilarityService = new ImageSimilarityService();
     this.imageCache = GlobalImageCache;
     this.configService = configService;
     this.isInitialized = false;
@@ -49,10 +47,7 @@ class UnifiedDataService {
       // 1. 初始化数据库服务
       await this.imageStorageService.ensureInitialized();
       
-      // 2. 初始化相似度检测服务
-      await this.imageSimilarityService.initialize();
-      
-      // 3. 构建缓存
+      // 2. 构建缓存
       await this.imageCache.buildCache();
       
       this.isInitialized = true;
@@ -73,19 +68,19 @@ class UnifiedDataService {
    */
   async readAllImages() {
     try {
-      // 先从缓存读取
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.allImages && cache.allImages.length > 0) {
         logger.debug('从缓存读取所有图片:', cache.allImages.length);
         return cache.allImages;
       }
       
-      // 缓存没有，从数据库读取并更新缓存
-      logger.debug('从数据库读取所有图片');
-      await this.imageCache.refreshCache();
-      
-      const updatedCache = this.imageCache.getCache();
-      return updatedCache.allImages;
+      // 如果缓存中仍然没有，说明数据库中也没有图片
+      logger.debug('缓存中没有图片，返回空数组');
+      return [];
       
     } catch (error) {
       logger.error('读取所有图片失败:', error);
@@ -150,11 +145,14 @@ class UnifiedDataService {
     try {
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
-      logger.debug(`读取分类图片: 原始=${category}, 标准化=${normalizedCategory}`);
       
       // 直接从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
-      logger.debug('从缓存读取分类图片:', normalizedCategory, categoryImages.length);
+      
+      // 只在有图片时打印日志
+      if (categoryImages.length > 0) {
+        logger.debug('从缓存读取分类图片:', normalizedCategory, categoryImages.length);
+      }
       return categoryImages;
       
     } catch (error) {
@@ -169,19 +167,19 @@ class UnifiedDataService {
    */
   async readRecentImages(limit = 20) {
     try {
-      // 先从缓存读取
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.recentImages && cache.recentImages.length > 0) {
         logger.debug('从缓存读取最近图片:', cache.recentImages.length);
         return cache.recentImages.slice(0, limit);
       }
       
-      // 缓存没有，从数据库读取并更新缓存
-      logger.debug('从数据库读取最近图片');
-      await this.imageCache.refreshCache();
-      
-      const updatedCache = this.imageCache.getCache();
-      return updatedCache.recentImages.slice(0, limit);
+      // 如果缓存中仍然没有，说明数据库中也没有图片
+      logger.debug('缓存中没有最近图片，返回空数组');
+      return [];
       
     } catch (error) {
       logger.error('读取最近图片失败:', error);
@@ -197,7 +195,6 @@ class UnifiedDataService {
     try {
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
-      logger.debug(`读取分类最近图片: 原始=${category}, 标准化=${normalizedCategory}`);
       
       // 直接从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
@@ -211,7 +208,10 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      logger.debug('从缓存读取分类最近图片:', normalizedCategory, recentImages.length);
+      // 只在有图片时打印日志
+      if (recentImages.length > 0) {
+        logger.debug('从缓存读取分类最近图片:', normalizedCategory, recentImages.length);
+      }
       return recentImages;
       
     } catch (error) {
@@ -226,8 +226,6 @@ class UnifiedDataService {
    */
   async readRecentImagesByCity(city, limit = 4) {
     try {
-      logger.debug(`读取城市最近图片: ${city}`);
-      
       // 直接从缓存获取城市图片
       const cityImages = this.imageCache.getImagesByCity(city);
       
@@ -240,7 +238,10 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      logger.debug('从缓存读取城市最近图片:', city, recentImages.length);
+      // 只在有图片时打印日志
+      if (recentImages.length > 0) {
+        logger.debug('从缓存读取城市最近图片:', city, recentImages.length);
+      }
       return recentImages;
       
     } catch (error) {
@@ -255,19 +256,19 @@ class UnifiedDataService {
    */
   async readCategoryCounts() {
     try {
-      // 先从缓存读取
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.categoryCounts && Object.keys(cache.categoryCounts).length > 0) {
         logger.debug('从缓存读取分类统计');
         return cache.categoryCounts;
       }
       
-      // 缓存没有，从数据库读取并更新缓存
-      logger.debug('从数据库读取分类统计');
-      await this.imageCache.refreshCache();
-      
-      const updatedCache = this.imageCache.getCache();
-      return updatedCache.categoryCounts;
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有分类统计，返回空对象');
+      return {};
       
     } catch (error) {
       logger.error('读取分类统计失败:', error);
@@ -281,19 +282,19 @@ class UnifiedDataService {
    */
   async readCityCounts() {
     try {
-      // 先从缓存读取
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.cityCounts && Object.keys(cache.cityCounts).length > 0) {
         logger.debug('从缓存读取城市统计');
         return cache.cityCounts;
       }
       
-      // 缓存没有，从数据库读取并更新缓存
-      logger.debug('从数据库读取城市统计');
-      await this.imageCache.refreshCache();
-      
-      const updatedCache = this.imageCache.getCache();
-      return updatedCache.cityCounts;
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有城市统计，返回空对象');
+      return {};
       
     } catch (error) {
       logger.error('读取城市统计失败:', error);
@@ -498,7 +499,7 @@ class UnifiedDataService {
       
       // 1. 先写数据库
       await this.imageStorageService.saveSettings(settings);
-      console.log('✅ 数据库设置保存完成');
+      logger.debug('✅ 数据库设置保存完成');
       
       // 2. 缓存不需要更新（设置不涉及图片数据）
       
@@ -580,9 +581,9 @@ class UnifiedDataService {
    */
   async forceRefreshCache() {
     try {
-      console.log('🔄 强制刷新缓存...');
+      logger.debug('🔄 强制刷新缓存...');
       await this.imageCache.refreshCache();
-      console.log('✅ 缓存刷新完成');
+      logger.debug('✅ 缓存刷新完成');
     } catch (error) {
       console.error('❌ 强制刷新缓存失败:', error);
       throw error;
@@ -670,7 +671,7 @@ class UnifiedDataService {
     try {
       // 直接使用预计算的统计，避免重复计算
       const categoryCounts = this.imageCache.getSelectedCategoryCounts();
-      console.log('📊 按分类选中统计:', categoryCounts);
+      logger.debug('📊 按分类选中统计:', categoryCounts);
       return categoryCounts;
       
     } catch (error) {
@@ -687,7 +688,7 @@ class UnifiedDataService {
     try {
       // 直接使用预计算的统计，避免重复计算
       const cityCounts = this.imageCache.getSelectedCityCounts();
-      console.log('📊 按城市选中统计:', cityCounts);
+      logger.debug('📊 按城市选中统计:', cityCounts);
       return cityCounts;
       
     } catch (error) {
@@ -704,7 +705,7 @@ class UnifiedDataService {
     try {
       // 直接使用预计算的统计，避免重复计算
       const similarityGroupCounts = this.imageCache.getSelectedSimilarityGroupCounts();
-      console.log('📊 按相似组选中统计:', similarityGroupCounts);
+      logger.debug('📊 按相似组选中统计:', similarityGroupCounts);
       return similarityGroupCounts;
       
     } catch (error) {
@@ -754,7 +755,7 @@ class UnifiedDataService {
       // 计算平均大小
       stats.averageSize = stats.total > 0 ? stats.totalSize / stats.total : 0;
       
-      console.log('📊 选中图片详细统计:', stats);
+      logger.debug('📊 选中图片详细统计:', stats);
       return stats;
       
     } catch (error) {
@@ -781,7 +782,7 @@ class UnifiedDataService {
       const imageIds = categoryImages.map(img => img.id);
       
       this.addToSelection(imageIds);
-      console.log(`📊 按分类选中图片: ${category}, 数量: ${imageIds.length}`);
+      logger.debug(`📊 按分类选中图片: ${category}, 数量: ${imageIds.length}`);
       
       return imageIds.length;
       
@@ -802,7 +803,7 @@ class UnifiedDataService {
       const imageIds = cityImages.map(img => img.id);
       
       this.addToSelection(imageIds);
-      console.log(`📊 按城市选中图片: ${city}, 数量: ${imageIds.length}`);
+      logger.debug(`📊 按城市选中图片: ${city}, 数量: ${imageIds.length}`);
       
       return imageIds.length;
       
@@ -850,7 +851,7 @@ class UnifiedDataService {
         }
       });
       
-      console.log(`📊 ${logPrefix}: ${filterValue}, 数量: ${imageIds.length}`);
+      logger.debug(`📊 ${logPrefix}: ${filterValue}, 数量: ${imageIds.length}`);
       return imageIds.length;
       
     } catch (error) {
@@ -889,7 +890,7 @@ class UnifiedDataService {
   getSelectedImagesByCategory(category) {
     try {
       const categoryImages = this.getSelectedImages(category, null);
-      console.log(`📊 获取分类选中图片: ${category}, 数量: ${categoryImages.length}`);
+      logger.debug(`📊 获取分类选中图片: ${category}, 数量: ${categoryImages.length}`);
       return categoryImages;
     } catch (error) {
       console.error('❌ 获取分类选中图片失败:', error);
@@ -903,7 +904,7 @@ class UnifiedDataService {
   getSelectedImagesByCity(city) {
     try {
       const cityImages = this.getSelectedImages(null, city);
-      console.log(`📊 获取城市选中图片: ${city}, 数量: ${cityImages.length}`);
+      logger.debug(`📊 获取城市选中图片: ${city}, 数量: ${cityImages.length}`);
       return cityImages;
     } catch (error) {
       console.error('❌ 获取城市选中图片失败:', error);
@@ -918,7 +919,7 @@ class UnifiedDataService {
     try {
       const groupImages = this.imageCache.getImagesBySimilarityGroup(groupId);
       const selectedImages = groupImages.filter(img => img.selected === true);
-      console.log(`📊 获取相似组选中图片: ${groupId}, 数量: ${selectedImages.length}`);
+      logger.debug(`📊 获取相似组选中图片: ${groupId}, 数量: ${selectedImages.length}`);
       return selectedImages;
     } catch (error) {
       console.error('❌ 获取相似组选中图片失败:', error);
@@ -947,7 +948,7 @@ class UnifiedDataService {
    */
   async clearAllData() {
     try {
-      console.log('🗑️ 开始清空所有数据');
+      logger.debug('🗑️ 开始清空所有数据');
       
       // 清空数据库中的所有图片数据
       await this.imageStorageService.clearAllImages();
@@ -958,7 +959,7 @@ class UnifiedDataService {
       // 通知所有监听器数据已清空
       this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
       
-      console.log('✅ 所有数据已清空');
+      logger.debug('✅ 所有数据已清空');
       return true;
       
     } catch (error) {
@@ -1029,7 +1030,7 @@ class UnifiedDataService {
   async saveClassificationRules(rules) {
     try {
       await this.imageStorageService.saveClassificationRules(rules);
-      console.log('✅ 分类规则保存成功');
+      logger.debug('✅ 分类规则保存成功');
       return true;
     } catch (error) {
       console.error('❌ 保存分类规则失败:', error);
@@ -1041,7 +1042,7 @@ class UnifiedDataService {
   async resetClassificationRules() {
     try {
       const defaultRules = await this.imageStorageService.resetClassificationRules();
-      console.log('✅ 分类规则已重置为默认值');
+      logger.debug('✅ 分类规则已重置为默认值');
       return defaultRules;
     } catch (error) {
       console.error('❌ 重置分类规则失败:', error);
@@ -1053,7 +1054,7 @@ class UnifiedDataService {
   async updateClassificationRule(objectClass, newCategory) {
     try {
       const rules = await this.imageStorageService.updateClassificationRule(objectClass, newCategory);
-      console.log(`✅ 分类规则更新成功: ${objectClass} -> ${newCategory}`);
+      logger.debug(`✅ 分类规则更新成功: ${objectClass} -> ${newCategory}`);
       return rules;
     } catch (error) {
       console.error('❌ 更新分类规则失败:', error);
@@ -1065,7 +1066,7 @@ class UnifiedDataService {
   async addClassificationRule(objectClass, category) {
     try {
       const rules = await this.imageStorageService.addClassificationRule(objectClass, category);
-      console.log(`✅ 新增分类规则: ${objectClass} -> ${category}`);
+      logger.debug(`✅ 新增分类规则: ${objectClass} -> ${category}`);
       return rules;
     } catch (error) {
       console.error('❌ 添加分类规则失败:', error);
@@ -1077,10 +1078,38 @@ class UnifiedDataService {
   async removeClassificationRule(objectClass) {
     try {
       const rules = await this.imageStorageService.removeClassificationRule(objectClass);
-      console.log(`✅ 删除分类规则: ${objectClass}`);
+      logger.debug(`✅ 删除分类规则: ${objectClass}`);
       return rules;
     } catch (error) {
       console.error('❌ 删除分类规则失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 清空相似度数据
+   */
+  async clearSimilarityData() {
+    try {
+      logger.debug('清空相似度数据');
+      await this.imageStorageService.clearSimilarityData();
+      logger.debug('相似度数据清空完成');
+    } catch (error) {
+      logger.error('清空相似度数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量更新图片相似度信息
+   */
+  async updateImagesSimilarity(imageSimilarityArray) {
+    try {
+      logger.debug('批量更新图片相似度信息:', imageSimilarityArray.length);
+      await this.imageStorageService.updateImagesSimilarity(imageSimilarityArray);
+      logger.debug('图片相似度信息更新完成');
+    } catch (error) {
+      logger.error('更新图片相似度信息失败:', error);
       throw error;
     }
   }
@@ -1096,13 +1125,13 @@ class UnifiedDataService {
    */
   async getSimilarityGroupsStats() {
     try {
-      console.log('📊 获取相似度组统计信息...');
+      logger.debug('📊 获取相似度组统计信息...');
       
       // 使用 ImageStorageService 获取相似组数据
       const similarityGroups = await this.imageStorageService.getSimilarityGroups('similar');
       
       if (!similarityGroups || similarityGroups.length === 0) {
-        console.log('📊 没有找到相似度组数据');
+        logger.debug('📊 没有找到相似度组数据');
         return [];
       }
       
@@ -1137,7 +1166,7 @@ class UnifiedDataService {
       // 按组大小排序（从大到小）
       groups.sort((a, b) => b.imageCount - a.imageCount);
       
-      console.log(`📊 相似度组统计: ${groups.length}个组`);
+      logger.debug(`📊 相似度组统计: ${groups.length}个组`);
       return groups;
       
     } catch (error) {
@@ -1153,7 +1182,7 @@ class UnifiedDataService {
    */
   async getSimilarityGroupImages(groupId) {
     try {
-      console.log(`📖 获取相似组照片信息: ${groupId}`);
+      logger.debug(`📖 获取相似组照片信息: ${groupId}`);
       
       if (!groupId) {
         throw new Error('相似组ID不能为空');
@@ -1163,7 +1192,7 @@ class UnifiedDataService {
       const group = await this.imageStorageService.getSimilarityGroupById(groupId);
       
       if (!group) {
-        console.log(`📖 未找到相似组 ${groupId}`);
+        logger.debug(`📖 未找到相似组 ${groupId}`);
         return {
           groupId,
           imageCount: 0,
@@ -1206,7 +1235,7 @@ class UnifiedDataService {
         notFound: false
       };
       
-      console.log(`📖 相似组 ${groupId} 包含 ${images.length} 张图片`);
+      logger.debug(`📖 相似组 ${groupId} 包含 ${images.length} 张图片`);
       return result;
       
     } catch (error) {
@@ -1220,7 +1249,7 @@ class UnifiedDataService {
    */
   async removeImageFromSimilarityGroup(imageId, groupId) {
     try {
-      console.log(`🔄 从相似组移除图片: ${imageId}, groupId: ${groupId}`);
+      logger.debug(`🔄 从相似组移除图片: ${imageId}, groupId: ${groupId}`);
       
       // 从相似组中移除图片
       await this.imageStorageService.removeImageFromSimilarityGroup(imageId);
@@ -1228,7 +1257,7 @@ class UnifiedDataService {
       // 重建缓存以同步所有数据
       await this.imageCache.buildCache();
       
-      console.log(`✅ 成功从相似组移除图片: ${imageId}`);
+      logger.debug(`✅ 成功从相似组移除图片: ${imageId}`);
       return true;
     } catch (error) {
       console.error('❌ 从相似组移除图片失败:', error);
@@ -1245,7 +1274,7 @@ class UnifiedDataService {
    */
   async addImageToSimilarityGroup(imageId, groupId, similarityInfo = {}) {
     try {
-      console.log(`🔄 添加图片到相似组: ${imageId}, groupId: ${groupId}`);
+      logger.debug(`🔄 添加图片到相似组: ${imageId}, groupId: ${groupId}`);
       
       // 添加到相似组
       await this.imageStorageService.addImageToSimilarityGroup(imageId, groupId, similarityInfo);
@@ -1253,7 +1282,7 @@ class UnifiedDataService {
       // 重建缓存以同步所有数据
       await this.imageCache.buildCache();
       
-      console.log(`✅ 成功添加图片到相似组: ${imageId}`);
+      logger.debug(`✅ 成功添加图片到相似组: ${imageId}`);
       return true;
     } catch (error) {
       console.error('❌ 添加图片到相似组失败:', error);

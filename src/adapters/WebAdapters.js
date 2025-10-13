@@ -234,7 +234,7 @@ export const PermissionsAndroid = {
   },
   request: async (permission, options) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] 模拟权限请求: ${permission}`, options);
+      logger.debug(`[Web] 模拟权限请求: ${permission}`, options);
       return 'granted';
     } else {
       // 移动端使用原生API
@@ -244,7 +244,7 @@ export const PermissionsAndroid = {
   },
   check: async (permission) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] 模拟权限检查: ${permission}`);
+      logger.debug(`[Web] 模拟权限检查: ${permission}`);
       return true;
     } else {
       // 移动端使用原生API
@@ -340,7 +340,7 @@ export const AsyncStorage = {
 export const RNFS = {
   read: async (filePath, start, length, encoding) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.read: ${filePath}`);
+      logger.debug(`[Web] RNFS.read: ${filePath}`);
       return 'mock_file_content';
     } else {
       // 移动端使用原生API
@@ -363,7 +363,7 @@ export const RNFS = {
           ctime: stats.ctime,
         };
       } catch (error) {
-        console.log(`[Web] File stat failed: ${error.message}`);
+        logger.debug(`[Web] File stat failed: ${error.message}`);
         return { 
           size: 1024, 
           isFile: () => true,
@@ -380,7 +380,6 @@ export const RNFS = {
   },
   readDir: async (dirPath) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.readDir: ${dirPath}`);
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
@@ -405,10 +404,9 @@ export const RNFS = {
           });
         }
         
-        console.log(`[Web] Found ${result.length} items in ${dirPath}`);
         return result;
       } catch (error) {
-        console.log(`[Web] Directory read failed: ${error.message}`);
+        logger.error(`[Web] Directory read failed: ${error.message}`);
         return [];
       }
     } else {
@@ -419,7 +417,6 @@ export const RNFS = {
   },
   exists: async (filePath) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.exists: ${filePath}`);
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
@@ -431,12 +428,10 @@ export const RNFS = {
           normalizedPath = filePath.substring(1);
         }
         
-        console.log(`[Web] RNFS.exists normalized path: ${normalizedPath}`);
         const exists = fs.existsSync(normalizedPath);
-        console.log(`[Web] RNFS.exists result: ${exists}`);
         return exists;
       } catch (error) {
-        console.log(`[Web] File system access not available: ${error.message}`);
+        logger.error(`[Web] File system access not available: ${error.message}`);
         return false;
       }
     } else {
@@ -447,7 +442,7 @@ export const RNFS = {
   },
   mkdir: async (dirPath) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.mkdir: ${dirPath}`);
+      logger.debug(`[Web] RNFS.mkdir: ${dirPath}`);
       return true;
     } else {
       // 移动端使用原生API
@@ -457,9 +452,9 @@ export const RNFS = {
   },
   unlink: async (filePath) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.unlink: ${filePath}`);
-      console.log(`[Web] Electron available:`, !!window.require);
-      console.log(`[Web] window.require available:`, !!window.require);
+      logger.debug(`[Web] RNFS.unlink: ${filePath}`);
+      logger.debug(`[Web] Electron available:`, !!window.require);
+      logger.debug(`[Web] window.require available:`, !!window.require);
       
       if (!window.require) {
         console.error(`[Web] window.require not available, cannot delete file`);
@@ -474,12 +469,12 @@ export const RNFS = {
           normalizedPath = filePath.substring(1);
         }
         
-        console.log(`[Web] RNFS.unlink normalized path: ${normalizedPath}`);
+        logger.debug(`[Web] RNFS.unlink normalized path: ${normalizedPath}`);
         
         // 在PC环境下使用Electron接口删除文件
-        console.log(`[Web] Calling ElectronFileAPI.deleteFile...`);
+        logger.debug(`[Web] Calling ElectronFileAPI.deleteFile...`);
         const result = await ElectronFileAPI.deleteFile(normalizedPath);
-        console.log(`[Web] File deleted via Electron: ${normalizedPath}`, result);
+        logger.debug(`[Web] File deleted via Electron: ${normalizedPath}`, result);
         return true;
       } catch (error) {
         logger.error(`[Web] Failed to delete file via Electron: ${filePath}`, error);
@@ -493,7 +488,7 @@ export const RNFS = {
   },
   copyFile: async (from, to) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.copyFile: ${from} -> ${to}`);
+      logger.debug(`[Web] RNFS.copyFile: ${from} -> ${to}`);
       return true;
     } else {
       // 移动端使用原生API
@@ -503,7 +498,7 @@ export const RNFS = {
   },
   moveFile: async (from, to) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.moveFile: ${from} -> ${to}`);
+      logger.debug(`[Web] RNFS.moveFile: ${from} -> ${to}`);
       return true;
     } else {
       // 移动端使用原生API
@@ -513,7 +508,7 @@ export const RNFS = {
   },
   writeFile: async (filePath, content, encoding) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.writeFile: ${filePath}`);
+      logger.debug(`[Web] RNFS.writeFile: ${filePath}`);
       return true;
     } else {
       // 移动端使用原生API
@@ -523,7 +518,7 @@ export const RNFS = {
   },
   readFile: async (filePath, encoding) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] RNFS.readFile: ${filePath}`);
+      logger.debug(`[Web] RNFS.readFile: ${filePath}`);
       return 'mock_file_content';
     } else {
       // 移动端使用原生API
@@ -569,7 +564,7 @@ export const useFocusEffect = (callback) => {
 // 6. 图片选择器适配
 export const launchImageLibrary = (options, callback) => {
   if (Platform.OS === 'web') {
-    console.log('[Web] launchImageLibrary:', options);
+    logger.debug('[Web] launchImageLibrary:', options);
     const mockResult = {
       assets: [
         {
@@ -682,13 +677,13 @@ export const createBottomTabNavigator = () => {
 export const SQLite = {
   openDatabase: (name, version, displayName, size) => {
     if (Platform.OS === 'web') {
-      console.log(`[Web] SQLite.openDatabase: ${name}`);
+      logger.debug(`[Web] SQLite.openDatabase: ${name}`);
       return {
         transaction: (fn) => {
-          console.log('[Web] SQLite.transaction');
+          logger.debug('[Web] SQLite.transaction');
           fn({
             executeSql: (sql, params, successCallback, errorCallback) => {
-              console.log('[Web] SQLite.executeSql:', sql);
+              logger.debug('[Web] SQLite.executeSql:', sql);
               if (successCallback) {
                 setTimeout(() => successCallback({ rows: { length: 0, raw: () => [] } }), 100);
               }
@@ -696,10 +691,10 @@ export const SQLite = {
           });
         },
         readTransaction: (fn) => {
-          console.log('[Web] SQLite.readTransaction');
+          logger.debug('[Web] SQLite.readTransaction');
           fn({
             executeSql: (sql, params, successCallback, errorCallback) => {
-              console.log('[Web] SQLite.executeSql:', sql);
+              logger.debug('[Web] SQLite.executeSql:', sql);
               if (successCallback) {
                 setTimeout(() => successCallback({ rows: { length: 0, raw: () => [] } }), 100);
               }
@@ -870,20 +865,20 @@ export const Alert = {
 export const ElectronFileAPI = {
   deleteFile: (filePath) => {
     return new Promise((resolve, reject) => {
-      console.log(`[ElectronFileAPI] 开始删除文件: ${filePath}`);
-      console.log(`[ElectronFileAPI] Platform.OS: ${Platform.OS}`);
-      console.log(`[ElectronFileAPI] window.require 可用:`, !!window.require);
-      console.log(`[ElectronFileAPI] window 对象:`, typeof window);
-      console.log(`[ElectronFileAPI] process 对象:`, typeof process);
+      logger.debug(`[ElectronFileAPI] 开始删除文件: ${filePath}`);
+      logger.debug(`[ElectronFileAPI] Platform.OS: ${Platform.OS}`);
+      logger.debug(`[ElectronFileAPI] window.require 可用:`, !!window.require);
+      logger.debug(`[ElectronFileAPI] window 对象:`, typeof window);
+      logger.debug(`[ElectronFileAPI] process 对象:`, typeof process);
       
       if (Platform.OS === 'web' && window.require) {
         try {
-          console.log(`[ElectronFileAPI] 尝试获取 electron 模块...`);
+          logger.debug(`[ElectronFileAPI] 尝试获取 electron 模块...`);
           const electron = window.require('electron');
-          console.log(`[ElectronFileAPI] electron 模块:`, electron);
+          logger.debug(`[ElectronFileAPI] electron 模块:`, electron);
           
           const { ipcRenderer } = electron;
-          console.log(`[ElectronFileAPI] ipcRenderer 获取成功:`, !!ipcRenderer);
+          logger.debug(`[ElectronFileAPI] ipcRenderer 获取成功:`, !!ipcRenderer);
           
           if (!ipcRenderer) {
             throw new Error('ipcRenderer not available');
@@ -891,7 +886,7 @@ export const ElectronFileAPI = {
           
           // 监听删除结果
           const handleResult = (event, result) => {
-            console.log(`[ElectronFileAPI] 收到删除结果:`, result);
+            logger.debug(`[ElectronFileAPI] 收到删除结果:`, result);
             ipcRenderer.removeListener('delete-file-result', handleResult);
             if (result.success) {
               resolve(result);
@@ -904,7 +899,7 @@ export const ElectronFileAPI = {
           let timeoutId;
           const handleDeleteResult = (event) => {
             const result = event.detail;
-            console.log(`[ElectronFileAPI] 收到删除结果:`, result);
+            logger.debug(`[ElectronFileAPI] 收到删除结果:`, result);
             
             // 由于 IPCListenerService 发送的是全局事件，我们需要通过其他方式匹配
             // 这里我们假设每个删除请求都是独立的，直接处理第一个结果
@@ -918,10 +913,10 @@ export const ElectronFileAPI = {
                 window.removeEventListener('file-delete-result', handleDeleteResult);
               }
               if (result.success) {
-                console.log(`[ElectronFileAPI] 文件删除成功: ${filePath}`);
+                logger.debug(`[ElectronFileAPI] 文件删除成功: ${filePath}`);
                 resolve(result);
               } else {
-                console.log(`[ElectronFileAPI] 文件删除失败: ${filePath}, ${result.message}`);
+                logger.error(`[ElectronFileAPI] 文件删除失败: ${filePath}, ${result.message}`);
                 reject(new Error(result.message));
               }
             }
@@ -932,16 +927,16 @@ export const ElectronFileAPI = {
             window.addEventListener('file-delete-result', handleDeleteResult);
           }
           
-          console.log(`[ElectronFileAPI] 已注册结果监听器`);
+          logger.debug(`[ElectronFileAPI] 已注册结果监听器`);
           
           // 发送删除请求
-          console.log(`[ElectronFileAPI] 发送删除请求: ${filePath}`);
+          logger.debug(`[ElectronFileAPI] 发送删除请求: ${filePath}`);
           ipcRenderer.send('delete-file', filePath);
-          console.log(`[ElectronFileAPI] 删除请求已发送`);
+          logger.debug(`[ElectronFileAPI] 删除请求已发送`);
           
           // 设置超时
           timeoutId = setTimeout(() => {
-            console.log(`[ElectronFileAPI] 删除超时`);
+            logger.warn(`[ElectronFileAPI] 删除超时`);
             if (typeof window !== 'undefined') {
               window.removeEventListener('file-delete-result', handleDeleteResult);
             }

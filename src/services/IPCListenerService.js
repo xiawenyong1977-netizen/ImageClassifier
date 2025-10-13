@@ -16,7 +16,7 @@ class IPCListenerService {
    */
   initialize() {
     if (this.isInitialized) {
-      logger.warn('IPCListenerService 已经初始化');
+      logger.debug('IPCListenerService 已经初始化，跳过重复初始化');
       return;
     }
 
@@ -26,6 +26,7 @@ class IPCListenerService {
     }
 
     try {
+      logger.debug('开始初始化 IPCListenerService...');
       const { ipcRenderer } = window.require('electron');
       
       // 1. 自定义标题栏设置按钮监听器
@@ -46,8 +47,8 @@ class IPCListenerService {
    */
   setupTitleBarListeners(ipcRenderer) {
     // 监听设置按钮点击
-    const handleSettingsClick = (event, data) => {
-      console.log('📨 收到标题栏设置按钮点击消息:', data);
+    const handleSettingsClick = (event) => {
+      logger.debug('📨 收到标题栏设置按钮点击消息');
       
       // 发送自定义事件给页面处理
       if (typeof window !== 'undefined') {
@@ -60,7 +61,7 @@ class IPCListenerService {
     ipcRenderer.on('navigate-to-settings', handleSettingsClick);
     this.listeners.set('navigate-to-settings', handleSettingsClick);
     
-    console.log('✅ 标题栏监听器设置完成');
+    logger.debug('✅ 标题栏监听器设置完成');
   }
 
   /**
@@ -69,7 +70,7 @@ class IPCListenerService {
   setupFileOperationListeners(ipcRenderer) {
     // 监听文件删除结果
     const handleDeleteFileResult = (event, result) => {
-      console.log('📨 收到文件删除结果:', result);
+      logger.debug('📨 收到文件删除结果:', result);
       
       // 发送自定义事件给页面处理
       if (typeof window !== 'undefined') {
@@ -82,7 +83,7 @@ class IPCListenerService {
     ipcRenderer.on('delete-file-result', handleDeleteFileResult);
     this.listeners.set('delete-file-result', handleDeleteFileResult);
     
-    console.log('✅ 文件操作监听器设置完成');
+    logger.debug('✅ 文件操作监听器设置完成');
   }
 
   /**
@@ -99,12 +100,12 @@ class IPCListenerService {
       // 移除所有监听器
       for (const [eventName, handler] of this.listeners) {
         ipcRenderer.removeListener(eventName, handler);
-        console.log(`🗑️ 移除 IPC 监听器: ${eventName}`);
+        logger.debug(`🗑️ 移除 IPC 监听器: ${eventName}`);
       }
       
       this.listeners.clear();
       this.isInitialized = false;
-      console.log('✅ IPCListenerService 清理完成');
+      logger.debug('✅ IPCListenerService 清理完成');
     } catch (error) {
       console.error('❌ IPCListenerService 清理失败:', error);
     }

@@ -37,17 +37,14 @@ export default function App() {
       try {
         logger.debug('App.desktop.js 开始初始化服务...');
         
-        // 首先初始化 ConfigService
+        // 初始化配置服务
         await configService.initialize();
-        logger.debug('ConfigService 初始化完成');
         
-        // 初始化 UnifiedDataService
+        // 初始化数据服务
         await UnifiedDataService.initialize();
-        logger.debug('UnifiedDataService 初始化完成');
         
         // 初始化 IPC 监听器
         IPCListenerService.initialize();
-        logger.debug('IPCListenerService 初始化完成');
         
         setIsServiceReady(true);
       } catch (error) {

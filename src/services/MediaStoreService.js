@@ -47,19 +47,19 @@ class MediaStoreService {
       if (Platform.OS === 'web') {
         logger.info('MediaStore not available in web environment, using alternative method');
       } else {
-        console.log('⚠️ MediaStore module not available');
+        logger.debug('⚠️ MediaStore module not available');
       }
       return false;
     }
 
     try {
-      console.log(`🗑️ Using MediaStore to delete file: ${filePath}`);
+      logger.debug(`🗑️ Using MediaStore to delete file: ${filePath}`);
       
       // Remove file:// prefix
       const cleanPath = filePath.replace('file://', '');
       
       const result = await MediaStoreModule.deleteFile(cleanPath);
-      console.log(`✅ MediaStore delete result: ${result}`);
+      logger.debug(`✅ MediaStore delete result: ${result}`);
       
       return result;
     } catch (error) {
@@ -75,19 +75,19 @@ class MediaStoreService {
       if (Platform.OS === 'web') {
         logger.info('MediaStore not available in web environment, using alternative method');
       } else {
-        console.log('⚠️ MediaStore module not available');
+        logger.debug('⚠️ MediaStore module not available');
       }
       return { exists: false, error: 'MediaStore module not available' };
     }
 
     try {
-      console.log(`🔍 Getting file info: ${filePath}`);
+      logger.debug(`🔍 Getting file info: ${filePath}`);
       
       // Remove file:// prefix
       const cleanPath = filePath.replace('file://', '');
       
       const fileInfo = await MediaStoreModule.getFileInfo(cleanPath);
-      console.log(`📋 File info:`, fileInfo);
+      logger.debug(`📋 File info:`, fileInfo);
       
       return fileInfo;
     } catch (error) {

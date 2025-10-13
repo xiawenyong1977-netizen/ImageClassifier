@@ -1,5 +1,4 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
-import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
 import { logger } from '../adapters/WebAdapters.js';
 
@@ -20,10 +19,22 @@ class GlobalImageCache {
     this.isLoading = false;
     this.isLoaded = false;
     this.listeners = new Set();
-    this.imageStorageService = new ImageStorageService();
+    this.imageStorageService = null; // 延迟获取，避免循环依赖
     
     // 选中状态管理
     this.selectionListeners = new Set();
+  }
+  
+  /**
+   * 获取存储服务实例（从 UnifiedDataService 获取，避免重复创建）
+   */
+  getStorageService() {
+    if (!this.imageStorageService) {
+      // 动态导入避免循环依赖
+      const UnifiedDataService = require('./UnifiedDataService.js').default;
+      this.imageStorageService = UnifiedDataService.imageStorageService;
+    }
+    return this.imageStorageService;
   }
 
   // 添加监听器
@@ -39,10 +50,9 @@ class GlobalImageCache {
 
   // 构建缓存
   async buildCache() {
-    logger.debug('buildCache 被调用，调用堆栈:', new Error().stack);
-    
     if (this.isLoading) {
       // 如果正在加载，等待完成
+      logger.debug('缓存正在构建中，等待完成...');
       return new Promise((resolve) => {
         const checkLoaded = () => {
           if (this.isLoaded) {
@@ -56,22 +66,23 @@ class GlobalImageCache {
     }
 
     if (this.isLoaded) {
-      logger.debug('缓存已加载，直接返回');
+      // 已加载，直接返回，不打印日志（避免日志污染）
       return this.cache;
     }
 
-    logger.debug('开始构建缓存...');
+    // 只在真正开始构建时打印堆栈
+    logger.debug('开始构建缓存...', new Error().stack);
     this.isLoading = true;
 
     try {
       logger.debug('开始构建全局图片缓存...');
       
-      // 确保存储服务已初始化
-      await this.imageStorageService.ensureInitialized();
-      logger.debug('存储服务初始化完成');
+      // 获取存储服务实例（共享 UnifiedDataService 的实例）
+      const storageService = this.getStorageService();
+      logger.debug('使用共享的存储服务实例');
       
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
-      const allImages = await this.imageStorageService.getImages();
+      const allImages = await storageService.getImages();
       logger.debug(`获取到 ${allImages.length} 张图片`);
       
       // 确保 allImages 是数组
@@ -108,15 +119,15 @@ class GlobalImageCache {
       // 直接通过过滤 allImages 来获取数据
       
       // 计算统计信息
-      console.log('🔄 开始重新计算分类统计...');
+      logger.debug('🔄 开始重新计算分类统计...');
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
-      console.log('✅ 分类统计计算完成');
+      logger.debug('✅ 分类统计计算完成');
       
       // 加载相似组数据到图片对象中
-      console.log('🔄 开始加载相似组数据...');
+      logger.debug('🔄 开始加载相似组数据...');
       await this._loadSimilarityGroupData();
-      console.log('✅ 相似组数据加载完成');
+      logger.debug('✅ 相似组数据加载完成');
       
       // 获取最近图片（从缓存中取前20张）
       this.cache.recentImages = this.cache.allImages
@@ -130,7 +141,7 @@ class GlobalImageCache {
       this.isLoaded = true;
       this.isLoading = false;
       
-      console.log('✅ 全局图片缓存构建完成');
+      logger.debug('✅ 全局图片缓存构建完成');
       
       // 通知所有监听器
       this.notifyListeners();
@@ -150,7 +161,7 @@ class GlobalImageCache {
 
   // 刷新缓存
   async refreshCache() {
-    console.log('🔍 refreshCache 被调用，调用堆栈:', new Error().stack);
+    logger.debug('🔄 强制刷新缓存（重置状态并重建）');
     this.isLoaded = false;
     this.isLoading = false;
     return this.buildCache();
@@ -162,7 +173,7 @@ class GlobalImageCache {
       // 检查图片是否已存在
       const existingIndex = this.cache.allImages.findIndex(img => img.id === image.id);
       if (existingIndex !== -1) {
-        console.log('📝 图片已存在于缓存中:', image.id);
+        logger.debug('📝 图片已存在于缓存中:', image.id);
         return false;
       }
 
@@ -188,7 +199,7 @@ class GlobalImageCache {
         })
         .slice(0, 20);
       
-      console.log('📝 图片已增量添加到缓存:', image.id);
+      logger.debug('📝 图片已增量添加到缓存:', image.id);
       
       // 通知监听器
       this.notifyListeners();
@@ -215,7 +226,7 @@ class GlobalImageCache {
   // 更新单个图片的分类
   updateImageClassification(imageId, newCategory, additionalData = {}) {
     try {
-      console.log(`🔄 更新图片分类: ${imageId} -> ${newCategory}`);
+      logger.debug(`🔄 更新图片分类: ${imageId} -> ${newCategory}`);
       
       // 找到要更新的图片
       const imageIndex = this.cache.allImages.findIndex(img => img.id === imageId);
@@ -239,7 +250,7 @@ class GlobalImageCache {
       // 重新构建分类统计
       this._rebuildCategoryCounts();
       
-      console.log(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
+      logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
       
       // 通知监听器
       this.notifyListeners();
@@ -253,13 +264,19 @@ class GlobalImageCache {
   }
   
   // 重新构建ID到索引的映射
-  _rebuildImageIdIndex() {
-    console.log(`🔄 重新构建ID映射表，图片数量: ${this.cache.allImages.length}`);
+  _rebuildImageIdIndex(forceLog = false) {
+    if (forceLog) {
+      logger.debug(`🔄 重新构建ID映射表，图片数量: ${this.cache.allImages.length}`);
+    } else {
+      logger.debug(`构建ID映射表，图片数量: ${this.cache.allImages.length}`);
+    }
     this.imageIdToIndex.clear();
     this.cache.allImages.forEach((img, index) => {
       this.imageIdToIndex.set(img.id, index);
     });
-    console.log(`✅ ID映射表构建完成，映射条目数: ${this.imageIdToIndex.size}`);
+    if (forceLog) {
+      logger.debug(`✅ ID映射表构建完成，映射条目数: ${this.imageIdToIndex.size}`);
+    }
   }
 
   // 通过ID快速获取图片对象（O(1)复杂度）
@@ -274,18 +291,18 @@ class GlobalImageCache {
       const image = this.cache.allImages.find(img => img.id === imageId);
       if (image) {
         console.warn(`⚠️ 通过直接查找找到了图片，映射表需要重建`);
-        // 重建映射表
-        this._rebuildImageIdIndex();
+        // 重建映射表（打印日志）
+        this._rebuildImageIdIndex(true);
         return image;
       }
       
       console.warn(`⚠️ 直接查找也未找到图片 ${imageId}`);
-      console.log(`🔍 映射表大小: ${this.imageIdToIndex.size}`);
-      console.log(`🔍 缓存图片数量: ${this.cache.allImages.length}`);
+      logger.debug(`🔍 映射表大小: ${this.imageIdToIndex.size}`);
+      logger.debug(`🔍 缓存图片数量: ${this.cache.allImages.length}`);
       
       // 显示映射表中的前几个ID
       const mapEntries = Array.from(this.imageIdToIndex.entries()).slice(0, 5);
-      console.log(`🔍 映射表前5个条目:`, mapEntries);
+      logger.debug(`🔍 映射表前5个条目:`, mapEntries);
       
       return null;
     }
@@ -293,21 +310,21 @@ class GlobalImageCache {
     const image = this.cache.allImages[index];
     if (!image) {
       console.error(`❌ 索引 ${index} 处的图片对象为空`);
-      // 重建映射表
-      this._rebuildImageIdIndex();
+      // 重建映射表（打印日志）
+      this._rebuildImageIdIndex(true);
       return null;
     }
     
     // 验证ID是否匹配
     if (image.id !== imageId) {
       console.warn(`⚠️ ID不匹配! 查找: ${imageId}, 找到: ${image.id}，重建映射表`);
-      // 重建映射表
-      this._rebuildImageIdIndex();
+      // 重建映射表（打印日志）
+      this._rebuildImageIdIndex(true);
       
       // 再次尝试直接查找
       const correctImage = this.cache.allImages.find(img => img.id === imageId);
       if (correctImage) {
-        console.log(`✅ 重建映射表后找到正确图片: ${imageId}`);
+        logger.debug(`✅ 重建映射表后找到正确图片: ${imageId}`);
         return correctImage;
       } else {
         console.warn(`⚠️ 重建映射表后仍未找到图片: ${imageId}`);
@@ -320,19 +337,19 @@ class GlobalImageCache {
 
   // 重新构建分类统计
   _rebuildCategoryCounts() {
-    console.log('📊 开始计算分类统计，总图片数:', this.cache.allImages.length);
+    logger.debug('📊 开始计算分类统计，总图片数:', this.cache.allImages.length);
     this.cache.categoryCounts = {};
     this.cache.allImages.forEach((img, index) => {
       if (img.category) {
         // 使用标准化的分类ID作为键（英文ID）
         const normalizedCategory = this._normalizeCategoryId(img.category);
         this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
-        console.log(`📊 图片${index+1}: ${img.fileName} → ${img.category} → ${normalizedCategory}`);
+        logger.debug(`📊 图片${index+1}: ${img.fileName} → ${img.category} → ${normalizedCategory}`);
       } else {
-        console.log(`⚠️ 图片${index+1}: ${img.fileName} 没有分类信息`);
+        logger.debug(`⚠️ 图片${index+1}: ${img.fileName} 没有分类信息`);
       }
     });
-    console.log('📊 分类统计计算结果:', this.cache.categoryCounts);
+    logger.debug('📊 分类统计计算结果:', this.cache.categoryCounts);
   }
 
   // 标准化分类ID（直接使用ConfigService）
@@ -369,12 +386,12 @@ class GlobalImageCache {
     const category = this._normalizeCategoryId(image.category);
     this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
     
-    console.log(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}, similarityGroupIndex: ${image.similarityGroupIndex}`);
+    logger.debug(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}, similarityGroupIndex: ${image.similarityGroupIndex}`);
     if (image.city) {
       this.cache.selectedCityCounts[image.city] = (this.cache.selectedCityCounts[image.city] || 0) + 1;
-      console.log(`🔍 城市选中统计更新: ${image.city} = ${this.cache.selectedCityCounts[image.city]}`);
+      logger.debug(`🔍 城市选中统计更新: ${image.city} = ${this.cache.selectedCityCounts[image.city]}`);
     } else {
-      console.log(`⚠️ 图片 ${image.id} 没有城市信息，跳过城市统计更新`);
+      logger.debug(`⚠️ 图片 ${image.id} 没有城市信息，跳过城市统计更新`);
     }
     
     if (image.similarityGroupIndex) {
@@ -383,9 +400,9 @@ class GlobalImageCache {
         this.cache.selectedSimilarityGroupCounts = {};
       }
       this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] || 0) + 1;
-      console.log(`🔍 相似组选中统计更新: ${image.similarityGroupIndex} = ${this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]}`);
+      logger.debug(`🔍 相似组选中统计更新: ${image.similarityGroupIndex} = ${this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]}`);
     } else {
-      console.log(`⚠️ 图片 ${image.id} 没有相似组信息，跳过相似组统计更新`);
+      logger.debug(`⚠️ 图片 ${image.id} 没有相似组信息，跳过相似组统计更新`);
     }
   }
 
@@ -438,11 +455,11 @@ class GlobalImageCache {
       const similarityGroupIndex = await this.imageStorageService.getSimilarityGroupIndex();
       
       if (!similarityGroupIndex || Object.keys(similarityGroupIndex).length === 0) {
-        console.log('📊 没有相似组数据需要加载');
+        logger.debug('📊 没有相似组数据需要加载');
         return;
       }
       
-      console.log(`📊 开始加载相似组数据，共 ${Object.keys(similarityGroupIndex).length} 个相似组`);
+      logger.debug(`📊 开始加载相似组数据，共 ${Object.keys(similarityGroupIndex).length} 个相似组`);
       
       // 为每个图片设置相似组信息
       let processedCount = 0;
@@ -458,7 +475,7 @@ class GlobalImageCache {
         }
       }
       
-      console.log(`✅ 相似组数据加载完成，处理了 ${processedCount} 张图片`);
+      logger.debug(`✅ 相似组数据加载完成，处理了 ${processedCount} 张图片`);
       
     } catch (error) {
       console.error('❌ 加载相似组数据失败:', error);
@@ -467,7 +484,7 @@ class GlobalImageCache {
 
   // 重新构建选中统计
   _rebuildSelectedStats() {
-    console.log('📊 开始重新计算选中统计...');
+    logger.debug('📊 开始重新计算选中统计...');
     this.cache.selectedCategoryCounts = {};
     this.cache.selectedCityCounts = {};
     this.cache.selectedSimilarityGroupCounts = {};
@@ -491,7 +508,7 @@ class GlobalImageCache {
       }
     });
     
-    console.log('📊 选中统计重建完成:', {
+    logger.debug('📊 选中统计重建完成:', {
       selectedCategoryCounts: this.cache.selectedCategoryCounts,
       selectedCityCounts: this.cache.selectedCityCounts,
       selectedSimilarityGroupCounts: this.cache.selectedSimilarityGroupCounts
@@ -525,13 +542,13 @@ class GlobalImageCache {
         }
       }
     }
-    console.log(`🔍 手动更新相似组统计: ${groupId} = ${this.cache.selectedSimilarityGroupCounts[groupId] || 0}`);
+    logger.debug(`🔍 手动更新相似组统计: ${groupId} = ${this.cache.selectedSimilarityGroupCounts[groupId] || 0}`);
   }
   
   // 删除单个图片
   removeImage(imageId) {
     try {
-      console.log(`🗑️ 删除图片: ${imageId}`);
+      logger.debug(`🗑️ 删除图片: ${imageId}`);
       
       // 找到要删除的图片
       const imageIndex = this.cache.allImages.findIndex(img => img.id === imageId);
@@ -553,7 +570,7 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       this._rebuildRecentImages();
       
-      console.log(`✅ 图片删除完成: ${imageToDelete.fileName}`);
+      logger.debug(`✅ 图片删除完成: ${imageToDelete.fileName}`);
       
       // 通知监听器
       this.notifyListeners();
@@ -587,7 +604,7 @@ class GlobalImageCache {
   // 批量删除图片
   removeImages(imageIds) {
     try {
-      console.log(`🗑️ 批量删除图片: ${imageIds.length} 张`);
+      logger.debug(`🗑️ 批量删除图片: ${imageIds.length} 张`);
       
       // 创建要删除的图片ID集合，提高查找效率
       const imageIdSet = new Set(imageIds);
@@ -621,7 +638,7 @@ class GlobalImageCache {
       this._rebuildSelectedStats();
       this._rebuildRecentImages();
       
-      console.log(`✅ 批量删除完成: ${imagesToDelete.length}/${imageIds.length} 张图片`);
+      logger.debug(`✅ 批量删除完成: ${imagesToDelete.length}/${imageIds.length} 张图片`);
       
       // 通知监听器
       this.notifyListeners();
@@ -710,7 +727,7 @@ class GlobalImageCache {
 
   // 切换图片选中状态
   toggleImageSelection(imageId) {
-    console.log(`🔄 GlobalImageCache 切换图片选择状态: ${imageId}`);
+    logger.debug(`🔄 GlobalImageCache 切换图片选择状态: ${imageId}`);
     
     // 使用快速查找获取图片对象
     const image = this._getImageById(imageId);
@@ -720,7 +737,7 @@ class GlobalImageCache {
     }
     
     // 调试：检查图片对象的分类信息
-    console.log(`🔍 图片对象详情:`, {
+    logger.debug(`🔍 图片对象详情:`, {
       id: image.id,
       fileName: image.fileName,
       category: image.category,
@@ -735,7 +752,7 @@ class GlobalImageCache {
       image.selected = true;
       this._updateSelectedStatsAdd(image);
     }
-    console.log(`🔄 GlobalImageCache 新的选中状态: ${imageId} = ${image.selected}`);
+    logger.debug(`🔄 GlobalImageCache 新的选中状态: ${imageId} = ${image.selected}`);
     this.notifySelectionListeners();
   }
 
@@ -837,7 +854,7 @@ class GlobalImageCache {
     // 通知所有监听器缓存已清空
     this.notifyListeners();
     this.notifySelectionListeners();
-    console.log('🗑️ 缓存已清空');
+    logger.debug('🗑️ 缓存已清空');
   }
 }
 

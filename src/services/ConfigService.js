@@ -16,6 +16,12 @@ class ConfigService {
    * @returns {Promise<boolean>} 是否成功加载配置
    */
   async initialize() {
+    // 如果已经加载，直接返回
+    if (this.isLoaded) {
+      logger.debug('配置文件已加载，跳过重复加载');
+      return true;
+    }
+    
     try {
       logger.debug('开始加载配置文件...');
       
@@ -42,7 +48,7 @@ class ConfigService {
         }
         
         responseText = await response.text();
-        console.log('🔧 响应内容前200字符:', responseText.substring(0, 200));
+        logger.debug('🔧 响应内容前200字符:', responseText.substring(0, 200));
         
         // 检查是否是HTML内容
         if (responseText.trim().startsWith('<!DOCTYPE')) {
@@ -55,10 +61,10 @@ class ConfigService {
           const fs = eval('require')('fs');
           const path = eval('require')('path');
           const fullPath = path.resolve(configPath);
-          console.log('🔧 读取文件路径:', fullPath);
+          logger.debug('🔧 读取文件路径:', fullPath);
           
           responseText = fs.readFileSync(fullPath, 'utf8');
-          console.log('🔧 文件内容前200字符:', responseText.substring(0, 200));
+          logger.debug('🔧 文件内容前200字符:', responseText.substring(0, 200));
         } catch (error) {
           console.warn('⚠️ Node.js环境下的文件系统操作在浏览器构建中被跳过');
           throw new Error('Node.js环境在浏览器构建中不支持');
@@ -68,8 +74,8 @@ class ConfigService {
       this.config = JSON.parse(responseText);
       this.isLoaded = true;
       
-      console.log('✅ 配置文件加载成功');
-      console.log(`📊 配置统计:`, {
+      logger.debug('✅ 配置文件加载成功');
+      logger.debug(`📊 配置统计:`, {
         models: Object.keys(this.config.models || {}).length,
         categories: Object.keys(this.config.categoryNameMap || {}).length,
         yoloObjects: Object.keys(this.config.yoloObjectNameMap || {}).length,
@@ -91,7 +97,7 @@ class ConfigService {
   getConfigPath() {
     // 在浏览器环境和Electron开发环境中都使用HTTP方式访问
     if (typeof window !== 'undefined') {
-      console.log('🔧 window.location:', {
+      logger.debug('🔧 window.location:', {
         hostname: window.location.hostname,
         origin: window.location.origin,
         href: window.location.href
@@ -349,7 +355,7 @@ class ConfigService {
    * @returns {Promise<boolean>} 是否成功重新加载
    */
   async reload() {
-    console.log('🔄 重新加载配置文件...');
+    logger.debug('🔄 重新加载配置文件...');
     this.isLoaded = false;
     this.config = null;
     return await this.initialize();

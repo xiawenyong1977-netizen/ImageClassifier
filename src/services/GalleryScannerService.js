@@ -71,12 +71,12 @@ const createDefaultLocationInfo = (source = 'none') => ({
 
 const extractGPSFromExifParser = async (exifData) => {
 
-  console.log('========== extractGPSFromExifParser 被调用 ==========');
+  logger.debug('========== extractGPSFromExifParser 被调用 ==========');
 
   
 
   if (!exifData?.tags) {
-    console.log('❌ 没有tags');
+    logger.debug('❌ 没有tags');
     return null;
   }
 
@@ -87,15 +87,15 @@ const extractGPSFromExifParser = async (exifData) => {
   
 
   if (!GPSLatitude || !GPSLongitude) {
-    console.log('❌ 没有GPS坐标');
+    logger.debug('❌ 没有GPS坐标');
     return null;
   }
 
   
 
-  console.log(`✅ 发现GPS坐标: ${GPSLatitude}, ${GPSLongitude}`);
+  logger.debug(`✅ 发现GPS坐标: ${GPSLatitude}, ${GPSLongitude}`);
 
-  console.log('准备调用 findNearestCityAsync...');
+  logger.debug('准备调用 findNearestCityAsync...');
 
   
 
@@ -105,7 +105,7 @@ const extractGPSFromExifParser = async (exifData) => {
 
   
 
-  console.log('findNearestCityAsync 返回结果:', nearestCity);
+  logger.debug('findNearestCityAsync 返回结果:', nearestCity);
 
   
 
@@ -587,7 +587,7 @@ class GalleryScannerService {
   async scanDirectoryForUris(dirPath, onProgress = null, totalFoundSoFar = 0) {
     try {
 
-      console.log(`Starting optimized scan of directory: ${dirPath}`);
+      logger.debug(`Starting optimized scan of directory: ${dirPath}`);
 
       
 
@@ -595,7 +595,7 @@ class GalleryScannerService {
 
       if (!exists) {
 
-        console.log(`Directory does not exist: ${dirPath}`);
+        logger.debug(`Directory does not exist: ${dirPath}`);
 
         return [];
 
@@ -615,8 +615,7 @@ class GalleryScannerService {
 
       
 
-      console.log(`📁 目录 ${dirPath} 包含 ${items.length} 个项目`);
-      console.log(`📁 目录内容:`, items.map(item => `${item.name} (${item.isDirectory() ? '目录' : '文件'})`));
+      logger.debug(`📁 目录 ${dirPath} 包含 ${items.length} 个项目`);
 
       
 
@@ -1035,9 +1034,9 @@ class GalleryScannerService {
    * 异步扫描所有目录，收集文件列表
    */
   async scanDirectoriesPhase(scanPaths, scanStartTime) {
-    console.log('📁 阶段1: 开始目录扫描...');
+    logger.debug('📁 阶段1: 开始目录扫描...');
     
-    this.sendProgressMessage('directory_scanning', 0, 0, 0, scanStartTime);
+    this.sendProgressMessage('directory_scanning', 0, 0, 0, scanStartTime, '准备扫描');
     
     const allImages = [];
     
@@ -1077,7 +1076,7 @@ class GalleryScannerService {
     // 获取现有图片URI集合
     this.sendProgressMessage('file_comparison', allImages.length, 0, 0, scanStartTime, '正在加载现有图片列表...');
     const existingUris = new Set(await UnifiedDataService.getImageUris());
-    console.log(`Found ${existingUris.size} existing image URIs`);
+    logger.debug(`Found ${existingUris.size} existing image URIs`);
     
     // 让出控制权，避免阻塞UI
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -1181,7 +1180,7 @@ class GalleryScannerService {
         
         // 每处理100张图片输出一次统计信息
         if (this.classificationStats.count % 100 === 0) {
-          console.log(`📊 分类进度: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms`);
+          logger.debug(`📊 分类进度: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms`);
         }
         
         // 构建保存数据
@@ -1215,7 +1214,7 @@ class GalleryScannerService {
         };
         
         // 调试：详细检查分类结果和保存数据
-        console.log(`🔍 分类结果检查 ${image.fileName}:`, {
+        logger.debug(`🔍 分类结果检查 ${image.fileName}:`, {
           success: classification.success,
           categoryId: classification.categoryId,
           category: classification.category,
@@ -1228,7 +1227,7 @@ class GalleryScannerService {
           mobileNetV3Count: classification.mobileNetV3Detections?.predictions?.length || 0
         });
         
-        console.log(`🔍 保存数据检查 ${image.fileName}:`, {
+        logger.debug(`🔍 保存数据检查 ${image.fileName}:`, {
           hasIdCardDetections: !!saveData.idCardDetections,
           hasGeneralDetections: !!saveData.generalDetections,
           hasMobileNetV3Detections: !!saveData.mobileNetV3Detections,
@@ -1241,7 +1240,7 @@ class GalleryScannerService {
         // 立即保存单张图片数据
         try {
           // 调试：检查保存的数据是否包含检测结果
-          console.log(`🔍 准备保存图片 ${image.fileName}:`, {
+          logger.debug(`🔍 准备保存图片 ${image.fileName}:`, {
             hasIdCardDetections: !!saveData.idCardDetections,
             hasGeneralDetections: !!saveData.generalDetections,
             hasMobileNetV3Detections: !!saveData.mobileNetV3Detections,
@@ -1250,7 +1249,7 @@ class GalleryScannerService {
           });
           
           await UnifiedDataService.writeImageDetailedInfo([saveData], false);
-          console.log(`✅ 成功保存图片: ${image.fileName} (第${processedCount + 1}张)`);
+          logger.debug(`✅ 成功保存图片: ${image.fileName} (第${processedCount + 1}张)`);
           processedCount++;
         } catch (saveError) {
           console.error(`❌ 保存失败 ${image.fileName} (第${processedCount + 1}张):`, saveError);
@@ -1290,7 +1289,7 @@ class GalleryScannerService {
     
     // 阶段4.5: 相似度检测
     if (newImages.length > 0) {
-      console.log(`🔗 开始检测相似图片，新图片数量: ${newImages.length}`);
+      logger.debug(`🔗 开始检测相似图片，新图片数量: ${newImages.length}`);
       
       // 发送相似度检测开始消息
       this.sendProgressMessage('similarity_detection', newImages.length, 0, 0, scanStartTime, '开始检测相似图片...');
@@ -1310,7 +1309,7 @@ class GalleryScannerService {
         });
         
         if (similarityResult.success) {
-          console.log(`🔗 相似度检测完成: 发现${similarityResult.groups.length}个相似组, 处理${similarityResult.processed}张图片`);
+          logger.debug(`🔗 相似度检测完成: 发现${similarityResult.groups.length}个相似组, 处理${similarityResult.processed}张图片`);
           // 发送相似度检测完成消息
           this.sendProgressMessage('similarity_detection', newImages.length, similarityResult.processed, 0, scanStartTime, `检测完成: 发现${similarityResult.groups.length}个相似组`);
         } else {
@@ -1324,12 +1323,12 @@ class GalleryScannerService {
         this.sendProgressMessage('similarity_detection', newImages.length, 0, 1, scanStartTime, '相似度检测出错');
       }
     } else {
-      console.log('🔗 没有新图片，跳过相似度检测');
+      logger.debug('🔗 没有新图片，跳过相似度检测');
     }
     // 输出最终分类性能统计
     if (this.classificationStats && this.classificationStats.count > 0) {
       const speed = (this.classificationStats.count / (this.classificationStats.totalTime / 1000)).toFixed(2);
-      console.log(`📊 分类完成: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms，处理速度: ${speed}张/秒`);
+      logger.debug(`📊 分类完成: ${this.classificationStats.count}张图片，平均耗时: ${this.classificationStats.avgTime.toFixed(2)}ms，处理速度: ${speed}张/秒`);
     }
     
     // 阶段3-4完成

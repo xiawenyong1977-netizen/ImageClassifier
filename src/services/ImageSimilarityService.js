@@ -5,12 +5,11 @@
  */
 
 import ColorHistogramExtractor from './ColorHistogramExtractor.js';
-import ImageStorageService from './ImageStorageService.js';
 import { logger } from '../adapters/WebAdapters.js';
 
 class ImageSimilarityService {
   constructor() {
-    this.storageService = new ImageStorageService();
+    this.unifiedDataService = null; // 延迟初始化
     this.isInitialized = false;
     
     // 相似度检测配置
@@ -25,12 +24,25 @@ class ImageSimilarityService {
   }
 
   /**
+   * 获取UnifiedDataService实例（延迟导入避免循环依赖）
+   */
+  getUnifiedDataService() {
+    if (!this.unifiedDataService) {
+      // 动态导入避免循环依赖
+      const UnifiedDataService = require('./UnifiedDataService.js').default;
+      this.unifiedDataService = UnifiedDataService;
+    }
+    return this.unifiedDataService;
+  }
+
+  /**
    * 初始化服务
    */
   async initialize() {
     try {
       logger.debug('ImageSimilarityService 开始初始化...');
-      await this.storageService.ensureInitialized();
+      // 获取UnifiedDataService实例
+      this.getUnifiedDataService();
       this.isInitialized = true;
       logger.debug('ImageSimilarityService 初始化成功');
     } catch (error) {
@@ -61,18 +73,18 @@ class ImageSimilarityService {
 
     try {
       // 获取所有图片数据（精简信息）
-      const allImages = await this.storageService.getImages();
+      const allImages = await this.getUnifiedDataService().readAllImages();
       
       if (!allImages || allImages.length === 0) {
-        console.log('⚠️ 没有找到图片数据');
+        logger.debug('⚠️ 没有找到图片数据');
         return { success: true, groups: [], processed: 0 };
       }
 
       // 每次检测都清空现有相似度数据，完全重新检测
-      console.log('🧹 清空现有相似度数据，开始完全重新检测');
-      await this.storageService.clearSimilarityData();
+      logger.debug('🧹 清空现有相似度数据，开始完全重新检测');
+      await this.getUnifiedDataService().clearSimilarityData();
      
-      console.log(`📊 总图片数: ${allImages.length}, 开始重新检测相似度`);
+      logger.debug(`📊 总图片数: ${allImages.length}, 开始重新检测相似度`);
 
       // 执行相似度检测
       const detectionResult = await this.detectSimilarityGroups(
@@ -87,7 +99,7 @@ class ImageSimilarityService {
       // 保存检测结果
       await this._saveDetectionResults(detectionResult);
 
-      console.log(`✅ 相似度检测完成: 发现${detectionResult.groups.length}个相似组, 处理${detectionResult.processed}张图片`);
+      logger.debug(`✅ 相似度检测完成: 发现${detectionResult.groups.length}个相似组, 处理${detectionResult.processed}张图片`);
 
       return {
         success: true,
@@ -132,8 +144,8 @@ class ImageSimilarityService {
       }));
 
       // 使用批量更新函数，避免多次读取全部数据
-      await this.storageService.updateImagesSimilarity(imageSimilarityArray);
-      console.log(`✅ 保存检测结果成功，批量更新${imageSimilarityArray.length}张图片`);
+      await this.getUnifiedDataService().updateImagesSimilarity(imageSimilarityArray);
+      logger.debug(`✅ 保存检测结果成功，批量更新${imageSimilarityArray.length}张图片`);
 
     } catch (error) {
       console.error('❌ 保存检测结果失败:', error);
@@ -160,10 +172,10 @@ class ImageSimilarityService {
       return takenAtStr.trim() !== '';
     });
     
-    console.log(`🔍 开始相似度检测: 输入${images.length}张图片, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
+    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
     
     if (imagesWithTime.length === 0) {
-      console.log('⚠️ 没有有效的图片进行相似度检测');
+      logger.debug('⚠️ 没有有效的图片进行相似度检测');
       return {
         groups: [],
         processed: 0,
@@ -179,7 +191,7 @@ class ImageSimilarityService {
       // 3. 创建时间窗口
       const timeWindows = this._createTimeWindows(sortedImages, opts.timeWindow);
       
-      console.log(`📊 创建了${timeWindows.length}个时间窗口`);
+      logger.debug(`📊 创建了${timeWindows.length}个时间窗口`);
       
       // 4. 在每个时间窗口内检测相似图片
       const allGroups = [];
@@ -187,7 +199,7 @@ class ImageSimilarityService {
       
       for (let i = 0; i < timeWindows.length; i++) {
         const window = timeWindows[i];
-        console.log(`🪟 处理时间窗口${i + 1}: ${window.length}张图片`);
+        logger.debug(`🪟 处理时间窗口${i + 1}: ${window.length}张图片`);
         
         // 提取特征
         const windowWithFeatures = await this._extractFeaturesForWindow(window);
@@ -198,13 +210,13 @@ class ImageSimilarityService {
         allGroups.push(...windowGroups);
         processedCount += window.length;
         
-        console.log(`✅ 窗口${i + 1}完成: 发现${windowGroups.length}个相似组`);
+        logger.debug(`✅ 窗口${i + 1}完成: 发现${windowGroups.length}个相似组`);
       }
       
       // 5. 合并跨窗口的相似组
       const mergedGroups = this._mergeSimilarGroups(allGroups);
       
-      console.log(`🎯 相似度检测完成: 发现${mergedGroups.length}个相似组, 处理${processedCount}张图片`);
+      logger.debug(`🎯 相似度检测完成: 发现${mergedGroups.length}个相似组, 处理${processedCount}张图片`);
       
       return {
         groups: mergedGroups,
@@ -322,7 +334,7 @@ class ImageSimilarityService {
       // 使用真实的颜色直方图提取器
       const features = await this.histogramExtractor.extractHistogram(image.uri);
       
-      console.log(`✅ 提取图片特征成功: ${image.fileName}`);
+      logger.debug(`✅ 提取图片特征成功: ${image.fileName}`);
       return features;
     } catch (error) {
       console.error('❌ 提取颜色直方图失败:', error);
@@ -385,7 +397,7 @@ class ImageSimilarityService {
         if (similarity >= options.similarityThreshold) {
           similarImages.push(image2);
           processed.add(j);
-          console.log(`🔗 发现相似图片: ${image1.fileName} <-> ${image2.fileName} (相似度: ${(similarity * 100).toFixed(1)}%)`);
+          logger.debug(`🔗 发现相似图片: ${image1.fileName} <-> ${image2.fileName} (相似度: ${(similarity * 100).toFixed(1)}%)`);
         }
       }
       

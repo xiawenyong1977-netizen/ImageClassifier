@@ -62,23 +62,27 @@ const HomeScreen = () => {
         UnifiedDataService.readAllImages()
       ]);
       
-      // 加载各分类的最近图片
-      const categoryIds = UnifiedDataService.getAllCategoryIds();
-      const categoryImagesPromises = categoryIds.map(async (categoryId) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByCategory(categoryId, 1);
-          return { categoryId, images };
-        } catch (error) {
-          logger.error(`加载分类 ${categoryId} 最近图片失败:`, error);
-          return { categoryId, images: [] };
-        }
-      });
-      
-      const categoryImagesResults = await Promise.all(categoryImagesPromises);
+      // 加载各分类的最近图片（只在有图片时加载）
       const categoryImagesMap = {};
-      categoryImagesResults.forEach(({ categoryId, images }) => {
-        categoryImagesMap[categoryId] = images;
-      });
+      if (Object.keys(categoryCountsData).length > 0) {
+        const categoryIds = UnifiedDataService.getAllCategoryIds();
+        const categoryImagesPromises = categoryIds.map(async (categoryId) => {
+          try {
+            const images = await UnifiedDataService.readRecentImagesByCategory(categoryId, 1);
+            return { categoryId, images };
+          } catch (error) {
+            logger.error(`加载分类 ${categoryId} 最近图片失败:`, error);
+            return { categoryId, images: [] };
+          }
+        });
+        
+        const categoryImagesResults = await Promise.all(categoryImagesPromises);
+        categoryImagesResults.forEach(({ categoryId, images }) => {
+          categoryImagesMap[categoryId] = images;
+        });
+      } else {
+        logger.debug('没有分类数据，跳过加载分类最近图片');
+      }
       
       // 加载各城市的最近图片
       const cityIds = Object.keys(cityCountsData).slice(0, 10);
@@ -158,7 +162,6 @@ const HomeScreen = () => {
           // 处理图片路径，将相对路径转换为 public 目录下的路径
           content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
             const imagePath = `./readme/${filename}`;
-            logger.debug('转换图片路径:', filename, '->', imagePath);
             return `src="${imagePath}"`;
           });
           
@@ -211,7 +214,6 @@ const HomeScreen = () => {
           // 处理图片路径，将相对路径转换为绝对路径
           content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
             const imagePath = path.join(readmeDir, filename).replace(/\\/g, '/');
-            logger.debug('转换图片路径:', filename, '->', imagePath);
             return `src="file:///${imagePath}"`;
           });
           
@@ -281,7 +283,7 @@ const HomeScreen = () => {
   useEffect(() => {
     loadData();
     loadReadme();
-  }, [loadData, loadReadme]);
+  }, []);
   
   // 页面重新挂载时重新加载数据（通过页面切换实现）
   // 不再监听缓存变化，每次挂载都重新建立快照

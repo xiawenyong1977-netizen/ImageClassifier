@@ -14,6 +14,7 @@
     "electron": "electron .",
     "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
     "electron-pack": "npm run build && electron-builder",
+    "electron-pack-appx": "npm run build && electron-builder --win appx",
     "preelectron-pack": "npm run build"
   },
   "dependencies": {
@@ -59,7 +60,7 @@
   },
   "build": {
     "appId": "com.imageclassifier.app",
-    "productName": "芯图相册-智能分类，便捷管理，仅你可见",
+    "productName": "XinTuAlbum",
     "directories": {
       "output": "dist"
     },
@@ -94,9 +95,9 @@
     "appx": {
       "applicationId": "ImageClassifier",
       "displayName": "芯图相册",
-      "publisherDisplayName": "ImageClassifier Team",
-      "identityName": "ImageClassifier.App",
-      "publisher": "CN=ImageClassifier",
+      "publisherDisplayName": "智语未来",
+      "identityName": "28A8A450.4144689735081",
+      "publisher": "CN=F5ED0799-D181-4743-8773-A1B629AE296D",
       "backgroundColor": "#2f3241",
       "languages": ["zh-CN", "en-US"],
       "addAutoLaunchExtension": false,

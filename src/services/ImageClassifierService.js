@@ -20,6 +20,9 @@ class ImageClassifierService {
     // 模型配置将在初始化时从配置文件加载
     this.models = {};
     
+    // 缓存可用的执行提供者，避免重复检测
+    this.cachedProviders = null;
+    
     // 注意：已移除 Web Worker 池，使用主线程并行推理
   }
 
@@ -196,7 +199,7 @@ class ImageClassifierService {
       if (!loadResults.success) {
         throw new Error(`模型加载失败: ${loadResults.message}`);
       }
-      console.log(`✅ 模型加载完成: ${loadResults.message}`);
+      logger.info(`✅ 模型加载完成: ${loadResults.message}`);
       
       // Time-based simulation classification algorithm already initialized
       this.isInitialized = true;
@@ -236,7 +239,6 @@ class ImageClassifierService {
         
         // 检测可用的执行提供者
         const availableProviders = await this.detectAvailableProviders();
-        console.log(`🔍 检测到的执行提供者: ${availableProviders.join(', ')}`);
         
         // 创建推理会话时的配置
         const sessionOptions = {
@@ -267,6 +269,11 @@ class ImageClassifierService {
    * @returns {Promise<string[]>} 可用的执行提供者列表
    */
   async detectAvailableProviders() {
+    // 如果已经检测过，直接返回缓存结果
+    if (this.cachedProviders) {
+      return this.cachedProviders;
+    }
+    
     try {
       const ort = this.ort;
       const availableProviders = [];
@@ -275,46 +282,46 @@ class ImageClassifierService {
       if (typeof ort.getAvailableProviders === 'function') {
         // 检查可用的执行提供者
         const providers = await ort.getAvailableProviders();
-        console.log(`🔍 ONNX Runtime 可用提供者: ${providers.join(', ')}`);
+        logger.debug(`🔍 ONNX Runtime 可用提供者: ${providers.join(', ')}`);
         
         // 优先选择GPU提供者（优先WebGL，因为WebGPU需要特殊标志）
         if (providers.includes('webgl')) {
           availableProviders.push('webgl');
-          console.log('🚀 使用 WebGL 加速');
+          logger.debug('🚀 使用 WebGL 加速');
         } else if (providers.includes('webgpu')) {
           availableProviders.push('webgpu');
-          console.log('🚀 使用 WebGPU 加速');
+          logger.debug('🚀 使用 WebGPU 加速');
         } else if (providers.includes('cuda')) {
           availableProviders.push('cuda');
-          console.log('🚀 使用 CUDA 加速');
+          logger.debug('🚀 使用 CUDA 加速');
         } else if (providers.includes('dml')) {
           availableProviders.push('dml');
-          console.log('🚀 使用 DirectML 加速');
+          logger.debug('🚀 使用 DirectML 加速');
         } else if (providers.includes('openvino')) {
           availableProviders.push('openvino');
-          console.log('🚀 使用 OpenVINO 加速');
+          logger.debug('🚀 使用 OpenVINO 加速');
         }
         
         // 总是添加CPU作为后备
         if (providers.includes('cpu')) {
           availableProviders.push('cpu');
-          console.log('💻 添加 CPU 作为后备');
+          logger.debug('💻 添加 CPU 作为后备');
         }
       } else {
         // 如果没有getAvailableProviders方法，使用默认策略
-        console.log('⚠️ getAvailableProviders 方法不可用，使用默认策略');
+        logger.debug('⚠️ getAvailableProviders 方法不可用，使用默认策略');
         
         // 根据环境推断可用的提供者
         if (typeof window !== 'undefined') {
           // 浏览器环境
-          console.log('🌐 检测浏览器环境支持...');
+          logger.debug('🌐 检测浏览器环境支持...');
           
           // 检测WebGPU支持
           if (typeof navigator !== 'undefined' && navigator.gpu) {
             availableProviders.push('webgpu');
-            console.log('🚀 检测到 WebGPU 支持');
+            logger.debug('🚀 检测到 WebGPU 支持');
           } else {
-            console.log('❌ 未检测到 WebGPU 支持');
+            logger.debug('❌ 未检测到 WebGPU 支持');
           }
           
           // 检测WebGL支持
@@ -323,29 +330,34 @@ class ImageClassifierService {
             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
             if (gl) {
               availableProviders.push('webgl');
-              console.log('🚀 检测到 WebGL 支持');
+              logger.debug('🚀 检测到 WebGL 支持');
             } else {
-              console.log('❌ 未检测到 WebGL 支持');
+              logger.debug('❌ 未检测到 WebGL 支持');
             }
           } catch (error) {
-            console.log('❌ WebGL 检测失败:', error.message);
+            logger.debug('❌ WebGL 检测失败:', error.message);
           }
         }
         
         // 总是添加CPU
         availableProviders.push('cpu');
-        console.log('💻 添加 CPU 支持');
+        logger.debug('💻 添加 CPU 支持');
       }
       
       // 如果没有检测到任何提供者，默认使用CPU
       if (availableProviders.length === 0) {
         availableProviders.push('cpu');
-        console.log('⚠️ 未检测到可用提供者，使用 CPU');
+        logger.debug('⚠️ 未检测到可用提供者，使用 CPU');
       }
+      
+      // 缓存检测结果
+      this.cachedProviders = availableProviders;
+        logger.info('✅ 执行提供者检测完成，已缓存结果');
       
       return availableProviders;
     } catch (error) {
       console.warn('⚠️ 检测执行提供者失败，使用 CPU:', error.message);
+      this.cachedProviders = ['cpu'];
       return ['cpu'];
     }
   }
@@ -501,7 +513,7 @@ class ImageClassifierService {
           bbox: [x, y, w, h]
         });
       } else if (confidence > 0.1) { // 调试：显示低置信度的检测
-        console.log(`🔍 低置信度检测: classId=${classId}, confidence=${confidence.toFixed(3)}, threshold=${confidenceThreshold}`);
+        logger.debug(`🔍 低置信度检测: classId=${classId}, confidence=${confidence.toFixed(3)}, threshold=${confidenceThreshold}`);
       }
       }
       
@@ -510,11 +522,11 @@ class ImageClassifierService {
       
       // 检查是否有有效检测结果
       if (nmsDetections.length === 0) {
-        console.log(`🔍 YOLO后处理: 没有通过NMS的检测结果 (原始检测: ${detections.length}个)`);
+        logger.debug(`🔍 YOLO后处理: 没有通过NMS的检测结果 (原始检测: ${detections.length}个)`);
         return [];
       }
       
-      console.log(`🔍 YOLO后处理: ${detections.length}个原始检测 -> ${nmsDetections.length}个最终检测`);
+      logger.debug(`🔍 YOLO后处理: ${detections.length}个原始检测 -> ${nmsDetections.length}个最终检测`);
       return nmsDetections;
     } catch (error) {
       console.error('YOLO postprocessing failed:', error);
@@ -607,9 +619,8 @@ class ImageClassifierService {
        // 获取图像尺寸
       const imageDimensions = await this.getOriginalImageDimensions(imageUri);
       // 第一步：检查是否为手机截图（最高优先级）
-      console.log('🔍 第一步：检查手机截图...');
       if (await this.identifyMobileScreenshot(imageUri, imageDimensions)) {
-        console.log('✅ 检测到手机截图，返回结果');
+        logger.debug('✅ 检测到手机截图');
         return {
           success: true,
           categoryId: 'screenshot',
@@ -627,7 +638,6 @@ class ImageClassifierService {
           }
         };
       }
-      console.log('❌ 不是手机截图，继续下一步');
 
       // ✨ 新增：尝试远程分类
       let allModelResults = null;
@@ -688,7 +698,7 @@ class ImageClassifierService {
       // 如果没有使用远程推理，则执行本地并行推理
       if (!useRemoteInference) {
         // 第二步到第四步：并行执行所有模型推理
-        console.log('🔍 并行执行所有模型推理...');
+        logger.debug('🔍 并行执行所有模型推理...');
         const parallelResults = await this.runParallelInference(imageUri);
         
         // 保存所有模型的原始结果
@@ -705,10 +715,10 @@ class ImageClassifierService {
       const generalCount = allModelResults.general.length;
       const mobileNetV3Count = allModelResults.mobileNetV3.predictions ? allModelResults.mobileNetV3.predictions.length : 0;
       
-      console.log(`📊 所有模型推理完成:`);
-      console.log(`  - 身份证模型: ${idCardCount} 个检测结果`);
-      console.log(`  - 通用模型: ${generalCount} 个检测结果`);
-      console.log(`  - MobileNetV3模型: ${mobileNetV3Count} 个检测结果`);
+      logger.debug(`📊 所有模型推理完成:`);
+      logger.debug(`  - 身份证模型: ${idCardCount} 个检测结果`);
+      logger.debug(`  - 通用模型: ${generalCount} 个检测结果`);
+      logger.debug(`  - MobileNetV3模型: ${mobileNetV3Count} 个检测结果`);
 
       // 调用新的分类映射函数
       const categoryId = await this.MapObjectes2Category(allModelResults, imageUri, imageDimensions);
@@ -846,13 +856,13 @@ class ImageClassifierService {
 
       // 调试：输出检测结果
       if (limitedDetections.length > 0) {
-        console.log(`🔍 ${modelName}检测到${limitedDetections.length}个物体:`, limitedDetections.map(d => ({
+        logger.debug(`🔍 ${modelName}检测到${limitedDetections.length}个物体:`, limitedDetections.map(d => ({
           classId: d.classId,
           confidence: d.confidence.toFixed(3),
           bbox: d.bbox.map(b => b.toFixed(2))
         })));
       } else {
-        console.log(`⚠️ ${modelName}没有检测到任何物体 (置信度阈值: ${confidenceThreshold})`);
+        logger.debug(`⚠️ ${modelName}没有检测到任何物体 (置信度阈值: ${confidenceThreshold})`);
       }
      
       return limitedDetections;
@@ -894,7 +904,7 @@ class ImageClassifierService {
    */
   async runParallelInference(imageUri) {
     const startTime = Date.now();
-    console.log('🚀 开始串行推理（测试模式）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
+    logger.debug('🚀 开始串行推理（测试模式）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
     
     // 串行执行推理，避免异步问题
     let idCardResults = [];
@@ -902,27 +912,27 @@ class ImageClassifierService {
     let mobileNetV3Results = {};
     
     try {
-      console.log('🔍 开始 idCard 推理...');
+      logger.debug('🔍 开始 idCard 推理...');
       idCardResults = await this.classifyImageWithYOLO(imageUri, 'idCard');
-      console.log(`✅ idCard 推理完成: ${idCardResults.length} 个检测结果`);
+      logger.debug(`✅ idCard 推理完成: ${idCardResults.length} 个检测结果`);
     } catch (error) {
       console.error('❌ idCard 推理失败:', error);
       idCardResults = [];
     }
     
     try {
-      console.log('🔍 开始 general 推理...');
+      logger.debug('🔍 开始 general 推理...');
       generalResults = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
-      console.log(`✅ general 推理完成: ${generalResults.length} 个检测结果`);
+      logger.debug(`✅ general 推理完成: ${generalResults.length} 个检测结果`);
     } catch (error) {
       console.error('❌ general 推理失败:', error);
       generalResults = [];
     }
     
     try {
-      console.log('🔍 开始 mobileNetV3 推理...');
+      logger.debug('🔍 开始 mobileNetV3 推理...');
       mobileNetV3Results = await this.classifyImageWithMobileNetV3(imageUri);
-      console.log(`✅ mobileNetV3 推理完成: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
+      logger.debug(`✅ mobileNetV3 推理完成: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
     } catch (error) {
       console.error('❌ mobileNetV3 推理失败:', error);
       mobileNetV3Results = {};
@@ -936,7 +946,7 @@ class ImageClassifierService {
     };
     
     const endTime = Date.now();
-    console.log(`⏱️ 串行推理完成，总耗时: ${endTime - startTime}ms`);
+    logger.debug(`⏱️ 串行推理完成，总耗时: ${endTime - startTime}ms`);
     
     return serialResults;
   }
@@ -954,16 +964,16 @@ class ImageClassifierService {
    */
   identifyMainRole(imageURI, yoloDetectResults, imageDimensions) {
     try {
-      console.log(`🎯 开始识别图像主角: ${imageURI}`);
+      logger.debug(`🎯 开始识别图像主角: ${imageURI}`);
       
       if (!yoloDetectResults || yoloDetectResults.length === 0) {
-        console.log('⚠️ 没有检测到任何物体');
+        logger.debug('⚠️ 没有检测到任何物体');
         return [];
       }
 
       // 检查图像尺寸参数
       if (!imageDimensions || !imageDimensions.width || !imageDimensions.height) {
-        console.log('⚠️ 缺少图像尺寸信息，无法计算物体比例');
+        logger.debug('⚠️ 缺少图像尺寸信息，无法计算物体比例');
         return [];
       }
 
@@ -1034,15 +1044,15 @@ class ImageClassifierService {
         }))
         .sort((a, b) => b.sizeRatio - a.sizeRatio); // 按面积比例降序排序
       
-      console.log(`✅ 主角识别完成，识别到 ${results.length} 个分类:`);
+      logger.debug(`✅ 主角识别完成，识别到 ${results.length} 个分类:`);
       results.forEach((result, index) => {
-        console.log(`  ${index + 1}. ${result.category}: ${result.count}个物体, 累计面积比例: ${(result.sizeRatio * 100).toFixed(2)}%`);
+        logger.debug(`  ${index + 1}. ${result.category}: ${result.count}个物体, 累计面积比例: ${(result.sizeRatio * 100).toFixed(2)}%`);
       });
       
       // 输出详细的面积比例数据，用于阈值调优
-      console.log('📊 面积比例详细数据（用于阈值调优）:');
+      logger.debug('📊 面积比例详细数据（用于阈值调优）:');
       results.forEach((result, index) => {
-        console.log(`  ${result.category}: 面积比例=${(result.sizeRatio * 100).toFixed(3)}%, 物体数量=${result.count}`);
+        logger.debug(`  ${result.category}: 面积比例=${(result.sizeRatio * 100).toFixed(3)}%, 物体数量=${result.count}`);
       });
       
       return results;
@@ -1067,7 +1077,7 @@ class ImageClassifierService {
   async MapObjectes2Category(allModelResults, imageURI, imageDimensions) {
     // 检查身份证检测结果
     if (allModelResults.idCard && allModelResults.idCard.length > 0) {
-      console.log('🆔 检测到身份证，返回身份证分类');
+      logger.debug('🆔 检测到身份证，返回身份证分类');
       return 'idcard';
     }
     
@@ -1128,7 +1138,7 @@ class ImageClassifierService {
     // 按置信度排序
     allDetectedObjects.sort((a, b) => b.confidence - a.confidence);
     
-    console.log('🔍 所有检测到的物体:', allDetectedObjects.map(obj => 
+    logger.debug('🔍 所有检测到的物体:', allDetectedObjects.map(obj => 
       `${obj.name}: ${(obj.confidence * 100).toFixed(1)}% (${obj.source})`
     ).join(', '));
 
@@ -1138,7 +1148,7 @@ class ImageClassifierService {
     );
     
     if (espressoMakerDetection) {
-      console.log(`☕ 检测到espresso maker，置信度: ${(espressoMakerDetection.confidence * 100).toFixed(1)}%，来源: ${espressoMakerDetection.source}，返回idcard分类`);
+      logger.debug(`☕ 检测到espresso maker，置信度: ${(espressoMakerDetection.confidence * 100).toFixed(1)}%，来源: ${espressoMakerDetection.source}，返回idcard分类`);
       return 'idcard';
     }
 
@@ -1148,14 +1158,14 @@ class ImageClassifierService {
     );
     
     if (bookDetection) {
-      console.log(`📚 检测到book，置信度: ${(bookDetection.confidence * 100).toFixed(1)}%，来源: ${bookDetection.source}，返回idcard分类`);
+      logger.debug(`📚 检测到book，置信度: ${(bookDetection.confidence * 100).toFixed(1)}%，来源: ${bookDetection.source}，返回idcard分类`);
       return 'idcard';
     }
 
     // 调用identifyMainRole获取主角信息
     const mainRoleResults = this.identifyMainRole(imageURI, allModelResults.general, imageDimensions);
     
-    console.log('🎯 主角识别结果:', mainRoleResults);
+    logger.debug('🎯 主角识别结果:', mainRoleResults);
     
     // 检查人物分类（遍历所有结果查找人物）
     if (mainRoleResults && mainRoleResults.length > 0) {
@@ -1165,44 +1175,44 @@ class ImageClassifierService {
       const foodSubject = mainRoleResults.find(result => result.category === 'foods');
       
       if (personSubject) {
-        console.log(`👤 人物检测: 数量=${personSubject.count}, 面积占比=${(personSubject.sizeRatio * 100).toFixed(3)}%`);
+        logger.debug(`👤 人物检测: 数量=${personSubject.count}, 面积占比=${(personSubject.sizeRatio * 100).toFixed(3)}%`);
         
         // 检查是否为单人且面积占比大于5%（降低阈值）
         if (personSubject.count === 1 && personSubject.sizeRatio > 0.05) {
-          console.log('✅ 单人分类: 面积占比 > 5%');
+          logger.debug('✅ 单人分类: 面积占比 > 5%');
           return 'single_person';
         } else if (personSubject.count === 1) {
-          console.log('❌ 单人分类: 面积占比不足 5%');
+          logger.debug('❌ 单人分类: 面积占比不足 5%');
         }
         
         // 检查是否为多人且面积占比大于8%（降低阈值）
         if (personSubject.count > 1 && personSubject.sizeRatio > 0.08) {
-          console.log('✅ 多人分类: 面积占比 > 8%');
+          logger.debug('✅ 多人分类: 面积占比 > 8%');
           return 'social_activities';
         } else if (personSubject.count > 1) {
-          console.log('❌ 多人分类: 面积占比不足 8%');
+          logger.debug('❌ 多人分类: 面积占比不足 8%');
         }
       }
       
       // 检查动物
       if (animalSubject) {
-        console.log(`🐾 动物检测: 面积占比=${(animalSubject.sizeRatio * 100).toFixed(3)}%`);
+        logger.debug(`🐾 动物检测: 面积占比=${(animalSubject.sizeRatio * 100).toFixed(3)}%`);
         if (animalSubject.sizeRatio > 0.05) {
-          console.log('✅ 动物分类: 面积占比 > 5%');
+          logger.debug('✅ 动物分类: 面积占比 > 5%');
           return 'pets';
         } else {
-          console.log('❌ 动物分类: 面积占比不足 5%');
+          logger.debug('❌ 动物分类: 面积占比不足 5%');
         }
       }
       
       // 检查美食
       if (foodSubject) {
-        console.log(`🍽️ 美食检测: 面积占比=${(foodSubject.sizeRatio * 100).toFixed(3)}%`);
+        logger.debug(`🍽️ 美食检测: 面积占比=${(foodSubject.sizeRatio * 100).toFixed(3)}%`);
         if (foodSubject.sizeRatio > 0.05) {
-          console.log('✅ 美食分类: 面积占比 > 5%');
+          logger.debug('✅ 美食分类: 面积占比 > 5%');
           return 'foods';
         } else {
-          console.log('❌ 美食分类: 面积占比不足 5%');
+          logger.debug('❌ 美食分类: 面积占比不足 5%');
         }
       }
     }
@@ -1213,11 +1223,11 @@ class ImageClassifierService {
     );
     
     if (natureDetections.length > 0) {
-      console.log(`🌿 检测到自然风景相关物体: ${natureDetections.length}个`);
+      logger.debug(`🌿 检测到自然风景相关物体: ${natureDetections.length}个`);
       natureDetections.forEach((obj, index) => {
-        console.log(`  ${index + 1}. ${obj.name} (${obj.source}): 置信度 ${(obj.confidence * 100).toFixed(1)}%`);
+        logger.debug(`  ${index + 1}. ${obj.name} (${obj.source}): 置信度 ${(obj.confidence * 100).toFixed(1)}%`);
       });
-      console.log('✅ 归类为自然风景分类');
+      logger.debug('✅ 归类为自然风景分类');
       return 'travel_scenery';
     }
 
@@ -1226,16 +1236,16 @@ class ImageClassifierService {
       const topConfidenceObject = allDetectedObjects[0]; // 已经按置信度排序，第一个就是最高的
       
       if (topConfidenceObject.appCategory) {
-        console.log(`🎯 使用置信度最高的物体进行分类:`);
-        console.log(`  - 物体名称: ${topConfidenceObject.name}`);
-        console.log(`  - 置信度: ${(topConfidenceObject.confidence * 100).toFixed(1)}%`);
-        console.log(`  - 来源: ${topConfidenceObject.source}`);
-        console.log(`  - 物体类别: ${topConfidenceObject.objectCategory}`);
-        console.log(`  - 应用分类: ${topConfidenceObject.appCategory}`);
-        console.log(`✅ 返回应用分类: ${topConfidenceObject.appCategory}`);
+        logger.debug(`🎯 使用置信度最高的物体进行分类:`);
+        logger.debug(`  - 物体名称: ${topConfidenceObject.name}`);
+        logger.debug(`  - 置信度: ${(topConfidenceObject.confidence * 100).toFixed(1)}%`);
+        logger.debug(`  - 来源: ${topConfidenceObject.source}`);
+        logger.debug(`  - 物体类别: ${topConfidenceObject.objectCategory}`);
+        logger.debug(`  - 应用分类: ${topConfidenceObject.appCategory}`);
+        logger.debug(`✅ 返回应用分类: ${topConfidenceObject.appCategory}`);
         return topConfidenceObject.appCategory;
       } else {
-        console.log(`⚠️ 置信度最高的物体 "${topConfidenceObject.name}" 没有有效的应用分类，使用默认分类`);
+        logger.debug(`⚠️ 置信度最高的物体 "${topConfidenceObject.name}" 没有有效的应用分类，使用默认分类`);
         return 'other';
       }
     }
@@ -1262,22 +1272,22 @@ class ImageClassifierService {
       // 1. 通过MobileNetV3分类名称获取物体分类信息
       const mobileNetV3ClassInfo = this.configService.getMobileNetV3ClassByEnglishName(mobileNetV3Class);
       if (!mobileNetV3ClassInfo || !mobileNetV3ClassInfo.category) {
-        console.log(`⚠️ 未找到MobileNetV3分类 "${mobileNetV3Class}" 的配置信息`);
+        logger.debug(`⚠️ 未找到MobileNetV3分类 "${mobileNetV3Class}" 的配置信息`);
         return 'other';
       }
       
       const objectCategory = mobileNetV3ClassInfo.category;
-      console.log(`🔍 MobileNetV3分类 "${mobileNetV3Class}" 映射到物体分类: ${objectCategory}`);
+      logger.debug(`🔍 MobileNetV3分类 "${mobileNetV3Class}" 映射到物体分类: ${objectCategory}`);
       
       // 2. 通过物体分类映射到应用分类
       const objectMappings = this.configService.getObjectMappings();
       const appCategory = objectMappings[objectCategory];
       
       if (appCategory) {
-        console.log(`✅ 物体分类 "${objectCategory}" 映射到应用分类: ${appCategory}`);
+        logger.debug(`✅ 物体分类 "${objectCategory}" 映射到应用分类: ${appCategory}`);
         return appCategory;
       } else {
-        console.log(`⚠️ 未找到物体分类 "${objectCategory}" 的应用分类映射`);
+        logger.debug(`⚠️ 未找到物体分类 "${objectCategory}" 的应用分类映射`);
         return 'other';
       }
       
@@ -1302,8 +1312,6 @@ class ImageClassifierService {
       const originalWidth = imageDimensions.width;
       const originalHeight = imageDimensions.height;
       
-      console.log('📏 获取图片分辨率:', originalWidth, 'x', originalHeight);
-      
       // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
       const aspectRatio = originalWidth / originalHeight;
       const isMobileResolution = aspectRatio <= 0.5;
@@ -1315,19 +1323,17 @@ class ImageClassifierService {
                               fileNameLower.includes('截图') || 
                               fileNameLower.includes('screen');
       
-      // 调试信息
-      console.log('🔍 手机截图判定调试:');
-      console.log(`  - 文件名: ${fileName}`);
-      console.log(`  - 原始分辨率: ${originalWidth}x${originalHeight}`);
-      console.log(`  - 宽高比: ${aspectRatio.toFixed(3)}`);
-      console.log(`  - 手机分辨率: ${isMobileResolution}`);
-      console.log(`  - 截图文件名: ${isScreenshotFile}`);
-      console.log(`  - 最终判定: ${isMobileResolution || isScreenshotFile}`);
+      const isScreenshot = isMobileResolution || isScreenshotFile;
+      
+      // 只在检测到手机截图时输出调试信息
+      if (isScreenshot) {
+        logger.debug(`📱 检测到手机截图: ${originalWidth}x${originalHeight}, 宽高比=${aspectRatio.toFixed(3)}`);
+      }
       
       // 两个特征中只要有一个满足就判定为手机截图
-      return isMobileResolution || isScreenshotFile;
+      return isScreenshot;
     } catch (error) {
-      console.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
+      logger.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
       return false;
     }
   }
@@ -1416,7 +1422,7 @@ class ImageClassifierService {
       };
 
       modelConfig.model = await ort.InferenceSession.create(modelConfig.path, sessionOptions);
-      console.log('✅ MobileNetV3模型加载成功');
+      logger.debug('✅ MobileNetV3模型加载成功');
       
       return modelConfig.model;
     } catch (error) {
@@ -1507,21 +1513,21 @@ class ImageClassifierService {
       if (output.cpuData) {
         // CPU数据，直接使用
         outputData = output.cpuData;
-        console.log('📊 使用CPU数据，长度:', outputData.length);
+        logger.debug('📊 使用CPU数据，长度:', outputData.length);
       } else if (output.data) {
         // GPU数据，需要转换为CPU数据
         outputData = await output.data();
-        console.log('📊 使用GPU数据，长度:', outputData.length);
+        logger.debug('📊 使用GPU数据，长度:', outputData.length);
       } else if (Array.isArray(output)) {
         // 数组格式数据
         outputData = output;
-        console.log('📊 使用数组数据，长度:', outputData.length);
+        logger.debug('📊 使用数组数据，长度:', outputData.length);
       } else {
         throw new Error(`无法识别的MobileNetV3输出数据格式: ${JSON.stringify(output)}`);
       }
       
-      console.log('📊 输出数据前5个值:', outputData.slice(0, 5));
-      console.log('📊 ImageNet类别数量:', this.imagenetClasses ? this.imagenetClasses.length : 'undefined');
+      logger.debug('📊 输出数据前5个值:', outputData.slice(0, 5));
+      logger.debug('📊 ImageNet类别数量:', this.imagenetClasses ? this.imagenetClasses.length : 'undefined');
       const probabilities = new Array(outputData.length);
 
       // 计算softmax
@@ -1732,8 +1738,6 @@ class ImageClassifierService {
     const config = this.getAPIConfig();
     
     try {
-      logger.debug('🔍 查询缓存...', imageHash.substring(0, 16) + '...');
-      
       const response = await fetch(`${config.baseURL}/api/v1/classify/check-cache`, {
         method: 'POST',
         headers: {
@@ -1751,11 +1755,7 @@ class ImageClassifierService {
       
       const result = await response.json();
       
-      if (result.cached) {
-        logger.debug('✅ 缓存命中！');
-      } else {
-        logger.debug('❌ 缓存未命中');
-      }
+      // 不再输出缓存查询结果日志，由调用方决定是否输出
       
       return result;
       
@@ -1856,29 +1856,23 @@ class ImageClassifierService {
       
       // 如果输入是URI字符串，需要转换为Blob
       if (typeof imageInput === 'string') {
-        logger.debug('📥 从URI加载图片...');
         const response = await fetch(imageInput);
         const blob = await response.blob();
         imageFile = new File([blob], 'image.jpg', { type: blob.type || 'image/jpeg' });
       }
       
       // 步骤1: 计算哈希
-      logger.debug('🔑 计算图片哈希...');
       const imageHash = await this.calculateSHA256(imageFile);
-      logger.debug(`🔑 哈希: ${imageHash.substring(0, 16)}...`);
       
       // 步骤1.5: 缩放图像到1024x1024（保持宽高比）
-      logger.debug('🖼️ 缩放图像到1024x1024...');
       const resizedImageFile = await this.resizeImageTo1024(imageFile);
-      logger.debug('✅ 图像缩放完成');
       
       // 步骤2: 查询缓存（强制使用）
-      logger.debug('🔍 查询缓存...');
       const cacheResult = await this.checkCache(imageHash, clientId);
       
       if (cacheResult.cached) {
         // 缓存命中！
-        logger.debug('✅ 缓存命中！节省上传带宽');
+        logger.info(`✅ 远程推理缓存命中: ${imageHash.substring(0, 8)}...`);
         
         // 直接返回完整的缓存结果
         return {

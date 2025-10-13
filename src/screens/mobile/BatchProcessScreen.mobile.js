@@ -28,7 +28,7 @@ const ImageUploadScreen = ({ navigation }) => {
       await galleryScannerService.initialize();
       // 使用新的扫描方法
       const result = await galleryScannerService.scanGalleryWithProgress((progress) => {
-        console.log('扫描进度:', progress);
+        logger.debug('扫描进度:', progress);
       });
       
       // 获取所有图片数据
@@ -81,7 +81,7 @@ const ImageUploadScreen = ({ navigation }) => {
           });
 
           successCount++;
-          console.log(`图片分类成功: ${image.fileName} -> ${classificationResult.category}`);
+          logger.debug(`图片分类成功: ${image.fileName} -> ${classificationResult.category}`);
         } catch (error) {
           console.error(`图片分类失败 ${image.fileName}:`, error);
           failCount++;
