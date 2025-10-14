@@ -107,14 +107,6 @@ const HomeScreen = () => {
       logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
       logger.debug('准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
       
-      // 验证和记录最近图片的URI格式
-      if (recentImagesData.length > 0) {
-        logger.debug('📷 最近图片URI示例:', recentImagesData.slice(0, 3).map(img => ({
-          id: img.id,
-          uri: img.uri,
-          fileName: img.fileName
-        })));
-      }
       
       setRecentImages(recentImagesData);
       setCategoryCounts(categoryCountsData);
@@ -330,7 +322,12 @@ const HomeScreen = () => {
     logger.debug('HomeScreen 收到扫描进度更新:', progress);
     
     // 如果开始扫描，立即切换到扫描模式
-    if (progress.stage === 'started' || progress.stage === 'scanning' || progress.stage === 'processing') {
+    if (progress.stage === 'started' || progress.stage === 'scanning' || progress.stage === 'processing' ||
+        progress.stage === 'directory_scanning' || progress.stage === 'file_comparison' ||
+        progress.stage === 'screenshot_detection' || progress.stage === 'cache_checking' ||
+        progress.stage === 'remote_inference' || progress.stage === 'local_inference' ||
+        progress.stage === 'processing_images' || progress.stage === 'removing_files' ||
+        progress.stage === 'similarity_detection' || progress.stage === 'updating_data') {
       setForceShowReadme(false);
       setIsScanning(true);
       logger.debug('扫描开始，清除强制显示 readme 状态，切换到正常显示模式');

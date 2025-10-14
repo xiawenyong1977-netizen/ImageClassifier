@@ -215,7 +215,6 @@ class IndexedDBAdapter {
       }
       
       transaction.oncomplete = () => {
-        logger.debug(`✅ IndexedDB 保存成功 (${key})`);
         resolve(true);
       };
       
@@ -258,7 +257,6 @@ class IndexedDBAdapter {
             id: imageData.id || this.generateStableId(imageData.uri)
           };
           store.add(imageWithId);
-          logger.debug(`✅ 添加图片: ${imageData.fileName}`);
         }
         
         resolve(true);
@@ -270,7 +268,6 @@ class IndexedDBAdapter {
       };
       
       transaction.oncomplete = () => {
-        logger.debug(`✅ IndexedDB 单条记录操作成功`);
         resolve(true);
       };
       
@@ -529,7 +526,6 @@ class ImageStorageService {
   async _performSave(imageDataArray) {
     // 获取现有图片数据
     const existingImages = await this.getImages();
-    logger.debug(`Existing image count: ${existingImages.length}`);
     
     // 批量处理
     const newImages = [];
@@ -581,6 +577,7 @@ class ImageStorageService {
         generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
         mobileNetV3Detections: imageData.mobileNetV3Detections || null,  // MobileNetV3模型检测结果
         imageDimensions: imageData.imageDimensions || null,  // 图像尺寸信息
+        message: imageData.message || null,  // 大模型推理描述
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -597,36 +594,25 @@ class ImageStorageService {
     }
     
     // 保存到存储
-    logger.debug(`💾 开始保存到存储，检测结果字段:`, {
-      idCardDetections: imageDataArray[0]?.idCardDetections?.length || 0,
-      generalDetections: imageDataArray[0]?.generalDetections?.length || 0,
-      mobileNetV3Detections: imageDataArray[0]?.mobileNetV3Detections ? '存在' : '不存在'
-    });
-    
     // 根据数据量选择最优保存策略
     if (Platform.OS === 'web') {
       if (imageDataArray.length === 1) {
         // 单张图片：使用单条记录操作（性能最优）
         await this.storage.addOrUpdateSingleImage(imageDataArray[0]);
-        logger.debug(`✅ 单条记录保存成功`);
       } else {
         // 批量图片：也使用单条记录操作，避免数据丢失
-        logger.debug(`🔄 开始批量保存 ${imageDataArray.length} 张图片`);
         for (const imageData of imageDataArray) {
           await this.storage.addOrUpdateSingleImage(imageData);
         }
-        logger.debug(`✅ 批量保存成功，处理了 ${imageDataArray.length} 张图片`);
       }
     } else {
       // 移动端：使用原有逻辑
       await this.storage.setItem(this.storageKeys.images, existingImages);
-      logger.debug(`✅ 数据已保存到存储`);
     }
     
     // 更新统计信息
     await this.updateStats();
     
-    logger.debug(`Batch save completed: ${newImages.length} new, ${updatedImages.length} updated`);
     return { newCount: newImages.length, updatedCount: updatedImages.length };
   }
 
@@ -741,7 +727,6 @@ class ImageStorageService {
       
       // Get existing image data
       const existingImages = await this.getImages();
-      logger.debug(`Existing image count: ${existingImages.length}`);
       
       // Check if already exists
       const existingIndex = existingImages.findIndex(img => img.uri === uri);
@@ -787,6 +772,7 @@ class ImageStorageService {
         generalDetections: imageData.generalDetections || null,  // 通用模型检测结果
         mobileNetV3Detections: imageData.mobileNetV3Detections || null,  // MobileNetV3模型检测结果
         imageDimensions: imageData.imageDimensions || null,  // 图像尺寸信息
+        message: imageData.message || null,  // 大模型推理描述
         // Additional metadata
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -826,7 +812,6 @@ class ImageStorageService {
       if (!fullImages) {
         return [];
       }
-      logger.debug(`📊 ImageStorageService.getImages() 从数据库读取到 ${fullImages.length} 张图片`);
       
       // 转换为精简数据结构 - 只包含界面显示必需字段
       const simplifiedImages = fullImages.map(img => {
@@ -1454,7 +1439,6 @@ class ImageStorageService {
       // Save statistics
       await this.storage.setItem(this.storageKeys.stats, stats);
       
-      logger.debug('Statistics updated successfully');
       return stats;
       
     } catch (error) {

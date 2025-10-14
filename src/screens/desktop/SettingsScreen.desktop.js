@@ -379,7 +379,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleClearData}>
-            <Text style={styles.actionButtonText}>🗑️ 清空分类信息</Text>
+            <Text style={styles.actionButtonText}>🗑️ 清空相册信息</Text>
             <Text style={styles.actionButtonDescription}>
               清空所有照片的分类和位置信息
             </Text>

@@ -344,9 +344,6 @@ class GlobalImageCache {
         // 使用标准化的分类ID作为键（英文ID）
         const normalizedCategory = this._normalizeCategoryId(img.category);
         this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
-        logger.debug(`📊 图片${index+1}: ${img.fileName} → ${img.category} → ${normalizedCategory}`);
-      } else {
-        logger.debug(`⚠️ 图片${index+1}: ${img.fileName} 没有分类信息`);
       }
     });
     logger.debug('📊 分类统计计算结果:', this.cache.categoryCounts);

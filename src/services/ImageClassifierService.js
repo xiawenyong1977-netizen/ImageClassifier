@@ -23,6 +23,14 @@ class ImageClassifierService {
     // 缓存可用的执行提供者，避免重复检测
     this.cachedProviders = null;
     
+    // 批量处理配置
+    this.BATCH_CONFIG = {
+      CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
+      UPLOAD_BATCH_SIZE: 20,      // 批量上传大小
+      REMOTE_TIMEOUT: 60000,      // 远程请求超时（毫秒）- 增加到60秒
+      HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
+    };
+    
     // 注意：已移除 Web Worker 池，使用主线程并行推理
   }
 
@@ -505,16 +513,14 @@ class ImageClassifierService {
         const classId = classScores.indexOf(maxScore);
         const confidence = maxScore;
         
-      // 统一处理所有模型类型
-      if (confidence > confidenceThreshold && classId >= 0 && classId < numClasses) {
-        detections.push({
-          classId: classId,
-          confidence: confidence,
-          bbox: [x, y, w, h]
-        });
-      } else if (confidence > 0.1) { // 调试：显示低置信度的检测
-        logger.debug(`🔍 低置信度检测: classId=${classId}, confidence=${confidence.toFixed(3)}, threshold=${confidenceThreshold}`);
-      }
+        // 统一处理所有模型类型
+        if (confidence > confidenceThreshold && classId >= 0 && classId < numClasses) {
+          detections.push({
+            classId: classId,
+            confidence: confidence,
+            bbox: [x, y, w, h]
+          });
+        }
       }
       
       // 应用非极大值抑制 (NMS)
@@ -609,6 +615,13 @@ class ImageClassifierService {
 
  
   // Classify image (simplified version, directly using time classification)
+  /**
+   * 图片分类主方法（纯本地推理）
+   * 注意：此方法仅用于扫描流程的第4层本地推理降级
+   * 截图检测、缓存查询、远程推理已在前3层完成
+   * @param {string} imageUri - 图片URI
+   * @returns {Promise<Object>} 分类结果
+   */
   async classifyImage(imageUri) {
     try {
       // 检查服务是否已初始化
@@ -616,99 +629,20 @@ class ImageClassifierService {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
-       // 获取图像尺寸
+      // 获取图像尺寸
       const imageDimensions = await this.getOriginalImageDimensions(imageUri);
-      // 第一步：检查是否为手机截图（最高优先级）
-      if (await this.identifyMobileScreenshot(imageUri, imageDimensions)) {
-        logger.debug('✅ 检测到手机截图');
-        return {
-          success: true,
-          categoryId: 'screenshot',
-          confidence: 1.0,
-          message: '检测到手机截图',
-          idCardDetections: [],
-          generalDetections: [],
-          mobileNetV3Detections: [],
-          imageDimensions: imageDimensions,
-          allModelResults: {
-            mobileScreenshot: true,
-            idCard: [],
-            general: [],
-            mobileNetV3: []
-          }
-        };
-      }
-
-      // ✨ 新增：尝试远程分类
-      let allModelResults = null;
-      let useRemoteInference = false;
       
-      try {
-        logger.debug('🌐 尝试远程分类...');
-        const remoteResult = await this.classifyImageRemote(imageUri, {
-          checkHealthFirst: true
-        });
-        
-        if (remoteResult.success) {
-          // 远程分类成功
-          const data = remoteResult.data;
-          
-          // 判断是大模型推理还是小模型推理
-          if (data.category && data.category !== '') {
-            // 大模型推理 - 直接返回结果
-            logger.debug('✅ 远程大模型推理成功:', data.category);
-            return {
-              success: true,
-              categoryId: data.category,
-              confidence: data.confidence || 0.9,
-              message: data.description || '图像分类完成',
-              idCardDetections: [],
-              generalDetections: [],
-              mobileNetV3Detections: [],
-              imageDimensions: imageDimensions,
-              allModelResults: {},
-              classificationMethod: 'remote_llm'
-            };
-          } else if (data.local_inference_result) {
-            // 小模型推理 - 保存检测结果，跳过本地并行推理
-            logger.debug('✅ 远程小模型推理成功，使用服务器返回的检测结果');
-            const localResult = data.local_inference_result;
-            
-            // 构造 allModelResults 对象，使用服务器返回的结果
-            allModelResults = {
-              mobileScreenshot: false,
-              idCard: localResult.idCardDetections || [],
-              general: localResult.generalDetections || [],
-              mobileNetV3: localResult.mobileNetV3Detections || {}
-            };
-            
-            useRemoteInference = true;
-            logger.debug('🔄 跳过本地推理，使用服务器检测结果');
-          }
-        }
-        
-        if (!useRemoteInference) {
-          // 远程分类失败，继续本地推理
-          logger.warn('⚠️ 远程分类失败，降级到本地推理');
-        }
-      } catch (remoteError) {
-        logger.warn('⚠️ 远程分类异常，降级到本地推理:', remoteError.message);
-      }
-
-      // 如果没有使用远程推理，则执行本地并行推理
-      if (!useRemoteInference) {
-        // 第二步到第四步：并行执行所有模型推理
-        logger.debug('🔍 并行执行所有模型推理...');
-        const parallelResults = await this.runParallelInference(imageUri);
-        
-        // 保存所有模型的原始结果
-        allModelResults = {
-          mobileScreenshot: false,
-          idCard: parallelResults.idCard || [],
-          general: parallelResults.general || [],
-          mobileNetV3: parallelResults.mobileNetV3 || []
-        };
-      }
+      // 执行本地并行推理
+      logger.debug('🔍 并行执行所有模型推理...');
+      const parallelResults = await this.runParallelInference(imageUri);
+      
+      // 保存所有模型的原始结果
+      const allModelResults = {
+        mobileScreenshot: false,
+        idCard: parallelResults.idCard || [],
+        general: parallelResults.general || [],
+        mobileNetV3: parallelResults.mobileNetV3 || []
+      };
 
       // 统计检测结果
       const idCardCount = allModelResults.idCard.length;
@@ -1303,22 +1237,19 @@ class ImageClassifierService {
   /**
    * 识别手机截图
    * @param {string} imageUri - 图片URI
-   * @param {Object} imageDimensions - 图像尺寸 {width, height}
+   * @param {string} fileName - 文件名
+   * @param {number} width - 图片宽度
+   * @param {number} height - 图片高度
    * @returns {Promise<boolean>} 如果是手机截图返回true，否则返回false
    */
-  async identifyMobileScreenshot(imageUri, imageDimensions) {
+  async identifyMobileScreenshot(imageUri, fileName, width, height) {
     try {
-      // 使用传入的图像尺寸，避免重复加载图片
-      const originalWidth = imageDimensions.width;
-      const originalHeight = imageDimensions.height;
-      
       // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
-      const aspectRatio = originalWidth / originalHeight;
+      const aspectRatio = width / height;
       const isMobileResolution = aspectRatio <= 0.5;
       
       // 特征2：文件名判定 - 包含截图关键词
-      const fileName = '';
-      const fileNameLower = fileName.toLowerCase();
+      const fileNameLower = (fileName || '').toLowerCase();
       const isScreenshotFile = fileNameLower.includes('screenshot') || 
                               fileNameLower.includes('截图') || 
                               fileNameLower.includes('screen');
@@ -1327,13 +1258,13 @@ class ImageClassifierService {
       
       // 只在检测到手机截图时输出调试信息
       if (isScreenshot) {
-        logger.debug(`📱 检测到手机截图: ${originalWidth}x${originalHeight}, 宽高比=${aspectRatio.toFixed(3)}`);
+        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio.toFixed(3)}, 文件名=${fileName}`);
       }
       
       // 两个特征中只要有一个满足就判定为手机截图
       return isScreenshot;
     } catch (error) {
-      logger.warn('⚠️ 获取原始分辨率失败，跳过手机截图检测:', error.message);
+      logger.warn('⚠️ 手机截图检测失败:', error.message);
       return false;
     }
   }
@@ -1653,6 +1584,250 @@ class ImageClassifierService {
    * 
    * @returns {Promise<Object>} 健康状态信息
    */
+  /**
+   * 计算图片的SHA-256哈希值
+   * @param {string} imageUri - 图片URI
+   * @returns {Promise<string>} SHA-256哈希字符串
+   */
+  async calculateImageHash(imageUri) {
+    try {
+      // 安全地加载图片数据
+      let blob;
+      
+      if (imageUri.startsWith('file://')) {
+        // 本地文件：使用 WebAdapters 中的安全读取函数
+        const { readImageFileAsBlob } = require('../adapters/WebAdapters.js');
+        blob = await readImageFileAsBlob(imageUri);
+      } else {
+        // 网络URL：使用 fetch
+        const response = await fetch(imageUri);
+        blob = await response.blob();
+      }
+      
+      const arrayBuffer = await blob.arrayBuffer();
+      
+      // 计算SHA-256哈希
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      return hashHex;
+    } catch (error) {
+      logger.error('❌ 计算图片哈希失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量检测手机截图
+   * @param {Array} imageDataList - [{ uri, fileName, width, height }]
+   * @returns {Promise<{screenshots: Array, nonScreenshots: Array}>}
+   */
+  async batchDetectScreenshots(imageDataList) {
+    const screenshots = [];
+    const nonScreenshots = [];
+    
+    for (const imageData of imageDataList) {
+      const isScreenshot = await this.identifyMobileScreenshot(
+        imageData.uri, 
+        imageData.fileName, 
+        imageData.width, 
+        imageData.height
+      );
+      
+      if (isScreenshot) {
+        screenshots.push(imageData);
+      } else {
+        nonScreenshots.push(imageData);
+      }
+    }
+    
+    logger.debug(`📱 批量截图检测完成：${screenshots.length} 张截图，${nonScreenshots.length} 张非截图`);
+    
+    return { screenshots, nonScreenshots };
+  }
+
+  /**
+   * 批量查询缓存
+   * @param {Array<string>} imageHashes - 图片哈希数组（自动分批处理）
+   * @param {string} userId - 可选的用户ID
+   * @returns {Promise<Object>} 批量缓存查询结果 { success: true, total, cached_count, items: [] }
+   */
+  async batchCheckCache(imageHashes, userId = null) {
+    const config = this.getAPIConfig();
+    
+    if (imageHashes.length === 0) {
+      return { success: true, total: 0, cached_count: 0, items: [] };
+    }
+    
+    try {
+      logger.debug(`🔍 批量查询缓存：${imageHashes.length} 个哈希值`);
+      
+      // 分批处理（每批100个）
+      const batchSize = this.BATCH_CONFIG.CACHE_BATCH_SIZE;
+      const allItems = [];
+      let totalCached = 0;
+      
+      for (let i = 0; i < imageHashes.length; i += batchSize) {
+        const batchHashes = imageHashes.slice(i, i + batchSize);
+        
+        const headers = { 'Content-Type': 'application/json' };
+        if (userId) {
+          headers['X-User-ID'] = userId;
+        }
+        
+        const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ image_hashes: batchHashes })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        allItems.push(...result.items);
+        totalCached += result.cached_count;
+        
+        logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
+      }
+      
+      logger.debug(`✅ 批量缓存查询完成：总命中 ${totalCached}/${imageHashes.length}`);
+      
+      return {
+        success: true,
+        total: imageHashes.length,
+        cached_count: totalCached,
+        items: allItems
+      };
+    } catch (error) {
+      logger.error('❌ 批量缓存查询失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量远程分类
+   * @param {Array} imageDataList - [{ uri, hash, blob, fileName, imageData }] 自动分批处理
+   * @param {Object} options - { userId, timeout }
+   * @returns {Promise<Object>} 批量分类结果 { success: true, total, success_count, fail_count, items: [] }
+   */
+  async batchClassifyRemote(imageDataList, options = {}) {
+    const config = this.getAPIConfig();
+    const { userId = null, timeout = this.BATCH_CONFIG.REMOTE_TIMEOUT } = options;
+    
+    if (imageDataList.length === 0) {
+      return { success: true, total: 0, success_count: 0, fail_count: 0, items: [] };
+    }
+    
+    try {
+      logger.debug(`⬆️  批量上传分类：${imageDataList.length} 张图片`);
+      
+      // 分批处理（每批20张）
+      const batchSize = this.BATCH_CONFIG.UPLOAD_BATCH_SIZE;
+      const allItems = [];
+      let totalSuccess = 0;
+      let totalFail = 0;
+      
+      for (let i = 0; i < imageDataList.length; i += batchSize) {
+        const batch = imageDataList.slice(i, i + batchSize);
+        
+        const formData = new FormData();
+        
+        // 添加图片文件
+        for (const imageData of batch) {
+          formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
+        }
+        
+        // 添加哈希列表
+        const hashes = batch.map(img => img.hash).filter(h => h);
+        if (hashes.length > 0) {
+          formData.append('image_hashes', JSON.stringify(hashes));
+        }
+        
+        const headers = {};
+        if (userId) {
+          headers['X-User-ID'] = userId;
+        }
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        const response = await fetch(`${config.baseURL}/api/v1/classify/batch`, {
+          method: 'POST',
+          headers: headers,
+          body: formData,
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          logger.error(`❌ 批量分类HTTP错误: ${response.status} ${response.statusText}`, errorText);
+          throw new Error(`批量分类失败: HTTP ${response.status} - ${errorText}`);
+        }
+        
+        const result = await response.json();
+        
+        // 记录批次结果详情
+        logger.debug(`📊 批次 ${Math.floor(i / batchSize) + 1} 原始结果:`, {
+          success: result.success,
+          total: result.total,
+          success_count: result.success_count,
+          fail_count: result.fail_count,
+          itemsLength: result.items?.length,
+          firstItem: result.items?.[0]
+        });
+        
+        // 合并结果，保留原始 imageData 引用
+        const itemsWithData = result.items.map((item, idx) => ({
+          ...item,
+          imageData: batch[idx].imageData // 保留原始图片数据引用
+        }));
+        
+        allItems.push(...itemsWithData);
+        totalSuccess += result.success_count;
+        totalFail += result.fail_count;
+        
+        logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：成功 ${result.success_count}/${result.total}`);
+      }
+      
+      logger.debug(`✅ 批量分类完成：总成功 ${totalSuccess}/${imageDataList.length}`);
+      
+      return {
+        success: true,
+        total: imageDataList.length,
+        success_count: totalSuccess,
+        fail_count: totalFail,
+        items: allItems
+      };
+    } catch (error) {
+      // 处理超时和取消请求的情况
+      if (error.name === 'AbortError' || error.message === 'The user aborted a request.') {
+        logger.warn('⚠️ 远程推理超时或被取消，将降级到本地推理');
+        return {
+          success: false,
+          total: imageDataList.length,
+          success_count: 0,
+          fail_count: imageDataList.length,
+          items: imageDataList.map((imageData, index) => ({
+            index,
+            success: false,
+            data: null,
+            error: '请求超时或取消',
+            imageData
+          }))
+        };
+      }
+      
+      logger.error('❌ 批量分类失败:', error.message || error);
+      logger.error('❌ 错误详情:', error);
+      throw error;
+    }
+  }
+
   async checkHealth() {
     const config = this.getAPIConfig();
     
@@ -1660,7 +1835,7 @@ class ImageClassifierService {
       logger.debug('🏥 检查后端服务健康状态...');
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+      const timeoutId = setTimeout(() => controller.abort(), this.BATCH_CONFIG.HEALTH_CHECK_TIMEOUT);
       
       const response = await fetch(`${config.baseURL}/api/v1/health`, {
         method: 'GET',
@@ -1912,92 +2087,6 @@ class ImageClassifierService {
         categoryId: 'other',
         confidence: 0,
         message: `远程分类失败: ${error.message}`,
-        // 保持与本地分类兼容的空字段
-        idCardDetections: [],
-        generalDetections: [],
-        mobileNetV3Detections: [],
-        imageDimensions: null,
-        allModelResults: {}
-      };
-    }
-  }
-
-  /**
-   * 混合分类策略：优先使用远程分类，失败时降级到本地分类
-   * 
-   * @param {string|Blob|File} imageInput - 图片输入
-   * @param {Object} options - 选项
-   * @returns {Promise<Object>} 分类结果
-   */
-  async classifyImageHybrid(imageInput, options = {}) {
-    const {
-      preferRemote = true,
-      fallbackToLocal = true
-    } = options;
-    
-    try {
-      if (preferRemote) {
-        logger.debug('🌐 尝试远程分类...');
-        
-        try {
-          // 尝试远程分类
-          const remoteResult = await this.classifyImageRemote(imageInput, {
-            checkHealthFirst: true
-          });
-          
-          if (remoteResult.success) {
-            logger.debug('✅ 远程分类成功');
-            return {
-              ...remoteResult,
-              classificationMethod: 'remote'
-            };
-          }
-          
-          if (!fallbackToLocal) {
-            return remoteResult;
-          }
-          
-          logger.warn('⚠️ 远程分类失败，降级到本地分类');
-        } catch (remoteError) {
-          logger.warn('⚠️ 远程分类异常，降级到本地分类:', remoteError.message);
-          
-          if (!fallbackToLocal) {
-            throw remoteError;
-          }
-        }
-      }
-      
-      // 降级到本地分类
-      logger.debug('🖥️ 使用本地分类...');
-      
-      // 如果输入是Blob/File，需要转换为URI
-      let imageUri = imageInput;
-      if (imageInput instanceof Blob || imageInput instanceof File) {
-        imageUri = URL.createObjectURL(imageInput);
-      }
-      
-      const localResult = await this.classifyImage(imageUri);
-      
-      // 清理临时URL
-      if (imageUri !== imageInput && imageUri.startsWith('blob:')) {
-        URL.revokeObjectURL(imageUri);
-      }
-      
-      return {
-        ...localResult,
-        classificationMethod: 'local'
-      };
-      
-    } catch (error) {
-      logger.error('❌ 混合分类失败:', error);
-      
-      // 返回结构兼容本地分类格式
-      return {
-        success: false,
-        error: error.message,
-        categoryId: 'other',
-        confidence: 0,
-        message: `分类失败: ${error.message}`,
         // 保持与本地分类兼容的空字段
         idCardDetections: [],
         generalDetections: [],

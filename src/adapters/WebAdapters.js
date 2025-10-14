@@ -147,7 +147,8 @@ export const normalizeFilePath = (filePath) => {
   }
   
   // Windows路径处理: /D:/path -> D:/path
-  if (normalizedPath.startsWith('/') && normalizedPath.length > 1 && normalizedPath[1] === ':') {
+  // 使用循环确保移除所有前导斜杠
+  while (normalizedPath.startsWith('/') && normalizedPath.length > 2 && normalizedPath[2] === ':') {
     normalizedPath = normalizedPath.substring(1);
   }
   
@@ -219,6 +220,49 @@ export const readFileForExif = async (filePath) => {
   }
 };
 
+// 图片文件读取函数 - 返回Blob格式，用于图片处理
+export const readImageFileAsBlob = async (filePath) => {
+  const normalizedPath = normalizeFilePath(filePath);
+  
+  // 检测环境：Electron vs 浏览器
+  const isElectron = typeof window !== 'undefined' && window.require;
+  
+  if (isElectron) {
+    // Electron环境：使用Node.js的fs模块
+    try {
+      const fs = window.require('fs');
+      const path = window.require('path');
+      
+      const fileBuffer = fs.readFileSync(normalizedPath);
+      const ext = path.extname(normalizedPath).toLowerCase();
+      const mimeType = getMimeTypeFromExtension(ext);
+      
+      return new Blob([fileBuffer], { type: mimeType });
+    } catch (error) {
+      logger.error('❌ Electron环境读取本地图片文件失败:', error);
+      throw error;
+    }
+  } else {
+    // 浏览器环境：无法直接读取本地文件
+    const error = new Error('浏览器环境无法直接读取本地文件，请使用Electron环境');
+    logger.error('❌ 浏览器环境限制:', error.message);
+    throw error;
+  }
+};
+
+// 根据文件扩展名获取MIME类型
+export const getMimeTypeFromExtension = (ext) => {
+  const mimeTypes = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.webp': 'image/webp'
+  };
+  return mimeTypes[ext] || 'image/jpeg';
+};
+
 // 1. PermissionsAndroid 适配
 export const PermissionsAndroid = {
   PERMISSIONS: {
@@ -273,7 +317,6 @@ export const AsyncStorage = {
   },
   setItem: async (key, value) => {
     if (Platform.OS === 'web') {
-      logger.debug(`[Web] AsyncStorage.setItem: ${key}`);
       try {
         localStorage.setItem(key, JSON.stringify(value));
         return true;
@@ -289,7 +332,6 @@ export const AsyncStorage = {
   },
   removeItem: async (key) => {
     if (Platform.OS === 'web') {
-      logger.debug(`[Web] AsyncStorage.removeItem: ${key}`);
       try {
         localStorage.removeItem(key);
         return true;
@@ -321,7 +363,6 @@ export const AsyncStorage = {
   },
   getAllKeys: async () => {
     if (Platform.OS === 'web') {
-      logger.debug('[Web] AsyncStorage.getAllKeys');
       try {
         return Object.keys(localStorage);
       } catch (error) {
@@ -393,7 +434,7 @@ export const RNFS = {
           const fullPath = `${normalizedDirPath}/${file}`;
           const stats = fs.statSync(fullPath);
           
-          result.push({
+          const item = {
             name: file,
             path: fullPath,
             isFile: () => stats.isFile(),
@@ -401,7 +442,18 @@ export const RNFS = {
             size: stats.size,
             mtime: stats.mtime,
             ctime: stats.ctime,
-          });
+          };
+          
+          // 验证关键字段（只在发现问题时记录，避免大量日志）
+          if (!item.path) {
+            logger.error('❌ RNFS.readDir 返回了没有路径的项目:', {
+              file: file,
+              fullPath: fullPath,
+              dirPath: dirPath
+            });
+          }
+          
+          result.push(item);
         }
         
         return result;
