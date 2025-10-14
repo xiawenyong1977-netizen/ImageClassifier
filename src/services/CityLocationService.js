@@ -54,9 +54,12 @@ class CityLocationService {
       // 使用API返回的中文名称
       const chineseName = mainCity.name_zh || mainCity.name;
       
+      // 标准化城市名称：移除"市"后缀，统一格式
+      const normalizedCityName = this.normalizeCityName(chineseName);
+      
       // 转换API返回格式到本地格式
       const city = {
-        name: chineseName,
+        name: normalizedCityName,
         province: chineseName, // 使用中文名作为省份（暂时）
         lat: mainCity.latitude,
         lng: mainCity.longitude,
@@ -111,6 +114,7 @@ class CityLocationService {
         minDistance = distance;
         nearestCity = {
           ...city,
+          name: this.normalizeCityName(city.name), // 标准化城市名称
           distance: Math.round(distance * 100) / 100, // 保留两位小数
           source: 'local'
         };
@@ -162,8 +166,10 @@ class CityLocationService {
       }
     }
 
-    // 缓存结果
+    // 缓存结果并确保城市名称标准化
     if (nearestCity) {
+      // 确保城市名称标准化（防止远程API返回未标准化的名称）
+      nearestCity.name = this.normalizeCityName(nearestCity.name);
       this.setCache(cacheKey, nearestCity);
     }
 
@@ -202,6 +208,23 @@ class CityLocationService {
 
     // 按距离排序
     return citiesInRadius.sort((a, b) => a.distance - b.distance);
+  }
+
+  /**
+   * 标准化城市名称
+   * @param {string} cityName - 原始城市名称
+   * @returns {string} 标准化后的城市名称
+   */
+  normalizeCityName(cityName) {
+    if (!cityName) return cityName;
+    
+    // 移除"市"后缀，统一格式
+    let normalized = cityName.trim();
+    if (normalized.endsWith('市')) {
+      normalized = normalized.slice(0, -1);
+    }
+    
+    return normalized;
   }
 
   /**

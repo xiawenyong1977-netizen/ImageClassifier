@@ -173,7 +173,6 @@ class UnifiedDataService {
       // 从缓存读取
       const cache = this.imageCache.getCache();
       if (cache.recentImages && cache.recentImages.length > 0) {
-        logger.debug('从缓存读取最近图片:', cache.recentImages.length);
         return cache.recentImages.slice(0, limit);
       }
       
@@ -208,10 +207,6 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      // 只在有图片时打印日志
-      if (recentImages.length > 0) {
-        logger.debug('从缓存读取分类最近图片:', normalizedCategory, recentImages.length);
-      }
       return recentImages;
       
     } catch (error) {
@@ -238,10 +233,6 @@ class UnifiedDataService {
         })
         .slice(0, limit);
       
-      // 只在有图片时打印日志
-      if (recentImages.length > 0) {
-        logger.debug('从缓存读取城市最近图片:', city, recentImages.length);
-      }
       return recentImages;
       
     } catch (error) {

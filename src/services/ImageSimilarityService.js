@@ -193,13 +193,11 @@ class ImageSimilarityService {
       
       logger.debug(`📊 创建了${timeWindows.length}个时间窗口`);
       
-      // 4. 在每个时间窗口内检测相似图片
-      const allGroups = [];
-      let processedCount = 0;
+      // 4. 并行处理所有时间窗口
+      logger.debug(`🚀 开始并行处理${timeWindows.length}个时间窗口`);
       
-      for (let i = 0; i < timeWindows.length; i++) {
-        const window = timeWindows[i];
-        logger.debug(`🪟 处理时间窗口${i + 1}: ${window.length}张图片`);
+      const windowPromises = timeWindows.map(async (window, index) => {
+        logger.debug(`🪟 并行处理时间窗口${index + 1}: ${window.length}张图片`);
         
         // 提取特征
         const windowWithFeatures = await this._extractFeaturesForWindow(window);
@@ -207,11 +205,21 @@ class ImageSimilarityService {
         // 检测相似组
         const windowGroups = this._findSimilarGroupsInWindow(windowWithFeatures, opts);
         
-        allGroups.push(...windowGroups);
-        processedCount += window.length;
+        logger.debug(`✅ 窗口${index + 1}完成: 发现${windowGroups.length}个相似组`);
         
-        logger.debug(`✅ 窗口${i + 1}完成: 发现${windowGroups.length}个相似组`);
-      }
+        return {
+          windowGroups,
+          processed: window.length,
+          windowIndex: index
+        };
+      });
+      
+      // 等待所有窗口处理完成
+      const windowResults = await Promise.all(windowPromises);
+      
+      // 合并结果
+      const allGroups = windowResults.flatMap(result => result.windowGroups);
+      const processedCount = windowResults.reduce((sum, result) => sum + result.processed, 0);
       
       // 5. 合并跨窗口的相似组
       const mergedGroups = this._mergeSimilarGroups(allGroups);
@@ -294,9 +302,8 @@ class ImageSimilarityService {
    * @private
    */
   async _extractFeaturesForWindow(windowImages) {
-    const imagesWithFeatures = [];
-    
-    for (const image of windowImages) {
+    // 并行提取所有图片的特征
+    const featurePromises = windowImages.map(async (image) => {
       try {
         let features = image.similarity_features;
         
@@ -305,22 +312,22 @@ class ImageSimilarityService {
           features = await this._extractColorHistogram(image);
           
           // 保存特征到图片对象
-          const updatedImage = {
+          return {
             ...image,
             similarity_features: features,
             color_histogram: features.color_histogram
           };
-          imagesWithFeatures.push(updatedImage);
         } else {
-          imagesWithFeatures.push(image);
+          return image;
         }
       } catch (error) {
         console.warn(`⚠️ 提取图片${image.fileName}特征失败:`, error);
-        imagesWithFeatures.push(image);
+        return image;
       }
-    }
+    });
     
-    return imagesWithFeatures;
+    // 等待所有特征提取完成
+    return await Promise.all(featurePromises);
   }
 
   /**

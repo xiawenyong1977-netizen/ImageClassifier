@@ -18,7 +18,6 @@ import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 import { logger } from '../../adapters/WebAdapters.js';
 
 const HomeScreen = () => {
-  logger.debug('HomeScreen 组件开始渲染');
   
   // 页面状态管理
   const [currentScreen, setCurrentScreen] = useState('Home');
@@ -84,8 +83,9 @@ const HomeScreen = () => {
         logger.debug('没有分类数据，跳过加载分类最近图片');
       }
       
-      // 加载各城市的最近图片
-      const cityIds = Object.keys(cityCountsData).slice(0, 10);
+      // 加载各城市的最近图片（按数量排序取前10个）
+      const sortedCities = Object.entries(cityCountsData).sort(([,a], [,b]) => b - a);
+      const cityIds = sortedCities.slice(0, 10).map(([cityName]) => cityName);
       const cityImagesPromises = cityIds.map(async (cityName) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByCity(cityName, 1);
@@ -330,17 +330,16 @@ const HomeScreen = () => {
         progress.stage === 'similarity_detection' || progress.stage === 'updating_data') {
       setForceShowReadme(false);
       setIsScanning(true);
-      logger.debug('扫描开始，清除强制显示 readme 状态，切换到正常显示模式');
     }
     
     // 扫描完成时切换回正常模式
     if (progress.stage === 'completed') {
       setIsScanning(false);
       logger.debug('扫描完成，切换到正常模式');
-      // 重新加载扫描时间和统计信息
-      loadLastScanTime();
       // 重新加载数据
       loadData();
+      // 显示扫描完成时间
+      loadLastScanTime();
     }
     
     // 防抖：只在消息真正变化时更新
@@ -826,7 +825,6 @@ const HomeScreen = () => {
 
   // 渲染首页内容的函数
   const renderHomeContent = () => {
-    logger.debug('renderHomeContent 被调用');
     logger.debug('hideEmptyCategoriesRef.current:', hideEmptyCategoriesRef.current);
     logger.debug('当前分类统计状态:', categoryCounts);
     logger.debug('当前最近图片数量:', recentImages.length);
@@ -974,7 +972,6 @@ const HomeScreen = () => {
 
   // 渲染所有页面的函数
   const renderAllScreens = useMemo(() => {
-    logger.debug('renderAllScreens 开始执行');
     
     const CategoryScreen = loadedScreens.Category;
     const ImagePreviewScreen = loadedScreens.ImagePreview;
@@ -1014,9 +1011,6 @@ const HomeScreen = () => {
             })()}
             {/* 当没有图片时显示 readme，否则显示正常内容 */}
             {(() => {
-              logger.debug('检查显示条件 - totalImagesCount:', totalImagesCount);
-              logger.debug('forceShowReadme:', forceShowReadme);
-              logger.debug('isScanning:', isScanning);
               logger.debug('readmeContent 长度:', readmeContent.length);
               const shouldShowReadme = (forceShowReadme || totalImagesCount === 0) && !isScanning;
               logger.debug('shouldShowReadme:', shouldShowReadme);

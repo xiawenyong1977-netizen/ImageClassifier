@@ -433,6 +433,9 @@ const extractTakenTime = async (filePath, useRemoteApi = true) => {
 
 
 import UnifiedDataService from './UnifiedDataService';
+import ParallelHashCalculator from './ParallelHashCalculator.js';
+import configService from './ConfigService.js';
+import ImageSimilarityService from './ImageSimilarityService.js';
 
 
 class GalleryScannerService {
@@ -442,9 +445,19 @@ class GalleryScannerService {
     this.isInitialized = false;
 
     this.imageClassifier = new ImageClassifierService();
+    
+    // 初始化并行哈希计算器
+    this.parallelHashCalculator = new ParallelHashCalculator(4); // 使用4个Worker
+
+    // 初始化相似度检测服务
+    this.similarityService = new ImageSimilarityService();
 
     this.galleryPaths = [];
+    
+    // 用于跟踪上次的进度消息，避免重复发送
+    this.lastProgressMessage = null;
   }
+
 
 
 
@@ -459,6 +472,9 @@ class GalleryScannerService {
       // 从UnifiedDataService获取配置
       const settings = await UnifiedDataService.readSettings();
       this.galleryPaths = settings.scanPaths || [];
+      
+      // 初始化相似度检测服务
+      await this.similarityService.initialize();
       
       // 不再处理权限，假设权限已经在APP级别处理
       this.isInitialized = true;
@@ -1004,14 +1020,23 @@ class GalleryScannerService {
    */
   sendProgressMessage(stage, filesFound = 0, filesProcessed = 0, filesFailed = 0, scanStartTime = null, extraInfo = '') {
     if (this.onProgress) {
-      this.onProgress(this.processProgressData({
+      const progressData = this.processProgressData({
         stage,
         message: extraInfo || stage,
         filesFound,
         filesProcessed,
         filesFailed,
         scanStartTime
-      }));
+      });
+      
+      // 检查消息是否与上次相同，避免重复发送
+      const messageKey = `${stage}_${filesFound}_${filesProcessed}_${filesFailed}_${extraInfo}`;
+      if (this.lastProgressMessage === messageKey) {
+        return; // 消息没有变化，直接返回
+      }
+      
+      this.lastProgressMessage = messageKey;
+      this.onProgress(progressData);
     }
   }
   
@@ -1056,8 +1081,14 @@ class GalleryScannerService {
       // 阶段6: 数据批量更新
       await this.updateDataPhase(processedCount, failedCount, scanStartTime);
       
+      // 阶段7: 相似度检测（在数据更新后执行，确保能获取到所有图片数据）
+      const { processedCount: similarityCount, failedCount: similarityFailed } = 
+        await this.similarityDetectionPhase(scanStartTime);
+      
       // 扫描完成
-      this.sendProgressMessage('completed', allImages.length, processedCount, failedCount, scanStartTime);
+      const totalProcessed = processedCount + similarityCount;
+      const totalFailed = failedCount + similarityFailed;
+      this.sendProgressMessage('completed', allImages.length, totalProcessed, totalFailed, scanStartTime);
       
       // 如果加载了模型，才需要卸载
       if (this.imageClassifier.isInitialized) {
@@ -1241,68 +1272,94 @@ class GalleryScannerService {
     let failedCount = 0;
     const remainingImages = [];
     
-    // 检测截图
-    for (let i = 0; i < newImages.length; i++) {
-      const image = newImages[i];
+    // 并行检测截图
+    const batchSize = 4; // 并行处理4张图片
+    logger.info(`🚀 开始并行截图检测: ${newImages.length} 张图片，批次大小: ${batchSize}`);
+    
+    for (let i = 0; i < newImages.length; i += batchSize) {
+      const batch = newImages.slice(i, i + batchSize);
       
-      try {
-        // 提取图片尺寸
-        const exifData = await extractExifData(image.path, this.useRemoteInference);
-        const width = exifData.imageDimensions?.width || 0;
-        const height = exifData.imageDimensions?.height || 0;
-        
-        // 检测是否为截图
-        const isScreenshot = await this.imageClassifier.identifyMobileScreenshot(
-          image.uri,
-          image.fileName,
-          width,
-          height
-        );
-        
-        if (isScreenshot) {
-          // 构建分类结果
-          const classification = {
-            categoryId: 'screenshot',
-            confidence: 1.0
-          };
+      // 并行处理当前批次
+      const batchPromises = batch.map(async (image, batchIndex) => {
+        try {
+          // 提取图片尺寸
+          const exifData = await extractExifData(image.path, this.useRemoteInference);
+          const width = exifData.imageDimensions?.width || 0;
+          const height = exifData.imageDimensions?.height || 0;
           
-          // 立即保存
-          const saved = await this.saveImageResult(image, classification, exifData);
-          if (saved.success) {
+          // 检测是否为截图
+          const isScreenshot = await this.imageClassifier.identifyMobileScreenshot(
+            image.uri,
+            image.fileName,
+            width,
+            height
+          );
+          
+          if (isScreenshot) {
+            // 构建分类结果
+            const classification = {
+              categoryId: 'screenshot',
+              confidence: 1.0
+            };
+            
+            // 立即保存
+            const saved = await this.saveImageResult(image, classification, exifData);
+            return {
+              success: saved.success,
+              isScreenshot: true,
+              image: image,
+              exifData: exifData
+            };
+          } else {
+            // 保存EXIF数据，供后续使用
+            return {
+              success: true,
+              isScreenshot: false,
+              image: {
+                ...image,
+                exifData
+              },
+              exifData: exifData
+            };
+          }
+        } catch (error) {
+          logger.error(`❌ 截图检测失败:`, error);
+          return {
+            success: false,
+            isScreenshot: false,
+            image: image,
+            error: error
+          };
+        }
+      });
+
+      // 等待当前批次完成
+      const batchResults = await Promise.all(batchPromises);
+      
+      // 处理批次结果
+      for (const result of batchResults) {
+        if (result.success) {
+          if (result.isScreenshot) {
             processedCount++;
           } else {
-            failedCount++;
+            remainingImages.push(result.image);
           }
         } else {
-          // 保存EXIF数据，供后续使用
-          remainingImages.push({
-            ...image,
-            exifData
-          });
+          failedCount++;
+          remainingImages.push(result.image);
         }
-        
-        // 定期更新进度（只有检测到截图时才更新）
-        if ((i + 1) % 50 === 0 || i === newImages.length - 1) {
-          if (processedCount > 0) {
-            this.sendProgressMessage(
-              'screenshot_detection',
-              newImages.length,
-              processedCount,
-              failedCount,
-              scanStartTime,
-              `成功检测到了${processedCount}张手机截图`
-            );
-          }
-        }
-        
-        // 每处理10个文件就让出控制权，避免UI卡顿
-        if ((i + 1) % 10 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-        
-      } catch (error) {
-        logger.error(`❌ 截图检测失败:`, error);
-        remainingImages.push(image);
+      }
+      
+      // 发送进度更新（sendProgressMessage会自动处理重复消息）
+      if (processedCount > 0) {
+        this.sendProgressMessage(
+          'screenshot_detection',
+          newImages.length,
+          processedCount,
+          failedCount,
+          scanStartTime,
+          `成功检测到了${processedCount}张手机截图`
+        );
       }
     }
     
@@ -1327,43 +1384,56 @@ class GalleryScannerService {
     const uncachedImages = [];
     
     try {
-      // 计算所有图片哈希（保留所有文件，不去重）
+      // 使用并行哈希计算器计算所有图片哈希
+      logger.info(`🚀 开始并行计算 ${remainingImages.length} 张图片的哈希值...`);
+      
+      const hashResults = await this.parallelHashCalculator.calculateHashesParallel(
+        remainingImages,
+        (processed, total) => {
+          // 每100个更新一次进度，避免更新太频繁
+          if (processed % 100 === 0 || processed === total) {
+            this.sendProgressMessage(
+              'cache_checking',
+              remainingImages.length,
+              0,
+              0,
+              scanStartTime,
+              `智能分类查询: 正在计算哈希值 ${processed}/${total}`
+            );
+          }
+        }
+      );
+      
+      // 处理哈希计算结果
       const imageHashMap = new Map();
       let hashCalculationFailures = 0;
       const duplicateHashes = new Set();
       
-             for (let i = 0; i < remainingImages.length; i++) {
-               const image = remainingImages[i];
-               try {
-                 const hash = await this.imageClassifier.calculateImageHash(image.uri);
-                 
-                 // 检查是否已有相同哈希
-                 if (imageHashMap.has(hash)) {
-                   duplicateHashes.add(hash);
-                 }
-                 
-                 // 为每个文件生成唯一键，即使哈希相同也保留
-                 const uniqueKey = `${hash}_${image.uri}`;
-                 imageHashMap.set(uniqueKey, { ...image, hash });
-               } catch (error) {
-                 hashCalculationFailures++;
-                 if (hashCalculationFailures <= 10) {
-                   logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${remainingImages.length}):`, {
-          fileName: image.fileName,
-                     uri: image.uri,
-                     error: error.message
-                   });
-                 } else if (hashCalculationFailures === 11) {
-                   logger.warn(`❌ 更多哈希计算失败，后续错误将不再详细记录...`);
-                 }
-                 uncachedImages.push(image);
-               }
-               
-               // 每处理10个文件就让出控制权，避免UI卡顿
-               if ((i + 1) % 10 === 0) {
-                 await new Promise(resolve => setTimeout(resolve, 0));
-               }
-             }
+      for (const result of hashResults) {
+        if (result.hash) {
+          // 检查是否已有相同哈希
+          if (imageHashMap.has(result.hash)) {
+            duplicateHashes.add(result.hash);
+          }
+          
+          // 为每个文件生成唯一键，即使哈希相同也保留
+          const uniqueKey = `${result.hash}_${result.uri}`;
+          imageHashMap.set(uniqueKey, result);
+        } else {
+          // 哈希计算失败
+          hashCalculationFailures++;
+          if (hashCalculationFailures <= 10) {
+            logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${remainingImages.length}):`, {
+              fileName: result.fileName,
+              uri: result.uri,
+              error: result.hashError || '未知错误'
+            });
+          } else if (hashCalculationFailures === 11) {
+            logger.warn(`❌ 更多哈希计算失败，后续错误将不再详细记录...`);
+          }
+          uncachedImages.push(result);
+        }
+      }
       
       const imageEntries = Array.from(imageHashMap.entries());
       const hashes = imageEntries.map(([key, data]) => data.hash);
@@ -1384,8 +1454,15 @@ class GalleryScannerService {
       const clientId = await UnifiedDataService.getClientId();
       const cacheResult = await this.imageClassifier.batchCheckCache(hashes, clientId);
       
+      // 调试：检查缓存查询结果
+      logger.debug(`🔍 缓存查询结果统计: 请求 ${hashes.length} 个哈希，返回 ${cacheResult.items.length} 个结果`);
+      
       // 处理缓存结果
-      for (const item of cacheResult.items) {
+      let processedInBatch = 0;
+      const processedHashes = new Set(); // 跟踪已处理的哈希值
+      
+      for (let i = 0; i < cacheResult.items.length; i++) {
+        const item = cacheResult.items[i];
         // 查找所有具有相同哈希的图片
         const matchingImages = imageEntries
           .filter(([key, data]) => data.hash === item.image_hash)
@@ -1410,12 +1487,44 @@ class GalleryScannerService {
             
             if (saved.success) {
               processedCount++;
+              processedInBatch++;
             }
           } else {
             // 缓存未命中，保存哈希供后续使用
             uncachedImages.push({
               ...image,
               hash: item.image_hash
+            });
+          }
+          processedHashes.add(item.image_hash);
+        }
+        
+        // 每处理50个缓存项就更新一次进度
+        if ((i + 1) % 50 === 0 || i === cacheResult.items.length - 1) {
+          this.sendProgressMessage(
+            'cache_checking',
+            remainingImages.length,
+            processedCount,
+            0,
+            scanStartTime,
+            `智能分类查询: 已处理 ${processedCount} 张，${uncachedImages.length} 张待处理`
+          );
+        }
+      }
+      
+      // 处理缓存查询结果中缺失的哈希值
+      const missingHashes = hashes.filter(hash => !processedHashes.has(hash));
+      if (missingHashes.length > 0) {
+        logger.warn(`⚠️ 缓存查询结果不完整: ${missingHashes.length} 个哈希值在结果中未找到，将进入远程推理`);
+        // 将这些图片添加到待处理列表
+        for (const hash of missingHashes) {
+          const matchingImages = imageEntries
+            .filter(([key, data]) => data.hash === hash)
+            .map(([key, data]) => data);
+          for (const image of matchingImages) {
+            uncachedImages.push({
+              ...image,
+              hash: hash
             });
           }
         }
@@ -1460,36 +1569,101 @@ class GalleryScannerService {
     try {
       const clientId = await UnifiedDataService.getClientId();
       
-      // 准备上传数据
+      // 准备上传数据 - 并行处理
       const uploadData = [];
-      for (const image of remainingImages) {
-        try {
-          // 安全地读取本地图片文件
-          const blob = await readImageFileAsBlob(image.path);
-          
-          // 缩放图片到1024x1024（保持长宽比）
-          const resizedBlob = await this.resizeImageTo1024(blob, image.fileName);
-          
-          uploadData.push({
-          uri: image.uri,
-            hash: image.hash,
-            blob: resizedBlob,
-          fileName: image.fileName,
-            imageData: image
-          });
-        } catch (error) {
-          logger.error('❌ 准备上传数据失败:', error);
-          failedImages.push(image);
-          failedCount++;
+      const batchSize = 20; // 每批处理20张图片
+      
+      for (let i = 0; i < remainingImages.length; i += batchSize) {
+        const batch = remainingImages.slice(i, i + batchSize);
+        
+        // 并行处理当前批次
+        const batchPromises = batch.map(async (image) => {
+          try {
+            // 安全地读取本地图片文件
+            const blob = await readImageFileAsBlob(image.path);
+            
+            // 缩放图片到1024x1024（保持长宽比）
+            const resizedBlob = await this.resizeImageTo1024(blob, image.fileName);
+            
+            return {
+              uri: image.uri,
+              hash: image.hash,
+              blob: resizedBlob,
+              fileName: image.fileName,
+              imageData: image
+            };
+          } catch (error) {
+            logger.error('❌ 准备上传数据失败:', error);
+            failedImages.push(image);
+            failedCount++;
+            return null;
+          }
+        });
+        
+        // 等待当前批次完成
+        const batchResults = await Promise.all(batchPromises);
+        
+        // 收集成功的结果
+        for (const result of batchResults) {
+          if (result) {
+            uploadData.push(result);
+          }
         }
+        
+        // 更新进度
+        const processed = Math.min(i + batchSize, remainingImages.length);
+        this.sendProgressMessage(
+          'remote_inference',
+          remainingImages.length,
+          processed,
+          0,
+          scanStartTime,
+          `照片数据预处理: ${processed}/${remainingImages.length}`
+        );
       }
       
       if (uploadData.length === 0) {
         return { remainingImages: failedImages, processedCount: 0, failedCount };
       }
       
-      // 批量上传（内部自动分批）
-      const result = await this.imageClassifier.batchClassifyRemote(uploadData, { userId: clientId });
+      // 手动分批处理，以便控制进度更新
+      const remoteBatchSize = 20; // 每批20张图片
+      const allItems = [];
+      let totalSuccess = 0;
+      let totalFail = 0;
+      
+      for (let i = 0; i < uploadData.length; i += remoteBatchSize) {
+        const batch = uploadData.slice(i, i + remoteBatchSize);
+        const batchNumber = Math.floor(i / remoteBatchSize) + 1;
+        const totalBatches = Math.ceil(uploadData.length / remoteBatchSize);
+        
+        // 更新进度
+        this.sendProgressMessage(
+          'remote_inference',
+          remainingImages.length,
+          i + batch.length,
+          0,
+          scanStartTime,
+          `快速智能识别: 批次 ${batchNumber}/${totalBatches} (${i + batch.length}/${uploadData.length} 张)`
+        );
+        
+        // 处理当前批次
+        const batchResult = await this.imageClassifier.batchClassifyRemote(batch, { userId: clientId });
+        
+        // 合并结果
+        allItems.push(...batchResult.items);
+        totalSuccess += batchResult.success_count;
+        totalFail += batchResult.fail_count;
+      }
+      
+      // 构造最终结果
+      const result = {
+        success: true,
+        total: uploadData.length,
+        success_count: totalSuccess,
+        fail_count: totalFail,
+        items: allItems
+      };
       
       logger.debug('🔍 远程推理结果详情:', {
         success: result.success,
@@ -1504,13 +1678,6 @@ class GalleryScannerService {
       for (const item of result.items) {
         const imageData = item.imageData; // 已在 batchClassifyRemote 中保留
         
-        logger.debug('🔍 处理远程推理结果项:', {
-          success: item.success,
-          hasData: !!item.data,
-          dataKeys: item.data ? Object.keys(item.data) : null,
-          category: item.data?.category,
-          description: item.data?.description
-        });
         
         if (item.success && item.data) {
           // 判断是大模型还是小模型推理
@@ -1531,13 +1698,33 @@ class GalleryScannerService {
           } else if (item.data.local_inference_result) {
             // 小模型推理，需要映射
             const localResult = item.data.local_inference_result;
+            
+            // 翻译mobileNetV3Detections中的imagenet_class_xxx
+            let translatedMobileNetV3Detections = localResult.mobileNetV3Detections;
+            if (translatedMobileNetV3Detections && translatedMobileNetV3Detections.predictions && Array.isArray(translatedMobileNetV3Detections.predictions)) {
+              translatedMobileNetV3Detections = {
+                ...translatedMobileNetV3Detections,
+                predictions: translatedMobileNetV3Detections.predictions.map(prediction => {
+                  if (prediction.class && prediction.class.startsWith('imagenet_class_')) {
+                    const classId = prediction.class;
+                    const translatedName = this.translateImageNetClass(classId);
+                    return {
+                      ...prediction,
+                      class: translatedName || classId // 如果翻译失败，保持原名称
+                    };
+                  }
+                  return prediction;
+                })
+              };
+            }
+            
             classification = {
               categoryId: this.mapDetectionsToCategory(localResult),
               confidence: 0.8,
               // 保存小模型检测结果
               idCardDetections: localResult.idCardDetections || [],
               generalDetections: localResult.generalDetections || [],
-              mobileNetV3Detections: localResult.mobileNetV3Detections || null,
+              mobileNetV3Detections: translatedMobileNetV3Detections,
               // 小模型推理没有大模型描述信息
               message: null
             };
@@ -1644,17 +1831,15 @@ class GalleryScannerService {
           failedCount++;
         }
         
-        // 更新进度
-        if ((i + 1) % 10 === 0 || i === remainingImages.length - 1) {
+        // 更新进度（每张图片都更新，因为本地推理很慢）
       this.sendProgressMessage(
-            'local_inference',
-            remainingImages.length,
+          'local_inference',
+          remainingImages.length,
         processedCount, 
         failedCount, 
         scanStartTime,
-            `本地智能识别照片: ${processedCount}/${remainingImages.length}`
-          );
-        }
+          `本地智能识别照片: ${processedCount}/${remainingImages.length}`
+        );
         
         // 每处理5个文件就让出控制权，避免UI卡顿（本地推理比较耗时）
         if ((i + 1) % 5 === 0) {
@@ -1670,6 +1855,59 @@ class GalleryScannerService {
     logger.info(`✅ 第4层完成：本地推理成功 ${processedCount} 张，失败 ${failedCount} 张`);
     
     return { processedCount, failedCount };
+  }
+
+  /**
+   * 阶段3e: 相似度检测
+   * 对所有已分类的图片进行相似度检测
+   */
+  async similarityDetectionPhase(scanStartTime) {
+    logger.info(`🔍 第5层：相似度检测`);
+    this.sendProgressMessage('similarity_detection', 0, 0, 0, scanStartTime, '开始相似度检测');
+    
+    try {
+      // 获取所有图片进行相似度检测
+      const allImages = await UnifiedDataService.readAllImages();
+      
+      if (allImages.length === 0) {
+        logger.info('📊 第5层：没有图片，跳过相似度检测');
+        return { processedCount: 0, failedCount: 0 };
+      }
+      
+      logger.info(`🔍 第5层：开始相似度检测，处理 ${allImages.length} 张图片`);
+      this.sendProgressMessage('similarity_detection', allImages.length, 0, 0, scanStartTime, `相似度检测: 处理 ${allImages.length} 张图片`);
+      
+      // 批量进行相似度检测
+      logger.info(`🔍 开始调用相似度检测服务，参数: timeWindow=300, similarityThreshold=0.8`);
+      const result = await this.similarityService.detectSimilarImages({
+        timeWindow: 300, // 5分钟时间窗口
+        similarityThreshold: 0.8,
+        groupType: 'similar'
+      });
+      
+      logger.info(`🔍 相似度检测服务返回结果:`, {
+        success: result.success,
+        groupsLength: result.groups ? result.groups.length : 0,
+        processed: result.processed,
+        total: result.total,
+        error: result.error
+      });
+      
+      if (result.success) {
+        logger.info(`✅ 第5层完成：相似度检测成功，发现 ${result.groups.length} 个相似组`);
+        this.sendProgressMessage('similarity_detection', allImages.length, allImages.length, 0, scanStartTime, `相似度检测完成: 发现 ${result.groups.length} 个相似组`);
+        return { processedCount: allImages.length, failedCount: 0 };
+      } else {
+        logger.error(`❌ 第5层失败：相似度检测失败: ${result.error}`);
+        this.sendProgressMessage('similarity_detection', allImages.length, 0, allImages.length, scanStartTime, `相似度检测失败: ${result.error}`);
+        return { processedCount: 0, failedCount: allImages.length };
+      }
+      
+    } catch (error) {
+      logger.error('❌ 相似度检测阶段失败:', error);
+      this.sendProgressMessage('similarity_detection', 0, 0, 0, scanStartTime, `相似度检测失败: ${error.message}`);
+      return { processedCount: 0, failedCount: 1 };
+    }
   }
 
   /**
@@ -1779,52 +2017,50 @@ class GalleryScannerService {
   }
   
   /**
-   * 阶段5: 移除文件处理
+   * 阶段6: 移除文件处理
    * 处理已删除的文件
    */
   async removeFilesPhase(deletedUris, scanStartTime) {
     if (deletedUris.length === 0) {
-      // 阶段5: 没有文件需要移除
+      // 阶段6: 没有文件需要移除
       return;
     }
     
-    // 阶段5: 开始移除已删除文件
+    // 阶段6: 开始移除已删除文件
     
     this.sendProgressMessage('removing_files', 0, 0, 0, scanStartTime);
     
     const deleteResult = await UnifiedDataService.removeImagesByUris(deletedUris, false);
     if (deleteResult.success) {
-      // 阶段5完成
+      // 阶段6完成
     } else {
-      console.error('❌ 阶段5失败: 移除文件失败:', deleteResult.error);
+      console.error('❌ 阶段6失败: 移除文件失败:', deleteResult.error);
     }
   }
   
   /**
-   * 阶段6: 数据批量更新
-   * 更新缓存和保存扫描完成时间
+   * 阶段7: 扫描完成处理
+   * 刷新缓存和保存扫描完成时间
    */
   async updateDataPhase(processedCount, failedCount, scanStartTime) {
-    // 阶段6: 开始数据批量更新
+    // 阶段7: 开始扫描完成处理
     
-    this.sendProgressMessage('updating_data', 0, processedCount, failedCount, scanStartTime);
+    this.sendProgressMessage('updating_data', 0, processedCount, failedCount, scanStartTime, '正在完成扫描处理');
     
     try {
-      // 强制刷新缓存（重置状态后重新构建）
-      // 强制刷新缓存
+      // 刷新缓存，确保UI显示最新数据
       await UnifiedDataService.imageCache.refreshCache();
       
       // 保存扫描完成时间
       const settings = await UnifiedDataService.readSettings();
       settings.lastScanTime = new Date().toISOString();
       await UnifiedDataService.writeSettings(settings);
-      // 扫描完成时间已保存
       
     } catch (error) {
-      console.error('❌ 阶段6失败: 数据更新失败:', error);
+      console.error('❌ 阶段7失败: 扫描完成处理失败:', error);
     }
     
-    // 发送最终进度通知（在数据更新完成后）
+    // 发送最终进度通知
     this.sendProgressMessage(
       'processing_images', 
       0, 
@@ -1834,7 +2070,7 @@ class GalleryScannerService {
       `处理完成: ${processedCount} 个文件，失败 ${failedCount} 个`
     );
     
-    // 阶段6完成
+    // 阶段7完成
   }
 
 
@@ -1895,6 +2131,36 @@ class GalleryScannerService {
       const imageUrl = URL.createObjectURL(imageBlob);
       img.src = imageUrl;
     });
+  }
+
+  /**
+   * 翻译ImageNet类别ID为中文名称
+   * @param {string} classId - 如 "imagenet_class_651"
+   * @returns {string} 中文名称或原ID
+   */
+  translateImageNetClass(classId) {
+    try {
+      // 提取数字部分
+      const match = classId.match(/imagenet_class_(\d+)/);
+      if (!match) {
+        return classId; // 如果不是标准格式，返回原ID
+      }
+      
+      const classNumber = parseInt(match[1]);
+      const mobileNetV3Classes = configService.getMobileNetV3Classes();
+      
+      // 根据ID查找对应的英文名称（与本地推理逻辑一致）
+      const classInfo = Object.values(mobileNetV3Classes).find(cls => cls.id === classNumber);
+      if (classInfo && classInfo.english) {
+        return classInfo.english; // 返回英文名称，与本地推理保持一致
+      }
+      
+      // 如果找不到，返回去掉前缀的数字ID
+      return classNumber.toString();
+    } catch (error) {
+      logger.warn(`翻译ImageNet类别失败: ${classId}`, error);
+      return classId;
+    }
   }
 
 }
