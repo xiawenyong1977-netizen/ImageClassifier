@@ -542,7 +542,18 @@ const HomeScreen = () => {
         }
         
         const formattedSize = formatFileSize(totalSize);
-        setGlobalMessage(`最近扫描完成时间: ${formattedTime} | 照片数量: ${totalImages} | 空间大小: ${formattedSize}`);
+        
+        // 添加耗时信息显示
+        let durationText = '';
+        if (settings.lastScanDurationSeconds) {
+          if (settings.lastScanDurationMinutes >= 1) {
+            durationText = ` | 耗时: ${settings.lastScanDurationMinutes}分钟`;
+          } else {
+            durationText = ` | 耗时: ${settings.lastScanDurationSeconds}秒`;
+          }
+        }
+        
+        setGlobalMessage(`最近扫描完成时间: ${formattedTime} | 照片数量: ${totalImages} | 空间大小: ${formattedSize}${durationText}`);
       } else {
         setGlobalMessage('图片分类应用已就绪');
       }

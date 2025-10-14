@@ -1048,6 +1048,9 @@ class GalleryScannerService {
       // 保存onProgress为实例变量
       this.onProgress = onProgress;
       
+      // 记录扫描开始时间（用于计算总耗时）
+      const scanStartTimestamp = Date.now();
+      
       // 健康检查（内部操作，不发送进度消息）
       try {
         const health = await this.imageClassifier.checkHealth();
@@ -1088,6 +1091,17 @@ class GalleryScannerService {
       // 扫描完成
       const totalProcessed = processedCount + similarityCount;
       const totalFailed = failedCount + similarityFailed;
+      
+      // 计算总耗时
+      const scanEndTimestamp = Date.now();
+      const totalScanDuration = scanEndTimestamp - scanStartTimestamp;
+      const totalScanDurationSeconds = Math.round(totalScanDuration / 1000);
+      
+      logger.info(`⏱️ 扫描完成，总耗时: ${totalScanDurationSeconds}秒 (${Math.round(totalScanDuration / 1000 / 60)}分钟)`);
+      
+      // 保存扫描完成时间和耗时信息
+      await this.saveScanCompletionInfo(totalScanDuration);
+      
       this.sendProgressMessage('completed', allImages.length, totalProcessed, totalFailed, scanStartTime);
       
       // 如果加载了模型，才需要卸载
@@ -2039,6 +2053,24 @@ class GalleryScannerService {
   }
   
   /**
+   * 保存扫描完成信息（时间和耗时）
+   */
+  async saveScanCompletionInfo(totalScanDuration) {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      settings.lastScanTime = new Date().toISOString();
+      settings.lastScanDuration = totalScanDuration; // 毫秒
+      settings.lastScanDurationSeconds = Math.round(totalScanDuration / 1000); // 秒
+      settings.lastScanDurationMinutes = Math.round(totalScanDuration / 1000 / 60); // 分钟
+      
+      await UnifiedDataService.writeSettings(settings);
+      logger.info(`💾 已保存扫描完成信息: 耗时 ${settings.lastScanDurationSeconds}秒`);
+    } catch (error) {
+      logger.error('❌ 保存扫描完成信息失败:', error);
+    }
+  }
+
+  /**
    * 阶段7: 扫描完成处理
    * 刷新缓存和保存扫描完成时间
    */
@@ -2050,11 +2082,6 @@ class GalleryScannerService {
     try {
       // 刷新缓存，确保UI显示最新数据
       await UnifiedDataService.imageCache.refreshCache();
-      
-      // 保存扫描完成时间
-      const settings = await UnifiedDataService.readSettings();
-      settings.lastScanTime = new Date().toISOString();
-      await UnifiedDataService.writeSettings(settings);
       
     } catch (error) {
       console.error('❌ 阶段7失败: 扫描完成处理失败:', error);

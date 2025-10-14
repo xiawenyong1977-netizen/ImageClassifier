@@ -278,9 +278,13 @@ class ImageSimilarityService {
         // 在时间窗口内，添加到当前窗口
         currentWindow.push(image);
       } else {
-        // 超出时间窗口，保存当前窗口并开始新窗口
-        if (currentWindow.length > 1) {
+        // 超出时间窗口，检查当前窗口是否应该保存
+        if (currentWindow.length >= 3) {
+          // 只有3张或以上照片的窗口才进行相似度检测
           windows.push([...currentWindow]);
+        } else if (currentWindow.length === 2) {
+          // 2张照片的窗口跳过，不进行相似度检测
+          console.log(`⏰ 跳过2张照片窗口，只处理3张或以上照片的窗口`);
         }
         windowStartTime = imageTime;
         currentWindow = [image];
@@ -288,8 +292,12 @@ class ImageSimilarityService {
     }
     
     // 保存最后一个窗口
-    if (currentWindow.length > 1) {
+    if (currentWindow.length >= 3) {
+      // 只有3张或以上照片的窗口才进行相似度检测
       windows.push(currentWindow);
+    } else if (currentWindow.length === 2) {
+      // 2张照片的窗口跳过，不进行相似度检测
+      console.log(`⏰ 跳过2张照片窗口，只处理3张或以上照片的窗口`);
     }
     
     return windows;
