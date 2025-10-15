@@ -10,7 +10,7 @@ class CityLocationService {
     
     // API配置
     this.apiConfig = {
-      baseURL: 'http://123.57.68.4:8000',
+      baseURL: 'https://www.xintuxiangce.top',
       timeout: 5000, // 5秒超时
       endpoints: {
         nearestCity: '/api/v1/location/nearest-city',
