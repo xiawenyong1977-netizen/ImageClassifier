@@ -17,7 +17,13 @@ class ImageSimilarityService {
       timeWindow: 300,        // 5分钟
       similarityThreshold: 0.8,
       groupType: 'similar',
-      histogramBins: 256      // RGB直方图bin数量
+      histogramBins: 256,     // RGB直方图bin数量
+      
+      // 简化算法配置（基于推理结果）
+      useSimplifiedAlgorithm: true,       // 是否启用简化算法
+      globalImageCountThreshold: 300,     // 全局图片总数阈值，超过此值所有窗口都使用简化算法
+      textSimilarityThreshold: 0.6,       // 文本相似度阈值（大模型message字段）
+      objectSimilarityThreshold: 0.65     // 物体检测相似度阈值（小模型generalDetections）
     };
     
     this.histogramExtractor = new ColorHistogramExtractor();
@@ -193,17 +199,35 @@ class ImageSimilarityService {
       
       logger.debug(`📊 创建了${timeWindows.length}个时间窗口`);
       
-      // 4. 并行处理所有时间窗口
+      // 4. 根据全局图片总数决定算法策略
+      const totalImageCount = imagesWithTime.length;
+      const useSimplified = opts.useSimplifiedAlgorithm && totalImageCount >= opts.globalImageCountThreshold;
+      
+      if (useSimplified) {
+        logger.info(`✅ 全局图片总数${totalImageCount}张 >= ${opts.globalImageCountThreshold}张，所有窗口使用简化算法`);
+      } else {
+        logger.info(`📊 全局图片总数${totalImageCount}张 < ${opts.globalImageCountThreshold}张，所有窗口使用颜色直方图算法`);
+      }
+      
+      // 5. 并行处理所有时间窗口
       logger.debug(`🚀 开始并行处理${timeWindows.length}个时间窗口`);
       
       const windowPromises = timeWindows.map(async (window, index) => {
         logger.debug(`🪟 并行处理时间窗口${index + 1}: ${window.length}张图片`);
         
-        // 提取特征
-        const windowWithFeatures = await this._extractFeaturesForWindow(window);
+        let windowGroups;
         
-        // 检测相似组
-        const windowGroups = this._findSimilarGroupsInWindow(windowWithFeatures, opts);
+        // ⭐ 根据全局策略选择算法（所有窗口使用相同算法）
+        if (useSimplified) {
+          // 使用简化算法（基于推理结果）
+          // ⭐ 只在简化算法时才加载推理结果
+          const windowWithInferenceData = await this._loadInferenceDataForWindow(window);
+          windowGroups = this._findSimilarGroupsInWindow(windowWithInferenceData, opts);
+        } else {
+          // 使用原有颜色直方图算法（不需要推理结果）
+          const windowWithFeatures = await this._extractFeaturesForWindow(window);
+          windowGroups = this._findSimilarGroupsInWindow(windowWithFeatures, opts);
+        }
         
         logger.debug(`✅ 窗口${index + 1}完成: 发现${windowGroups.length}个相似组`);
         
@@ -304,6 +328,70 @@ class ImageSimilarityService {
   }
 
   /**
+   * 批量加载窗口内图片的推理结果
+   * @param {Array} windowImages - 窗口内的图片（来自缓存，只有基本信息）
+   * @returns {Array} 增强后的图片数组（包含推理结果）
+   * @private
+   */
+  async _loadInferenceDataForWindow(windowImages) {
+    logger.debug(`📥 批量加载推理结果: ${windowImages.length}张图片`);
+    
+    try {
+      const storageService = this.getUnifiedDataService().imageStorageService;
+      
+      // 提取图片ID列表
+      const imageIds = windowImages.map(img => img.id);
+      
+      // ⭐ 一次性批量查询
+      const detailedImagesMap = await storageService.getImagesByIds(imageIds);
+      
+      // 调试：检查返回值类型
+      logger.debug(`🔍 detailedImagesMap类型: ${detailedImagesMap?.constructor?.name}, 是Map: ${detailedImagesMap instanceof Map}`);
+      
+      // 确保返回的是Map对象
+      if (!(detailedImagesMap instanceof Map)) {
+        logger.error(`❌ getImagesByIds返回了非Map对象:`, detailedImagesMap);
+        throw new Error('getImagesByIds返回了非Map对象');
+      }
+      
+      // 合并推理结果到缓存对象
+      const enhancedImages = windowImages.map(cacheImg => {
+        const detailedImg = detailedImagesMap.get(cacheImg.id);
+        
+        if (!detailedImg) {
+          logger.warn(`⚠️ 未找到图片详情: ${cacheImg.id}`);
+          return {
+            ...cacheImg,
+            generalDetections: [],
+            mobileNetV3Detections: null,
+            message: null
+          };
+        }
+        
+        return {
+          ...cacheImg,
+          generalDetections: detailedImg.generalDetections || [],
+          mobileNetV3Detections: detailedImg.mobileNetV3Detections || null,
+          message: detailedImg.message || null
+        };
+      });
+      
+      logger.debug(`✅ 推理结果加载完成`);
+      return enhancedImages;
+      
+    } catch (error) {
+      console.error('❌ 加载推理结果失败:', error);
+      // 降级：返回原始图片（不包含推理结果）
+      return windowImages.map(img => ({
+        ...img,
+        generalDetections: [],
+        mobileNetV3Detections: null,
+        message: null
+      }));
+    }
+  }
+
+  /**
    * 为时间窗口内的图片提取特征
    * @param {Array} windowImages - 时间窗口内的图片数组
    * @returns {Array} 包含特征的图片数组
@@ -385,13 +473,196 @@ class ImageSimilarityService {
   }
 
   /**
-   * 在时间窗口内查找相似组
-   * @param {Array} windowImages - 包含特征的图片数组
+   * 找出窗口内最多的分类
+   * @private
+   */
+  _findDominantCategory(windowImages) {
+    const categoryCount = {};
+    
+    windowImages.forEach(image => {
+      const category = image.category || 'other';
+      categoryCount[category] = (categoryCount[category] || 0) + 1;
+    });
+    
+    let dominantCategory = null;
+    let maxCount = 0;
+    
+    for (const [category, count] of Object.entries(categoryCount)) {
+      if (count > maxCount) {
+        maxCount = count;
+        dominantCategory = category;
+      }
+    }
+    
+    return {
+      category: dominantCategory,
+      count: maxCount,
+      totalImages: windowImages.length,
+      percentage: (maxCount / windowImages.length) * 100
+    };
+  }
+
+  /**
+   * 判断图片是大模型还是小模型推理
+   * @private
+   */
+  _getInferenceType(image) {
+    // 大模型推理会有message字段（描述文本）
+    if (image.message && image.message.trim() !== '') {
+      return 'large_model';
+    } else {
+      return 'small_model';
+    }
+  }
+
+  /**
+   * 在主导分类的图片中，找出最多的推理方式
+   * @private
+   */
+  _findDominantInferenceType(categoryImages) {
+    let largeModelCount = 0;
+    let smallModelCount = 0;
+    
+    const largeModelImages = [];
+    const smallModelImages = [];
+    
+    categoryImages.forEach(image => {
+      const inferenceType = this._getInferenceType(image);
+      
+      if (inferenceType === 'large_model') {
+        largeModelCount++;
+        largeModelImages.push(image);
+      } else {
+        smallModelCount++;
+        smallModelImages.push(image);
+      }
+    });
+    
+    if (largeModelCount > smallModelCount) {
+      return {
+        type: 'large_model',
+        count: largeModelCount,
+        images: largeModelImages,
+        percentage: (largeModelCount / categoryImages.length) * 100
+      };
+    } else {
+      return {
+        type: 'small_model',
+        count: smallModelCount,
+        images: smallModelImages,
+        percentage: (smallModelCount / categoryImages.length) * 100
+      };
+    }
+  }
+
+  /**
+   * 在时间窗口内查找相似组（简化版：基于推理结果）
+   * 注意：算法选择已在detectSimilarityGroups中完成，这里直接使用简化算法
+   * @param {Array} windowImages - 包含推理结果的图片数组
    * @param {Object} options - 检测选项
    * @returns {Array} 相似组数组
    * @private
    */
   _findSimilarGroupsInWindow(windowImages, options) {
+    return this._findSimilarGroupsSimplified(windowImages, options);
+  }
+
+  /**
+   * 简化算法：基于最大分类和推理方式
+   * @private
+   */
+  _findSimilarGroupsSimplified(windowImages, options) {
+    logger.debug(`🔍 使用简化算法处理窗口：${windowImages.length}张图片`);
+    
+    // 步骤1：找最大分类
+    const dominantCategory = this._findDominantCategory(windowImages);
+    
+    logger.debug(`📊 最大分类: ${dominantCategory.category} (${dominantCategory.count}张, ${dominantCategory.percentage.toFixed(1)}%)`);
+    
+    // 特殊分类跳过
+    if (['screenshot', 'idcard'].includes(dominantCategory.category)) {
+      logger.debug(`⏭️ 最大分类为${dominantCategory.category}，跳过相似度检测`);
+      return [];
+    }
+    
+    // 步骤2：筛选最大分类的图片
+    const categoryImages = windowImages.filter(img => 
+      img.category === dominantCategory.category
+    );
+    
+    if (categoryImages.length < 3) {
+      logger.debug(`⚠️ 最大分类图片${categoryImages.length}张 < 3张，跳过相似度检测`);
+      return [];
+    }
+    
+    // 步骤3：找最多的推理方式
+    const dominantInference = this._findDominantInferenceType(categoryImages);
+    
+    logger.debug(`🤖 最多推理方式: ${dominantInference.type} (${dominantInference.count}张)`);
+    
+    // 步骤4：只处理"最大分类+最多推理方式"的图片
+    const targetImages = dominantInference.images;
+    
+    logger.debug(`✅ 最终处理图片数: ${targetImages.length}张（其他${windowImages.length - targetImages.length}张跳过）`);
+    
+    if (targetImages.length < 3) {
+      logger.debug(`⚠️ 目标图片${targetImages.length}张 < 3张，跳过相似度检测`);
+      return [];
+    }
+    
+    // 步骤5：根据推理方式检测相似度
+    const groups = [];
+    const processed = new Set();
+    
+    for (let i = 0; i < targetImages.length; i++) {
+      if (processed.has(i)) continue;
+      
+      const image1 = targetImages[i];
+      const similarImages = [image1];
+      processed.add(i);
+      
+      for (let j = i + 1; j < targetImages.length; j++) {
+        if (processed.has(j)) continue;
+        
+        const image2 = targetImages[j];
+        
+        // 根据推理方式计算相似度
+        let similarity;
+        if (dominantInference.type === 'large_model') {
+          similarity = this._calculateTextSimilarity(image1, image2);
+          
+          if (similarity >= options.textSimilarityThreshold) {
+            similarImages.push(image2);
+            processed.add(j);
+            logger.debug(`🔗 文本相似: ${image1.fileName} <-> ${image2.fileName} (${(similarity * 100).toFixed(1)}%)`);
+          }
+        } else {
+          similarity = this._calculateObjectSimilarity(image1, image2);
+          
+          if (similarity >= options.objectSimilarityThreshold) {
+            similarImages.push(image2);
+            processed.add(j);
+            logger.debug(`🔗 物体相似: ${image1.fileName} <-> ${image2.fileName} (${(similarity * 100).toFixed(1)}%)`);
+          }
+        }
+      }
+      
+      if (similarImages.length > 1) {
+        const group = this._createSimilarityGroup(similarImages, 'similar');
+        groups.push(group);
+      }
+    }
+    
+    logger.debug(`✅ 简化算法完成: 发现${groups.length}个相似组`);
+    
+    return groups;
+  }
+
+  /**
+   * 原始算法：基于颜色直方图
+   * @private
+   */
+  _findSimilarGroupsOriginal(windowImages, options) {
     const groups = [];
     const processed = new Set();
     
@@ -427,7 +698,128 @@ class ImageSimilarityService {
   }
 
   /**
-   * 计算两张图片的相似度
+   * 计算文本相似度（大模型message字段）
+   * @private
+   */
+  _calculateTextSimilarity(image1, image2) {
+    const message1 = image1.message || '';
+    const message2 = image2.message || '';
+    
+    if (!message1 || !message2) {
+      return 0;
+    }
+    
+    // 提取关键词
+    const keywords1 = this._extractKeywords(message1);
+    const keywords2 = this._extractKeywords(message2);
+    
+    // 计算Jaccard相似度
+    const intersection = keywords1.filter(kw => keywords2.includes(kw)).length;
+    const union = new Set([...keywords1, ...keywords2]).size;
+    
+    if (union === 0) return 0;
+    
+    return intersection / union;
+  }
+
+  /**
+   * 提取关键词（简单分词）
+   * @private
+   */
+  _extractKeywords(text) {
+    // 移除标点符号，转小写，分词
+    const cleaned = text.toLowerCase()
+      .replace(/[.,!?;:'"()[\]{}]/g, ' ')
+      .trim();
+    
+    const words = cleaned.split(/\s+/);
+    
+    // 过滤停用词
+    const stopWords = ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'in', 'on', 'at', 'to', 'of', 'with', '的', '是', '在', '和', '了', '有'];
+    const keywords = words.filter(word => 
+      word.length > 2 && !stopWords.includes(word)
+    );
+    
+    return keywords;
+  }
+
+  /**
+   * 计算物体相似度（小模型generalDetections）
+   * @private
+   */
+  _calculateObjectSimilarity(image1, image2) {
+    const det1 = image1.generalDetections || [];
+    const det2 = image2.generalDetections || [];
+    
+    // 提取高置信度物体（>0.5）
+    const objects1 = new Map();
+    det1.forEach(d => {
+      if (d.confidence > 0.5) {
+        const classId = d.classId;
+        const conf = d.confidence;
+        if (!objects1.has(classId) || objects1.get(classId) < conf) {
+          objects1.set(classId, conf);
+        }
+      }
+    });
+    
+    const objects2 = new Map();
+    det2.forEach(d => {
+      if (d.confidence > 0.5) {
+        const classId = d.classId;
+        const conf = d.confidence;
+        if (!objects2.has(classId) || objects2.get(classId) < conf) {
+          objects2.set(classId, conf);
+        }
+      }
+    });
+    
+    // 如果都没检测到物体，尝试用MobileNetV3
+    if (objects1.size === 0 && objects2.size === 0) {
+      return this._calculateMobileNetV3Similarity(image1, image2);
+    }
+    
+    // 加权Jaccard相似度
+    const allClasses = new Set([...objects1.keys(), ...objects2.keys()]);
+    
+    let intersection = 0;
+    let union = 0;
+    
+    for (const classId of allClasses) {
+      const conf1 = objects1.get(classId) || 0;
+      const conf2 = objects2.get(classId) || 0;
+      
+      intersection += Math.min(conf1, conf2);
+      union += Math.max(conf1, conf2);
+    }
+    
+    return intersection / union;
+  }
+
+  /**
+   * MobileNetV3分类相似度（后备方案）
+   * @private
+   */
+  _calculateMobileNetV3Similarity(image1, image2) {
+    const mobile1 = image1.mobileNetV3Detections;
+    const mobile2 = image2.mobileNetV3Detections;
+    
+    if (!mobile1 || !mobile2 || !mobile1.predictions || !mobile2.predictions) {
+      return 0;
+    }
+    
+    // 提取Top-5类别
+    const top5_1 = mobile1.predictions.slice(0, 5).map(p => p.class);
+    const top5_2 = mobile2.predictions.slice(0, 5).map(p => p.class);
+    
+    // 计算重叠度
+    const overlap = top5_1.filter(c => top5_2.includes(c)).length;
+    
+    return overlap / 5;
+  }
+
+  /**
+   * 计算两张图片的相似度（颜色直方图版本）
    * @param {Object} image1 - 图片1
    * @param {Object} image2 - 图片2
    * @returns {number} 相似度分数 (0-1)

@@ -847,6 +847,42 @@ class ImageStorageService {
     }
   }
 
+  /**
+   * 批量获取图片详细信息（按ID列表）
+   * @param {Array<string>} imageIds - 图片ID数组
+   * @returns {Promise<Map<string, Object>>} ID到图片对象的映射
+   */
+  async getImagesByIds(imageIds) {
+    try {
+      await this.ensureInitialized();
+      
+      // 一次性读取所有图片
+      const allImages = await this.storage.getItem(this.storageKeys.images);
+      if (!allImages) {
+        return new Map();
+      }
+      
+      // 创建ID集合，提高查找效率
+      const idSet = new Set(imageIds);
+      
+      // 过滤并创建Map
+      const resultMap = new Map();
+      allImages.forEach(img => {
+        if (idSet.has(img.id)) {
+          resultMap.set(img.id, img);
+        }
+      });
+      
+      logger.debug(`📥 批量查询图片: 请求${imageIds.length}张, 找到${resultMap.size}张`);
+      
+      return resultMap;
+      
+    } catch (error) {
+      logger.error('批量获取图片失败:', error);
+      return new Map();
+    }
+  }
+
   // Get image by ID (精简结构)
   async getImageById(imageId) {
     try {
@@ -874,18 +910,6 @@ class ImageStorageService {
     } catch (error) {
       console.error('Failed to get image details by ID:', error);
       return null;
-    }
-  }
-
-  // Get multiple images by IDs
-  async getImagesByIds(imageIds) {
-    try {
-      const allImages = await this.getImages();
-      const images = allImages.filter(img => imageIds.includes(img.id));
-      return images;
-    } catch (error) {
-      console.error('Failed to get images by IDs:', error);
-      return [];
     }
   }
 
