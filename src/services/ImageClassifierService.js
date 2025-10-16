@@ -292,26 +292,66 @@ class ImageClassifierService {
         const providers = await ort.getAvailableProviders();
         logger.debug(`🔍 ONNX Runtime 可用提供者: ${providers.join(', ')}`);
         
-        // 优先选择GPU提供者（优先WebGL，因为WebGPU需要特殊标志）
-        if (providers.includes('webgl')) {
-          availableProviders.push('webgl');
-          logger.debug('🚀 使用 WebGL 加速');
-        } else if (providers.includes('webgpu')) {
-          availableProviders.push('webgpu');
-          logger.debug('🚀 使用 WebGPU 加速');
-        } else if (providers.includes('cuda')) {
-          availableProviders.push('cuda');
-          logger.debug('🚀 使用 CUDA 加速');
-        } else if (providers.includes('dml')) {
-          availableProviders.push('dml');
-          logger.debug('🚀 使用 DirectML 加速');
-        } else if (providers.includes('openvino')) {
-          availableProviders.push('openvino');
-          logger.debug('🚀 使用 OpenVINO 加速');
+        // 优先选择GPU提供者（根据环境选择最佳GPU提供者）
+        if (typeof window !== 'undefined') {
+          // 浏览器环境：优先WebGL/WebGPU
+          if (providers.includes('webgl')) {
+            availableProviders.push('webgl');
+            logger.debug('🚀 使用 WebGL 加速');
+          } else if (providers.includes('webgpu')) {
+            availableProviders.push('webgpu');
+            logger.debug('🚀 使用 WebGPU 加速');
+          }
+        } else {
+          // Node.js环境：优先CUDA
+          if (providers.includes('cuda')) {
+            availableProviders.push('cuda');
+            logger.debug('🚀 使用 CUDA 加速');
+          } else if (providers.includes('dml')) {
+            availableProviders.push('dml');
+            logger.debug('🚀 使用 DirectML 加速');
+          } else if (providers.includes('openvino')) {
+            availableProviders.push('openvino');
+            logger.debug('🚀 使用 OpenVINO 加速');
+          }
         }
         
         // 总是添加CPU作为后备
         if (providers.includes('cpu')) {
+          availableProviders.push('cpu');
+          logger.debug('💻 添加 CPU 作为后备');
+        }
+      } else if (typeof ort.listSupportedBackends === 'function') {
+        // Node.js环境：使用listSupportedBackends方法
+        const backends = ort.listSupportedBackends();
+        logger.debug(`🔍 ONNX Runtime 支持的backend: ${backends.map(b => b.name).join(', ')}`);
+        
+        // 优先选择GPU提供者
+        if (typeof window !== 'undefined') {
+          // 浏览器环境：优先WebGL/WebGPU
+          if (backends.some(b => b.name === 'webgl')) {
+            availableProviders.push('webgl');
+            logger.debug('🚀 使用 WebGL 加速');
+          } else if (backends.some(b => b.name === 'webgpu')) {
+            availableProviders.push('webgpu');
+            logger.debug('🚀 使用 WebGPU 加速');
+          }
+        } else {
+          // Node.js环境：优先DirectML（Windows GPU加速）
+          if (backends.some(b => b.name === 'dml')) {
+            availableProviders.push('dml');
+            logger.debug('🚀 使用 DirectML 加速');
+          } else if (backends.some(b => b.name === 'cuda')) {
+            availableProviders.push('cuda');
+            logger.debug('🚀 使用 CUDA 加速');
+          } else if (backends.some(b => b.name === 'openvino')) {
+            availableProviders.push('openvino');
+            logger.debug('🚀 使用 OpenVINO 加速');
+          }
+        }
+        
+        // 总是添加CPU作为后备
+        if (backends.some(b => b.name === 'cpu')) {
           availableProviders.push('cpu');
           logger.debug('💻 添加 CPU 作为后备');
         }
@@ -623,6 +663,8 @@ class ImageClassifierService {
    * @returns {Promise<Object>} 分类结果
    */
   async classifyImage(imageUri) {
+    const totalStartTime = Date.now();
+    
     try {
       // 检查服务是否已初始化
       if (!this.isInitialized) {
@@ -630,11 +672,14 @@ class ImageClassifierService {
       }
 
       // 获取图像尺寸
+      const dimensionsStart = Date.now();
       const imageDimensions = await this.getOriginalImageDimensions(imageUri);
+      const dimensionsTime = Date.now() - dimensionsStart;
       
       // 执行本地并行推理
-      logger.debug('🔍 并行执行所有模型推理...');
+      const inferenceStart = Date.now();
       const parallelResults = await this.runParallelInference(imageUri);
+      const inferenceTime = Date.now() - inferenceStart;
       
       // 保存所有模型的原始结果
       const allModelResults = {
@@ -648,15 +693,22 @@ class ImageClassifierService {
       const idCardCount = allModelResults.idCard.length;
       const generalCount = allModelResults.general.length;
       const mobileNetV3Count = allModelResults.mobileNetV3.predictions ? allModelResults.mobileNetV3.predictions.length : 0;
-      
-      logger.debug(`📊 所有模型推理完成:`);
-      logger.debug(`  - 身份证模型: ${idCardCount} 个检测结果`);
-      logger.debug(`  - 通用模型: ${generalCount} 个检测结果`);
-      logger.debug(`  - MobileNetV3模型: ${mobileNetV3Count} 个检测结果`);
 
       // 调用新的分类映射函数
+      const mappingStart = Date.now();
       const categoryId = await this.MapObjectes2Category(allModelResults, imageUri, imageDimensions);
+      const mappingTime = Date.now() - mappingStart;
 
+      const totalTime = Date.now() - totalStartTime;
+      
+      // 输出完整的性能分析报告
+      logger.info(`🎯 单张图片分类完整性能报告:`);
+      logger.info(`  ├─ 获取图像尺寸: ${dimensionsTime}ms`);
+      logger.info(`  ├─ 模型推理总时间: ${inferenceTime}ms`);
+      logger.info(`  ├─ 分类映射: ${mappingTime}ms`);
+      logger.info(`  └─ 总耗时: ${totalTime}ms`);
+      logger.info(`  → 分类结果: ${categoryId}`);
+      
       // 返回详细的分类结果，由调用方决定如何保存
       const result = {
         success: true,
@@ -669,7 +721,14 @@ class ImageClassifierService {
         mobileNetV3Detections: allModelResults.mobileNetV3,
         imageDimensions: imageDimensions,
         // 返回原始模型结果，供调试和分析
-        allModelResults: allModelResults
+        allModelResults: allModelResults,
+        // 返回性能统计
+        performanceMetrics: {
+          totalTime,
+          dimensionsTime,
+          inferenceTime,
+          mappingTime
+        }
       };
       
       
@@ -743,6 +802,8 @@ class ImageClassifierService {
   // 检测物体（使用指定模型）
   // 使用YOLO模型进行检测（支持idCard和yolo8s）
   async classifyImageWithYOLO(imageUri, modelName) {
+    const t0 = Date.now();
+    
     if (!imageUri) {
       throw new Error('imageUri is required');
     }
@@ -761,18 +822,23 @@ class ImageClassifierService {
 
     try {
       // 确保模型已加载
+      const loadStart = Date.now();
       await this.loadModel(modelName);
+      const loadTime = Date.now() - loadStart;
 
       // 预处理图片
+      const preprocessStart = Date.now();
       const inputTensor = await this.preprocessImageForYOLO(imageUri);
+      const preprocessTime = Date.now() - preprocessStart;
       
       // 运行推理
+      const inferenceStart = Date.now();
       const feeds = { images: inputTensor };
-      // 安全地计算数据范围，避免栈溢出
       const results = await modelConfig.model.run(feeds);
+      const inferenceTime = Date.now() - inferenceStart;
       
       // 后处理结果
-      // 尝试不同的输出名称
+      const postprocessStart = Date.now();
       const outputData = results.output0 || results.output || results[Object.keys(results)[0]];
       
       if (!outputData) {
@@ -787,16 +853,13 @@ class ImageClassifierService {
 
       // 限制检测数量
       const limitedDetections = detections.slice(0, maxDetections);
-
-      // 调试：输出检测结果
-      if (limitedDetections.length > 0) {
-        logger.debug(`🔍 ${modelName}检测到${limitedDetections.length}个物体:`, limitedDetections.map(d => ({
-          classId: d.classId,
-          confidence: d.confidence.toFixed(3),
-          bbox: d.bbox.map(b => b.toFixed(2))
-        })));
-      } else {
-        logger.debug(`⚠️ ${modelName}没有检测到任何物体 (置信度阈值: ${confidenceThreshold})`);
+      const postprocessTime = Date.now() - postprocessStart;
+      
+      const totalTime = Date.now() - t0;
+      
+      // 详细性能日志（仅在检测到物体或总时间过长时输出）
+      if (limitedDetections.length > 0 || totalTime > 1000) {
+        logger.info(`📊 ${modelName}推理性能: 总${totalTime}ms (加载${loadTime}ms + 预处理${preprocessTime}ms + 推理${inferenceTime}ms + 后处理${postprocessTime}ms) → ${limitedDetections.length}个检测`);
       }
      
       return limitedDetections;
@@ -838,38 +901,76 @@ class ImageClassifierService {
    */
   async runParallelInference(imageUri) {
     const startTime = Date.now();
-    logger.debug('🚀 开始串行推理（测试模式）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
+    logger.info('🚀 开始串行推理（避免资源竞争）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
     
-    // 串行执行推理，避免异步问题
+    // 串行执行推理，避免资源竞争导致单个模型变慢
     let idCardResults = [];
     let generalResults = [];
     let mobileNetV3Results = {};
     
-    try {
-      logger.debug('🔍 开始 idCard 推理...');
-      idCardResults = await this.classifyImageWithYOLO(imageUri, 'idCard');
-      logger.debug(`✅ idCard 推理完成: ${idCardResults.length} 个检测结果`);
-    } catch (error) {
-      console.error('❌ idCard 推理失败:', error);
-      idCardResults = [];
-    }
+    // 详细耗时统计
+    const timings = {
+      total: 0,
+      idCard: 0,
+      general: 0,
+      mobileNetV3: 0
+    };
     
     try {
-      logger.debug('🔍 开始 general 推理...');
-      generalResults = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
-      logger.debug(`✅ general 推理完成: ${generalResults.length} 个检测结果`);
+      // 串行执行，依次运行三个模型
+      
+      // 1. ID卡模型
+      const idCardStart = Date.now();
+      try {
+        idCardResults = await this.classifyImageWithYOLO(imageUri, 'idCard');
+        timings.idCard = Date.now() - idCardStart;
+        logger.info(`⏱️ ID卡模型推理耗时: ${timings.idCard}ms`);
+      } catch (error) {
+        timings.idCard = Date.now() - idCardStart;
+        console.error('❌ idCard 推理失败:', error);
+        idCardResults = [];
+      }
+      
+      // 2. YOLOv8模型
+      const generalStart = Date.now();
+      try {
+        generalResults = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
+        timings.general = Date.now() - generalStart;
+        logger.info(`⏱️ YOLOv8模型推理耗时: ${timings.general}ms`);
+      } catch (error) {
+        timings.general = Date.now() - generalStart;
+        console.error('❌ general 推理失败:', error);
+        generalResults = [];
+      }
+      
+      // 3. MobileNetV3模型
+      const mobileNetStart = Date.now();
+      try {
+        mobileNetV3Results = await this.classifyImageWithMobileNetV3(imageUri);
+        timings.mobileNetV3 = Date.now() - mobileNetStart;
+        logger.info(`⏱️ MobileNetV3模型推理耗时: ${timings.mobileNetV3}ms`);
+      } catch (error) {
+        timings.mobileNetV3 = Date.now() - mobileNetStart;
+        console.error('❌ mobileNetV3 推理失败:', error);
+        mobileNetV3Results = {};
+      }
+      
+      logger.debug(`✅ 所有模型推理完成:`);
+      logger.debug(`  - idCard: ${idCardResults.length} 个检测结果`);
+      logger.debug(`  - general: ${generalResults.length} 个检测结果`);
+      logger.debug(`  - mobileNetV3: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
+      
+      // 性能分析
+      const serialTotalTime = timings.idCard + timings.general + timings.mobileNetV3;
+      
+      logger.info(`📊 串行推理性能统计:`);
+      logger.info(`  - ID卡模型: ${timings.idCard}ms`);
+      logger.info(`  - YOLOv8模型: ${timings.general}ms`);
+      logger.info(`  - MobileNetV3模型: ${timings.mobileNetV3}ms`);
+      logger.info(`  - 串行总时间: ${serialTotalTime}ms`);
+      
     } catch (error) {
-      console.error('❌ general 推理失败:', error);
-      generalResults = [];
-    }
-    
-    try {
-      logger.debug('🔍 开始 mobileNetV3 推理...');
-      mobileNetV3Results = await this.classifyImageWithMobileNetV3(imageUri);
-      logger.debug(`✅ mobileNetV3 推理完成: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
-    } catch (error) {
-      console.error('❌ mobileNetV3 推理失败:', error);
-      mobileNetV3Results = {};
+      console.error('❌ 串行推理过程中发生错误:', error);
     }
     
     // 处理结果
@@ -880,7 +981,8 @@ class ImageClassifierService {
     };
     
     const endTime = Date.now();
-    logger.debug(`⏱️ 串行推理完成，总耗时: ${endTime - startTime}ms`);
+    timings.total = endTime - startTime;
+    logger.info(`⏱️ 串行推理总耗时: ${timings.total}ms`);
     
     return serialResults;
   }
@@ -1510,21 +1612,29 @@ class ImageClassifierService {
 
   // 使用MobileNetV3分类图片
   async classifyImageWithMobileNetV3(imageUri, options = {}) {
+    const t0 = Date.now();
     const { confidenceThreshold = this.models.mobilenetv3?.confidenceThreshold || 0.3 } = options;
     
     try {
       // 确保模型已加载
+      const loadStart = Date.now();
       await this.loadMobileNetV3Model();
+      const loadTime = Date.now() - loadStart;
       
       // 预处理图片
+      const preprocessStart = Date.now();
       const inputTensor = await this.preprocessImageForMobileNetV3(imageUri);
+      const preprocessTime = Date.now() - preprocessStart;
       
       // 运行推理
+      const inferenceStart = Date.now();
       const modelConfig = this.models.mobilenetv3;
       const feeds = { [modelConfig.inputName]: inputTensor };
       const results = await modelConfig.model.run(feeds);
+      const inferenceTime = Date.now() - inferenceStart;
       
       // 获取输出
+      const postprocessStart = Date.now();
       const output = results[modelConfig.outputName];
       if (!output) {
         throw new Error('MobileNetV3模型没有返回有效的输出数据');
@@ -1532,6 +1642,14 @@ class ImageClassifierService {
       
       // 后处理结果
       const processedResults = await this.postprocessMobileNetV3Output(output, confidenceThreshold);
+      const postprocessTime = Date.now() - postprocessStart;
+      
+      const totalTime = Date.now() - t0;
+      
+      // 详细性能日志（仅在总时间过长时输出）
+      if (totalTime > 500) {
+        logger.info(`📊 MobileNetV3推理性能: 总${totalTime}ms (加载${loadTime}ms + 预处理${preprocessTime}ms + 推理${inferenceTime}ms + 后处理${postprocessTime}ms)`);
+      }
       
       return {
         success: true,
@@ -1540,7 +1658,7 @@ class ImageClassifierService {
         topPrediction: processedResults.topPrediction,
         confidence: processedResults.confidence,
         model: 'mobilenetv3',
-        processingTime: Date.now()
+        processingTime: totalTime
       };
     } catch (error) {
       console.error('❌ MobileNetV3分类失败:', error);
@@ -1552,7 +1670,7 @@ class ImageClassifierService {
         topPrediction: null,
         confidence: 0,
         model: 'mobilenetv3',
-        processingTime: Date.now()
+        processingTime: Date.now() - t0
       };
     }
   }
