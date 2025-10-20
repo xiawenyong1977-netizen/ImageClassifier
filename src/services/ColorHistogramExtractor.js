@@ -1,9 +1,14 @@
 /**
  * 颜色直方图提取器
  * 从图片中提取RGB和HSV颜色直方图特征
+ * 
+ * 平台支持：
+ * - PC端（Electron/Web）：使用浏览器Canvas API
+ * - 移动端（React Native）：使用react-native-canvas
+ * - 通过CanvasAdapter统一适配，代码完全相同
  */
 
-import { logger } from '../adapters/WebAdapters.js';
+import { logger, CanvasAdapter } from '../adapters/WebAdapters.js';
 
 class ColorHistogramExtractor {
   constructor() {
@@ -22,41 +27,24 @@ class ColorHistogramExtractor {
    */
   async extractHistogram(imageUri) {
     try {
-      // 创建图片对象
-      const image = await this._loadImage(imageUri);
+      // 🆕 使用适配器加载图片（PC和移动端统一）
+      const image = await CanvasAdapter.loadImage(imageUri);
       
-      // 创建canvas来获取像素数据
-      let canvas, ctx;
-      if (typeof document !== 'undefined') {
-        // 浏览器环境
-        canvas = document.createElement('canvas');
-        ctx = canvas.getContext('2d');
-      } else {
-        // Node.js环境，使用canvas库
-        try {
-          const { createRequire } = await import('module');
-          const require = createRequire(import.meta.url);
-          const { createCanvas } = require('D:/ImageClassifierApp/pc-version-final/node_modules/canvas');
-          canvas = createCanvas(image.width, image.height);
-          ctx = canvas.getContext('2d');
-        } catch (error) {
-          logger.warn('Node.js环境下的canvas处理在浏览器构建中被跳过');
-          throw new Error('Node.js环境在浏览器构建中不支持');
-        }
-      }
-      
-      // 设置canvas尺寸（为了性能，可以缩放）
-      const maxSize = 200; // 限制最大尺寸以提高性能
+      // 计算缩放比例（为了性能，限制最大尺寸）
+      const maxSize = 200;
       const scale = Math.min(maxSize / image.width, maxSize / image.height, 1);
+      const width = Math.floor(image.width * scale);
+      const height = Math.floor(image.height * scale);
       
-      canvas.width = image.width * scale;
-      canvas.height = image.height * scale;
+      // 🆕 使用适配器创建Canvas（PC和移动端统一）
+      const canvas = await CanvasAdapter.createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
       
-      // 绘制图片到canvas
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      // 🟢 绘制图片到canvas（标准Canvas API）
+      ctx.drawImage(image, 0, 0, width, height);
       
-      // 获取像素数据
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // 🟢 获取像素数据（标准Canvas API）
+      const imageData = ctx.getImageData(0, 0, width, height);
       const pixels = imageData.data;
       
       // 提取直方图
@@ -67,55 +55,20 @@ class ColorHistogramExtractor {
         color_histogram: histogram,
         dominant_colors: this._extractDominantColors(histogram),
         brightness: this._calculateBrightness(histogram),
-        contrast: this._calculateContrast(pixels, canvas.width, canvas.height),
+        contrast: this._calculateContrast(pixels, width, height),
         extracted_at: new Date().toISOString()
       };
       
-      logger.debug(`提取颜色直方图成功: ${imageUri}`);
+      logger.debug(`✅ 提取颜色直方图成功: ${imageUri}`);
       return features;
       
     } catch (error) {
-      logger.error('提取颜色直方图失败:', error);
+      logger.error('❌ 提取颜色直方图失败:', error);
       throw error;
     }
   }
 
-  /**
-   * 加载图片
-   * @param {string} imageUri - 图片URI
-   * @returns {Promise<HTMLImageElement>} 图片对象
-   * @private
-   */
-  async _loadImage(imageUri) {
-    // 检查是否在浏览器环境中
-    if (typeof window !== 'undefined' && window.Image) {
-      return new Promise((resolve, reject) => {
-        const image = new Image();
-        image.crossOrigin = 'anonymous'; // 允许跨域
-        
-        image.onload = () => resolve(image);
-        image.onerror = (error) => {
-          logger.error('图片加载失败:', error);
-          reject(new Error(`图片加载失败: ${imageUri}`));
-        };
-        
-        image.src = imageUri;
-      });
-    } else {
-      // Node.js环境，使用canvas库
-      try {
-        const { createRequire } = await import('module');
-        const require = createRequire(import.meta.url);
-        const { loadImage } = require('D:/ImageClassifierApp/pc-version-final/node_modules/canvas');
-        // 将file://协议转换为普通路径
-        const filePath = imageUri.replace('file:///', '');
-        return await loadImage(filePath);
-      } catch (error) {
-        console.warn('⚠️ Node.js环境下的图片加载在浏览器构建中被跳过');
-        throw new Error('Node.js环境在浏览器构建中不支持');
-      }
-    }
-  }
+  // 🗑️ 已移除 _loadImage 方法，现在使用 CanvasAdapter.loadImage()
 
   /**
    * 从像素数据提取直方图

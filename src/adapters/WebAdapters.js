@@ -92,20 +92,26 @@ class Logger {
 // 创建单例实例
 const logger = new Logger();
 
-let Platform;
-try {
-  // 尝试检测web环境
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    // Web环境
-    Platform = { OS: 'web' };
-  } else {
-    // 移动端环境
-    Platform = eval('require("react-native").Platform');
+// 统一的Platform对象 - 在文件顶部定义，供内部函数使用
+export const Platform = (() => {
+  // 检测环境
+  if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+    // React Native环境 - 使用原生Platform
+    try {
+      return eval('require("react-native").Platform');
+    } catch (error) {
+      logger.warn('无法加载React Native Platform，使用fallback');
+      return { OS: 'web' };
+    }
   }
-} catch (error) {
-  // 如果检测失败，默认为web环境
-  Platform = { OS: 'web' };
-}
+  
+  // Web/Electron/Node环境 - 创建兼容的Platform对象
+  return { 
+    OS: 'web',
+    Version: undefined,
+    select: (obj) => obj.web || obj.default
+  };
+})();
 
 // URI转换函数 - 将文件URI转换为Web可访问的格式
 export const getWebAccessibleUri = (uri) => {
@@ -504,9 +510,8 @@ export const RNFS = {
   },
   unlink: async (filePath) => {
     if (Platform.OS === 'web') {
+      // ✅ PC端：保持原有逻辑不变（已经很完善）
       logger.debug(`[Web] RNFS.unlink: ${filePath}`);
-      logger.debug(`[Web] Electron available:`, !!window.require);
-      logger.debug(`[Web] window.require available:`, !!window.require);
       
       if (!window.require) {
         console.error(`[Web] window.require not available, cannot delete file`);
@@ -517,14 +522,12 @@ export const RNFS = {
         // 修复Windows路径格式问题
         let normalizedPath = filePath;
         if (filePath.startsWith('/') && filePath.includes(':')) {
-          // 处理 /D:/path 格式，转换为 D:/path
           normalizedPath = filePath.substring(1);
         }
         
         logger.debug(`[Web] RNFS.unlink normalized path: ${normalizedPath}`);
         
         // 在PC环境下使用Electron接口删除文件
-        logger.debug(`[Web] Calling ElectronFileAPI.deleteFile...`);
         const result = await ElectronFileAPI.deleteFile(normalizedPath);
         logger.debug(`[Web] File deleted via Electron: ${normalizedPath}`, result);
         return true;
@@ -532,10 +535,44 @@ export const RNFS = {
         logger.error(`[Web] Failed to delete file via Electron: ${filePath}`, error);
         throw error;
       }
+    } else if (Platform.OS === 'android') {
+      // 🆕 Android：优先使用MediaStore API（解决Android 10+删除限制）
+      const cleanPath = filePath.replace('file://', '');
+      
+      try {
+        // 策略1: 尝试MediaStore API
+        const { NativeModules } = eval('require("react-native")');
+        const { MediaStoreModule } = NativeModules;
+        
+        if (MediaStoreModule) {
+          logger.debug('📱 尝试使用MediaStore API删除');
+          const result = await MediaStoreModule.deleteFile(cleanPath);
+          if (result) {
+            logger.debug('✅ MediaStore删除成功');
+            return true;
+          }
+          logger.warn('⚠️ MediaStore删除失败，降级到RNFS');
+        }
+      } catch (error) {
+        logger.warn('⚠️ MediaStore删除失败:', error.message);
+      }
+      
+      // 策略2: 降级到RNFS（Android 9及以下，或MediaStore失败时）
+      try {
+        const RNFS = eval('require("react-native-fs")');
+        logger.debug('📁 使用RNFS删除');
+        await RNFS.unlink(cleanPath);
+        logger.debug('✅ RNFS删除成功');
+        return true;
+      } catch (error) {
+        logger.error('❌ RNFS删除失败:', error.message);
+        throw error;
+      }
     } else {
-      // 移动端使用原生API
-      const RNFS = Platform.OS === 'web' ? null : eval('require("react-native-fs")');
-      return await RNFS.unlink(filePath);
+      // iOS或其他平台：直接使用RNFS
+      const RNFS = eval('require("react-native-fs")');
+      const cleanPath = filePath.replace('file://', '');
+      return await RNFS.unlink(cleanPath);
     }
   },
   copyFile: async (from, to) => {
@@ -1271,5 +1308,259 @@ export const PermissionAdapter = {
 // 15. React Hooks 导出
 export { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 
-// 16. Logger 导出
+// 16. 模型路径适配器
+export const ModelPathAdapter = {
+  /**
+   * 获取模型基础路径
+   * @returns {string} 模型基础路径
+   */
+  getModelBasePath() {
+    // React Native环境
+    if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+      const RNPlatform = eval('require("react-native").Platform');
+      
+      if (RNPlatform.OS === 'android') {
+        // Android: 使用 assets 目录
+        logger.debug('📱 Android环境: 使用 assets 目录');
+        return 'file:///android_asset/models';
+      } else if (RNPlatform.OS === 'ios') {
+        // iOS: 使用 bundle 目录
+        const RNFS = eval('require("react-native-fs")');
+        logger.debug('📱 iOS环境: 使用 bundle 目录');
+        return `${RNFS.MainBundlePath}/models`;
+      }
+    }
+    
+    // Web浏览器 / Electron渲染进程环境
+    if (typeof window !== 'undefined' && window.location) {
+      const isElectron = typeof window.require !== 'undefined';
+      const isDevelopment = window.location.hostname === 'localhost' && 
+                           window.location.port === '3000';
+      
+      if (isDevelopment) {
+        // 开发环境（npm start）：使用开发服务器路径
+        logger.debug('🔧 开发环境: 使用开发服务器路径');
+        return 'http://localhost:3000/models';
+      } else if (isElectron) {
+        // Electron生产环境：使用相对路径（相对于build目录）
+        logger.debug('💻 Electron生产环境: 使用相对路径 ./models');
+        return './models';
+      } else {
+        // Web浏览器生产环境：使用相对路径
+        logger.debug('🌐 Web浏览器环境: 使用相对路径 ./models');
+        return './models';
+      }
+    }
+    
+    // 纯Node.js环境（fallback，一般不会到这里）
+    logger.debug('⚙️ Node.js环境: 使用 ./public/models');
+    return './public/models';
+  },
+
+  /**
+   * 获取完整的模型文件路径
+   * @param {string} modelFileName - 模型文件名（如 'yolov8s.onnx'）
+   * @param {string} configPath - 配置文件中的路径（可选）
+   * @returns {string} 完整的模型文件路径
+   */
+  getModelPath(modelFileName, configPath = null) {
+    // 如果提供了配置路径，先处理配置路径
+    if (configPath) {
+      // 如果是完整路径（http/https/绝对路径），直接返回
+      if (configPath.startsWith('http://') || 
+          configPath.startsWith('https://') || 
+          configPath.startsWith('/')) {
+        return configPath;
+      }
+      
+      // 如果配置路径以 ./ 开头，提取文件名
+      if (configPath.startsWith('./')) {
+        const fileName = configPath.substring(2);
+        // 如果包含 models/ 前缀，移除它
+        if (fileName.startsWith('models/')) {
+          modelFileName = fileName.substring(7);
+        } else {
+          modelFileName = fileName;
+        }
+      } else {
+        modelFileName = configPath;
+      }
+    }
+    
+    const basePath = this.getModelBasePath();
+    
+    // 拼接完整路径
+    return `${basePath}/${modelFileName}`;
+  },
+
+  /**
+   * 获取ONNX Runtime执行提供者
+   * @returns {string[]} 可用的执行提供者列表
+   */
+  getExecutionProviders() {
+    // React Native环境
+    if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+      const RNPlatform = eval('require("react-native").Platform');
+      
+      if (RNPlatform.OS === 'ios') {
+        // iOS: 优先CoreML，fallback到CPU
+        return ['coreml', 'cpu'];
+      } else if (RNPlatform.OS === 'android') {
+        // Android: 优先NNAPI，fallback到CPU
+        return ['nnapi', 'cpu'];
+      }
+    }
+    
+    // Web环境
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      // 浏览器：优先WebGPU -> WebGL -> WASM
+      return ['webgpu', 'webgl', 'wasm', 'cpu'];
+    }
+    
+    // Node.js/Electron环境
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      // PC: 优先CUDA -> DirectML -> CPU
+      return ['cuda', 'dml', 'cpu'];
+    }
+    
+    // Fallback
+    return ['cpu'];
+  },
+
+  /**
+   * 检测当前环境类型
+   * @returns {string} 环境类型: 'react-native' | 'web' | 'electron' | 'node'
+   */
+  detectEnvironment() {
+    // React Native
+    if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
+      return 'react-native';
+    }
+    
+    // Electron
+    if (typeof window !== 'undefined' && window.require) {
+      return 'electron';
+    }
+    
+    // Web浏览器
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      return 'web';
+    }
+    
+    // Node.js
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      return 'node';
+    }
+    
+    return 'unknown';
+  },
+
+  /**
+   * 加载ONNX Runtime模块
+   * @returns {Promise<any>} ONNX Runtime实例
+   */
+  async loadOnnxRuntime() {
+    const env = this.detectEnvironment();
+    
+    logger.debug(`检测到环境: ${env}`);
+    
+    try {
+      switch (env) {
+        case 'react-native':
+          logger.debug('加载 onnxruntime-react-native...');
+          return await import('onnxruntime-react-native');
+        
+        case 'web':
+        case 'electron':
+          logger.debug('加载 onnxruntime-web...');
+          const ortModule = await import('onnxruntime-web');
+          return ortModule.default || ortModule;
+        
+        case 'node':
+          logger.debug('加载 onnxruntime-node...');
+          return await import('onnxruntime-node');
+        
+        default:
+          throw new Error(`不支持的环境: ${env}`);
+      }
+    } catch (error) {
+      logger.error(`加载ONNX Runtime失败 (${env}):`, error);
+      throw error;
+    }
+  }
+};
+
+// 17. Canvas 适配器
+export const CanvasAdapter = {
+  /**
+   * 创建Canvas元素
+   * @param {number} width - 宽度
+   * @param {number} height - 高度
+   * @returns {Canvas} Canvas实例
+   */
+  async createCanvas(width, height) {
+    const env = ModelPathAdapter.detectEnvironment();
+    
+    if (env === 'react-native') {
+      // React Native环境
+      logger.debug('📱 使用 react-native-canvas 创建Canvas');
+      const Canvas = eval('require("react-native-canvas")').default;
+      const canvas = new Canvas(width, height);
+      return canvas;
+    } else {
+      // PC/Web环境（Electron/浏览器）
+      logger.debug('💻 使用浏览器 Canvas API');
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      return canvas;
+    }
+  },
+
+  /**
+   * 加载图片
+   * @param {string} imageUri - 图片URI
+   * @returns {Promise<Image>} Image实例
+   */
+  async loadImage(imageUri) {
+    const env = ModelPathAdapter.detectEnvironment();
+    
+    if (env === 'react-native') {
+      // React Native环境
+      logger.debug(`📱 使用 react-native-canvas 加载图片: ${imageUri}`);
+      const Canvas = eval('require("react-native-canvas")');
+      const img = new Canvas.Image();
+      
+      return new Promise((resolve, reject) => {
+        img.addEventListener('load', () => {
+          logger.debug(`✅ 图片加载成功: ${img.width}x${img.height}`);
+          resolve(img);
+        });
+        img.addEventListener('error', (error) => {
+          logger.error('❌ 图片加载失败:', error);
+          reject(new Error(`图片加载失败: ${imageUri}`));
+        });
+        img.src = imageUri;
+      });
+    } else {
+      // PC/Web环境（Electron/浏览器）
+      logger.debug(`💻 使用浏览器 Image 加载图片: ${imageUri}`);
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          logger.debug(`✅ 图片加载成功: ${img.width}x${img.height}`);
+          resolve(img);
+        };
+        img.onerror = (error) => {
+          logger.error('❌ 图片加载失败:', error);
+          reject(new Error(`图片加载失败: ${imageUri}`));
+        };
+        img.src = imageUri;
+      });
+    }
+  }
+};
+
+// 18. Logger 导出（Platform已在文件顶部定义和导出）
 export { logger };

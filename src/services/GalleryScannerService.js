@@ -1,35 +1,13 @@
-﻿// Platform detection for web and mobile
-
-import { logger, readImageFileAsBlob } from '../adapters/WebAdapters.js';
-
-let Platform;
-
-try {
-
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-
-    // Web environment
-
-    Platform = { OS: 'web' };
-
-  } else {
-
-    // Mobile environment
-
-    Platform = eval('require("react-native").Platform');
-
-  }
-
-} catch (error) {
-
-  // If detection fails, default to web environment
-
-  Platform = { OS: 'web' };
-
-}
-
-import { normalizeFilePath, readFileForExif, getFileStats } from '../adapters/WebAdapters';
-import { RNFS } from '../adapters/WebAdapters';
+﻿// 导入WebAdapters统一适配器
+import { 
+  logger, 
+  readImageFileAsBlob, 
+  normalizeFilePath, 
+  readFileForExif, 
+  getFileStats,
+  RNFS,
+  Platform  // 🆕 使用统一的Platform对象
+} from '../adapters/WebAdapters.js';
 
 import ImageClassifierService from './ImageClassifierService';
 

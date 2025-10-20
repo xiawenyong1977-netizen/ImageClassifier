@@ -1,9 +1,10 @@
 /**
  * IPC 监听器集中管理服务
  * 负责管理所有 Electron IPC 监听器
+ * 注意：仅用于 PC 端（Electron），移动端会自动跳过
  */
 
-import { logger } from '../adapters/WebAdapters.js';
+import { logger, Platform } from '../adapters/WebAdapters.js';
 
 class IPCListenerService {
   constructor() {
@@ -13,6 +14,7 @@ class IPCListenerService {
 
   /**
    * 初始化所有 IPC 监听器
+   * 📱 移动端会自动跳过，仅在 PC 端（Electron）执行
    */
   initialize() {
     if (this.isInitialized) {
@@ -20,13 +22,20 @@ class IPCListenerService {
       return;
     }
 
+    // 🆕 移动端检测：明确跳过移动端环境
+    if (Platform.OS !== 'web') {
+      logger.debug('📱 移动端环境，跳过 IPC 监听器初始化（IPC 仅用于 PC 端）');
+      return;
+    }
+
+    // 💻 PC端：检查 Electron 环境
     if (typeof window === 'undefined' || !window.require) {
-      logger.warn('非 Electron 环境，跳过 IPC 监听器初始化');
+      logger.warn('⚠️ 非 Electron 环境，跳过 IPC 监听器初始化');
       return;
     }
 
     try {
-      logger.debug('开始初始化 IPCListenerService...');
+      logger.debug('💻 开始初始化 PC 端 IPCListenerService...');
       const { ipcRenderer } = window.require('electron');
       
       // 1. 自定义标题栏设置按钮监听器
@@ -36,9 +45,9 @@ class IPCListenerService {
       this.setupFileOperationListeners(ipcRenderer);
       
       this.isInitialized = true;
-      logger.debug('IPCListenerService 初始化完成');
+      logger.debug('✅ PC 端 IPCListenerService 初始化完成');
     } catch (error) {
-      logger.error('IPCListenerService 初始化失败:', error);
+      logger.error('❌ IPCListenerService 初始化失败:', error);
     }
   }
 

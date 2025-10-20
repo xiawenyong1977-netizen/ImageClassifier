@@ -3,7 +3,7 @@
  * 负责读取和管理 initialSettings.json 配置文件
  */
 
-import { logger } from '../adapters/WebAdapters.js';
+import { logger, Platform } from '../adapters/WebAdapters.js';
 
 class ConfigService {
   constructor() {
@@ -23,22 +23,47 @@ class ConfigService {
     }
     
     try {
-      logger.debug('开始加载配置文件...');
+      logger.debug(`开始加载配置文件 (平台: ${Platform.OS})...`);
       
-      // 根据环境选择配置文件路径
+      // 🆕 移动端：直接 require JSON 文件
+      if (Platform.OS !== 'web') {
+        logger.debug('📱 移动端环境，使用 require 加载配置文件');
+        
+        try {
+          // 移动端直接 require JSON 文件（从 bundle 中）
+          const configData = require('../../public/initialSettings.json');
+          this.config = configData;
+          this.isLoaded = true;
+          
+          logger.debug('✅ 移动端配置文件加载成功');
+          logger.debug(`📊 配置统计:`, {
+            models: Object.keys(this.config.models || {}).length,
+            categories: Object.keys(this.config.categoryNameMap || {}).length,
+            yoloObjects: Object.keys(this.config.yoloObjectNameMap || {}).length,
+            imagenetClasses: Object.keys(this.config.mobilenetv3Classes || {}).length
+          });
+          
+          return true;
+        } catch (requireError) {
+          logger.error('❌ 移动端配置文件加载失败:', requireError);
+          throw requireError;
+        }
+      }
+      
+      // 💻 PC端：使用 fetch 或 fs 加载
       const configPath = this.getConfigPath();
-      logger.debug('配置文件路径:', configPath);
+      logger.debug('💻 PC端配置文件路径:', configPath);
       logger.debug('环境信息:', {
         hasWindow: typeof window !== 'undefined',
-        hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
-        origin: typeof window !== 'undefined' ? window.location.origin : 'N/A'
+        hostname: typeof window !== 'undefined' && window.location ? window.location.hostname : 'N/A',
+        origin: typeof window !== 'undefined' && window.location ? window.location.origin : 'N/A'
       });
       
       // 加载配置文件
       let responseText;
       
       if (typeof window !== 'undefined') {
-        // 浏览器环境使用fetch
+        // 浏览器/Electron环境使用fetch
         const response = await fetch(configPath);
         logger.debug('响应状态:', response.status, response.statusText);
         logger.debug('响应头 Content-Type:', response.headers.get('content-type'));
@@ -74,7 +99,7 @@ class ConfigService {
       this.config = JSON.parse(responseText);
       this.isLoaded = true;
       
-      logger.debug('✅ 配置文件加载成功');
+      logger.debug('✅ PC端配置文件加载成功');
       logger.debug(`📊 配置统计:`, {
         models: Object.keys(this.config.models || {}).length,
         categories: Object.keys(this.config.categoryNameMap || {}).length,
@@ -91,12 +116,13 @@ class ConfigService {
   }
 
   /**
-   * 获取配置文件路径
+   * 获取配置文件路径（仅用于PC端）
+   * 注意：移动端在 initialize() 中直接 require JSON，不会调用此方法
    * @returns {string} 配置文件路径
    */
   getConfigPath() {
-    // 在浏览器环境和Electron开发环境中都使用HTTP方式访问
-    if (typeof window !== 'undefined') {
+    // 💻 PC端：在浏览器环境和Electron环境中使用HTTP方式访问
+    if (typeof window !== 'undefined' && window.location) {
       logger.debug('🔧 window.location:', {
         hostname: window.location.hostname,
         origin: window.location.origin,

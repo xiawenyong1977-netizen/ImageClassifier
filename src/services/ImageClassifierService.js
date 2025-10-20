@@ -1,6 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import { logger } from '../adapters/WebAdapters.js';
+import { logger, ModelPathAdapter } from '../adapters/WebAdapters.js';
 
 class ImageClassifierService {
   constructor() {
@@ -34,38 +34,7 @@ class ImageClassifierService {
     // 注意：已移除 Web Worker 池，使用主线程并行推理
   }
 
-  // 获取模型路径（处理相对路径和绝对路径）
-  getModelPath(configPath, modelBasePath) {
-    if (!configPath) {
-      throw new Error('模型路径配置缺失');
-    }
-    
-    // 如果配置中的路径已经是完整路径（包含协议或绝对路径），直接使用
-    if (configPath.startsWith('http://') || configPath.startsWith('https://') || configPath.startsWith('/')) {
-      return configPath;
-    }
-    
-    // 如果是相对路径，与基础路径组合
-    if (configPath.startsWith('./')) {
-      // 移除 './' 前缀
-      const fileName = configPath.substring(2);
-      // 如果文件名包含 models/，只取文件名部分
-      if (fileName.startsWith('models/')) {
-        const actualFileName = fileName.substring(7); // 移除 'models/' 前缀
-        return `${modelBasePath}/${actualFileName}`;
-      }
-      // 直接拼接
-      return `${modelBasePath}/${fileName}`;
-    }
-    
-    // 如果配置路径已经包含 models 目录，直接拼接
-    if (configPath.includes('models/')) {
-      return `${modelBasePath}/${configPath}`;
-    }
-    
-    // 直接拼接
-    return `${modelBasePath}/${configPath}`;
-  }
+  // 🗑️ 已移除 getModelPath 方法，现在使用 ModelPathAdapter.getModelPath()
 
   // 从配置文件初始化模型配置
   async initializeModelConfigs() {
@@ -79,17 +48,13 @@ class ImageClassifierService {
       // 获取所有模型配置
       const modelConfigs = this.configService.getAllModelConfigs();
       
-      // 根据环境选择模型路径
-      const isWebEnvironment = typeof window !== 'undefined' && window.location;
-      const isDevelopment = isWebEnvironment && window.location.hostname === 'localhost' && window.location.port === '3000';
-      const modelBasePath = isDevelopment ? 'http://localhost:3000/models' : './models';
-
+      // 🆕 使用适配器获取模型路径（无需关心平台差异）
       // 初始化模型配置
       this.models = {
         // ID卡模型保持硬编码（特有模型，不在配置文件中）
         idCard: {
           model: null,
-          path: `${modelBasePath}/id_card_detection.onnx`,
+          path: ModelPathAdapter.getModelPath('id_card_detection.onnx'),
           classes: ['id_card_front', 'id_card_back'],
           metadata: null,
           priority: 1,
@@ -101,7 +66,7 @@ class ImageClassifierService {
         // YOLO8s模型从配置文件读取
         yolo8s: {
           model: null,
-          path: this.getModelPath(modelConfigs.yolo8s?.path, modelBasePath),
+          path: ModelPathAdapter.getModelPath('yolov8s.onnx', modelConfigs.yolo8s?.path),
           classes: null, // 将从配置文件加载
           metadata: null,
           priority: 2,
@@ -113,7 +78,7 @@ class ImageClassifierService {
         // MobileNetV3模型从配置文件读取
         mobilenetv3: {
           model: null,
-          path: this.getModelPath(modelConfigs.mobilenetv3?.path, modelBasePath),
+          path: ModelPathAdapter.getModelPath('mobilenetv3_rw_Opset17.onnx', modelConfigs.mobilenetv3?.path),
           classes: null, // 将从配置文件加载
           metadata: null,
           priority: 3,
@@ -170,19 +135,12 @@ class ImageClassifierService {
     }
 
     try {
-      if (typeof window !== 'undefined') {
-        // 浏览器环境
-        const ortModule = await import('onnxruntime-web');
-        this.ort = ortModule.default || ortModule;
-      } else {
-        // Node.js环境
-        this.ort = await import('onnxruntime-node');
-      }
-      
-      logger.debug('ONNX Runtime初始化成功');
+      // 🆕 使用适配器加载正确的ONNX Runtime版本
+      this.ort = await ModelPathAdapter.loadOnnxRuntime();
+      logger.debug('✅ ONNX Runtime初始化成功');
       return this.ort;
     } catch (error) {
-      logger.error('ONNX Runtime初始化失败:', error);
+      logger.error('❌ ONNX Runtime初始化失败:', error);
       throw error;
     }
   }
@@ -283,113 +241,42 @@ class ImageClassifierService {
     }
     
     try {
+      // 🆕 从适配器获取推荐的提供者列表
+      const recommendedProviders = ModelPathAdapter.getExecutionProviders();
+      logger.debug(`🔍 适配器推荐的执行提供者: ${recommendedProviders.join(', ')}`);
+      
       const ort = this.ort;
       const availableProviders = [];
       
-      // 检查是否有getAvailableProviders方法
+      // 检查ONNX Runtime实际支持的提供者
       if (typeof ort.getAvailableProviders === 'function') {
-        // 检查可用的执行提供者
-        const providers = await ort.getAvailableProviders();
-        logger.debug(`🔍 ONNX Runtime 可用提供者: ${providers.join(', ')}`);
+        // 获取ONNX Runtime实际支持的提供者
+        const ortProviders = await ort.getAvailableProviders();
+        logger.debug(`🔍 ONNX Runtime实际支持: ${ortProviders.join(', ')}`);
         
-        // 优先选择GPU提供者（根据环境选择最佳GPU提供者）
-        if (typeof window !== 'undefined') {
-          // 浏览器环境：优先WebGL/WebGPU
-          if (providers.includes('webgl')) {
-            availableProviders.push('webgl');
-            logger.debug('🚀 使用 WebGL 加速');
-          } else if (providers.includes('webgpu')) {
-            availableProviders.push('webgpu');
-            logger.debug('🚀 使用 WebGPU 加速');
+        // 🆕 取推荐列表和实际支持的交集（按推荐顺序）
+        for (const provider of recommendedProviders) {
+          if (ortProviders.includes(provider)) {
+            availableProviders.push(provider);
+            logger.debug(`✅ 启用提供者: ${provider}`);
           }
-        } else {
-          // Node.js环境：优先CUDA
-          if (providers.includes('cuda')) {
-            availableProviders.push('cuda');
-            logger.debug('🚀 使用 CUDA 加速');
-          } else if (providers.includes('dml')) {
-            availableProviders.push('dml');
-            logger.debug('🚀 使用 DirectML 加速');
-          } else if (providers.includes('openvino')) {
-            availableProviders.push('openvino');
-            logger.debug('🚀 使用 OpenVINO 加速');
-          }
-        }
-        
-        // 总是添加CPU作为后备
-        if (providers.includes('cpu')) {
-          availableProviders.push('cpu');
-          logger.debug('💻 添加 CPU 作为后备');
         }
       } else if (typeof ort.listSupportedBackends === 'function') {
         // Node.js环境：使用listSupportedBackends方法
         const backends = ort.listSupportedBackends();
-        logger.debug(`🔍 ONNX Runtime 支持的backend: ${backends.map(b => b.name).join(', ')}`);
+        logger.debug(`🔍 ONNX Runtime支持的backend: ${backends.map(b => b.name).join(', ')}`);
         
-        // 优先选择GPU提供者
-        if (typeof window !== 'undefined') {
-          // 浏览器环境：优先WebGL/WebGPU
-          if (backends.some(b => b.name === 'webgl')) {
-            availableProviders.push('webgl');
-            logger.debug('🚀 使用 WebGL 加速');
-          } else if (backends.some(b => b.name === 'webgpu')) {
-            availableProviders.push('webgpu');
-            logger.debug('🚀 使用 WebGPU 加速');
+        // 🆕 取推荐列表和实际支持的交集（按推荐顺序）
+        for (const provider of recommendedProviders) {
+          if (backends.some(b => b.name === provider)) {
+            availableProviders.push(provider);
+            logger.debug(`✅ 启用提供者: ${provider}`);
           }
-        } else {
-          // Node.js环境：优先DirectML（Windows GPU加速）
-          if (backends.some(b => b.name === 'dml')) {
-            availableProviders.push('dml');
-            logger.debug('🚀 使用 DirectML 加速');
-          } else if (backends.some(b => b.name === 'cuda')) {
-            availableProviders.push('cuda');
-            logger.debug('🚀 使用 CUDA 加速');
-          } else if (backends.some(b => b.name === 'openvino')) {
-            availableProviders.push('openvino');
-            logger.debug('🚀 使用 OpenVINO 加速');
-          }
-        }
-        
-        // 总是添加CPU作为后备
-        if (backends.some(b => b.name === 'cpu')) {
-          availableProviders.push('cpu');
-          logger.debug('💻 添加 CPU 作为后备');
         }
       } else {
-        // 如果没有getAvailableProviders方法，使用默认策略
-        logger.debug('⚠️ getAvailableProviders 方法不可用，使用默认策略');
-        
-        // 根据环境推断可用的提供者
-        if (typeof window !== 'undefined') {
-          // 浏览器环境
-          logger.debug('🌐 检测浏览器环境支持...');
-          
-          // 检测WebGPU支持
-          if (typeof navigator !== 'undefined' && navigator.gpu) {
-            availableProviders.push('webgpu');
-            logger.debug('🚀 检测到 WebGPU 支持');
-          } else {
-            logger.debug('❌ 未检测到 WebGPU 支持');
-          }
-          
-          // 检测WebGL支持
-          try {
-            const canvas = document.createElement('canvas');
-            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-            if (gl) {
-              availableProviders.push('webgl');
-              logger.debug('🚀 检测到 WebGL 支持');
-            } else {
-              logger.debug('❌ 未检测到 WebGL 支持');
-            }
-          } catch (error) {
-            logger.debug('❌ WebGL 检测失败:', error.message);
-          }
-        }
-        
-        // 总是添加CPU
-        availableProviders.push('cpu');
-        logger.debug('💻 添加 CPU 支持');
+        // 🆕 如果没有检测方法，直接使用推荐列表
+        logger.debug('⚠️ ONNX Runtime未提供检测方法，使用推荐列表');
+        availableProviders.push(...recommendedProviders);
       }
       
       // 如果没有检测到任何提供者，默认使用CPU
@@ -400,7 +287,7 @@ class ImageClassifierService {
       
       // 缓存检测结果
       this.cachedProviders = availableProviders;
-        logger.info('✅ 执行提供者检测完成，已缓存结果');
+      logger.info(`✅ 执行提供者检测完成: ${availableProviders.join(', ')}`);
       
       return availableProviders;
     } catch (error) {
