@@ -25,8 +25,6 @@ import { PermissionsAndroid } from './adapters/WebAdapters';
 import HomeScreen from './screens/mobile/HomeScreen.mobile';
 import CategoryScreen from './screens/mobile/CategoryScreen.mobile';
 import ImagePreviewScreen from './screens/mobile/ImagePreviewScreen.mobile';
-import BatchOperationScreen from './screens/mobile/BatchOperationScreen.mobile';
-import ImageUploadScreen from './screens/mobile/ImageUploadScreen.mobile';
 import SettingsScreen from './screens/mobile/SettingsScreen.mobile';
 
 const Stack = createStackNavigator();
