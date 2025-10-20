@@ -93,25 +93,12 @@ class Logger {
 const logger = new Logger();
 
 // 统一的Platform对象 - 在文件顶部定义，供内部函数使用
-export const Platform = (() => {
-  // 检测环境
-  if (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') {
-    // React Native环境 - 使用原生Platform
-    try {
-      return eval('require("react-native").Platform');
-    } catch (error) {
-      logger.warn('无法加载React Native Platform，使用fallback');
-      return { OS: 'web' };
-    }
-  }
-  
-  // Web/Electron/Node环境 - 创建兼容的Platform对象
-  return { 
-    OS: 'web',
-    Version: undefined,
-    select: (obj) => obj.web || obj.default
-  };
-})();
+// Web环境的Platform对象（移动端会使用WebAdapters.native.js中的实现）
+export const Platform = { 
+  OS: 'web',
+  Version: undefined,
+  select: (obj) => obj.web || obj.default
+};
 
 // URI转换函数 - 将文件URI转换为Web可访问的格式
 export const getWebAccessibleUri = (uri) => {
@@ -1411,15 +1398,15 @@ export const ModelPathAdapter = {
       }
     }
     
-    // Web环境
+    // Web环境（包括Electron）
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-      // 浏览器：优先WebGPU -> WebGL -> WASM
+      // 浏览器和Electron：优先WebGPU -> WebGL -> WASM -> CPU
       return ['webgpu', 'webgl', 'wasm', 'cpu'];
     }
     
-    // Node.js/Electron环境
+    // 纯Node.js环境
     if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-      // PC: 优先CUDA -> DirectML -> CPU
+      // 纯Node.js: 优先CUDA -> DirectML -> CPU
       return ['cuda', 'dml', 'cpu'];
     }
     
@@ -1437,19 +1424,23 @@ export const ModelPathAdapter = {
       return 'react-native';
     }
     
-    // Electron
+    // Electron (优先检测，因为Electron也有window和document)
     if (typeof window !== 'undefined' && window.require) {
       return 'electron';
+    }
+    
+    // Node.js (在Electron中，process.versions.node也存在)
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      // 检查是否在Electron环境中
+      if (typeof window !== 'undefined' && window.require) {
+        return 'electron'; // Electron环境
+      }
+      return 'node'; // 纯Node.js环境
     }
     
     // Web浏览器
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       return 'web';
-    }
-    
-    // Node.js
-    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-      return 'node';
     }
     
     return 'unknown';
@@ -1470,11 +1461,15 @@ export const ModelPathAdapter = {
           logger.debug('加载 onnxruntime-react-native...');
           return await import('onnxruntime-react-native');
         
-        case 'web':
         case 'electron':
+          logger.debug('加载 onnxruntime-web (Electron环境)...');
+          const electronOrtModule = await import('onnxruntime-web');
+          return electronOrtModule.default || electronOrtModule;
+        
+        case 'web':
           logger.debug('加载 onnxruntime-web...');
-          const ortModule = await import('onnxruntime-web');
-          return ortModule.default || ortModule;
+          const webOrtModule = await import('onnxruntime-web');
+          return webOrtModule.default || webOrtModule;
         
         case 'node':
           logger.debug('加载 onnxruntime-node...');
@@ -1564,3 +1559,9 @@ export const CanvasAdapter = {
 
 // 18. Logger 导出（Platform已在文件顶部定义和导出）
 export { logger };
+
+// 19. 移动端图片处理模块占位符（PC端不使用）
+export const ImageResizer = undefined;
+// RNFS 已在前面导出
+export const jpegJs = undefined;
+export const RNImage = undefined;

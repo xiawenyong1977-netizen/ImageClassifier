@@ -1,4 +1,4 @@
-import { AsyncStorage, RNFS, logger, Platform } from '../adapters/WebAdapters.js';
+import { AsyncStorage, RNFS, logger, Platform, SQLite } from '../adapters/WebAdapters';
 import configService from './ConfigService.js';
 
 // SQLite 适配器类（移动端）
@@ -17,22 +17,25 @@ class SQLiteAdapter {
     try {
       logger.debug('📱 开始初始化 SQLite 数据库...');
       
-      const SQLite = eval('require("react-native-sqlite-storage")');
-      SQLite.enablePromise(true);
-      
+
+
       // 打开数据库
-      this.db = await SQLite.openDatabase({
-        name: this.dbName,
-        location: 'default'
-      });
+      this.db = SQLite.openDatabase(this.dbName, '1.0', 'Image Classifier DB', 200000);
       
       // 创建表结构
       await this.createTables();
       
       // 数据库优化配置
-      await this.db.executeSql('PRAGMA journal_mode = WAL;');  // 写前日志模式
-      await this.db.executeSql('PRAGMA synchronous = NORMAL;');
-      await this.db.executeSql('PRAGMA cache_size = 10000;');
+      try {
+        logger.debug('📋 设置 SQLite PRAGMA...');
+        await this.db.executeSql('PRAGMA journal_mode = WAL;');  // 写前日志模式
+        await this.db.executeSql('PRAGMA synchronous = NORMAL;');
+        await this.db.executeSql('PRAGMA cache_size = 10000;');
+        logger.debug('✅ SQLite PRAGMA 设置成功');
+      } catch (pragmaError) {
+        logger.warn('⚠️ SQLite PRAGMA 设置失败（非致命错误）:', pragmaError);
+        // PRAGMA 失败不影响主要功能，继续初始化
+      }
       
       this.isInitialized = true;
       logger.debug('✅ SQLite 数据库初始化成功');
@@ -132,9 +135,15 @@ class SQLiteAdapter {
     
     if (key === 'images') {
       // 查询所有图片
-      const [result] = await this.db.executeSql(
+      const results = await this.db.executeSql(
         'SELECT * FROM images ORDER BY timestamp DESC'
       );
+      
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        logger.warn('⚠️ SQLite: 没有查询到图片数据');
+        return [];
+      }
       
       const images = [];
       for (let i = 0; i < result.rows.length; i++) {
@@ -152,9 +161,15 @@ class SQLiteAdapter {
       return images;
     } else if (key === 'settings') {
       // 查询所有设置
-      const [result] = await this.db.executeSql(
+      const results = await this.db.executeSql(
         'SELECT * FROM settings'
       );
+      
+      // SQLite executeSql返回数组，第一个元素是结果集
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        return null;
+      }
       
       const settings = {};
       for (let i = 0; i < result.rows.length; i++) {
@@ -169,9 +184,13 @@ class SQLiteAdapter {
       return Object.keys(settings).length > 0 ? settings : null;
     } else if (key === 'similarityData') {
       // 查询相似度数据
-      const [result] = await this.db.executeSql(
+      const results = await this.db.executeSql(
         'SELECT * FROM similarity_data'
       );
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        return null;
+      }
       
       const data = {};
       for (let i = 0; i < result.rows.length; i++) {
@@ -188,9 +207,13 @@ class SQLiteAdapter {
       return data;
     } else if (key === 'similarityGroupIndex') {
       // 查询相似组索引
-      const [result] = await this.db.executeSql(
+      const results = await this.db.executeSql(
         'SELECT * FROM similarity_group_index'
       );
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        return null;
+      }
       
       const index = {};
       for (let i = 0; i < result.rows.length; i++) {
@@ -363,7 +386,6 @@ class SQLiteAdapter {
       imageData.message
     ]);
     
-    logger.debug(`✅ SQLite单条记录保存: ${imageData.fileName}`);
     return true;
   }
 
@@ -430,7 +452,7 @@ class SQLiteAdapter {
     if (result.rowsAffected > 0) {
       logger.debug(`✅ SQLite更新分类: ${imageId} -> ${newCategory}`);
       return true;
-    } else {
+  } else {
       logger.warn(`⚠️ SQLite未找到图片: ${imageId}`);
       return false;
     }
@@ -485,8 +507,8 @@ class SQLiteAdapter {
             removedCount++;
           } else {
             failedCount++;
-          }
-        } catch (error) {
+  }
+} catch (error) {
           logger.error(`❌ SQLite删除失败: ${imageId}`, error);
           failedCount++;
         }
@@ -945,7 +967,7 @@ class ImageStorageService {
           logger.error('❌ SQLite 初始化失败，降级到 AsyncStorage:', sqliteError);
           // 降级到AsyncStorage
           this.storage = this.fallbackStorage;
-          await this.storage.getItem('test');
+        await this.storage.getItem('test');
           logger.debug('✅ AsyncStorage 初始化完成（降级模式）');
         }
       }

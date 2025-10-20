@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
-import { logger } from '../../adapters/WebAdapters.js';
+import { logger } from '../../adapters/WebAdapters';
 
 const RecentImagesGrid = ({ images, onImagePress }) => {
   const [imageErrors, setImageErrors] = useState({});

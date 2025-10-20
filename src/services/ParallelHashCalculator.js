@@ -1,4 +1,4 @@
-import { readImageFileAsBlob, logger } from '../adapters/WebAdapters.js';
+import { readImageFileAsBlob, logger } from '../adapters/WebAdapters';
 
 /**
  * 并行哈希计算管理器

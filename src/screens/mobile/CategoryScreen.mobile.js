@@ -33,7 +33,7 @@ const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 const CategoryScreen = ({ route, navigation }) => {
   // ==================== 路由参数 ====================
   const { category, city, similarityGroupId, fromScreen } = route.params || {};
-
+  
   // ==================== 状态管理 ====================
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -200,7 +200,7 @@ const CategoryScreen = ({ route, navigation }) => {
       const newSelected = new Set(selectedImages);
       if (newSelected.has(image.id)) {
         newSelected.delete(image.id);
-      } else {
+    } else {
         newSelected.add(image.id);
       }
       setSelectedImages(newSelected);
@@ -438,14 +438,14 @@ const CategoryScreen = ({ route, navigation }) => {
         </TouchableOpacity>
         <Text style={styles.selectionCount}>
           已选 {selectedImages.size}/{images.length}
-        </Text>
+      </Text>
         <TouchableOpacity onPress={toggleSelectAll}>
           <Text style={styles.selectionAll}>
             {selectedImages.size === images.length ? '取消全选' : '全选'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    );
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
   };
 
   /**
@@ -455,7 +455,7 @@ const CategoryScreen = ({ route, navigation }) => {
     if (!selectionMode || selectedImages.size === 0) return null;
     
     const actions = getActionButtons();
-    
+
     return (
       <View style={styles.actionBar}>
         {actions.map(action => (
@@ -479,11 +479,11 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const renderFooter = () => {
     if (!loadingMore) return null;
-    return (
+      return (
       <View style={styles.footer}>
         <ActivityIndicator size="small" color="#007AFF" />
-      </View>
-    );
+        </View>
+      );
   };
 
   /**
@@ -493,8 +493,8 @@ const CategoryScreen = ({ route, navigation }) => {
     <View style={styles.emptyContainer}>
       <Text style={styles.emptyIcon}>📭</Text>
       <Text style={styles.emptyText}>暂无图片</Text>
-    </View>
-  );
+            </View>
+          );
 
   // ==================== 主渲染 ====================
 
@@ -605,7 +605,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   selectionAll: {
-    fontSize: 16,
+     fontSize: 16,
     color: '#007AFF',
   },
   
@@ -692,7 +692,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#8E8E93',
-  },
+   },
 });
 
 export default CategoryScreen;

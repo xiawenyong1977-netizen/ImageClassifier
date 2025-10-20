@@ -90,6 +90,15 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    
+    // 复制 ONNX 模型文件到 assets 目录
+    sourceSets {
+        main {
+            assets {
+                srcDirs = ['src/main/assets', '../../public']
+            }
+        }
+    }
 }
 
 dependencies {
@@ -114,6 +123,7 @@ dependencies {
     implementation project(':react-native-reanimated')
     implementation project(':react-native-vector-icons')
     implementation project(':react-native-sqlite-storage')
+    implementation project(':onnxruntime-react-native')
    
 }
 

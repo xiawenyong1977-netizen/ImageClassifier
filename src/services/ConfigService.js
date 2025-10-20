@@ -3,7 +3,9 @@
  * 负责读取和管理 initialSettings.json 配置文件
  */
 
-import { logger, Platform } from '../adapters/WebAdapters.js';
+import { logger, Platform } from '../adapters/WebAdapters';
+// 静态导入配置文件（移动端和PC端都支持）
+import initialSettingsData from '../../public/initialSettings.json';
 
 class ConfigService {
   constructor() {
@@ -25,29 +27,22 @@ class ConfigService {
     try {
       logger.debug(`开始加载配置文件 (平台: ${Platform.OS})...`);
       
-      // 🆕 移动端：直接 require JSON 文件
+      // 🆕 移动端和PC端：使用静态导入的配置数据
       if (Platform.OS !== 'web') {
-        logger.debug('📱 移动端环境，使用 require 加载配置文件');
+        logger.debug('📱 移动端环境，使用静态导入的配置文件');
         
-        try {
-          // 移动端直接 require JSON 文件（从 bundle 中）
-          const configData = require('../../public/initialSettings.json');
-          this.config = configData;
-          this.isLoaded = true;
-          
-          logger.debug('✅ 移动端配置文件加载成功');
-          logger.debug(`📊 配置统计:`, {
-            models: Object.keys(this.config.models || {}).length,
-            categories: Object.keys(this.config.categoryNameMap || {}).length,
-            yoloObjects: Object.keys(this.config.yoloObjectNameMap || {}).length,
-            imagenetClasses: Object.keys(this.config.mobilenetv3Classes || {}).length
-          });
-          
-          return true;
-        } catch (requireError) {
-          logger.error('❌ 移动端配置文件加载失败:', requireError);
-          throw requireError;
-        }
+        this.config = initialSettingsData;
+        this.isLoaded = true;
+        
+        logger.debug('✅ 移动端配置文件加载成功');
+        logger.debug(`📊 配置统计:`, {
+          models: Object.keys(this.config.models || {}).length,
+          categories: Object.keys(this.config.categoryNameMap || {}).length,
+          yoloObjects: Object.keys(this.config.yoloObjectNameMap || {}).length,
+          imagenetClasses: Object.keys(this.config.mobilenetv3Classes || {}).length
+        });
+        
+        return true;
       }
       
       // 💻 PC端：使用 fetch 或 fs 加载

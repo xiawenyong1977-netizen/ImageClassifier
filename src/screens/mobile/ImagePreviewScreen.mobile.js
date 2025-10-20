@@ -187,7 +187,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
             try {
               await UnifiedDataService.updateImageCategory(currentImage.id, cat.id);
               Alert.alert('成功', `已移动到 ${cat.chinese || cat.english}`);
-            } catch (error) {
+    } catch (error) {
               logger.error('❌ 重新分类失败:', error);
               Alert.alert('操作失败', error.message);
             }
@@ -211,17 +211,17 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 渲染顶部导航栏
    */
   const renderHeader = () => (
-    <View style={styles.header}>
+      <View style={styles.header}>
       <TouchableOpacity onPress={goBack} style={styles.headerButton}>
         <Text style={styles.headerIcon}>‹</Text>
-      </TouchableOpacity>
+        </TouchableOpacity>
       <Text style={styles.headerTitle}>
         {currentImageIndex + 1} / {allImages.length || 1}
-      </Text>
+        </Text>
       <TouchableOpacity onPress={() => setShowInfo(!showInfo)} style={styles.headerButton}>
         <Text style={styles.headerIcon}>ℹ️</Text>
-      </TouchableOpacity>
-    </View>
+        </TouchableOpacity>
+      </View>
   );
 
   /**
@@ -249,7 +249,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           <TouchableOpacity onPress={() => setShowInfo(false)}>
             <Text style={styles.infoPanelClose}>✕</Text>
           </TouchableOpacity>
-        </View>
+            </View>
         <ScrollView style={styles.infoContent}>
           {imageInfo.map((item, index) => (
             <View key={index} style={styles.infoRow}>
@@ -258,7 +258,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
             </View>
           ))}
         </ScrollView>
-      </View>
+            </View>
     );
   };
 
@@ -283,7 +283,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         <Text style={styles.actionIcon}>📤</Text>
         <Text style={styles.actionLabel}>分享</Text>
       </TouchableOpacity>
-    </View>
+            </View>
   );
 
   /**
@@ -300,8 +300,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         <TouchableOpacity style={styles.navButtonRight} onPress={goToNext}>
           <Text style={styles.navButtonText}>›</Text>
         </TouchableOpacity>
-      )}
-    </>
+                )}
+              </>
   );
 
   // ==================== 主渲染 ====================
@@ -334,13 +334,13 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 style={styles.image}
                 resizeMode="contain"
               />
-            </View>
+          </View>
           ))}
-        </ScrollView>
+      </ScrollView>
 
         {/* 导航箭头 */}
         {renderNavigationArrows()}
-      </View>
+          </View>
 
       {/* 图片信息面板 */}
       {renderImageInfo()}

@@ -7,7 +7,7 @@ import {
   getFileStats,
   RNFS,
   Platform  // 🆕 使用统一的Platform对象
-} from '../adapters/WebAdapters.js';
+} from '../adapters/WebAdapters';
 
 import ImageClassifierService from './ImageClassifierService';
 
@@ -489,14 +489,8 @@ class GalleryScannerService {
         break;
         
       case 'directory_scanning':
-        // 如果message包含目录名，使用它；否则使用extraInfo
-        let dirName = '未知目录';
-        if (message.includes(': ')) {
-          const parts = message.split(': ');
-          if (parts.length > 1) {
-            dirName = parts[1];
-          }
-        }
+        // message 就是目录名（来自 sendProgressMessage 的 extraInfo 参数）
+        const dirName = message || '扫描中';
         // 如果还没有发现照片，只显示目录名；否则显示发现数量
         if (filesFound && filesFound > 0) {
           simpleMessage = `扫描目录: ${dirName} | 发现: ${filesFound} 张照片`;
@@ -1121,7 +1115,8 @@ class GalleryScannerService {
   async scanDirectoriesPhase(scanPaths, scanStartTime) {
     logger.debug('📁 阶段1: 开始目录扫描...');
     
-    this.sendProgressMessage('directory_scanning', 0, 0, 0, scanStartTime, `开始扫描目录: ${scanPaths.join(', ')}`);
+    // 只显示目录数量，不显示具体路径
+    this.sendProgressMessage('directory_scanning', 0, 0, 0, scanStartTime, `开始扫描 ${scanPaths.length} 个目录`);
     
     const allImages = [];
     

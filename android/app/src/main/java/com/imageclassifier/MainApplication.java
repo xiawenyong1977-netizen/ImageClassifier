@@ -21,7 +21,7 @@ import fr.bamlab.rnimageresizer.ImageResizerPackage;
 import com.swmansion.reanimated.ReanimatedPackage;
 import com.oblador.vectoricons.VectorIconsPackage;
 import org.pgsqlite.SQLitePluginPackage;
-import com.imageclassifier.MediaStorePackage;
+import ai.onnxruntime.reactnative.OnnxruntimePackage;
 
 public class MainApplication extends Application implements ReactApplication {
 
@@ -48,7 +48,7 @@ public class MainApplication extends Application implements ReactApplication {
             new ReanimatedPackage(),
             new VectorIconsPackage(),
             new SQLitePluginPackage(),
-            new MediaStorePackage()
+            new OnnxruntimePackage()
           );
         }
 

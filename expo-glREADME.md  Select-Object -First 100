@@ -1,0 +1,388 @@
+[1mdiff --git a/src/services/ImageClassifierService.js b/src/services/ImageClassifierService.js[m
+[1mindex 96514f0..99a5aa8 100644[m
+[1m--- a/src/services/ImageClassifierService.js[m
+[1m+++ b/src/services/ImageClassifierService.js[m
+[36m@@ -1,6 +1,6 @@[m
+ import UnifiedDataService from './UnifiedDataService.js';[m
+ import configService from './ConfigService.js';[m
+[31m-import { logger, ModelPathAdapter } from '../adapters/WebAdapters.js';[m
+[32m+[m[32mimport { logger, ModelPathAdapter, CanvasAdapter } from '../adapters/WebAdapters';[m
+ [m
+ class ImageClassifierService {[m
+   constructor() {[m
+[36m@@ -199,6 +199,10 @@[m [mclass ImageClassifierService {[m
+ [m
+         // MobileNetV3类别已在初始化时加载，无需重复加载[m
+ [m
+[32m+[m[32m        // 🆕 确保模型文件存在（移动端会从 assets 复制）[m
+[32m+[m[32m        const modelFileName = modelConfig.path.split('/').pop();[m
+[32m+[m[32m        await ModelPathAdapter.ensureModelExists(modelFileName);[m
+[32m+[m
+         // 加载ONNX模型[m
+         // 使用统一的ONNX Runtime实例[m
+         const ort = this.ort;[m
+[36m@@ -303,72 +307,46 @@[m [mclass ImageClassifierService {[m
+       // 使用统一的ONNX Runtime实例[m
+       const ort = this.ort;[m
+       [m
+[31m-      // 将图片转换为RGB格式并调整大小[m
+[31m-      const canvas = document.createElement('canvas');[m
+[31m-      const ctx = canvas.getContext('2d');[m
+[31m-      const img = new Image();[m
+[32m+[m[32m      // 移动端：使用 CanvasAdapter 加载并调整图片（已包含像素数据）[m
+[32m+[m[32m      const canvas = await CanvasAdapter.createCanvas(inputSize, inputSize);[m
+[32m+[m[32m      const imgData = await CanvasAdapter.loadImage(imageUri, canvas);[m
+       [m
+[31m-      return new Promise((resolve, reject) => {[m
+[31m-        img.onload = () => {[m
+[31m-          canvas.width = inputSize;[m
+[31m-          canvas.height = inputSize;[m
+[31m-          [m
+[31m-          // 计算缩放比例，保持长宽比[m
+[31m-          const scale = Math.min(inputSize / img.width, inputSize / img.height);[m
+[31m-          const scaledWidth = img.width * scale;[m
+[31m-          const scaledHeight = img.height * scale;[m
+[31m-          [m
+[31m-          // 计算居中位置[m
+[31m-          const x = (inputSize - scaledWidth) / 2;[m
+[31m-          const y = (inputSize - scaledHeight) / 2;[m
+[31m-          [m
+[31m-          // 填充黑色背景[m
+[31m-          ctx.fillStyle = 'black';[m
+[31m-          ctx.fillRect(0, 0, inputSize, inputSize);[m
+[31m-          [m
+[31m-          // 绘制图片，保持长宽比[m
+[31m-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight);[m
+[31m-          [m
+[31m-          // 获取图片数据[m
+[31m-          const imageData = ctx.getImageData(0, 0, inputSize, inputSize);[m
+[31m-          const { data } = imageData;[m
+[31m-          [m
+[31m-          // 转换为RGB格式并归一化到[0,1][m
+[31m-          const rgbData = new Float32Array(inputSize * inputSize * 3);[m
+[31m-          for (let i = 0; i < data.length; i += 4) {[m
+[31m-            const pixelIndex = i / 4;[m
+[31m-            rgbData[pixelIndex * 3] = data[i] / 255.0;         // R[m
+[31m-            rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G[m
+[31m-            rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B[m
+[31m-          }[m
+[31m-          [m
+[31m-          // 关键修复：转换为正确的BCHW格式[m
+[31m-          // 原始格式：HWC (Height, Width, Channel) - [640, 640, 3][m
+[31m-          // 目标格式：BCHW (Batch, Channel, Height, Width) - [1, 3, 640, 640][m
+[31m-          const bchwData = new Float32Array(1 * 3 * inputSize * inputSize);[m
+[31m-          [m
+[31m-          for (let h = 0; h < inputSize; h++) {[m
+[31m-            for (let w = 0; w < inputSize; w++) {[m
+[31m-              const pixelIndex = h * inputSize + w;[m
+[31m-              const r = rgbData[pixelIndex * 3];[m
+[31m-              const g = rgbData[pixelIndex * 3 + 1];[m
+[31m-              const b = rgbData[pixelIndex * 3 + 2];[m
+[31m-              [m
+[31m-              // BCHW格式：先所有R，再所有G，最后所有B[m
+[31m-              bchwData[h * inputSize + w] = r;                    // R通道[m
+[31m-              bchwData[inputSize * inputSize + h * inputSize + w] = g;        // G通道  [m
+[31m-              bchwData[2 * inputSize * inputSize + h * inputSize + w] = b;    // B通道[m
+[31m-            }[m
+[31m-          }[m
+[32m+[m[32m      // imgData 已包含解码后的像素数据（RGBA 格式，Uint8Array）[m
+[32m+[m[32m      const { data, width, height } = imgData;[m
+[32m+[m[41m      [m
+[32m+[m[32m      logger.debug(`📋 图片数据: ${width}x${height}, 像素数组长度: ${data.length}`);[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 转换为RGB格式并归一化到[0,1][m
+[32m+[m[32m      const rgbData = new Float32Array(inputSize * inputSize * 3);[m
+[32m+[m[32m      for (let i = 0; i < data.length; i += 4) {[m
+[32m+[m[32m        const pixelIndex = i / 4;[m
+[32m+[m[32m        rgbData[pixelIndex * 3] = data[i] / 255.0;         // R[m
+[32m+[m[32m        rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G[m
+[32m+[m[32m        rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B[m
+[32m+[m[32m      }[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 关键修复：转换为正确的BCHW格式[m
+[32m+[m[32m      // 原始格式：HWC (Height, Width, Channel) - [640, 640, 3][m
+[32m+[m[32m      // 目标格式：BCHW (Batch, Channel, Height, Width) - [1, 3, 640, 640][m
+[32m+[m[32m      const bchwData = new Float32Array(1 * 3 * inputSize * inputSize);[m
+[32m+[m[41m      [m
+[32m+[m[32m      for (let h = 0; h < inputSize; h++) {[m
+[32m+[m[32m        for (let w = 0; w < inputSize; w++) {[m
+[32m+[m[32m          const pixelIndex = h * inputSize + w;[m
+[32m+[m[32m          const r = rgbData[pixelIndex * 3];[m
+[32m+[m[32m          const g = rgbData[pixelIndex * 3 + 1];[m
+[32m+[m[32m          const b = rgbData[pixelIndex * 3 + 2];[m
+           [m
+[31m-          // 转换为ONNX格式 (1, 3, 640, 640)[m
+[31m-          const tensor = new ort.Tensor('float32', bchwData, [1, 3, inputSize, inputSize]);[m
+[31m-          resolve(tensor);[m
+[31m-        };[m
+[31m-        [m
+[31m-        img.onerror = reject;[m
+[31m-        img.src = imageData;[m
+[31m-      });[m
+[32m+[m[32m          // BCHW格式：先所有R，再所有G，最后所有B[m
+[32m+[m[32m          bchwData[h * inputSize + w] = r;                    // R通道[m
+[32m+[m[32m          bchwData[inputSize * inputSize + h * inputSize + w] = g;        // G通道[m[41m  [m
+[32m+[m[32m          bchwData[2 * inputSize * inputSize + h * inputSize + w] = b;    // B通道[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 转换为ONNX格式 (1, 3, 640, 640)[m
+[32m+[m[32m      const tensor = new ort.Tensor('float32', bchwData, [1, 3, inputSize, inputSize]);[m
+[32m+[m[32m      return tensor;[m
+     } catch (error) {[m
+       console.error('Image preprocessing failed:', error);[m
+       throw error;[m
+[36m@@ -759,19 +737,37 @@[m [mclass ImageClassifierService {[m
+ [m
+   // 获取图片原始分辨率[m
+   async getOriginalImageDimensions(imageUri) {[m
+[31m-    return new Promise((resolve, reject) => {[m
+[31m-      const img = new Image();[m
+[31m-      img.onload = () => {[m
+[31m-        resolve({[m
+[31m-          width: img.naturalWidth,[m
+[31m-          height: img.naturalHeight[m
+[31m-        });[m
+[31m-      };[m
+[31m-      img.onerror = () => {[m
+[31m-        reject(new Error('Failed to load image'));[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      // 移动端：使用 ImageResizer 快速获取尺寸（不实际缩放）[m
+[32m+[m[32m      const filePath = imageUri.startsWith('file://')[m[41m [m
+[32m+[m[32m        ? imageUri.replace('file://', '')[m[41m [m
+[32m+[m[32m        : imageUri;[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 使用 ImageResizer 获取图片信息（只读取元数据，不处理图片）[m
+[32m+[m[32m      const info = await ImageResizer_Native.createResizedImage([m
+[32m+[m[32m        filePath,[m
+[32m+[m[32m        10, // 最小尺寸，只为获取原始尺寸[m
+[32m+[m[32m        10,[m
+[32m+[m[32m        'JPEG',[m
+[32m+[m[32m        1,[m
+[32m+[m[32m        0,[m
+[32m+[m[32m        null,[m
+[32m+[m[32m        false,[m
+[32m+[m[32m        { mode: 'contain' }[m
+[32m+[m[32m      );[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 读取原始尺寸（从 EXIF 或实际解析）[m
+[32m+[m[32m      // 注意：这里返回的是调整后的尺寸，需要从原始文件读取[m
+[32m+[m[32m      // 简化方案：直接用临时解码获取尺寸[m
+[32m+[m[32m      const tempData = await CanvasAdapter.loadImage(imageUri, { _targetWidth: 100, _targetHeight: 100 });[m
+[32m+[m[32m      return {[m
+[32m+[m[32m        width: tempData._rawImageData?.width || tempData.width,[m
+[32m+[m[32m        height: tempData._rawImageData?.height || tempData.height[m
+       };[m
+[31m-      img.src = imageUri;[m
+[31m-    });[m
+[32m+[m[32m    } catch (error) {[m
+[32m+[m[32m      logger.error('❌ 获取图片尺寸失败:', error);[m
+[32m+[m[32m      throw new Error('Failed to load image');[m
+[32m+[m[32m    }[m
+   }[m
+ [m
+   // 检查是否为手机截图[m
+[36m@@ -1325,6 +1321,10 @@[m [mclass ImageClassifierService {[m
+ [m
+       // ImageNet类别已在初始化时加载[m
+ [m
+[32m+[m[32m      // 🆕 确保模型文件存在（移动端会从 assets 复制）[m
+[32m+[m[32m      const modelFileName = modelConfig.path.split('/').pop();[m
+[32m+[m[32m      await ModelPathAdapter.ensureModelExists(modelFileName);[m
+[32m+[m
+       // 使用统一的ONNX Runtime实例[m
+       const ort = this.ort;[m
+ [m
+[36m@@ -1358,64 +1358,41 @@[m [mclass ImageClassifierService {[m
+       // 使用统一的ONNX Runtime实例[m
+       const ort = this.ort;[m
+ [m
+[31m-      const canvas = document.createElement('canvas');[m
+[31m-      const ctx = canvas.getContext('2d');[m
+[31m-      const img = new Image();[m
+[32m+[m[32m      const inputSize = 224; // MobileNetV3输入尺寸[m
+       [m
+[31m-      return new Promise((resolve, reject) => {[m
+[31m-        img.onload = () => {[m
+[31m-          const inputSize = 224; // MobileNetV3输入尺寸[m
+[31m-          canvas.width = inputSize;[m
+[31m-          canvas.height = inputSize;[m
+[31m-          [m
+[31m-          // 使用cover模式保持宽高比，居中裁剪[m
+[31m-          const scale = Math.max(inputSize / img.width, inputSize / img.height);[m
+[31m-          const scaledWidth = img.width * scale;[m
+[31m-          const scaledHeight = img.height * scale;[m
+[31m-          [m
+[31m-          const x = (inputSize - scaledWidth) / 2;[m
+[31m-          const y = (inputSize - scaledHeight) / 2;[m
+[31m-          [m
+[31m-          // 填充黑色背景[m
+[31m-          ctx.fillStyle = 'black';[m
+[31m-          ctx.fillRect(0, 0, inputSize, inputSize);[m
+[31m-          [m
+[31m-          // 绘制图片[m
+[31m-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight);[m
+[31m-          [m
+[31m-          // 获取图片数据[m
+[31m-          const imageData = ctx.getImageData(0, 0, inputSize, inputSize);[m
+[31m-          const { data } = imageData;[m
+[31m-          [m
+[31m-          // 转换为RGB格式并归一化到[0,1][m
+[31m-          const rgbData = new Float32Array(inputSize * inputSize * 3);[m
+[31m-          for (let i = 0; i < data.length; i += 4) {[m
+[31m-            const pixelIndex = i / 4;[m
+[31m-            rgbData[pixelIndex * 3] = data[i] / 255.0;         // R[m
+[31m-            rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G[m
+[31m-            rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B[m
+[31m-          }[m
+[31m-          [m
+[31m-          // 转换为CHW格式 (Channel, Height, Width)[m
+[31m-          const chwData = new Float32Array(3 * inputSize * inputSize);[m
+[31m-          for (let h = 0; h < inputSize; h++) {[m
+[31m-            for (let w = 0; w < inputSize; w++) {[m
+[31m-              for (let c = 0; c < 3; c++) {[m
+[31m-                const hwcIndex = h * inputSize * 3 + w * 3 + c;[m
+[31m-                const chwIndex = c * inputSize * inputSize + h * inputSize + w;[m
+[31m-                chwData[chwIndex] = rgbData[hwcIndex];[m
+[31m-              }[m
+[31m-            }[m
+[32m+[m[32m      // 移动端：使用 CanvasAdapter 加载并调整图片（已包含像素数据）[m
+[32m+[m[32m      const canvas = await CanvasAdapter.createCanvas(inputSize, inputSize);[m
+[32m+[m[32m      const imgData = await CanvasAdapter.loadImage(imageUri, canvas);[m
+[32m+[m[41m      [m
+[32m+[m[32m      // imgData 已包含解码后的像素数据（RGBA 格式，Uint8Array）[m
+[32m+[m[32m      const { data, width, height } = imgData;[m
+[32m+[m[41m      [m
+[32m+[m[32m      logger.debug(`📋 MobileNetV3 图片数据: ${width}x${height}`);[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 转换为RGB格式并归一化到[0,1][m
+[32m+[m[32m      const rgbData = new Float32Array(inputSize * inputSize * 3);[m
+[32m+[m[32m      for (let i = 0; i < data.length; i += 4) {[m
+[32m+[m[32m        const pixelIndex = i / 4;[m
+[32m+[m[32m        rgbData[pixelIndex * 3] = data[i] / 255.0;         // R[m
+[32m+[m[32m        rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G[m
+[32m+[m[32m        rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B[m
+[32m+[m[32m      }[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 转换为CHW格式 (Channel, Height, Width)[m
+[32m+[m[32m      const chwData = new Float32Array(3 * inputSize * inputSize);[m
+[32m+[m[32m      for (let h = 0; h < inputSize; h++) {[m
+[32m+[m[32m        for (let w = 0; w < inputSize; w++) {[m
+[32m+[m[32m          for (let c = 0; c < 3; c++) {[m
+[32m+[m[32m            const hwcIndex = h * inputSize * 3 + w * 3 + c;[m
+[32m+[m[32m            const chwIndex = c * inputSize * inputSize + h * inputSize + w;[m
+[32m+[m[32m            chwData[chwIndex] = rgbData[hwcIndex];[m
+           }[m
+[31m-          [m
+[31m-          // 创建ONNX张量 [1, 3, 224, 224][m
+[31m-          const tensor = new ort.Tensor('float32', chwData, [1, 3, inputSize, inputSize]);[m
+[31m-          resolve(tensor);[m
+[31m-        };[m
+[31m-        [m
+[31m-        img.onerror = reject;[m
+[31m-        img.src = imageUri;[m
+[31m-      });[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 创建ONNX张量 [1, 3, 224, 224][m
+[32m+[m[32m      const tensor = new ort.Tensor('float32', chwData, [1, 3, inputSize, inputSize]);[m
+[32m+[m[32m      return tensor;[m
+     } catch (error) {[m
+       console.error('❌ MobileNetV3图片预处理失败:', error);[m
+       throw error;[m
+[36m@@ -2108,64 +2085,41 @@[m [mclass ImageClassifierService {[m
+    * @returns {Promise<File>} - 缩放后的图像文件[m
+    */[m
+   async resizeImageTo1024(imageFile) {[m
+[31m-    return new Promise((resolve, reject) => {[m
+[31m-      const canvas = document.createElement('canvas');[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      const maxSize = 1024;[m
+[32m+[m[32m      const canvas = await CanvasAdapter.createCanvas(maxSize, maxSize);[m
+       const ctx = canvas.getContext('2d');[m
+[31m-      const img = new Image();[m
+[32m+[m[32m      const img = await CanvasAdapter.loadImage(imageFile, canvas);[m
+       [m
+[31m-      img.onload = () => {[m
+[31m-        // 计算缩放比例，保持宽高比[m
+[31m-        const maxSize = 1024;[m
+[31m-        let { width, height } = img;[m
+[31m-        [m
+[31m-        if (width > height) {[m
+[31m-          if (width > maxSize) {[m
+[31m-            height = (height * maxSize) / width;[m
+[31m-            width = maxSize;[m
+[31m-          }[m
+[31m-        } else {[m
+[31m-          if (height > maxSize) {[m
+[31m-            width = (width * maxSize) / height;[m
+[31m-            height = maxSize;[m
+[31m-          }[m
+[32m+[m[32m      // 计算缩放比例，保持宽高比[m
+[32m+[m[32m      let { width, height } = img;[m
+[32m+[m[41m      [m
+[32m+[m[32m      if (width > height) {[m
+[32m+[m[32m        if (width > maxSize) {[m
+[32m+[m[32m          height = (height * maxSize) / width;[m
+[32m+[m[32m          width = maxSize;[m
+         }[m
+[31m-        [m
+[31m-        // 设置canvas尺寸[m
+[31m-        canvas.width = width;[m
+[31m-        canvas.height = height;[m
+[31m-        [m
+[31m-        // 绘制缩放后的图像[m
+[31m-        ctx.drawImage(img, 0, 0, width, height);[m
+[31m-        [m
+[31m-        // 转换为Blob[m
+[31m-        canvas.toBlob((blob) => {[m
+[31m-          if (blob) {[m
+[31m-            // 创建新的File对象[m
+[31m-            const resizedFile = new File([blob], imageFile.name, {[m
+[31m-              type: blob.type || 'image/jpeg',[m
+[31m-              lastModified: Date.now()[m
+[31m-            });[m
+[31m-            resolve(resizedFile);[m
+[31m-          } else {[m
+[31m-            reject(new Error('图像缩放失败'));[m
+[31m-          }[m
+[31m-        }, 'image/jpeg', 0.9); // 使用90%质量[m
+[31m-      };[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        if (height > maxSize) {[m
+[32m+[m[32m          width = (width * maxSize) / height;[m
+[32m+[m[32m          height = maxSize;[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+       [m
+[31m-      img.onerror = () => {[m
+[31m-        reject(new Error('图像加载失败'));[m
+[31m-      };[m
+[32m+[m[32m      // 设置canvas尺寸[m
+[32m+[m[32m      canvas.width = width;[m
+[32m+[m[32m      canvas.height = height;[m
+       [m
+[31m-      // 加载图像[m
+[31m-      const reader = new FileReader();[m
+[31m-      reader.onload = (e) => {[m
+[31m-        img.src = e.target.result;[m
+[31m-      };[m
+[31m-      reader.onerror = () => {[m
+[31m-        reject(new Error('文件读取失败'));[m
+[31m-      };[m
+[31m-      reader.readAsDataURL(imageFile);[m
+[31m-    });[m
+[32m+[m[32m      // 绘制缩放后的图像[m
+[32m+[m[32m      ctx.drawImage(img, 0, 0, width, height);[m
+[32m+[m[41m      [m
+[32m+[m[32m      // 转换为Blob (注意：react-native-canvas 可能不支持 toBlob)[m
+[32m+[m[32m      // 移动端直接返回 canvas，由调用方处理[m
+[32m+[m[32m      return canvas;[m
+[32m+[m[32m    } catch (error) {[m
+[32m+[m[32m      logger.error('❌ 图像缩放失败:', error);[m
+[32m+[m[32m      throw error;[m
+[32m+[m[32m    }[m
+   }[m
+ }[m
+ [m

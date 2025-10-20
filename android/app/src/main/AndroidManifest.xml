@@ -1,26 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 基础网络权限 - 用于远程推理API -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     
     <!-- 存储权限 - Android 12 及以下版本 -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
+                     android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                     android:maxSdkVersion="32" />
     
     <!-- 媒体权限 - Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     
-    <!-- 管理外部存储权限 - Android 11+ -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    
-    <!-- 相机权限 -->
+    <!-- 相机权限 - 用于拍照功能（可选） -->
     <uses-permission android:name="android.permission.CAMERA" />
-    
-    <!-- 系统权限 - 用于删除文件 -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <application
       android:name=".MainApplication"

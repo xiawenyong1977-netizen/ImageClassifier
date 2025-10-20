@@ -1,6 +1,7 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import { logger, ModelPathAdapter } from '../adapters/WebAdapters.js';
+import { logger, ModelPathAdapter, CanvasAdapter } from '../adapters/WebAdapters';
+import imageProcessor from './ImageProcessor';
 
 class ImageClassifierService {
   constructor() {
@@ -199,6 +200,12 @@ class ImageClassifierService {
 
         // MobileNetV3类别已在初始化时加载，无需重复加载
 
+        // 🆕 确保模型文件存在（仅在移动端需要从 assets 复制）
+        if (typeof ModelPathAdapter.ensureModelExists === 'function') {
+          const modelFileName = modelConfig.path.split('/').pop();
+          await ModelPathAdapter.ensureModelExists(modelFileName);
+        }
+
         // 加载ONNX模型
         // 使用统一的ONNX Runtime实例
         const ort = this.ort;
@@ -298,77 +305,50 @@ class ImageClassifierService {
   }
 
   // 预处理图片用于YOLO模型
-  async preprocessImageForYOLO(imageData, inputSize = 640) {
+  async preprocessImageForYOLO(imageUri, inputSize = 640) {
     try {
       // 使用统一的ONNX Runtime实例
       const ort = this.ort;
       
-      // 将图片转换为RGB格式并调整大小
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
+      // 使用新接口获取像素数据（保持宽高比，居中，黑边填充）
+      const data = await imageProcessor.getPixelData(
+        imageUri,
+        inputSize,
+        inputSize,
+        { mode: 'contain', backgroundColor: [0, 0, 0, 255] }
+      );
       
-      return new Promise((resolve, reject) => {
-        img.onload = () => {
-          canvas.width = inputSize;
-          canvas.height = inputSize;
+      // 转换为RGB格式并归一化到[0,1]
+      const rgbData = new Float32Array(inputSize * inputSize * 3);
+      for (let i = 0; i < data.length; i += 4) {
+        const pixelIndex = i / 4;
+        rgbData[pixelIndex * 3] = data[i] / 255.0;         // R
+        rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
+        rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
+      }
+      
+      // 关键修复：转换为正确的BCHW格式
+      // 原始格式：HWC (Height, Width, Channel) - [640, 640, 3]
+      // 目标格式：BCHW (Batch, Channel, Height, Width) - [1, 3, 640, 640]
+      const bchwData = new Float32Array(1 * 3 * inputSize * inputSize);
+      
+      for (let h = 0; h < inputSize; h++) {
+        for (let w = 0; w < inputSize; w++) {
+          const pixelIndex = h * inputSize + w;
+          const r = rgbData[pixelIndex * 3];
+          const g = rgbData[pixelIndex * 3 + 1];
+          const b = rgbData[pixelIndex * 3 + 2];
           
-          // 计算缩放比例，保持长宽比
-          const scale = Math.min(inputSize / img.width, inputSize / img.height);
-          const scaledWidth = img.width * scale;
-          const scaledHeight = img.height * scale;
-          
-          // 计算居中位置
-          const x = (inputSize - scaledWidth) / 2;
-          const y = (inputSize - scaledHeight) / 2;
-          
-          // 填充黑色背景
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, inputSize, inputSize);
-          
-          // 绘制图片，保持长宽比
-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
-          
-          // 获取图片数据
-          const imageData = ctx.getImageData(0, 0, inputSize, inputSize);
-          const { data } = imageData;
-          
-          // 转换为RGB格式并归一化到[0,1]
-          const rgbData = new Float32Array(inputSize * inputSize * 3);
-          for (let i = 0; i < data.length; i += 4) {
-            const pixelIndex = i / 4;
-            rgbData[pixelIndex * 3] = data[i] / 255.0;         // R
-            rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
-            rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
-          }
-          
-          // 关键修复：转换为正确的BCHW格式
-          // 原始格式：HWC (Height, Width, Channel) - [640, 640, 3]
-          // 目标格式：BCHW (Batch, Channel, Height, Width) - [1, 3, 640, 640]
-          const bchwData = new Float32Array(1 * 3 * inputSize * inputSize);
-          
-          for (let h = 0; h < inputSize; h++) {
-            for (let w = 0; w < inputSize; w++) {
-              const pixelIndex = h * inputSize + w;
-              const r = rgbData[pixelIndex * 3];
-              const g = rgbData[pixelIndex * 3 + 1];
-              const b = rgbData[pixelIndex * 3 + 2];
-              
-              // BCHW格式：先所有R，再所有G，最后所有B
-              bchwData[h * inputSize + w] = r;                    // R通道
-              bchwData[inputSize * inputSize + h * inputSize + w] = g;        // G通道  
-              bchwData[2 * inputSize * inputSize + h * inputSize + w] = b;    // B通道
-            }
-          }
-          
-          // 转换为ONNX格式 (1, 3, 640, 640)
-          const tensor = new ort.Tensor('float32', bchwData, [1, 3, inputSize, inputSize]);
-          resolve(tensor);
-        };
-        
-        img.onerror = reject;
-        img.src = imageData;
-      });
+          // BCHW格式：先所有R，再所有G，最后所有B
+          bchwData[h * inputSize + w] = r;                    // R通道
+          bchwData[inputSize * inputSize + h * inputSize + w] = g;        // G通道  
+          bchwData[2 * inputSize * inputSize + h * inputSize + w] = b;    // B通道
+        }
+      }
+      
+      // 转换为ONNX格式 (1, 3, 640, 640)
+      const tensor = new ort.Tensor('float32', bchwData, [1, 3, inputSize, inputSize]);
+      return tensor;
     } catch (error) {
       console.error('Image preprocessing failed:', error);
       throw error;
@@ -558,9 +538,9 @@ class ImageClassifierService {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
-      // 获取图像尺寸
+      // 获取图像尺寸（使用ImageProcessor，后续预处理可以复用）
       const dimensionsStart = Date.now();
-      const imageDimensions = await this.getOriginalImageDimensions(imageUri);
+      const imageDimensions = await imageProcessor.getImageDimensions(imageUri);
       const dimensionsTime = Date.now() - dimensionsStart;
       
       // 执行本地并行推理
@@ -759,19 +739,12 @@ class ImageClassifierService {
 
   // 获取图片原始分辨率
   async getOriginalImageDimensions(imageUri) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        resolve({
-          width: img.naturalWidth,
-          height: img.naturalHeight
-        });
-      };
-      img.onerror = () => {
-        reject(new Error('Failed to load image'));
-      };
-      img.src = imageUri;
-    });
+    try {
+      // 使用ImageProcessor统一接口，避免重复加载
+      return await imageProcessor.getImageDimensions(imageUri);
+    } catch (error) {
+      throw new Error('Failed to load image');
+    }
   }
 
   // 检查是否为手机截图
@@ -1325,6 +1298,12 @@ class ImageClassifierService {
 
       // ImageNet类别已在初始化时加载
 
+      // 🆕 确保模型文件存在（仅在移动端需要从 assets 复制）
+      if (typeof ModelPathAdapter.ensureModelExists === 'function') {
+        const modelFileName = modelConfig.path.split('/').pop();
+        await ModelPathAdapter.ensureModelExists(modelFileName);
+      }
+
       // 使用统一的ONNX Runtime实例
       const ort = this.ort;
 
@@ -1358,64 +1337,39 @@ class ImageClassifierService {
       // 使用统一的ONNX Runtime实例
       const ort = this.ort;
 
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
+      const inputSize = 224; // MobileNetV3输入尺寸
+      // 使用新接口获取像素数据（cover模式，填满并裁剪）
+      const data = await imageProcessor.getPixelData(
+        imageUri,
+        inputSize,
+        inputSize,
+        { mode: 'cover' }
+      );
       
-      return new Promise((resolve, reject) => {
-        img.onload = () => {
-          const inputSize = 224; // MobileNetV3输入尺寸
-          canvas.width = inputSize;
-          canvas.height = inputSize;
-          
-          // 使用cover模式保持宽高比，居中裁剪
-          const scale = Math.max(inputSize / img.width, inputSize / img.height);
-          const scaledWidth = img.width * scale;
-          const scaledHeight = img.height * scale;
-          
-          const x = (inputSize - scaledWidth) / 2;
-          const y = (inputSize - scaledHeight) / 2;
-          
-          // 填充黑色背景
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, inputSize, inputSize);
-          
-          // 绘制图片
-          ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
-          
-          // 获取图片数据
-          const imageData = ctx.getImageData(0, 0, inputSize, inputSize);
-          const { data } = imageData;
-          
-          // 转换为RGB格式并归一化到[0,1]
-          const rgbData = new Float32Array(inputSize * inputSize * 3);
-          for (let i = 0; i < data.length; i += 4) {
-            const pixelIndex = i / 4;
-            rgbData[pixelIndex * 3] = data[i] / 255.0;         // R
-            rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
-            rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
+      // 转换为RGB格式并归一化到[0,1]
+      const rgbData = new Float32Array(inputSize * inputSize * 3);
+      for (let i = 0; i < data.length; i += 4) {
+        const pixelIndex = i / 4;
+        rgbData[pixelIndex * 3] = data[i] / 255.0;         // R
+        rgbData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
+        rgbData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
+      }
+      
+      // 转换为CHW格式 (Channel, Height, Width)
+      const chwData = new Float32Array(3 * inputSize * inputSize);
+      for (let h = 0; h < inputSize; h++) {
+        for (let w = 0; w < inputSize; w++) {
+          for (let c = 0; c < 3; c++) {
+            const hwcIndex = h * inputSize * 3 + w * 3 + c;
+            const chwIndex = c * inputSize * inputSize + h * inputSize + w;
+            chwData[chwIndex] = rgbData[hwcIndex];
           }
-          
-          // 转换为CHW格式 (Channel, Height, Width)
-          const chwData = new Float32Array(3 * inputSize * inputSize);
-          for (let h = 0; h < inputSize; h++) {
-            for (let w = 0; w < inputSize; w++) {
-              for (let c = 0; c < 3; c++) {
-                const hwcIndex = h * inputSize * 3 + w * 3 + c;
-                const chwIndex = c * inputSize * inputSize + h * inputSize + w;
-                chwData[chwIndex] = rgbData[hwcIndex];
-              }
-            }
-          }
-          
-          // 创建ONNX张量 [1, 3, 224, 224]
-          const tensor = new ort.Tensor('float32', chwData, [1, 3, inputSize, inputSize]);
-          resolve(tensor);
-        };
-        
-        img.onerror = reject;
-        img.src = imageUri;
-      });
+        }
+      }
+      
+      // 创建ONNX张量 [1, 3, 224, 224]
+      const tensor = new ort.Tensor('float32', chwData, [1, 3, inputSize, inputSize]);
+      return tensor;
     } catch (error) {
       console.error('❌ MobileNetV3图片预处理失败:', error);
       throw error;

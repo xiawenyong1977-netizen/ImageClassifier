@@ -4,7 +4,7 @@
  * 注意：仅用于 PC 端（Electron），移动端会自动跳过
  */
 
-import { logger, Platform } from '../adapters/WebAdapters.js';
+import { logger, Platform } from '../adapters/WebAdapters';
 
 class IPCListenerService {
   constructor() {

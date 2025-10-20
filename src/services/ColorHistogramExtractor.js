@@ -8,7 +8,8 @@
  * - 通过CanvasAdapter统一适配，代码完全相同
  */
 
-import { logger, CanvasAdapter } from '../adapters/WebAdapters.js';
+import { logger } from '../adapters/WebAdapters';
+import imageProcessor from './ImageProcessor';
 
 class ColorHistogramExtractor {
   constructor() {
@@ -27,25 +28,22 @@ class ColorHistogramExtractor {
    */
   async extractHistogram(imageUri) {
     try {
-      // 🆕 使用适配器加载图片（PC和移动端统一）
-      const image = await CanvasAdapter.loadImage(imageUri);
+      // 使用 ImageProcessor 获取图片尺寸
+      const dimensions = await imageProcessor.getImageDimensions(imageUri);
       
       // 计算缩放比例（为了性能，限制最大尺寸）
       const maxSize = 200;
-      const scale = Math.min(maxSize / image.width, maxSize / image.height, 1);
-      const width = Math.floor(image.width * scale);
-      const height = Math.floor(image.height * scale);
+      const scale = Math.min(maxSize / dimensions.width, maxSize / dimensions.height, 1);
+      const width = Math.floor(dimensions.width * scale);
+      const height = Math.floor(dimensions.height * scale);
       
-      // 🆕 使用适配器创建Canvas（PC和移动端统一）
-      const canvas = await CanvasAdapter.createCanvas(width, height);
-      const ctx = canvas.getContext('2d');
+      logger.debug(`🎨 直方图提取: ${imageUri}, 缩放到 ${width}x${height}`);
       
-      // 🟢 绘制图片到canvas（标准Canvas API）
-      ctx.drawImage(image, 0, 0, width, height);
-      
-      // 🟢 获取像素数据（标准Canvas API）
-      const imageData = ctx.getImageData(0, 0, width, height);
-      const pixels = imageData.data;
+      // 使用 ImageProcessor 获取像素数据
+      const pixels = await imageProcessor.getPixelData(imageUri, width, height, {
+        mode: 'contain',
+        backgroundColor: [0, 0, 0, 255]
+      });
       
       // 提取直方图
       const histogram = this._extractHistogramFromPixels(pixels);

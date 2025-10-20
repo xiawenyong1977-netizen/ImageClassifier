@@ -1,12 +1,12 @@
 /**
  * 芯图相册 - 移动端首页
  * 
- * 功能：
- * 1. 统计概览（总图片、暂存箱、今日新增、相似组）
- * 2. 按内容分类浏览（横向滚动）
- * 3. 相似图片分组（最多8组）
- * 4. 按城市分类（全部显示）
- * 5. 最近照片（3x4网格）
+ * 功能（与PC端保持一致）：
+ * 1. 消息提示区（显示扫描进度或最近扫描信息）
+ * 2. 按内容分类浏览
+ * 3. 相似图片分组
+ * 4. 按城市分类
+ * 5. 最近照片
  * 6. FAB扫描按钮
  */
 
@@ -23,7 +23,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from '../../adapters/WebAdapters';
+import { SafeAreaView, Platform, PermissionsAndroid } from '../../adapters/WebAdapters';
+import { useFocusEffect } from '@react-navigation/native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
@@ -36,14 +37,6 @@ const HomeScreen = ({ navigation }) => {
   // ==================== 状态管理 ====================
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  
-  // 统计数据
-  const [stats, setStats] = useState({
-    totalImages: 0,
-    stagingBox: 0,
-    todayAdded: 0,
-    similarityGroups: 0,
-  });
   
   // 分类数据
   const [categories, setCategories] = useState([]);
@@ -59,11 +52,52 @@ const HomeScreen = ({ navigation }) => {
   
   // 扫描状态
   const [isScanning, setIsScanning] = useState(false);
+  
+  // 消息提示
+  const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
+  
+  // 隐藏空分类设置
+  const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
 
   // ==================== 初始化加载 ====================
   useEffect(() => {
     initializeData();
+    loadLastScanTime();
+    loadHideEmptyCategoriesSetting();
   }, []);
+  
+  // 监听页面焦点，当从其他页面返回时刷新数据
+  useFocusEffect(
+    useCallback(() => {
+      // 页面获得焦点时，刷新数据（避免初次加载时重复刷新）
+      // 如果正在扫描，不要刷新（避免覆盖扫描进度消息）
+      if (!loading && !isScanning) {
+        logger.debug('🔄 首页获得焦点，刷新数据...');
+        loadAllData();
+        loadLastScanTime();
+      }
+    }, [loading, isScanning])
+  );
+  
+  /**
+   * 加载"隐藏空分类"设置
+   */
+  const loadHideEmptyCategoriesSetting = async () => {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      setHideEmptyCategories(settings.hideEmptyCategories === true);
+    } catch (error) {
+      logger.error('加载隐藏空分类设置失败:', error);
+    }
+  };
+  
+  /**
+   * 当 hideEmptyCategories 改变时，重新加载分类
+   */
+  useEffect(() => {
+    if (loading) return; // 初始化时不重新加载
+    loadCategories();
+  }, [hideEmptyCategories]);
 
   /**
    * 初始化数据加载
@@ -72,11 +106,8 @@ const HomeScreen = ({ navigation }) => {
     try {
       setLoading(true);
       
-      // 确保服务初始化
-      await UnifiedDataService.initialize();
-      await configService.initialize();
-      
-      // 加载所有数据
+      // ConfigService 和 UnifiedDataService 已在 App.js 启动时初始化
+      // 这里直接加载数据即可
       await loadAllData();
       
     } catch (error) {
@@ -94,7 +125,6 @@ const HomeScreen = ({ navigation }) => {
     try {
       // 并行加载核心数据
       await Promise.all([
-        loadStatistics(),
         loadCategories(),
         loadRecentImages(),
       ]);
@@ -103,64 +133,70 @@ const HomeScreen = ({ navigation }) => {
       setTimeout(() => {
         loadCities();
         loadSimilarityGroups();
-      }, 100);
-      
-    } catch (error) {
+        }, 100);
+        
+          } catch (error) {
       logger.error('❌ 加载数据失败:', error);
       throw error;
     }
   };
 
-  /**
-   * 加载统计数据
-   */
-  const loadStatistics = async () => {
-    try {
-      const cache = GlobalImageCache.getCache();
-      const allImages = cache.allImages || [];
-      
-      const newStats = {
-        totalImages: allImages.length,
-        stagingBox: cache.categoryCounts['tobecleaned'] || 0,
-        todayAdded: UnifiedDataService.getTodayAddedCount(),
-        similarityGroups: UnifiedDataService.getSimilarityGroupsCount(),
-      };
-      
-      setStats(newStats);
-      logger.debug('📊 统计数据加载完成:', newStats);
-      
-    } catch (error) {
-      logger.error('❌ 加载统计数据失败:', error);
-    }
-  };
 
   /**
-   * 加载分类列表
+   * 加载分类列表（包括暂存箱，最多8个，按配置文件顺序）
    */
   const loadCategories = async () => {
     try {
       const cache = GlobalImageCache.getCache();
       const categoryCounts = cache.categoryCounts || {};
       
-      // 获取所有分类配置
+      // 获取所有分类配置（按配置文件中的显示顺序）
       const allCategories = configService.getAllCategoriesWithUI();
       
-      // 构建分类列表（排除暂存箱）
-      const categoryList = Object.keys(categoryCounts)
-        .filter(catId => catId !== 'tobecleaned' && categoryCounts[catId] > 0)
-        .map(catId => {
-          const categoryConfig = allCategories.find(c => c.id === catId) || {};
-          return {
-            id: catId,
-            name: categoryConfig.chinese || categoryConfig.english || catId,
-            count: categoryCounts[catId],
-            thumbnail: null, // 懒加载
-          };
+      // 按配置文件顺序构建分类列表
+      const categoryList = allCategories
+        .filter(categoryConfig => {
+          const count = categoryCounts[categoryConfig.id] || 0;
+          // 如果开启了隐藏空分类且该分类数量为0，则不显示
+          if (hideEmptyCategories && count === 0) {
+            return false;
+          }
+          return true;
         })
-        .sort((a, b) => b.count - a.count); // 按数量降序
+        .map(categoryConfig => ({
+          id: categoryConfig.id,
+          name: categoryConfig.chinese || categoryConfig.english || categoryConfig.id,
+          count: categoryCounts[categoryConfig.id] || 0,
+          color: categoryConfig.color || '#666666',
+          recentImages: [], // 稍后加载
+        }))
+        .slice(0, 8); // 最多8个分类
       
-      setCategories(categoryList);
-      logger.debug(`📁 分类列表加载完成: ${categoryList.length}个分类`);
+      // 并行加载每个分类的最近一张照片（只加载有照片的分类）
+      const categoryWithImagesPromises = categoryList.map(async (category) => {
+        if (category.count === 0) {
+          // 空分类不需要加载照片
+          return category;
+        }
+        
+        try {
+          const recentImages = await UnifiedDataService.readRecentImagesByCategory(category.id, 1);
+          return {
+            ...category,
+            recentImages: recentImages || []
+          };
+        } catch (error) {
+          logger.error(`加载分类 ${category.id} 最近照片失败:`, error);
+          return {
+            ...category,
+            recentImages: []
+          };
+        }
+      });
+      
+      const categoryWithImages = await Promise.all(categoryWithImagesPromises);
+      setCategories(categoryWithImages);
+      logger.debug(`📁 分类列表加载完成: ${categoryWithImages.length}个分类 (hideEmpty: ${hideEmptyCategories})`);
       
     } catch (error) {
       logger.error('❌ 加载分类列表失败:', error);
@@ -176,12 +212,24 @@ const HomeScreen = ({ navigation }) => {
       const cityCounts = cache.cityCounts || {};
       
       // 构建城市列表并按数量降序排序
-      const cityList = Object.keys(cityCounts)
+      let cityList = Object.keys(cityCounts)
         .map(cityName => ({
           name: cityName,
           count: cityCounts[cityName],
         }))
         .sort((a, b) => b.count - a.count);
+      
+      // 🧪 开发模式：如果没有城市数据，使用模拟数据（模拟器无法获取GPS）
+      if (cityList.length === 0 && Platform.OS === 'android') {
+        logger.debug('🧪 使用模拟城市数据（开发模式）');
+        cityList = [
+          { name: '北京', count: 15 },
+          { name: '上海', count: 12 },
+          { name: '深圳', count: 8 },
+          { name: '杭州', count: 6 },
+          { name: '成都', count: 3 },
+        ];
+      }
       
       setCities(cityList);
       logger.debug(`🏙️ 城市列表加载完成: ${cityList.length}个城市`);
@@ -196,9 +244,13 @@ const HomeScreen = ({ navigation }) => {
    */
   const loadSimilarityGroups = async () => {
     try {
-      const groups = UnifiedDataService.getSimilarityGroups(8);
+      // 使用 PC 端相同的方法获取相似组统计（与 PC 端保持一致）
+      const allGroups = await UnifiedDataService.getSimilarityGroupsStats();
+      // 只取前8组
+      const groups = allGroups.slice(0, 8);
       setSimilarityGroups(groups);
-      logger.debug(`🔍 相似组加载完成: ${groups.length}组`);
+      
+      logger.debug(`🔍 相似组加载完成: ${groups.length}/${allGroups.length}组`);
       
     } catch (error) {
       logger.error('❌ 加载相似组失败:', error);
@@ -222,6 +274,89 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 加载最近扫描时间和信息
+   */
+  const loadLastScanTime = async () => {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      if (settings && settings.lastScanTime) {
+        // 手动格式化时间（确保在 React Native 中显示中文格式）
+        const date = new Date(settings.lastScanTime);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hour = String(date.getHours()).padStart(2, '0');
+        const minute = String(date.getMinutes()).padStart(2, '0');
+        const formattedTime = `${year}-${month}-${day} ${hour}:${minute}`;
+        
+        // 从缓存获取统计信息
+        const cache = GlobalImageCache.getCache();
+        const images = cache.allImages || [];
+        const totalImages = images.length;
+        let totalSize = 0;
+        for (const image of images) {
+          if (image.size && typeof image.size === 'number') {
+            totalSize += image.size;
+          }
+        }
+        
+        const formattedSize = formatFileSize(totalSize);
+        
+        // 添加耗时信息
+        let durationText = '';
+        if (settings.lastScanDurationSeconds) {
+          if (settings.lastScanDurationMinutes >= 1) {
+            durationText = ` | 耗时: ${settings.lastScanDurationMinutes}分钟`;
+        } else {
+            durationText = ` | 耗时: ${settings.lastScanDurationSeconds}秒`;
+          }
+        }
+        
+        setGlobalMessage(`上次扫描: ${formattedTime} | 共 ${totalImages} 张 | ${formattedSize}${durationText}`);
+      } else {
+        setGlobalMessage('图片分类应用已就绪');
+      }
+    } catch (error) {
+      logger.error('加载最近扫描时间失败:', error);
+      setGlobalMessage('图片分类应用已就绪');
+    }
+  };
+
+  /**
+   * 格式化文件大小
+   */
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  /**
+   * 切换"隐藏空分类"设置
+   */
+  const toggleHideEmptyCategories = async () => {
+    try {
+      logger.debug('切换隐藏空分类设置');
+      // 读取当前设置
+      const settings = await UnifiedDataService.readSettings();
+      // 切换设置
+      const newValue = !hideEmptyCategories;
+      settings.hideEmptyCategories = newValue;
+      // 保存设置
+      await UnifiedDataService.writeSettings(settings);
+      // 更新状态
+      setHideEmptyCategories(newValue);
+      // 重新加载分类列表
+      await loadCategories();
+      logger.debug('隐藏空分类设置已更新:', newValue);
+    } catch (error) {
+      logger.error('切换隐藏空分类设置失败:', error);
+    }
+  };
+
+  /**
    * 下拉刷新
    */
   const onRefresh = useCallback(async () => {
@@ -231,6 +366,8 @@ const HomeScreen = ({ navigation }) => {
       await GlobalImageCache.buildCache();
       // 重新加载数据
       await loadAllData();
+      // 重新加载扫描信息
+      await loadLastScanTime();
     } catch (error) {
       logger.error('❌ 刷新失败:', error);
       Alert.alert('刷新失败', error.message);
@@ -240,21 +377,128 @@ const HomeScreen = ({ navigation }) => {
   }, []);
 
   /**
+   * 检查并请求相册权限
+   */
+  const checkAndRequestPermissions = async () => {
+    if (Platform.OS !== 'android') {
+      return true; // iOS 权限在 Info.plist 中配置
+    }
+
+    try {
+      logger.debug('📋 检查相册访问权限...');
+      logger.debug(`📱 Android 版本: API ${Platform.Version}`);
+      
+      // 根据 Android 版本请求不同的权限
+      let permissions = [];
+      
+      if (Platform.Version >= 33) {
+        // Android 13+ (API 33+): 使用新的媒体权限
+        logger.debug('📋 Android 13+，请求新的媒体权限');
+        permissions = [PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES];
+      } else {
+        // Android 12 及以下: 使用旧的存储权限
+        logger.debug('📋 Android 12-，请求旧的存储权限');
+        permissions = [
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        ];
+      }
+
+      logger.debug('📋 需要检查的权限:', permissions);
+
+      // 检查是否所有权限都已授权
+      const checkResults = await Promise.all(
+        permissions.map(p => PermissionsAndroid.check(p))
+      );
+
+      logger.debug('📋 权限检查结果:', checkResults);
+
+      if (checkResults.every(result => result === true)) {
+        logger.debug('✅ 已有相册访问权限');
+        return true;
+      }
+
+      // 请求权限
+      logger.debug('📋 开始请求相册访问权限...');
+      const grantResults = await PermissionsAndroid.requestMultiple(permissions);
+      
+      logger.debug('📋 权限请求结果:', grantResults);
+      
+      const allGranted = Object.values(grantResults).every(
+        result => result === PermissionsAndroid.RESULTS.GRANTED
+      );
+
+      if (allGranted) {
+        logger.debug('✅ 相册访问权限已授权');
+        return true;
+      } else {
+        logger.warn('⚠️ 部分权限被拒绝');
+        Alert.alert(
+          '权限不足',
+          '需要访问相册权限才能扫描图片。请在设置中授予权限。',
+          [
+            { text: '取消', style: 'cancel' },
+            { 
+              text: '去设置', 
+              onPress: () => {
+                // TODO: 打开应用设置页面
+                Alert.alert('提示', '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限');
+              }
+            }
+          ]
+        );
+        return false;
+      }
+    } catch (error) {
+      logger.error('❌ 权限检查失败:', error);
+      return false;
+    }
+  };
+
+  /**
    * 触发扫描
    */
   const handleScan = async () => {
     try {
+      // 先检查并请求权限
+      const hasPermission = await checkAndRequestPermissions();
+      if (!hasPermission) {
+        logger.warn('⚠️ 没有相册访问权限，取消扫描');
+        return;
+      }
+
       setIsScanning(true);
+      setGlobalMessage('正在初始化...');
+      logger.debug('🔍 开始扫描相册...');
       
       const galleryScannerService = new GalleryScannerService();
-      await galleryScannerService.scanGallery();
+      
+      // 初始化服务
+      await galleryScannerService.initialize();
+      
+      // 开始扫描，显示进度（使用和PC端一致的进度消息）
+      await galleryScannerService.scanGalleryWithProgress((progress) => {
+        logger.debug('📊 收到扫描进度:', progress);
+        // progress已经包含了simpleMessage字段，这是PC端格式化后的消息
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || '处理中...';
+          setGlobalMessage(message);
+          logger.debug(`🔍 更新消息: ${message}`);
+        }
+      });
+      
+      logger.debug('✅ 扫描完成');
+      setGlobalMessage('扫描完成，正在刷新数据...');
       
       // 扫描完成后刷新数据
       await onRefresh();
       
+      // 加载最近扫描信息
+      await loadLastScanTime();
       Alert.alert('扫描完成', '相册扫描已完成');
     } catch (error) {
       logger.error('❌ 扫描失败:', error);
+      setGlobalMessage('扫描失败');
       Alert.alert('扫描失败', error.message);
     } finally {
       setIsScanning(false);
@@ -263,103 +507,86 @@ const HomeScreen = ({ navigation }) => {
 
   // ==================== 渲染函数 ====================
 
-  /**
-   * 渲染统计卡片
-   */
-  const renderStatCard = (icon, title, value, color, badge, onPress) => (
-    <TouchableOpacity
-      style={[styles.statCard, { borderLeftColor: color }]}
-      onPress={onPress}
-      disabled={!onPress}
-      activeOpacity={onPress ? 0.7 : 1}
-    >
-      <View style={styles.statCardContent}>
-        <Text style={styles.statCardIcon}>{icon}</Text>
-        <View style={styles.statCardInfo}>
-          <Text style={styles.statCardValue}>{value}</Text>
-          <Text style={styles.statCardTitle}>{title}</Text>
-        </View>
-        {badge && <View style={styles.badge} />}
-      </View>
-    </TouchableOpacity>
-  );
 
   /**
-   * 渲染统计概览区
-   */
-  const renderStatistics = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>📊 统计概览</Text>
-      <View style={styles.statsGrid}>
-        {renderStatCard('📸', '总图片', stats.totalImages, '#007AFF', false, null)}
-        {renderStatCard('📦', '暂存箱', stats.stagingBox, '#FF9500', stats.stagingBox > 0, () => {
-          navigation.navigate('StagingBox');
-        })}
-        {renderStatCard('✨', '今日新增', stats.todayAdded, '#34C759', false, null)}
-        {renderStatCard('🔍', '相似组', stats.similarityGroups, '#AF52DE', false, () => {
-          // 滚动到相似组区域
-          // TODO: 实现滚动定位
-        })}
-      </View>
-    </View>
-  );
-
-  /**
-   * 渲染分类卡片
+   * 渲染分类卡片（与PC端一致的设计）
    */
   const renderCategoryCard = (category) => (
     <TouchableOpacity
       key={category.id}
       style={styles.categoryCard}
       onPress={() => {
-        navigation.navigate('Category', {
-          category: category.id,
-          fromScreen: 'Home',
-        });
+        if (category.id === 'tobecleaned') {
+          navigation.navigate('StagingBox');
+        } else {
+          navigation.navigate('Category', {
+            category: category.id,
+            fromScreen: 'Home',
+          });
+        }
       }}
     >
-      <View style={styles.categoryThumbnail}>
-        <Text style={styles.categoryPlaceholder}>📁</Text>
-      </View>
-      <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
-      <Text style={styles.categoryCount}>{category.count}</Text>
-    </TouchableOpacity>
+      {/* 缩略图占满整个卡片 */}
+      {category.recentImages && category.recentImages.length > 0 ? (
+        <Image
+          source={{ uri: category.recentImages[0].uri }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
+          <Text style={styles.emptyThumbnailText}>📷</Text>
+            </View>
+      )}
+      
+      {/* 覆盖层显示分类信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
+        <Text style={styles.categoryCount}>{category.count}</Text>
+            </View>
+            </TouchableOpacity>
   );
 
   /**
-   * 渲染按内容分类区
+   * 渲染按内容分类区（4列网格，最多8个）
    */
   const renderCategoriesSection = () => {
-    if (categories.length === 0) return null;
-    
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📁 按内容分类</Text>
-          <TouchableOpacity onPress={() => {
-            // TODO: 展开所有分类
-          }}>
-            <Text style={styles.sectionMore}>全部 ›</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>📁 按内容</Text>
+          <TouchableOpacity 
+            style={styles.toggleButton}
+            onPress={toggleHideEmptyCategories}
+          >
+            <Text style={styles.toggleButtonText}>
+              {hideEmptyCategories ? '显示空分类' : '隐藏空分类'}
+            </Text>
+            </TouchableOpacity>
+          </View>
+        
+        {categories.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>📷</Text>
+            <Text style={styles.emptyStateText}>暂无分类图片</Text>
+            <Text style={styles.emptyStateSubtext}>请先扫描图片或调整显示设置</Text>
+          </View>
+        ) : (
+          <View style={styles.categoriesGrid}>
+            {categories.map(renderCategoryCard)}
+          </View>
+        )}
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesScroll}
-        >
-          {categories.map(renderCategoryCard)}
-        </ScrollView>
-      </View>
     );
   };
 
   /**
-   * 渲染相似组卡片
+   * 渲染相似组卡片（与 PC 端保持一致：显示 1 张代表图片）
    */
   const renderSimilarityGroupCard = (group) => (
     <TouchableOpacity
       key={group.groupId}
-      style={styles.similarityCard}
+      style={styles.categoryCard}
       onPress={() => {
         navigation.navigate('Category', {
           similarityGroupId: group.groupId,
@@ -367,57 +594,50 @@ const HomeScreen = ({ navigation }) => {
         });
       }}
     >
-      <View style={styles.similarityHeader}>
-        <Text style={styles.similarityTitle}>
-          🔍 组{group.groupId} ({group.imageCount}张相似)
-        </Text>
-        <Text style={styles.similaritySimilarity}>{Math.round(group.similarity * 100)}%</Text>
-      </View>
-      <View style={styles.similarityThumbnails}>
-        {group.images.slice(0, 3).map((img, idx) => (
-          <Image
-            key={idx}
-            source={{ uri: img.uri }}
-            style={styles.similarityThumbnail}
-          />
-        ))}
-        {group.imageCount > 3 && (
-          <View style={styles.similarityMore}>
-            <Text style={styles.similarityMoreText}>+{group.imageCount - 3}</Text>
-          </View>
-        )}
-      </View>
+      {/* 缩略图占满整个卡片 */}
+      {group.latestImageUri ? (
+        <Image
+          source={{ uri: group.latestImageUri }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
+          <Text style={styles.emptyThumbnailText}>🔗</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示相似照片信息（与 PC 端一致）*/}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>相似照片</Text>
+        <Text style={styles.categoryCount}>{group.imageCount}</Text>
+        </View>
     </TouchableOpacity>
   );
 
   /**
-   * 渲染相似图片分组区
+   * 渲染相似照片区（与"按内容"保持一致：4列网格布局）
    */
   const renderSimilarityGroupsSection = () => {
     if (similarityGroups.length === 0) return null;
     
     return (
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🔍 相似图片分组</Text>
-          <TouchableOpacity onPress={() => {
-            // TODO: 展开所有相似组
-          }}>
-            <Text style={styles.sectionMore}>全部 ›</Text>
-          </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>相似照片</Text>
+        <View style={styles.categoriesGrid}>
+          {similarityGroups.map(renderSimilarityGroupCard)}
         </View>
-        {similarityGroups.map(renderSimilarityGroupCard)}
-      </View>
+        </View>
     );
   };
 
   /**
-   * 渲染城市列表项
+   * 渲染城市卡片（与"按内容"保持一致：4列网格布局）
    */
-  const renderCityItem = (city) => (
+  const renderCityCard = (city) => (
     <TouchableOpacity
       key={city.name}
-      style={styles.cityItem}
+      style={styles.categoryCard}
       onPress={() => {
         navigation.navigate('Category', {
           city: city.name,
@@ -425,27 +645,32 @@ const HomeScreen = ({ navigation }) => {
         });
       }}
     >
-      <Text style={styles.cityArrow}>›</Text>
-      <Text style={styles.cityName}>{city.name}</Text>
-      <Text style={styles.cityCount}>({city.count})</Text>
+      {/* 城市背景色 */}
+      <View style={[styles.thumbnail, { backgroundColor: '#FF9800' }]}>
+        <Text style={styles.emptyThumbnailText}>📍</Text>
+      </View>
+      
+      {/* 覆盖层显示城市信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{city.name}</Text>
+        <Text style={styles.categoryCount}>{city.count}</Text>
+      </View>
     </TouchableOpacity>
   );
 
   /**
-   * 渲染按城市分类区
+   * 渲染按城市区（与"按内容"保持一致：4列网格布局）
    */
   const renderCitiesSection = () => {
     if (cities.length === 0) return null;
     
     return (
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏙️ 按城市分类</Text>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>按城市</Text>
+        <View style={styles.categoriesGrid}>
+          {cities.slice(0, 8).map(renderCityCard)}
         </View>
-        <View style={styles.citiesList}>
-          {cities.map(renderCityItem)}
         </View>
-      </View>
     );
   };
 
@@ -453,40 +678,40 @@ const HomeScreen = ({ navigation }) => {
    * 渲染最近照片
    */
   const renderRecentPhotos = () => {
-    if (recentImages.length === 0) return null;
-    
     return (
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📸 最近照片</Text>
-          <TouchableOpacity onPress={() => {
-            // TODO: 查看更多
-          }}>
-            <Text style={styles.sectionMore}>全部 ›</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.recentGrid}>
-          {recentImages.map((image, index) => (
-            <TouchableOpacity
-              key={image.id || index}
-              style={styles.recentGridItem}
-              onPress={() => {
-                navigation.navigate('ImagePreview', {
-                  image: image,
-                  allImages: recentImages,
-                  currentIndex: index,
-                  fromScreen: 'Home',
-                });
-              }}
-            >
-              <Image
-                source={{ uri: image.uri }}
-                style={styles.recentGridImage}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
+        <Text style={[styles.sectionTitle, { marginBottom: 16, paddingHorizontal: 16 }]}>📸 最近照片</Text>
+        
+        {recentImages.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>📷</Text>
+            <Text style={styles.emptyStateText}>暂无照片</Text>
+            <Text style={styles.emptyStateSubtext}>请点击右下角扫描按钮开始扫描相册</Text>
+          </View>
+        ) : (
+          <View style={styles.recentGrid}>
+            {recentImages.map((image, index) => (
+              <TouchableOpacity
+                key={image.id || index}
+                style={styles.recentGridItem}
+                onPress={() => {
+                  navigation.navigate('ImagePreview', {
+                    image: image,
+                    allImages: recentImages,
+                    currentIndex: index,
+                    fromScreen: 'Home',
+                  });
+                }}
+              >
+                <Image
+                  source={{ uri: image.uri }}
+                  style={styles.recentGridImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
@@ -495,17 +720,20 @@ const HomeScreen = ({ navigation }) => {
    * 渲染FAB扫描按钮
    */
   const renderFAB = () => (
-    <TouchableOpacity
-      style={styles.fab}
-      onPress={handleScan}
-      disabled={isScanning}
-    >
-      {isScanning ? (
-        <ActivityIndicator color="#FFFFFF" />
-      ) : (
-        <Text style={styles.fabIcon}>🔄</Text>
-      )}
-    </TouchableOpacity>
+    <>
+      {/* 扫描按钮 */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={handleScan}
+        disabled={isScanning}
+      >
+        {isScanning ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.fabIcon}>🔄</Text>
+        )}
+      </TouchableOpacity>
+    </>
   );
 
   // ==================== 主渲染 ====================
@@ -528,6 +756,11 @@ const HomeScreen = ({ navigation }) => {
         <Text style={styles.headerTitle}>芯图相册</Text>
       </View>
 
+      {/* 消息提示区 */}
+      <View style={styles.messageBanner}>
+        <Text style={styles.messageText}>{globalMessage}</Text>
+        </View>
+
       {/* 主内容区 */}
       <ScrollView
         style={styles.scrollView}
@@ -536,10 +769,9 @@ const HomeScreen = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {renderStatistics()}
         {renderCategoriesSection()}
-        {renderSimilarityGroupsSection()}
         {renderCitiesSection()}
+        {renderSimilarityGroupsSection()}
         {renderRecentPhotos()}
       </ScrollView>
 
@@ -579,6 +811,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000000',
   },
+  // 消息提示区样式
+  messageBanner: {
+    padding: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  messageText: {
+    fontSize: 12,
+    color: '#666666',
+    textAlign: 'center',
+  },
   scrollView: {
     flex: 1,
   },
@@ -589,7 +832,7 @@ const styles = StyleSheet.create({
   // 区块样式
   section: {
     backgroundColor: '#FFFFFF',
-    marginTop: 12,
+    marginTop: 4, // 减小顶部间距，让内容更紧凑
     paddingVertical: 16,
   },
   sectionHeader: {
@@ -597,53 +840,31 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 16, // 增加标题和卡片的间距
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#000000',
+    // 注意：当 sectionTitle 在 sectionHeader 内部时，不需要额外的 padding
+    // 当单独使用时，需要通过内联样式添加 paddingHorizontal: 16
+  },
+  toggleButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 12,
+  },
+  toggleButtonText: {
+    fontSize: 11,
+    color: '#666666',
+    fontWeight: '500',
   },
   sectionMore: {
     fontSize: 14,
     color: '#007AFF',
   },
   
-  // 统计卡片
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  statCard: {
-    width: (SCREEN_WIDTH - 48) / 2, // 两列布局，减去padding和gap
-    backgroundColor: '#F9F9F9',
-    borderRadius: 12,
-    padding: 12,
-    borderLeftWidth: 4,
-  },
-  statCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statCardIcon: {
-    fontSize: 32,
-    marginRight: 12,
-  },
-  statCardInfo: {
-    flex: 1,
-  },
-  statCardValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  statCardTitle: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
-  },
   badge: {
     width: 8,
     height: 8,
@@ -651,37 +872,57 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30',
   },
   
-  // 分类卡片
-  categoriesScroll: {
-    paddingHorizontal: 16,
-    gap: 12,
+  // 分类卡片（4列网格布局）
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 8,
+    gap: 4,
   },
   categoryCard: {
-    width: 100,
-    alignItems: 'center',
+    width: (SCREEN_WIDTH - 16 - 12) / 4, // 4列: 总宽度 - 左右padding(8*2) - gap(4*3)
+    aspectRatio: 1, // 正方形
+    borderRadius: 6,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#F0F0F0',
   },
-  categoryThumbnail: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-    backgroundColor: '#F9F9F9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',  // 垂直居中
+    alignItems: 'center',      // 水平居中
   },
-  categoryPlaceholder: {
+  emptyThumbnailText: {
     fontSize: 32,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  categoryOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    padding: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   categoryName: {
-    fontSize: 14,
-    color: '#000000',
-    marginBottom: 4,
-    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: 'white',
+    flex: 1,
   },
   categoryCount: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: 'white',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+    marginLeft: 2,
   },
   
   // 相似组卡片
@@ -775,6 +1016,38 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   
+  // 扫描进度提示框
+  scanProgressContainer: {
+    position: 'absolute',
+    right: 16,
+    bottom: 150, // 在FAB按钮上方
+    maxWidth: SCREEN_WIDTH - 80,
+  },
+  scanProgressBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 122, 255, 0.2)',
+  },
+  scanProgressSpinner: {
+    marginRight: 10,
+  },
+  scanProgressText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
+    lineHeight: 18,
+  },
+  
   // FAB按钮
   fab: {
     position: 'absolute',
@@ -794,6 +1067,31 @@ const styles = StyleSheet.create({
   },
   fabIcon: {
     fontSize: 24,
+  },
+  
+  // 空数据状态样式
+  emptyState: {
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  emptyStateIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+    opacity: 0.4,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666666',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  emptyStateSubtext: {
+    fontSize: 13,
+    color: '#999999',
+    textAlign: 'center',
+    lineHeight: 18,
   },
 });
 

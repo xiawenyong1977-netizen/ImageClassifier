@@ -1,6 +1,6 @@
 // 城市坐标查找服务 - 跨平台实现
 import citiesData from '../data/china-cities.json';
-import { logger } from '../adapters/WebAdapters.js';
+import { logger } from '../adapters/WebAdapters';
 
 class CityLocationService {
   constructor() {

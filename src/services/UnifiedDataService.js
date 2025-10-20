@@ -2,7 +2,7 @@
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
-import { logger } from '../adapters/WebAdapters.js';
+import { logger } from '../adapters/WebAdapters';
 
 class UnifiedDataService {
   constructor() {
@@ -1281,7 +1281,7 @@ class UnifiedDataService {
     }
   }
 
-  // ==================== 移动端统计接口 ====================
+  // ==================== 统计接口扩展 ====================
 
   /**
    * 获取今日新增图片数量
@@ -1302,46 +1302,6 @@ class UnifiedDataService {
     } catch (error) {
       logger.error('获取今日新增数量失败:', error);
       return 0;
-    }
-  }
-
-  /**
-   * 获取相似图片组的总数
-   * @returns {number} 相似组数量（暂时返回0，待实现完整相似度检测）
-   */
-  getSimilarityGroupsCount() {
-    try {
-      // TODO: 实现完整的相似度检测算法
-      // 当前返回0，后续Phase 2实现
-      logger.debug('📊 相似组功能待实现，当前返回0');
-      return 0;
-    } catch (error) {
-      logger.error('获取相似组数量失败:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * 获取相似图片分组
-   * @param {number} limit - 返回的最大组数（可选）
-   * @returns {Array} 相似组列表（暂时返回空数组，待实现）
-   */
-  getSimilarityGroups(limit = 8) {
-    try {
-      // TODO: Phase 2 实现完整的相似度检测算法
-      // 实现逻辑：
-      // 1. 获取所有图片
-      // 2. 调用 ColorHistogramExtractor 计算图片特征
-      // 3. 使用相似度算法（如余弦相似度）进行分组
-      // 4. 过滤出相似度高于阈值（如0.85）的组
-      // 5. 按相似度降序排序
-      // 6. 返回前 limit 组
-      
-      logger.debug(`📊 相似组功能待实现，当前返回空数组`);
-      return [];
-    } catch (error) {
-      logger.error('获取相似组失败:', error);
-      return [];
     }
   }
 }

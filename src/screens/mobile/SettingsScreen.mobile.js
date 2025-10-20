@@ -1,11 +1,9 @@
 /**
  * 芯图相册 - 移动端设置页
  * 
- * 功能：
- * 1. 扫描设置
- * 2. 存储管理
- * 3. 显示设置
- * 4. 关于信息
+ * 功能（与PC端保持一致）：
+ * 1. 分类操作（智能分类、清空相册信息）
+ * 2. 应用信息（版本、构建版本、平台、存储类型、存储大小）
  */
 
 import React, { useState, useEffect } from 'react';
@@ -17,21 +15,25 @@ import {
   StyleSheet,
   Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from '../../adapters/WebAdapters';
+import UnifiedDataService from '../../services/UnifiedDataService';
+import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
 import { logger } from '../../adapters/WebAdapters';
 
-const SettingsScreen = ({ navigation }) => {
+const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // ==================== 状态管理 ====================
-  const [autoScan, setAutoScan] = useState(false);
-  const [cacheSize, setCacheSize] = useState('0 MB');
-  const [theme, setTheme] = useState('auto');
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState({});
+  const [storageType, setStorageType] = useState('检测中...');
+  const [storageSize, setStorageSize] = useState('计算中...');
 
   // ==================== 初始化 ====================
   useEffect(() => {
     loadSettings();
-    calculateCacheSize();
+    detectStorageInfo();
   }, []);
 
   /**
@@ -39,60 +41,67 @@ const SettingsScreen = ({ navigation }) => {
    */
   const loadSettings = async () => {
     try {
-      const imageStorageService = new ImageStorageService();
-      // TODO: 从存储加载设置
-      setAutoScan(false);
-      setTheme('auto');
+      setLoading(true);
+      const loadedSettings = await UnifiedDataService.readSettings();
+      setSettings(loadedSettings || {});
+      logger.debug('设置加载完成:', loadedSettings);
     } catch (error) {
       logger.error('❌ 加载设置失败:', error);
+      Alert.alert('错误', '加载设置失败');
+    } finally {
+      setLoading(false);
     }
   };
 
   /**
-   * 计算缓存大小
+   * 检测存储信息
    */
-  const calculateCacheSize = async () => {
+  const detectStorageInfo = async () => {
     try {
-      // TODO: 实际计算缓存大小
-      setCacheSize('0 MB');
+      const imageStorageService = new ImageStorageService();
+      
+      // 检测存储类型
+      let type = 'SQLite';
+      if (typeof window !== 'undefined' && window.indexedDB) {
+        type = 'IndexedDB';
+      }
+      setStorageType(type);
+      
+      // 计算存储大小
+      const allImages = await UnifiedDataService.readAllImages();
+      const sizeInMB = (allImages.length * 50) / 1024; // 估算，每张图片约50KB元数据
+      setStorageSize(`${sizeInMB.toFixed(2)} MB (${allImages.length}张图片)`);
+      
     } catch (error) {
-      logger.error('❌ 计算缓存大小失败:', error);
+      logger.error('❌ 检测存储信息失败:', error);
+      setStorageType('未知');
+      setStorageSize('未知');
     }
   };
 
-  // ==================== 设置操作 ====================
+  // ==================== 分类操作 ====================
 
   /**
-   * 切换自动扫描
+   * 清空相册信息
    */
-  const toggleAutoScan = async (value) => {
-    try {
-      setAutoScan(value);
-      // TODO: 保存设置
-      logger.debug(`自动扫描: ${value ? '开启' : '关闭'}`);
-    } catch (error) {
-      logger.error('❌ 切换自动扫描失败:', error);
-    }
-  };
-
-  /**
-   * 清理缓存
-   */
-  const handleClearCache = () => {
+  const handleClearData = () => {
     Alert.alert(
-      '清理缓存',
-      '确定要清理缓存吗？这不会删除图片数据。',
+      '确认清空',
+      '确定要清空所有照片的分类和位置信息吗？\n\n⚠️ 此操作不可恢复！',
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '确定',
+          text: '清空',
+          style: 'destructive',
           onPress: async () => {
             try {
-              // TODO: 实际清理缓存
-              Alert.alert('成功', '缓存已清理');
-              calculateCacheSize();
+              await UnifiedDataService.clearAllData();
+              Alert.alert('成功', '相册信息已清空');
+              // 重新加载设置和存储信息
+              await loadSettings();
+              await detectStorageInfo();
             } catch (error) {
-              logger.error('❌ 清理缓存失败:', error);
+              logger.error('❌ 清空数据失败:', error);
               Alert.alert('失败', error.message);
             }
           },
@@ -101,85 +110,32 @@ const SettingsScreen = ({ navigation }) => {
     );
   };
 
-  /**
-   * 数据备份
-   */
-  const handleBackup = () => {
-    Alert.alert('提示', '备份功能开发中');
-  };
-
-  /**
-   * 数据恢复
-   */
-  const handleRestore = () => {
-    Alert.alert('提示', '恢复功能开发中');
-  };
-
-  /**
-   * 切换主题
-   */
-  const handleThemeChange = () => {
-    const themes = [
-      { value: 'light', label: '浅色' },
-      { value: 'dark', label: '深色' },
-      { value: 'auto', label: '跟随系统' },
-    ];
-
-    Alert.alert(
-      '选择主题',
-      '',
-      [
-        ...themes.map(t => ({
-          text: t.label + (theme === t.value ? ' ✓' : ''),
-          onPress: () => setTheme(t.value),
-        })),
-        { text: '取消', style: 'cancel' },
-      ]
-    );
-  };
-
-  /**
-   * 显示关于信息
-   */
-  const handleAbout = () => {
-    Alert.alert(
-      '关于芯图相册',
-      '版本: 1.0.0\n\n基于AI的智能图片分类和管理应用\n\n© 2025 芯图相册团队',
-      [{ text: '确定' }]
-    );
-  };
 
   // ==================== 渲染函数 ====================
 
   /**
-   * 渲染设置项
+   * 渲染操作按钮
    */
-  const renderSettingItem = (title, value, onPress, showArrow = true) => (
+  const renderActionButton = (icon, title, description, onPress, danger = false) => (
     <TouchableOpacity
-      style={styles.settingItem}
+      style={styles.actionButton}
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Text style={styles.settingTitle}>{title}</Text>
-      <View style={styles.settingRight}>
-        {value && <Text style={styles.settingValue}>{value}</Text>}
-        {showArrow && <Text style={styles.settingArrow}>›</Text>}
-      </View>
+      <Text style={[styles.actionButtonText, danger && styles.dangerText]}>
+        {icon} {title}
+      </Text>
+      <Text style={styles.actionButtonDescription}>{description}</Text>
     </TouchableOpacity>
   );
 
   /**
-   * 渲染开关项
+   * 渲染信息项
    */
-  const renderSwitchItem = (title, value, onValueChange) => (
-    <View style={styles.settingItem}>
-      <Text style={styles.settingTitle}>{title}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#767577', true: '#81b0ff' }}
-        thumbColor={value ? '#007AFF' : '#f4f3f4'}
-      />
+  const renderInfoItem = (label, value) => (
+    <View style={styles.infoItem}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
     </View>
   );
 
@@ -192,6 +148,17 @@ const SettingsScreen = ({ navigation }) => {
 
   // ==================== 主渲染 ====================
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>加载中...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* 顶部导航栏 */}
@@ -201,35 +168,26 @@ const SettingsScreen = ({ navigation }) => {
 
       {/* 设置列表 */}
       <ScrollView style={styles.scrollView}>
-        {/* 扫描设置 */}
-        {renderSectionTitle('📁 扫描设置')}
+        {/* 分类操作 */}
+        {renderSectionTitle('分类操作')}
         <View style={styles.section}>
-          {renderSettingItem('扫描路径', '相册', () => Alert.alert('提示', '功能开发中'))}
-          {renderSwitchItem('自动扫描', autoScan, toggleAutoScan)}
+          {renderActionButton(
+            '🗑️',
+            '清空相册信息',
+            '清空所有照片的分类和位置信息',
+            handleClearData,
+            true
+          )}
         </View>
 
-        {/* 存储管理 */}
-        {renderSectionTitle('💾 存储管理')}
+        {/* 应用信息 */}
+        {renderSectionTitle('应用信息')}
         <View style={styles.section}>
-          {renderSettingItem('缓存大小', cacheSize, handleClearCache)}
-          {renderSettingItem('清理缓存', '', handleClearCache)}
-          {renderSettingItem('数据备份', '', handleBackup)}
-          {renderSettingItem('数据恢复', '', handleRestore)}
-        </View>
-
-        {/* 显示设置 */}
-        {renderSectionTitle('🎨 显示设置')}
-        <View style={styles.section}>
-          {renderSettingItem('主题模式', getThemeLabel(theme), handleThemeChange)}
-          {renderSettingItem('图片质量', '高', () => Alert.alert('提示', '功能开发中'))}
-        </View>
-
-        {/* 关于 */}
-        {renderSectionTitle('ℹ️ 关于')}
-        <View style={styles.section}>
-          {renderSettingItem('版本信息', 'v1.0.0', handleAbout)}
-          {renderSettingItem('使用帮助', '', () => Alert.alert('提示', '功能开发中'))}
-          {renderSettingItem('隐私政策', '', () => Alert.alert('提示', '功能开发中'))}
+          {renderInfoItem('版本', '1.0.0')}
+          {renderInfoItem('构建版本', '2025.01.20')}
+          {renderInfoItem('平台', '移动端 (React Native)')}
+          {renderInfoItem('存储类型', storageType)}
+          {renderInfoItem('存储大小', storageSize)}
         </View>
 
         {/* 底部空白 */}
@@ -239,26 +197,22 @@ const SettingsScreen = ({ navigation }) => {
   );
 };
 
-// ==================== 工具函数 ====================
-
-/**
- * 获取主题标签
- */
-const getThemeLabel = (theme) => {
-  const labels = {
-    light: '浅色',
-    dark: '深色',
-    auto: '跟随系统',
-  };
-  return labels[theme] || '跟随系统';
-};
-
 // ==================== 样式 ====================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#8E8E93',
   },
   header: {
     height: 56,
@@ -291,32 +245,52 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   
-  // 设置项
-  settingItem: {
+  // 操作按钮
+  actionButton: {
+    margin: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    padding: 16,
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  actionButtonDescription: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 4,
+  },
+  dangerText: {
+    color: '#FF3B30',
+  },
+  
+  // 信息项
+  infoItem: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F2F2F7',
   },
-  settingTitle: {
+  infoLabel: {
     fontSize: 16,
     color: '#000000',
   },
-  settingRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingValue: {
+  infoValue: {
     fontSize: 14,
     color: '#8E8E93',
-    marginRight: 8,
-  },
-  settingArrow: {
-    fontSize: 18,
-    color: '#8E8E93',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
   },
 });
 

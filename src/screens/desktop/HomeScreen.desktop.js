@@ -15,7 +15,7 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import configService from '../../services/ConfigService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
-import { logger } from '../../adapters/WebAdapters.js';
+import { logger } from '../../adapters/WebAdapters';
 
 const HomeScreen = () => {
   

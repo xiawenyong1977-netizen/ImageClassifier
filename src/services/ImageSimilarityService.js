@@ -5,7 +5,7 @@
  */
 
 import ColorHistogramExtractor from './ColorHistogramExtractor.js';
-import { logger } from '../adapters/WebAdapters.js';
+import { logger } from '../adapters/WebAdapters';
 
 class ImageSimilarityService {
   constructor() {
@@ -222,11 +222,11 @@ class ImageSimilarityService {
           // 使用简化算法（基于推理结果）
           // ⭐ 只在简化算法时才加载推理结果
           const windowWithInferenceData = await this._loadInferenceDataForWindow(window);
-          windowGroups = this._findSimilarGroupsInWindow(windowWithInferenceData, opts);
+          windowGroups = this._findSimilarGroupsSimplified(windowWithInferenceData, opts);
         } else {
-          // 使用原有颜色直方图算法（不需要推理结果）
+          // 使用原有颜色直方图算法（需要提取特征）
           const windowWithFeatures = await this._extractFeaturesForWindow(window);
-          windowGroups = this._findSimilarGroupsInWindow(windowWithFeatures, opts);
+          windowGroups = this._findSimilarGroupsOriginal(windowWithFeatures, opts);
         }
         
         logger.debug(`✅ 窗口${index + 1}完成: 发现${windowGroups.length}个相似组`);
@@ -553,18 +553,6 @@ class ImageSimilarityService {
         percentage: (smallModelCount / categoryImages.length) * 100
       };
     }
-  }
-
-  /**
-   * 在时间窗口内查找相似组（简化版：基于推理结果）
-   * 注意：算法选择已在detectSimilarityGroups中完成，这里直接使用简化算法
-   * @param {Array} windowImages - 包含推理结果的图片数组
-   * @param {Object} options - 检测选项
-   * @returns {Array} 相似组数组
-   * @private
-   */
-  _findSimilarGroupsInWindow(windowImages, options) {
-    return this._findSimilarGroupsSimplified(windowImages, options);
   }
 
   /**

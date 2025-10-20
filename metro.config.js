@@ -9,6 +9,8 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
 const config = {
   resolver: {
     sourceExts: ['js', 'json', 'ts', 'tsx', 'jsx'],
+    // 明确指定平台扩展优先级
+    platforms: ['ios', 'android', 'native', 'web'],
     alias: {
       buffer: 'buffer',
     },

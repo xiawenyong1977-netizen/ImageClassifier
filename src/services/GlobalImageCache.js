@@ -1,6 +1,6 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
 import configService from './ConfigService.js';
-import { logger } from '../adapters/WebAdapters.js';
+import { logger } from '../adapters/WebAdapters';
 
 class GlobalImageCache {
   constructor() {
@@ -75,6 +75,13 @@ class GlobalImageCache {
     this.isLoading = true;
 
     try {
+      // 确保 ConfigService 已初始化
+      if (!configService.isConfigLoaded()) {
+        logger.debug('⏳ ConfigService 未加载，开始初始化...');
+        await configService.initialize();
+        logger.debug('✅ ConfigService 初始化完成');
+      }
+      
       logger.debug('开始构建全局图片缓存...');
       
       // 获取存储服务实例（共享 UnifiedDataService 的实例）
