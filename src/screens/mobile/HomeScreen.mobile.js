@@ -1,519 +1,800 @@
+/**
+ * 芯图相册 - 移动端首页
+ * 
+ * 功能：
+ * 1. 统计概览（总图片、暂存箱、今日新增、相似组）
+ * 2. 按内容分类浏览（横向滚动）
+ * 3. 相似图片分组（最多8组）
+ * 4. 按城市分类（全部显示）
+ * 5. 最近照片（3x4网格）
+ * 6. FAB扫描按钮
+ */
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, RefreshControl, Alert, Dimensions, Platform } from 'react-native';
-import { StyleSheet } from 'react-native';
-import { SafeAreaView, useFocusEffect } from '../adapters/WebAdapters';
-import { RNFS } from '../adapters/WebAdapters';
-import ImageStorageService from '../services/ImageStorageService';
-import GalleryScannerService from '../services/GalleryScannerService';
-import ImageClassifierService from '../services/ImageClassifierService';
-import configService from '../services/ConfigService';
-import CategoryCard from '../components/CategoryCard';
-import RecentImagesGrid from '../components/RecentImagesGrid';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Dimensions,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from '../../adapters/WebAdapters';
+import UnifiedDataService from '../../services/UnifiedDataService';
+import GlobalImageCache from '../../services/GlobalImageCache';
+import configService from '../../services/ConfigService';
+import GalleryScannerService from '../../services/GalleryScannerService';
+import { logger } from '../../adapters/WebAdapters';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const HomeScreen = ({ navigation }) => {
-  const [recentImages, setRecentImages] = useState([]);
-  const [categoryCounts, setCategoryCounts] = useState({});
-  const [stats, setStats] = useState({});
+  // ==================== 状态管理 ====================
   const [refreshing, setRefreshing] = useState(false);
-  const [categoryRecentImages, setCategoryRecentImages] = useState({});
-
-  // 获取所有分类信息（动态渲染用）
-  const getAllCategories = () => {
-    if (!configService || !configService.isConfigLoaded()) {
-      throw new Error('ConfigService未初始化或配置未加载');
-    }
-    return configService.getAllCategoriesWithUI();
-  };
-
-  // 渲染分类卡片
-  const renderCategoryCards = () => {
-    try {
-      const categories = getAllCategories();
-      return categories.map(category => {
-        const categoryKey = category.id;
-        const shouldShow = hideEmptyCategories ? (categoryCounts[categoryKey] > 0) : true;
-        
-        if (!shouldShow) return null;
-        
-        return (
-          <CategoryCard
-            key={categoryKey}
-            category={{
-              id: categoryKey,
-              name: category.chinese || category.english || categoryKey,
-              color: '#607D8B' // 默认颜色，因为用户说不需要图标
-            }}
-            count={categoryCounts[categoryKey] || 0}
-            recentImages={categoryRecentImages[categoryKey] || []}
-            onPress={() => handleCategoryPress(categoryKey)}
-          />
-        );
-      });
-    } catch (error) {
-      console.error('获取分类信息失败:', error);
-      return null;
-    }
-  };
+  const [loading, setLoading] = useState(true);
   
-  // 扫描进度相关状态
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState({
-    current: 0,
-    total: 0,
-    message: '',
-    filesFound: 0,
-    filesProcessed: 0,
-    filesFailed: 0
+  // 统计数据
+  const [stats, setStats] = useState({
+    totalImages: 0,
+    stagingBox: 0,
+    todayAdded: 0,
+    similarityGroups: 0,
   });
-  const [hideEmptyCategories, setHideEmptyCategories] = useState(true); // 默认开启，隐藏无数据分类
+  
+  // 分类数据
+  const [categories, setCategories] = useState([]);
+  
+  // 城市数据
+  const [cities, setCities] = useState([]);
+  
+  // 相似组数据
+  const [similarityGroups, setSimilarityGroups] = useState([]);
+  
+  // 最近照片
+  const [recentImages, setRecentImages] = useState([]);
+  
+  // 扫描状态
+  const [isScanning, setIsScanning] = useState(false);
 
-  // 服务实例
-  const [galleryScannerService] = useState(new GalleryScannerService());
-  const [imageClassifierService] = useState(new ImageClassifierService());
-  const [imageStorageService] = useState(new ImageStorageService());
-
+  // ==================== 初始化加载 ====================
   useEffect(() => {
-    loadData();
-    loadSettings();
-    // 延迟执行自动扫描，避免阻塞主线程和触摸事件
-    const timer = setTimeout(() => {
-      autoScanGallery();
-    }, 1000);
-    
-    return () => clearTimeout(timer);
+    initializeData();
   }, []);
 
-  // 当屏幕获得焦点时刷新数据，确保从其他页面返回时数据是最新的
-  if (Platform.OS === 'web') {
-    // Web环境：直接调用useFocusEffect
-    useFocusEffect(
-      React.useCallback(() => {
-        console.log('HomeScreen 获得焦点，强制刷新数据...');
-        const timeoutId = setTimeout(async () => {
-          await loadData(true); // 强制刷新
-          loadSettings(); // 同时刷新设置
-          console.log('useFocusEffect 完成，当前分类最近照片状态:', categoryRecentImages);
-        }, 100);
-        
-        return () => clearTimeout(timeoutId);
-      }, [])
-    );
-  } else {
-    // 移动端：使用useFocusEffect hook
-    useFocusEffect(
-      React.useCallback(() => {
-        console.log('HomeScreen 获得焦点，强制刷新数据...');
-        const timeoutId = setTimeout(async () => {
-          await loadData(true); // 强制刷新
-          loadSettings(); // 同时刷新设置
-          console.log('useFocusEffect 完成，当前分类最近照片状态:', categoryRecentImages);
-        }, 100);
-        
-        return () => clearTimeout(timeoutId);
-      }, [])
-    );
-  }
-
-  const loadData = async (forceRefresh = false) => {
+  /**
+   * 初始化数据加载
+   */
+  const initializeData = async () => {
     try {
-      const [images, counts, statsData] = await Promise.all([
-        imageStorageService.getRecentImages(12),
-        imageStorageService.getCategoryCounts(),
-        imageStorageService.getStats(),
+      setLoading(true);
+      
+      // 确保服务初始化
+      await UnifiedDataService.initialize();
+      await configService.initialize();
+      
+      // 加载所有数据
+      await loadAllData();
+      
+    } catch (error) {
+      logger.error('❌ 首页初始化失败:', error);
+      Alert.alert('初始化失败', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * 加载所有数据（第一优先级：立即加载）
+   */
+  const loadAllData = async () => {
+    try {
+      // 并行加载核心数据
+      await Promise.all([
+        loadStatistics(),
+        loadCategories(),
+        loadRecentImages(),
       ]);
       
-      // 获取每个分类的最近照片
-      const categoryRecentImages = {};
-      const categories = UnifiedDataService.getAllCategoryIds();
+      // 延迟加载次要数据（第二优先级）
+      setTimeout(() => {
+        loadCities();
+        loadSimilarityGroups();
+      }, 100);
       
-      console.log('开始获取分类最近照片...');
-      for (const category of categories) {
-        if (counts[category] > 0) {
-          try {
-            const recentImages = await imageStorageService.getImagesByCategory(category, 1);
-            if (recentImages.length > 0) {
-              categoryRecentImages[category] = recentImages[0];
-              console.log(`分类 ${category} 获取到最近照片:`, recentImages[0].fileName);
-            }
-          } catch (error) {
-            console.error(`获取${category}分类最近照片失败:`, error);
-          }
-        }
-      }
-      console.log('分类最近照片获取完成:', Object.keys(categoryRecentImages));
-      
-      // 使用 requestAnimationFrame 确保UI更新不阻塞触摸事件
-      requestAnimationFrame(() => {
-        // 强制刷新时直接更新，确保数据同步
-        if (forceRefresh) {
-          setRecentImages(images);
-          setCategoryCounts(counts);
-          setStats(statsData);
-          setCategoryRecentImages(categoryRecentImages);
-        } else {
-                  // 对于分类最近照片，总是更新以确保背景图是最新的
-        console.log('更新分类最近照片状态:', categoryRecentImages);
-        setCategoryRecentImages(categoryRecentImages);
-          
-          // 其他数据使用防抖机制
-          setRecentImages(prev => {
-            if (JSON.stringify(prev) !== JSON.stringify(images)) {
-              return images;
-            }
-            return prev;
-          });
-          
-          setCategoryCounts(counts);
-          setStats(statsData);
-        }
-      });
     } catch (error) {
-      console.error('加载数据失败:', error);
+      logger.error('❌ 加载数据失败:', error);
+      throw error;
     }
   };
 
-  const loadSettings = async () => {
+  /**
+   * 加载统计数据
+   */
+  const loadStatistics = async () => {
     try {
-      const savedSettings = await imageStorageService.getSettings();
-      if (savedSettings.hideEmptyCategories !== undefined) {
-        setHideEmptyCategories(savedSettings.hideEmptyCategories);
-      }
+      const cache = GlobalImageCache.getCache();
+      const allImages = cache.allImages || [];
+      
+      const newStats = {
+        totalImages: allImages.length,
+        stagingBox: cache.categoryCounts['tobecleaned'] || 0,
+        todayAdded: UnifiedDataService.getTodayAddedCount(),
+        similarityGroups: UnifiedDataService.getSimilarityGroupsCount(),
+      };
+      
+      setStats(newStats);
+      logger.debug('📊 统计数据加载完成:', newStats);
+      
     } catch (error) {
-      console.error('加载设置失败:', error);
+      logger.error('❌ 加载统计数据失败:', error);
     }
   };
 
-  const autoScanGallery = async () => {
-    console.log('🔍 autoScanGallery 开始执行...');
+  /**
+   * 加载分类列表
+   */
+  const loadCategories = async () => {
+    try {
+      const cache = GlobalImageCache.getCache();
+      const categoryCounts = cache.categoryCounts || {};
+      
+      // 获取所有分类配置
+      const allCategories = configService.getAllCategoriesWithUI();
+      
+      // 构建分类列表（排除暂存箱）
+      const categoryList = Object.keys(categoryCounts)
+        .filter(catId => catId !== 'tobecleaned' && categoryCounts[catId] > 0)
+        .map(catId => {
+          const categoryConfig = allCategories.find(c => c.id === catId) || {};
+          return {
+            id: catId,
+            name: categoryConfig.chinese || categoryConfig.english || catId,
+            count: categoryCounts[catId],
+            thumbnail: null, // 懒加载
+          };
+        })
+        .sort((a, b) => b.count - a.count); // 按数量降序
+      
+      setCategories(categoryList);
+      logger.debug(`📁 分类列表加载完成: ${categoryList.length}个分类`);
+      
+    } catch (error) {
+      logger.error('❌ 加载分类列表失败:', error);
+    }
+  };
+
+  /**
+   * 加载城市列表
+   */
+  const loadCities = async () => {
+    try {
+      const cache = GlobalImageCache.getCache();
+      const cityCounts = cache.cityCounts || {};
+      
+      // 构建城市列表并按数量降序排序
+      const cityList = Object.keys(cityCounts)
+        .map(cityName => ({
+          name: cityName,
+          count: cityCounts[cityName],
+        }))
+        .sort((a, b) => b.count - a.count);
+      
+      setCities(cityList);
+      logger.debug(`🏙️ 城市列表加载完成: ${cityList.length}个城市`);
+      
+    } catch (error) {
+      logger.error('❌ 加载城市列表失败:', error);
+    }
+  };
+
+  /**
+   * 加载相似组
+   */
+  const loadSimilarityGroups = async () => {
+    try {
+      const groups = UnifiedDataService.getSimilarityGroups(8);
+      setSimilarityGroups(groups);
+      logger.debug(`🔍 相似组加载完成: ${groups.length}组`);
+      
+    } catch (error) {
+      logger.error('❌ 加载相似组失败:', error);
+    }
+  };
+
+  /**
+   * 加载最近照片
+   */
+  const loadRecentImages = async () => {
+    try {
+      const cache = GlobalImageCache.getCache();
+      const recent = (cache.recentImages || []).slice(0, 12);
+      
+      setRecentImages(recent);
+      logger.debug(`📸 最近照片加载完成: ${recent.length}张`);
+      
+    } catch (error) {
+      logger.error('❌ 加载最近照片失败:', error);
+    }
+  };
+
+  /**
+   * 下拉刷新
+   */
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // 重建缓存
+      await GlobalImageCache.buildCache();
+      // 重新加载数据
+      await loadAllData();
+    } catch (error) {
+      logger.error('❌ 刷新失败:', error);
+      Alert.alert('刷新失败', error.message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  /**
+   * 触发扫描
+   */
+  const handleScan = async () => {
     try {
       setIsScanning(true);
-      setScanProgress({
-        current: 0,
-        total: 0,
-        message: '正在清空数据库...',
-        filesFound: 0,
-        filesProcessed: 0,
-        filesFailed: 0
-      });
-
-      console.log('🗑️ 正在清空数据库...');
-      // 清空数据库
-      await imageStorageService.clearAllData();
-      console.log('✅ 数据库清空完成');
-
-      setScanProgress({
-        current: 0,
-        total: 0,
-        message: '正在初始化扫描服务...',
-        filesFound: 0,
-        filesProcessed: 0,
-        filesFailed: 0
-      });
-
-      console.log('🔍 正在初始化扫描服务...');
-      // 初始化扫描服务
-      await galleryScannerService.initialize();
-      console.log('✅ 扫描服务初始化完成');
-
-      // 创建进度回调函数
-      const onScanProgress = (progress) => {
-        // 使用 requestAnimationFrame 确保UI更新不阻塞触摸事件
-        requestAnimationFrame(() => {
-          setScanProgress(progress);
-        });
-      };
-
-      // 使用 Promise.resolve().then() 将扫描操作放到下一个事件循环
-      Promise.resolve().then(async () => {
-        try {
-          console.log('🔍 开始扫描相册...');
-          // 开始扫描
-          await galleryScannerService.scanGalleryWithProgress(onScanProgress);
-          console.log('✅ 扫描完成');
-          
-          // 扫描完成后刷新数据
-          await loadData(true); // 强制刷新
-        } catch (error) {
-          console.error('自动扫描相册失败:', error);
-          setScanProgress(prev => ({
-            ...prev,
-            message: `扫描失败: ${error.message}`
-          }));
-        } finally {
-          // 延迟关闭进度提示，让用户看到最终结果
-          setTimeout(() => {
-            setIsScanning(false);
-            setScanProgress({
-              current: 0,
-              total: 0,
-              message: '',
-              filesFound: 0,
-              filesProcessed: 0,
-              filesFailed: 0
-            });
-          }, 2000);
-        }
-      });
       
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.scanGallery();
+      
+      // 扫描完成后刷新数据
+      await onRefresh();
+      
+      Alert.alert('扫描完成', '相册扫描已完成');
     } catch (error) {
-      console.error('自动扫描相册初始化失败:', error);
+      logger.error('❌ 扫描失败:', error);
+      Alert.alert('扫描失败', error.message);
+    } finally {
       setIsScanning(false);
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    // 使用 requestAnimationFrame 确保UI更新不阻塞触摸事件
-    requestAnimationFrame(async () => {
-      await loadData(true); // 强制刷新数据
-      setRefreshing(false);
-    });
+  // ==================== 渲染函数 ====================
+
+  /**
+   * 渲染统计卡片
+   */
+  const renderStatCard = (icon, title, value, color, badge, onPress) => (
+    <TouchableOpacity
+      style={[styles.statCard, { borderLeftColor: color }]}
+      onPress={onPress}
+      disabled={!onPress}
+      activeOpacity={onPress ? 0.7 : 1}
+    >
+      <View style={styles.statCardContent}>
+        <Text style={styles.statCardIcon}>{icon}</Text>
+        <View style={styles.statCardInfo}>
+          <Text style={styles.statCardValue}>{value}</Text>
+          <Text style={styles.statCardTitle}>{title}</Text>
+        </View>
+        {badge && <View style={styles.badge} />}
+      </View>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染统计概览区
+   */
+  const renderStatistics = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>📊 统计概览</Text>
+      <View style={styles.statsGrid}>
+        {renderStatCard('📸', '总图片', stats.totalImages, '#007AFF', false, null)}
+        {renderStatCard('📦', '暂存箱', stats.stagingBox, '#FF9500', stats.stagingBox > 0, () => {
+          navigation.navigate('StagingBox');
+        })}
+        {renderStatCard('✨', '今日新增', stats.todayAdded, '#34C759', false, null)}
+        {renderStatCard('🔍', '相似组', stats.similarityGroups, '#AF52DE', false, () => {
+          // 滚动到相似组区域
+          // TODO: 实现滚动定位
+        })}
+      </View>
+    </View>
+  );
+
+  /**
+   * 渲染分类卡片
+   */
+  const renderCategoryCard = (category) => (
+    <TouchableOpacity
+      key={category.id}
+      style={styles.categoryCard}
+      onPress={() => {
+        navigation.navigate('Category', {
+          category: category.id,
+          fromScreen: 'Home',
+        });
+      }}
+    >
+      <View style={styles.categoryThumbnail}>
+        <Text style={styles.categoryPlaceholder}>📁</Text>
+      </View>
+      <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
+      <Text style={styles.categoryCount}>{category.count}</Text>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染按内容分类区
+   */
+  const renderCategoriesSection = () => {
+    if (categories.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>📁 按内容分类</Text>
+          <TouchableOpacity onPress={() => {
+            // TODO: 展开所有分类
+          }}>
+            <Text style={styles.sectionMore}>全部 ›</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesScroll}
+        >
+          {categories.map(renderCategoryCard)}
+        </ScrollView>
+      </View>
+    );
   };
 
-  const handleCategoryPress = (category) => {
-    navigation.navigate('Category', { category });
+  /**
+   * 渲染相似组卡片
+   */
+  const renderSimilarityGroupCard = (group) => (
+    <TouchableOpacity
+      key={group.groupId}
+      style={styles.similarityCard}
+      onPress={() => {
+        navigation.navigate('Category', {
+          similarityGroupId: group.groupId,
+          fromScreen: 'SimilarityGroup',
+        });
+      }}
+    >
+      <View style={styles.similarityHeader}>
+        <Text style={styles.similarityTitle}>
+          🔍 组{group.groupId} ({group.imageCount}张相似)
+        </Text>
+        <Text style={styles.similaritySimilarity}>{Math.round(group.similarity * 100)}%</Text>
+      </View>
+      <View style={styles.similarityThumbnails}>
+        {group.images.slice(0, 3).map((img, idx) => (
+          <Image
+            key={idx}
+            source={{ uri: img.uri }}
+            style={styles.similarityThumbnail}
+          />
+        ))}
+        {group.imageCount > 3 && (
+          <View style={styles.similarityMore}>
+            <Text style={styles.similarityMoreText}>+{group.imageCount - 3}</Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染相似图片分组区
+   */
+  const renderSimilarityGroupsSection = () => {
+    if (similarityGroups.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>🔍 相似图片分组</Text>
+          <TouchableOpacity onPress={() => {
+            // TODO: 展开所有相似组
+          }}>
+            <Text style={styles.sectionMore}>全部 ›</Text>
+          </TouchableOpacity>
+        </View>
+        {similarityGroups.map(renderSimilarityGroupCard)}
+      </View>
+    );
   };
 
-  // 测试位置信息提取功能
-  const testLocationExtraction = async () => {
-    try {
-      console.log('🧪 开始测试位置信息提取...');
-      const result = await galleryScannerService.testLocationExtraction();
-      console.log('测试结果:', result);
-      
-      // 显示测试结果
-      Alert.alert(
-        '位置信息测试结果',
-        `总图片: ${result.totalImages}\n有位置信息: ${result.imagesWithLocation}\n有GPS坐标: ${result.imagesWithGPS}\n覆盖率: ${result.coverageRate.toFixed(1)}%`,
-        [{ text: '确定' }]
-      );
-    } catch (error) {
-      console.error('测试失败:', error);
-      Alert.alert('测试失败', error.message);
-    }
+  /**
+   * 渲染城市列表项
+   */
+  const renderCityItem = (city) => (
+    <TouchableOpacity
+      key={city.name}
+      style={styles.cityItem}
+      onPress={() => {
+        navigation.navigate('Category', {
+          city: city.name,
+          fromScreen: 'Home',
+        });
+      }}
+    >
+      <Text style={styles.cityArrow}>›</Text>
+      <Text style={styles.cityName}>{city.name}</Text>
+      <Text style={styles.cityCount}>({city.count})</Text>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染按城市分类区
+   */
+  const renderCitiesSection = () => {
+    if (cities.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>🏙️ 按城市分类</Text>
+        </View>
+        <View style={styles.citiesList}>
+          {cities.map(renderCityItem)}
+        </View>
+      </View>
+    );
   };
 
-  // 测试模块可用性
-  const testModules = () => {
-    let results = '=== 测试模块可用性 ===\n\n';
-
-    // 测试Buffer
-    try {
-      const Buffer = require('buffer').Buffer;
-      results += `✅ Buffer模块可用: ${typeof Buffer}\n`;
-      results += `Buffer.from测试: ${Buffer.from('test', 'utf8').toString()}\n\n`;
-    } catch (error) {
-      results += `❌ Buffer模块不可用: ${error.message}\n\n`;
-    }
-
-    // 测试exif-parser
-    try {
-      const ExifParser = require('exif-parser');
-      results += `✅ exif-parser模块可用: ${typeof ExifParser}\n\n`;
-    } catch (error) {
-      results += `❌ exif-parser模块不可用: ${error.message}\n\n`;
-    }
-
-    // 测试react-native-exif
-    try {
-      const RNExif = eval('require("react-native-exif")');
-      results += `✅ react-native-exif模块可用: ${typeof RNExif}\n`;
-      results += `getExif方法: ${typeof RNExif.getExif}\n\n`;
-    } catch (error) {
-      results += `❌ react-native-exif模块不可用: ${error.message}\n\n`;
-    }
-
-    // 测试react-native-fs
-    try {
-      const RNFS = require('../adapters/WebAdapters').RNFS;
-      results += `✅ react-native-fs模块可用: ${typeof RNFS}\n\n`;
-    } catch (error) {
-      results += `❌ react-native-fs模块不可用: ${error.message}\n\n`;
-    }
-
-    // 测试React Native核心模块
-    try {
-      const ReactNative = eval('require("react-native")');
-      results += `✅ React Native核心模块可用: ${typeof ReactNative}\n`;
-      results += `Platform: ${typeof ReactNative.Platform}\n`;
-      results += `MediaStore: ${typeof ReactNative.MediaStore}\n\n`;
-    } catch (error) {
-      results += `❌ React Native核心模块不可用: ${error.message}\n\n`;
-    }
-
-    // 显示结果
-    Alert.alert('模块测试结果', results);
+  /**
+   * 渲染最近照片
+   */
+  const renderRecentPhotos = () => {
+    if (recentImages.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>📸 最近照片</Text>
+          <TouchableOpacity onPress={() => {
+            // TODO: 查看更多
+          }}>
+            <Text style={styles.sectionMore}>全部 ›</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.recentGrid}>
+          {recentImages.map((image, index) => (
+            <TouchableOpacity
+              key={image.id || index}
+              style={styles.recentGridItem}
+              onPress={() => {
+                navigation.navigate('ImagePreview', {
+                  image: image,
+                  allImages: recentImages,
+                  currentIndex: index,
+                  fromScreen: 'Home',
+                });
+              }}
+            >
+              <Image
+                source={{ uri: image.uri }}
+                style={styles.recentGridImage}
+                resizeMode="cover"
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
   };
+
+  /**
+   * 渲染FAB扫描按钮
+   */
+  const renderFAB = () => (
+    <TouchableOpacity
+      style={styles.fab}
+      onPress={handleScan}
+      disabled={isScanning}
+    >
+      {isScanning ? (
+        <ActivityIndicator color="#FFFFFF" />
+      ) : (
+        <Text style={styles.fabIcon}>🔄</Text>
+      )}
+    </TouchableOpacity>
+  );
+
+  // ==================== 主渲染 ====================
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>加载中...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* 顶部导航栏 */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>芯图相册</Text>
+      </View>
+
+      {/* 主内容区 */}
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* 标题和统计信息 */}
-        <View style={styles.header}>
-          <Text style={styles.title}>照片分类助手</Text>
-          <View style={styles.statsInline}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.classified || 0}</Text>
-              <Text style={styles.statLabel}>已分类</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.totalSize ? `${(stats.totalSize / 1024 / 1024).toFixed(1)}` : '0'}</Text>
-              <Text style={styles.statLabel}>总大小(MB)</Text>
-            </View>
-            <TouchableOpacity style={styles.testButton} onPress={testLocationExtraction}>
-              <Text style={styles.testButtonText}>测试位置</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.testButton} onPress={testModules}>
-              <Text style={styles.testButtonText}>测试模块</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.testButton} onPress={autoScanGallery}>
-              <Text style={styles.testButtonText}>重新扫描</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* 扫描进度提示区 - 始终显示 */}
-        <View style={styles.scanProgressBanner}>
-          <Text style={styles.scanProgressMessage} numberOfLines={1} ellipsizeMode="tail">
-            {isScanning
-              ? `${scanProgress.message} | 发现: ${scanProgress.filesFound} | 已处理: ${scanProgress.filesProcessed}`
-              : '扫描服务就绪，等待新文件...'
-            }
-          </Text>
-
-        </View>
-
-        {/* 分类卡片 */}
-        <View style={styles.categoriesSection}>
-          <Text style={styles.sectionTitle}>按内容</Text>
-          <View style={styles.categoriesContainer}>
-            {renderCategoryCards()}
-          </View>
-        </View>
-
-        {/* 最近照片 */}
-        <View style={styles.recentSection}>
-          <Text style={styles.sectionTitle}>最近</Text>
-          <RecentImagesGrid 
-            images={recentImages} 
-            onImagePress={(image) => {
-              navigation.navigate('ImagePreview', { image });
-            }}
-          />
-        </View>
+        {renderStatistics()}
+        {renderCategoriesSection()}
+        {renderSimilarityGroupsSection()}
+        {renderCitiesSection()}
+        {renderRecentPhotos()}
       </ScrollView>
+
+      {/* FAB扫描按钮 */}
+      {renderFAB()}
     </SafeAreaView>
   );
 };
 
+// ==================== 样式 ====================
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F2F2F7',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#8E8E93',
+  },
+  header: {
+    height: 56,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000000',
   },
   scrollView: {
     flex: 1,
   },
-  header: {
+  scrollContent: {
+    paddingBottom: 100, // 为FAB留出空间
+  },
+  
+  // 区块样式
+  section: {
+    backgroundColor: '#FFFFFF',
+    marginTop: 12,
+    paddingVertical: 16,
+  },
+  sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    flex: 1,
-  },
-  statsInline: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
-  statItem: {
-    alignItems: 'center',
-    marginLeft: 20,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
   },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2196F3',
+  sectionMore: {
+    fontSize: 14,
+    color: '#007AFF',
   },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  testButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginLeft: 10,
-  },
-  testButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  // 扫描进度提示区样式
-  scanProgressBanner: {
-    backgroundColor: '#f8f9fa',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    marginHorizontal: 0,
-    marginTop: 0,
-    marginBottom: 0,
-    padding: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanProgressMessage: {
-    fontSize: 13,
-    color: '#555',
-    textAlign: 'center',
-    lineHeight: 18,
-    fontWeight: '400',
-  },
-
-  categoriesContainer: {
+  
+  // 统计卡片
+  statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    marginTop: 10,
-    position: 'relative',
+    paddingHorizontal: 16,
+    gap: 12,
   },
-
-  categoriesSection: {
-    marginHorizontal: 20,
-    marginBottom: 30,
+  statCard: {
+    width: (SCREEN_WIDTH - 48) / 2, // 两列布局，减去padding和gap
+    backgroundColor: '#F9F9F9',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 4,
   },
-  sectionTitle: {
-    fontSize: 18,
+  statCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statCardIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  statCardInfo: {
+    flex: 1,
+  },
+  statCardValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  statCardTitle: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  badge: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF3B30',
+  },
+  
+  // 分类卡片
+  categoriesScroll: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  categoryCard: {
+    width: 100,
+    alignItems: 'center',
+  },
+  categoryThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F9F9F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryPlaceholder: {
+    fontSize: 32,
+  },
+  categoryName: {
+    fontSize: 14,
+    color: '#000000',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  categoryCount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  
+  // 相似组卡片
+  similarityCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+  },
+  similarityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  similarityTitle: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    color: '#000000',
   },
-  recentSection: {
-    marginHorizontal: 20,
-    marginBottom: 30,
+  similaritySimilarity: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#AF52DE',
   },
-  sectionTitle: {
+  similarityThumbnails: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  similarityThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
+    backgroundColor: '#E5E5EA',
+  },
+  similarityMore: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
+    backgroundColor: '#E5E5EA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  similarityMoreText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#8E8E93',
+  },
+  
+  // 城市列表
+  citiesList: {
+    paddingHorizontal: 16,
+  },
+  cityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  cityArrow: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    color: '#8E8E93',
+    marginRight: 8,
+  },
+  cityName: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000000',
+  },
+  cityCount: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  
+  // 最近照片网格
+  recentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 4,
+  },
+  recentGridItem: {
+    width: (SCREEN_WIDTH - 40) / 3, // 3列布局
+    height: (SCREEN_WIDTH - 40) / 3,
+  },
+  recentGridImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 4,
+  },
+  
+  // FAB按钮
+  fab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 80, // 避开底部Tab栏
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  fabIcon: {
+    fontSize: 24,
   },
 });
 
 export default HomeScreen;
-

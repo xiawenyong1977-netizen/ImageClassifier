@@ -39,6 +39,8 @@ const MainTabNavigator = () => (
 
         if (route.name === 'Home') {
           iconName = '🏠';
+        } else if (route.name === 'StagingBox') {
+          iconName = '📦';
         } else if (route.name === 'Settings') {
           iconName = '⚙️';
         }
@@ -55,7 +57,11 @@ const MainTabNavigator = () => (
         paddingBottom: 8,
         paddingTop: 8,
       },
-      tabBarShowLabel: false,
+      tabBarShowLabel: true,
+      tabBarLabelStyle: {
+        fontSize: 12,
+        marginTop: -4,
+      },
       headerShown: false,
     })}
   >
@@ -63,14 +69,34 @@ const MainTabNavigator = () => (
       name="Home" 
       component={HomeScreen} 
       options={{ 
-        title: '首页'
+        title: '首页',
+        tabBarLabel: '首页',
       }} 
     />
+    <Tab.Screen 
+      name="StagingBox" 
+      options={{ 
+        title: '暂存箱',
+        tabBarLabel: '暂存箱',
+      }}
+    >
+      {() => (
+        <CategoryScreen 
+          route={{ 
+            params: { 
+              category: 'tobecleaned',
+              fromScreen: 'StagingBox' 
+            } 
+          }} 
+        />
+      )}
+    </Tab.Screen>
     <Tab.Screen 
       name="Settings" 
       component={SettingsScreen} 
       options={{ 
-        title: '设置'
+        title: '设置',
+        tabBarLabel: '设置',
       }} 
     />
   </Tab.Navigator>

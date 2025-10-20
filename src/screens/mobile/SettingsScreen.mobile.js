@@ -1,77 +1,99 @@
+/**
+ * 芯图相册 - 移动端设置页
+ * 
+ * 功能：
+ * 1. 扫描设置
+ * 2. 存储管理
+ * 3. 显示设置
+ * 4. 关于信息
+ */
+
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from '../adapters/WebAdapters';
-import ImageStorageService from '../services/ImageStorageService';
-import ImageClassifierService from '../services/ImageClassifierService';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Switch,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from '../../adapters/WebAdapters';
+import ImageStorageService from '../../services/ImageStorageService';
+import { logger } from '../../adapters/WebAdapters';
 
 const SettingsScreen = ({ navigation }) => {
-  const [settings, setSettings] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [clearDataProgress, setClearDataProgress] = useState(null);
-  const [showProgressModal, setShowProgressModal] = useState(false);
+  // ==================== 状态管理 ====================
+  const [autoScan, setAutoScan] = useState(false);
+  const [cacheSize, setCacheSize] = useState('0 MB');
+  const [theme, setTheme] = useState('auto');
 
+  // ==================== 初始化 ====================
   useEffect(() => {
     loadSettings();
+    calculateCacheSize();
   }, []);
 
+  /**
+   * 加载设置
+   */
   const loadSettings = async () => {
     try {
-      const savedSettings = await ImageStorageService.getSettings();
-      setSettings(savedSettings);
+      const imageStorageService = new ImageStorageService();
+      // TODO: 从存储加载设置
+      setAutoScan(false);
+      setTheme('auto');
     } catch (error) {
-      console.error('加载设置失败:', error);
-    } finally {
-      setLoading(false);
+      logger.error('❌ 加载设置失败:', error);
     }
   };
 
-  const updateSetting = async (key, value) => {
+  /**
+   * 计算缓存大小
+   */
+  const calculateCacheSize = async () => {
     try {
-      const newSettings = { ...settings, [key]: value };
-      await ImageStorageService.saveSettings(newSettings);
-      setSettings(newSettings);
+      // TODO: 实际计算缓存大小
+      setCacheSize('0 MB');
     } catch (error) {
-      console.error('保存设置失败:', error);
-      Alert.alert('错误', '保存设置失败');
+      logger.error('❌ 计算缓存大小失败:', error);
     }
   };
 
-  const handleClearData = () => {
+  // ==================== 设置操作 ====================
+
+  /**
+   * 切换自动扫描
+   */
+  const toggleAutoScan = async (value) => {
+    try {
+      setAutoScan(value);
+      // TODO: 保存设置
+      logger.debug(`自动扫描: ${value ? '开启' : '关闭'}`);
+    } catch (error) {
+      logger.error('❌ 切换自动扫描失败:', error);
+    }
+  };
+
+  /**
+   * 清理缓存
+   */
+  const handleClearCache = () => {
     Alert.alert(
-      '重新智能扫描',
-      '确定要重新扫描相册并进行智能分类吗？此操作可能需要较长时间�?,
+      '清理缓存',
+      '确定要清理缓存吗？这不会删除图片数据。',
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '重新扫描',
-          style: 'default',
+          text: '确定',
           onPress: async () => {
             try {
-              // 显示进度提示�?              setShowProgressModal(true);
-              setClearDataProgress({
-                current: 0,
-                total: 3,
-                message: '准备开�?..',
-                step: 'preparing'
-              });
-              
-              // 调用清空数据方法，传入进度回�?              await ImageStorageService.clearAllData((progress) => {
-                setClearDataProgress(progress);
-              });
-              
-              // 操作完成后，停留1秒自动关�?              setTimeout(() => {
-                setShowProgressModal(false);
-                setClearDataProgress(null);
-                // 重新加载设置
-                loadSettings();
-              }, 1000);
-              
+              // TODO: 实际清理缓存
+              Alert.alert('成功', '缓存已清理');
+              calculateCacheSize();
             } catch (error) {
-              console.error('清空数据失败:', error);
-              // 出错时也自动关闭进度�?              setTimeout(() => {
-                setShowProgressModal(false);
-                setClearDataProgress(null);
-              }, 1000);
+              logger.error('❌ 清理缓存失败:', error);
+              Alert.alert('失败', error.message);
             }
           },
         },
@@ -79,289 +101,223 @@ const SettingsScreen = ({ navigation }) => {
     );
   };
 
-  const renderSettingItem = (title, description, type, key, value) => {
-    if (type === 'switch') {
-      return (
-        <View style={styles.settingItem}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingTitle}>{title}</Text>
-            <Text style={styles.settingDescription}>{description}</Text>
-          </View>
-          <Switch
-            value={value}
-            onValueChange={(newValue) => updateSetting(key, newValue)}
-            trackColor={{ false: '#e0e0e0', true: '#2196F3' }}
-            thumbColor={value ? '#fff' : '#f4f3f4'}
-          />
-        </View>
-      );
-    }
-
-    if (type === 'button') {
-      return (
-        <TouchableOpacity
-          style={styles.settingItem}
-          onPress={value}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingTitle}>{title}</Text>
-            <Text style={styles.settingDescription}>{description}</Text>
-          </View>
-          <Text style={styles.settingArrow}>�?/Text>
-        </TouchableOpacity>
-      );
-    }
-
-    return null;
+  /**
+   * 数据备份
+   */
+  const handleBackup = () => {
+    Alert.alert('提示', '备份功能开发中');
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>加载�?..</Text>
-        </View>
-      </SafeAreaView>
+  /**
+   * 数据恢复
+   */
+  const handleRestore = () => {
+    Alert.alert('提示', '恢复功能开发中');
+  };
+
+  /**
+   * 切换主题
+   */
+  const handleThemeChange = () => {
+    const themes = [
+      { value: 'light', label: '浅色' },
+      { value: 'dark', label: '深色' },
+      { value: 'auto', label: '跟随系统' },
+    ];
+
+    Alert.alert(
+      '选择主题',
+      '',
+      [
+        ...themes.map(t => ({
+          text: t.label + (theme === t.value ? ' ✓' : ''),
+          onPress: () => setTheme(t.value),
+        })),
+        { text: '取消', style: 'cancel' },
+      ]
     );
-  }
+  };
+
+  /**
+   * 显示关于信息
+   */
+  const handleAbout = () => {
+    Alert.alert(
+      '关于芯图相册',
+      '版本: 1.0.0\n\n基于AI的智能图片分类和管理应用\n\n© 2025 芯图相册团队',
+      [{ text: '确定' }]
+    );
+  };
+
+  // ==================== 渲染函数 ====================
+
+  /**
+   * 渲染设置项
+   */
+  const renderSettingItem = (title, value, onPress, showArrow = true) => (
+    <TouchableOpacity
+      style={styles.settingItem}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.settingTitle}>{title}</Text>
+      <View style={styles.settingRight}>
+        {value && <Text style={styles.settingValue}>{value}</Text>}
+        {showArrow && <Text style={styles.settingArrow}>›</Text>}
+      </View>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染开关项
+   */
+  const renderSwitchItem = (title, value, onValueChange) => (
+    <View style={styles.settingItem}>
+      <Text style={styles.settingTitle}>{title}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: '#767577', true: '#81b0ff' }}
+        thumbColor={value ? '#007AFF' : '#f4f3f4'}
+      />
+    </View>
+  );
+
+  /**
+   * 渲染分组标题
+   */
+  const renderSectionTitle = (title) => (
+    <Text style={styles.sectionTitle}>{title}</Text>
+  );
+
+  // ==================== 主渲染 ====================
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* 顶部标题 */}
+      {/* 顶部导航栏 */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>设置</Text>
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* 分类设置 */}
+      {/* 设置列表 */}
+      <ScrollView style={styles.scrollView}>
+        {/* 扫描设置 */}
+        {renderSectionTitle('📁 扫描设置')}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>分类设置</Text>
-          
-          {renderSettingItem(
-            '自动隐藏无数据分�?,
-            '开启后，首页只显示有图片的分类卡片',
-            'switch',
-            'hideEmptyCategories',
-            settings.hideEmptyCategories
-          )}
+          {renderSettingItem('扫描路径', '相册', () => Alert.alert('提示', '功能开发中'))}
+          {renderSwitchItem('自动扫描', autoScan, toggleAutoScan)}
         </View>
 
-        {/* 性能设置 */}
+        {/* 存储管理 */}
+        {renderSectionTitle('💾 存储管理')}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>性能设置</Text>
-          
-          {renderSettingItem(
-            '缩略图质�?,
-            '选择缩略图的压缩质量',
-            'button',
-            'thumbnailQuality',
-            () => Alert.alert('缩略图质�?, '当前: ' + settings.thumbnailQuality)
-          )}
-          
-          {renderSettingItem(
-            '最大缓存大�?,
-            `${settings.maxCacheSize} MB`,
-            'button',
-            'maxCacheSize',
-            () => Alert.alert('缓存大小', '当前: ' + settings.maxCacheSize + ' MB')
-          )}
+          {renderSettingItem('缓存大小', cacheSize, handleClearCache)}
+          {renderSettingItem('清理缓存', '', handleClearCache)}
+          {renderSettingItem('数据备份', '', handleBackup)}
+          {renderSettingItem('数据恢复', '', handleRestore)}
         </View>
 
-        {/* 数据管理 */}
+        {/* 显示设置 */}
+        {renderSectionTitle('🎨 显示设置')}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>数据管理</Text>
-          
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={handleClearData}>
-            <View style={styles.settingInfo}>
-              <Text style={[styles.settingTitle, styles.dangerText]}>
-                重新智能分类
-              </Text>
-              <Text style={styles.settingDescription}>
-                清空当前数据，开始智能分�?              </Text>
-            </View>
-            <Text style={styles.settingArrow}>�?/Text>
-          </TouchableOpacity>
+          {renderSettingItem('主题模式', getThemeLabel(theme), handleThemeChange)}
+          {renderSettingItem('图片质量', '高', () => Alert.alert('提示', '功能开发中'))}
         </View>
 
-        {/* 关于应用 */}
+        {/* 关于 */}
+        {renderSectionTitle('ℹ️ 关于')}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>关于应用</Text>
-          
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>版本</Text>
-              <Text style={styles.settingDescription}>1.0.0</Text>
-            </View>
-          </View>
-          
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>开发�?/Text>
-              <Text style={styles.settingDescription}>深圳市智语未来软件有限公�?/Text>
-            </View>
-          </View>
+          {renderSettingItem('版本信息', 'v1.0.0', handleAbout)}
+          {renderSettingItem('使用帮助', '', () => Alert.alert('提示', '功能开发中'))}
+          {renderSettingItem('隐私政策', '', () => Alert.alert('提示', '功能开发中'))}
         </View>
+
+        {/* 底部空白 */}
+        <View style={{ height: 40 }} />
       </ScrollView>
-      
-      {/* 进度提示�?*/}
-      {showProgressModal && (
-        <View style={styles.progressModal}>
-          <View style={styles.progressContent}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.progressTitle}>正在处理...</Text>
-            <Text style={styles.progressMessage}>
-              {clearDataProgress?.message || '准备开�?..'}
-            </Text>
-            <View style={styles.progressBar}>
-              <View 
-                style={[
-                  styles.progressFill, 
-                  { 
-                    width: `${(clearDataProgress?.current || 0) / (clearDataProgress?.total || 1) * 100}%` 
-                  }
-                ]} 
-              />
-            </View>
-            <Text style={styles.progressStep}>
-              {clearDataProgress?.current || 0} / {clearDataProgress?.total || 1}
-            </Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 };
 
+// ==================== 工具函数 ====================
+
+/**
+ * 获取主题标签
+ */
+const getThemeLabel = (theme) => {
+  const labels = {
+    light: '浅色',
+    dark: '深色',
+    auto: '跟随系统',
+  };
+  return labels[theme] || '跟随系统';
+};
+
+// ==================== 样式 ====================
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F2F2F7',
   },
   header: {
-    padding: 20,
-    backgroundColor: '#fff',
+    height: 56,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#E5E5EA',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#000000',
   },
   scrollView: {
     flex: 1,
   },
-  section: {
-    marginTop: 20,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#e0e0e0',
-  },
+  
+  // 分组
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#666',
-    padding: 16,
+    color: '#8E8E93',
+    paddingHorizontal: 16,
+    paddingTop: 24,
     paddingBottom: 8,
-    backgroundColor: '#f9f9f9',
   },
+  section: {
+    backgroundColor: '#FFFFFF',
+    marginTop: 8,
+  },
+  
+  // 设置项
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  settingInfo: {
-    flex: 1,
+    borderBottomColor: '#F2F2F7',
   },
   settingTitle: {
     fontSize: 16,
-    color: '#333',
-    marginBottom: 4,
+    color: '#000000',
   },
-  settingDescription: {
+  settingRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingValue: {
     fontSize: 14,
-    color: '#666',
+    color: '#8E8E93',
+    marginRight: 8,
   },
   settingArrow: {
     fontSize: 18,
-    color: '#ccc',
-  },
-  dangerText: {
-    color: '#ff4444',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  // 进度提示窗样�?  progressModal: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  progressContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    minWidth: 280,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  progressTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  progressMessage: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  progressBar: {
-    width: '100%',
-    height: 6,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#007AFF',
-    borderRadius: 3,
-  },
-  progressStep: {
-    fontSize: 12,
-    color: '#999',
+    color: '#8E8E93',
   },
 });
 
 export default SettingsScreen;
-

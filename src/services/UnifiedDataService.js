@@ -1280,6 +1280,70 @@ class UnifiedDataService {
       throw error;
     }
   }
+
+  // ==================== 移动端统计接口 ====================
+
+  /**
+   * 获取今日新增图片数量
+   * @returns {number} 今日新增的图片数量
+   */
+  getTodayAddedCount() {
+    try {
+      const cache = this.imageCache.getCache();
+      const today = new Date().toDateString();
+      
+      const todayImages = cache.allImages.filter(img => {
+        if (!img.createdAt) return false;
+        return new Date(img.createdAt).toDateString() === today;
+      });
+      
+      logger.debug(`📊 今日新增图片数量: ${todayImages.length}`);
+      return todayImages.length;
+    } catch (error) {
+      logger.error('获取今日新增数量失败:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 获取相似图片组的总数
+   * @returns {number} 相似组数量（暂时返回0，待实现完整相似度检测）
+   */
+  getSimilarityGroupsCount() {
+    try {
+      // TODO: 实现完整的相似度检测算法
+      // 当前返回0，后续Phase 2实现
+      logger.debug('📊 相似组功能待实现，当前返回0');
+      return 0;
+    } catch (error) {
+      logger.error('获取相似组数量失败:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 获取相似图片分组
+   * @param {number} limit - 返回的最大组数（可选）
+   * @returns {Array} 相似组列表（暂时返回空数组，待实现）
+   */
+  getSimilarityGroups(limit = 8) {
+    try {
+      // TODO: Phase 2 实现完整的相似度检测算法
+      // 实现逻辑：
+      // 1. 获取所有图片
+      // 2. 调用 ColorHistogramExtractor 计算图片特征
+      // 3. 使用相似度算法（如余弦相似度）进行分组
+      // 4. 过滤出相似度高于阈值（如0.85）的组
+      // 5. 按相似度降序排序
+      // 6. 返回前 limit 组
+      
+      logger.debug(`📊 相似组功能待实现，当前返回空数组`);
+      return [];
+    } catch (error) {
+      logger.error('获取相似组失败:', error);
+      return [];
+    }
+  }
 }
 
 // 导出单例实例

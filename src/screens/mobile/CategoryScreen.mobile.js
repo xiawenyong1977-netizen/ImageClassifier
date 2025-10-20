@@ -1,430 +1,508 @@
-import React, { useState, useEffect } from 'react';
-import { useFocusEffect } from '../adapters/WebAdapters';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, Modal, Dimensions } from 'react-native';
-import { SafeAreaView } from '../adapters/WebAdapters';
-import ImageStorageService from '../services/ImageStorageService';
+/**
+ * 芯图相册 - 移动端分类详情页（通用）
+ * 
+ * 支持4种形态：
+ * 1. 普通分类页 (category参数)
+ * 2. 暂存箱页 (category='tobecleaned')
+ * 3. 城市分类页 (city参数)
+ * 4. 相似组详情页 (similarityGroupId参数)
+ */
 
-// 获取分类显示名称的辅助函�?
-const imageStorageService = new ImageStorageService();
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  Dimensions,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { SafeAreaView } from '../../adapters/WebAdapters';
+import UnifiedDataService from '../../services/UnifiedDataService';
+import GlobalImageCache from '../../services/GlobalImageCache';
+import configService from '../../services/ConfigService';
+import { logger } from '../../adapters/WebAdapters';
 
-// 简化的图片项组�?
-const ImageItem = ({ item, isSelected, onPress, onLongPress }) => {
-  return (
-    <TouchableOpacity
-      style={[styles.imageContainer, isSelected && styles.selectedImage]}
-      onPress={() => onPress(item)}
-      onLongPress={() => onLongPress(item)}
-      activeOpacity={0.8}>
-      
-      {/* 显示图片 */}
-      {item.uri ? (
-        <Image
-          source={{ uri: item.uri }}
-          style={styles.image}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={styles.imagePlaceholder}>
-          <Text style={styles.placeholderText}>📷</Text>
-          <Text style={styles.placeholderFileName} numberOfLines={1}>
-            {item.fileName || '图片'}
-          </Text>
-        </View>
-      )}
-      
-      {/* 选择指示�?*/}
-      {isSelected && (
-        <View style={styles.selectionIndicator}>
-          <Text style={styles.selectionText}>�?/Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-};
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_COLUMNS = 3;
+const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 
 const CategoryScreen = ({ route, navigation }) => {
-  const { category } = route.params;
-  
-  // 基础状�?
+  // ==================== 路由参数 ====================
+  const { category, city, similarityGroupId, fromScreen } = route.params || {};
+
+  // ==================== 状态管理 ====================
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedImages, setSelectedImages] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // 多选模式
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
+  const [selectedImages, setSelectedImages] = useState(new Set());
   
-  // 删除进度状�?
-  const [showDeleteProgress, setShowDeleteProgress] = useState(false);
-  const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 0 });
+  // 分页
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   
-  // 分页状�?
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMoreImages, setHasMoreImages] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  
-  // 设置足够大的首次加载数量，确保铺满屏�?
-  const ITEMS_PER_PAGE = 24; // 大幅增加首次显示数量，确保铺满屏�?
+  const ITEMS_PER_PAGE = 50;
 
-  // 只在分类变化时加载图�?
+  // ==================== 页面类型判断 ====================
+  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : null;
+  const isStaging = category === 'tobecleaned';
+
+  /**
+   * 获取页面标题
+   */
+  const getPageTitle = () => {
+    if (isStaging) return '📦 暂存箱';
+    if (category) {
+      const categoryConfig = configService.getAllCategoriesWithUI().find(c => c.id === category);
+      return categoryConfig?.chinese || category;
+    }
+    if (city) return `🏙️ ${city}`;
+    if (similarityGroupId) return `🔍 相似组 ${similarityGroupId}`;
+    return '图片列表';
+  };
+
+  /**
+   * 获取操作按钮配置
+   */
+  const getActionButtons = () => {
+    if (isStaging) {
+      return [
+        { id: 'remove', label: '移出暂存箱', icon: '🔙', color: '#007AFF' },
+        { id: 'delete', label: '永久删除', icon: '🗑️', color: '#FF3B30' },
+        { id: 'export', label: '导出', icon: '📤', color: '#34C759' },
+      ];
+    }
+    
+    if (similarityGroupId) {
+      return [
+        { id: 'keep', label: '保留选中', icon: '✅', color: '#34C759' },
+        { id: 'deleteOthers', label: '删除其他', icon: '🗑️', color: '#FF9500' },
+        { id: 'deleteAll', label: '全部删除', icon: '🗑️', color: '#FF3B30' },
+      ];
+    }
+    
+    return [
+      { id: 'staging', label: '放入暂存箱', icon: '📦', color: '#FF9500' },
+      { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
+      { id: 'export', label: '导出', icon: '📤', color: '#34C759' },
+    ];
+  };
+
+  // ==================== 数据加载 ====================
+
   useEffect(() => {
-    loadCategoryImages();
-  }, [category]);
+    loadImages();
+  }, [category, city, similarityGroupId]);
 
-  // 当屏幕获得焦点时刷新数据，确保从其他页面返回时数据是最新的
-  useFocusEffect(
-    React.useCallback(() => {
-      console.log('CategoryScreen 获得焦点，刷新分类数�?..');
-      // 延迟刷新，避免频繁更�?
-      const timeoutId = setTimeout(() => {
-        loadCategoryImages();
-      }, 100);
-      
-      return () => clearTimeout(timeoutId);
-    }, [category])
-  );
-
-  const loadCategoryImages = async () => {
+  /**
+   * 加载图片列表
+   */
+  const loadImages = async (isRefresh = false) => {
     try {
-      setLoading(true);
-      const categoryImages = await ImageStorageService.getImagesByCategory(category);
-      setImages(categoryImages);
-      setCurrentPage(0);
-      setHasMoreImages(categoryImages.length > ITEMS_PER_PAGE);
+      if (isRefresh) {
+        setRefreshing(true);
+        setPage(1);
+      } else {
+        setLoading(true);
+      }
+
+      const cache = GlobalImageCache.getCache();
+      let allImages = cache.allImages || [];
+
+      // 根据页面类型过滤图片
+      let filteredImages = [];
+      if (category) {
+        filteredImages = allImages.filter(img => img.category === category);
+      } else if (city) {
+        filteredImages = allImages.filter(img => img.city === city);
+      } else if (similarityGroupId) {
+        // TODO: 从相似组获取图片
+        filteredImages = [];
+      }
+
+      // 按时间倒序排序
+      filteredImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+      setImages(filteredImages);
+      setHasMore(filteredImages.length > ITEMS_PER_PAGE);
+      
+      logger.debug(`📸 加载图片: ${filteredImages.length}张`);
+
     } catch (error) {
-      console.error('加载分类图片失败:', error);
-      Alert.alert('错误', '加载图片失败，请重试');
+      logger.error('❌ 加载图片失败:', error);
+      Alert.alert('加载失败', error.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  // 按日期分组图�?
-  const getGroupedImages = () => {
-    const grouped = {};
+  /**
+   * 下拉刷新
+   */
+  const onRefresh = useCallback(async () => {
+    await GlobalImageCache.buildCache();
+    await loadImages(true);
+  }, [category, city, similarityGroupId]);
+
+  /**
+   * 加载更多
+   */
+  const loadMore = () => {
+    if (!hasMore || loadingMore) return;
     
-    images.forEach(image => {
-      // 优先使用拍摄时间（takenAt），如果没有则使用文件时间（timestamp�?
-      let date;
-      if (image.takenAt) {
-        date = new Date(image.takenAt);
-      } else if (image.timestamp) {
-        date = new Date(image.timestamp);
-      } else if (image.createdAt) {
-        date = new Date(image.createdAt);
-      } else if (image.modifiedAt) {
-        date = new Date(image.modifiedAt);
-      } else {
-        date = new Date();
-      }
-      
-      const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD格式
-      
-      if (!grouped[dateKey]) {
-        grouped[dateKey] = [];
-      }
-      grouped[dateKey].push(image);
-    });
-    
-    // 对每个日期组内的图片按拍摄时间排�?
-    // 如果没有拍摄时间，则按文件时间排�?
-    Object.keys(grouped).forEach(dateKey => {
-      grouped[dateKey].sort((a, b) => {
-        const timeA = a.takenAt || a.timestamp || a.createdAt || a.modifiedAt || 0;
-        const timeB = b.takenAt || b.timestamp || b.createdAt || b.modifiedAt || 0;
-        return new Date(timeB) - new Date(timeA); // 最新的在前
-      });
-    });
-    
-    // 按日期倒序排列（最新的日期在前�?
-    const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
-    
-    return { grouped, sortedDates };
+    setLoadingMore(true);
+    setTimeout(() => {
+      setPage(page + 1);
+      setLoadingMore(false);
+    }, 300);
   };
 
-  // 获取当前显示的图片（时间轴布局显示所有图片）
-  const getDisplayedImages = () => {
-    // 由于使用时间轴布局，显示所有图片，不再分页
-    return images;
-  };
+  // ==================== 选择操作 ====================
 
-  // 自动加载更多图片
-  const loadMoreImages = async () => {
-    if (!hasMoreImages || isLoadingMore) return;
-    
-    setIsLoadingMore(true);
-    
-    // 模拟网络延迟，让用户感知到加载过�?
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    const nextPage = currentPage + 1;
-    const endIndex = (nextPage + 1) * ITEMS_PER_PAGE;
-    
-    if (endIndex <= images.length) {
-      setCurrentPage(nextPage);
-      setHasMoreImages(endIndex < images.length);
-    } else {
-      setHasMoreImages(false);
-    }
-    
-    setIsLoadingMore(false);
-  };
-
-  // 图片点击处理
-  const handleImagePress = (image) => {
-    if (selectionMode) {
-      toggleImageSelection(image.id);
-    } else {
-      navigation.navigate('ImagePreview', { image });
-    }
-  };
-
-  // 图片长按处理
-  const handleImageLongPress = (image) => {
+  /**
+   * 长按进入多选模式
+   */
+  const handleLongPress = (image) => {
     if (!selectionMode) {
       setSelectionMode(true);
-      setSelectedImages([image.id]);
-      setSelectAll(false);
+      const newSelected = new Set();
+      newSelected.add(image.id);
+      setSelectedImages(newSelected);
     }
   };
 
-  // 切换图片选择状�?
-  const toggleImageSelection = (imageId) => {
-    setSelectedImages(prev => {
-      const newSelected = prev.includes(imageId) 
-        ? prev.filter(id => id !== imageId)
-        : [...prev, imageId];
-      
-      // 更新全选状�?
-      const displayedImages = getDisplayedImages();
-      setSelectAll(newSelected.length === displayedImages.length);
-      
-      return newSelected;
-    });
-  };
-
-  // 退出选择模式
-  const exitSelectionMode = () => {
-    setSelectionMode(false);
-    setSelectedImages([]);
-    setSelectAll(false);
-  };
-
-  // 全�?取消全�?
-  const toggleSelectAll = () => {
-    if (selectAll) {
-      setSelectedImages([]);
-      setSelectAll(false);
+  /**
+   * 点击选择/取消选择
+   */
+  const handlePress = (image) => {
+    if (!selectionMode) {
+      // 普通模式：跳转到预览页
+      const index = images.findIndex(img => img.id === image.id);
+      navigation.navigate('ImagePreview', {
+        image: image,
+        allImages: images,
+        currentIndex: index,
+        category,
+        city,
+        similarityGroupId,
+        fromScreen: pageType,
+      });
     } else {
-      const displayedImages = getDisplayedImages();
-      const allImageIds = displayedImages.map(img => img.id);
-      setSelectedImages(allImageIds);
-      setSelectAll(true);
+      // 选择模式：切换选中状态
+      const newSelected = new Set(selectedImages);
+      if (newSelected.has(image.id)) {
+        newSelected.delete(image.id);
+      } else {
+        newSelected.add(image.id);
+      }
+      setSelectedImages(newSelected);
+      
+      // 如果没有选中任何图片，退出选择模式
+      if (newSelected.size === 0) {
+        setSelectionMode(false);
+      }
     }
   };
 
-  // 批量删除
-  const handleBatchDelete = () => {
-    if (selectedImages.length === 0) return;
+  /**
+   * 全选/取消全选
+   */
+  const toggleSelectAll = () => {
+    if (selectedImages.size === images.length) {
+      setSelectedImages(new Set());
+      setSelectionMode(false);
+    } else {
+      const allIds = new Set(images.map(img => img.id));
+      setSelectedImages(allIds);
+    }
+  };
 
+  /**
+   * 取消选择模式
+   */
+  const cancelSelection = () => {
+    setSelectionMode(false);
+    setSelectedImages(new Set());
+  };
+
+  // ==================== 批量操作 ====================
+
+  /**
+   * 执行批量操作
+   */
+  const handleBatchAction = async (actionId) => {
+    try {
+      const selectedIds = Array.from(selectedImages);
+      
+      if (selectedIds.length === 0) {
+        Alert.alert('提示', '请先选择图片');
+        return;
+      }
+
+      switch (actionId) {
+        case 'staging':
+          await batchMoveToStaging(selectedIds);
+          break;
+        case 'remove':
+          await batchRemoveFromStaging(selectedIds);
+          break;
+        case 'delete':
+          await batchDelete(selectedIds);
+          break;
+        case 'deleteOthers':
+          await batchDeleteOthers(selectedIds);
+          break;
+        case 'deleteAll':
+          await batchDeleteAll();
+          break;
+        case 'keep':
+          await batchKeep(selectedIds);
+          break;
+        case 'export':
+          Alert.alert('提示', '导出功能开发中');
+          break;
+      }
+
+      // 操作完成后退出选择模式并刷新
+      cancelSelection();
+      await onRefresh();
+
+    } catch (error) {
+      logger.error('❌ 批量操作失败:', error);
+      Alert.alert('操作失败', error.message);
+    }
+  };
+
+  /**
+   * 批量放入暂存箱
+   */
+  const batchMoveToStaging = async (imageIds) => {
     Alert.alert(
-      '确认删除',
-      `确定要删除选中�?${selectedImages.length} 张图片吗？`,
+      '放入暂存箱',
+      `确定要将选中的 ${imageIds.length} 张图片放入暂存箱吗？`,
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '删除',
-          style: 'destructive',
+          text: '确定',
           onPress: async () => {
-            try {
-              setShowDeleteProgress(true);
-              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedImages.length });
-              
-              await ImageStorageService.deleteImages(
-                selectedImages,
-                (progress) => {
-                  setDeleteProgress(progress);
-                }
-              );
-              
-              await loadCategoryImages();
-              exitSelectionMode();
-              
-              setTimeout(() => {
-                setShowDeleteProgress(false);
-              }, 1000);
-              
-            } catch (error) {
-              setShowDeleteProgress(false);
-              Alert.alert('操作失败', '删除过程中出现错误，请重�?);
+            for (const id of imageIds) {
+              await UnifiedDataService.updateImageCategory(id, 'tobecleaned');
             }
+            Alert.alert('成功', `已将 ${imageIds.length} 张图片放入暂存箱`);
           },
         },
       ]
     );
   };
 
-  // 渲染头部
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}>
-        <Text style={styles.backIcon}>�?/Text>
-      </TouchableOpacity>
-      
-      <Text style={styles.title}>
-        {getCategoryDisplayName(category)} ({images.length}�?
-      </Text>
-      
-      <TouchableOpacity
-        style={[styles.headerButton, selectionMode && styles.headerButtonActive]}
-        onPress={() => {
-          if (selectionMode) {
-            exitSelectionMode();
-          } else {
-            setSelectionMode(true);
-          }
-        }}>
-        <Text style={[styles.headerButtonText, selectionMode && styles.headerButtonTextActive]}>
-          {selectionMode ? '取消' : '选择'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  /**
+   * 批量移出暂存箱
+   */
+  const batchRemoveFromStaging = async (imageIds) => {
+    Alert.alert(
+      '移出暂存箱',
+      `确定要将选中的 ${imageIds.length} 张图片移出暂存箱吗？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '确定',
+          onPress: async () => {
+            // TODO: 需要重新分类，暂时移动到'other'
+            for (const id of imageIds) {
+              await UnifiedDataService.updateImageCategory(id, 'other');
+            }
+            Alert.alert('成功', `已将 ${imageIds.length} 张图片移出暂存箱`);
+          },
+        },
+      ]
+    );
+  };
 
-  // 渲染选择工具�?
-  const renderSelectionToolbar = () => {
-    if (!selectionMode) return null;
+  /**
+   * 批量删除
+   */
+  const batchDelete = async (imageIds) => {
+    Alert.alert(
+      '确认删除',
+      `确定要删除选中的 ${imageIds.length} 张图片吗？${isStaging ? '\n\n⚠️ 这将永久删除文件！' : ''}`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: async () => {
+            let successCount = 0;
+            for (const id of imageIds) {
+              try {
+                await UnifiedDataService.deleteImage(id);
+                successCount++;
+              } catch (error) {
+                logger.error(`❌ 删除图片失败: ${id}`, error);
+              }
+            }
+            Alert.alert('删除完成', `成功删除 ${successCount}/${imageIds.length} 张图片`);
+          },
+        },
+      ]
+    );
+  };
 
-    const displayedImages = getDisplayedImages();
+  /**
+   * 删除其他（保留选中）
+   */
+  const batchDeleteOthers = async (keepIds) => {
+    const deleteIds = images.filter(img => !keepIds.includes(img.id)).map(img => img.id);
+    
+    Alert.alert(
+      '删除其他图片',
+      `确定要删除未选中的 ${deleteIds.length} 张图片吗？\n\n将保留选中的 ${keepIds.length} 张图片`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: async () => {
+            await batchDelete(deleteIds);
+          },
+        },
+      ]
+    );
+  };
 
+  /**
+   * 全部删除
+   */
+  const batchDeleteAll = async () => {
+    const allIds = images.map(img => img.id);
+    await batchDelete(allIds);
+  };
+
+  /**
+   * 保留选中
+   */
+  const batchKeep = async (keepIds) => {
+    Alert.alert('成功', `已标记保留 ${keepIds.length} 张图片`);
+  };
+
+  // ==================== 渲染函数 ====================
+
+  /**
+   * 渲染图片项
+   */
+  const renderImageItem = ({ item }) => {
+    const isSelected = selectedImages.has(item.id);
+    
     return (
-      <View style={styles.selectionToolbar}>
-        <View style={styles.toolbarLeft}>
-          <TouchableOpacity
-            style={[styles.toolbarButton, styles.selectAllButton]}
-            onPress={toggleSelectAll}>
-            <Text style={[styles.toolbarButtonText, styles.selectAllButtonText]}>
-              {selectAll ? '取消全�? : '全�?}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        
-        <View style={styles.toolbarCenter}>
-          <Text style={styles.selectionCount}>
-            已选择 {selectedImages.length} / {displayedImages.length} �?
+      <TouchableOpacity
+        style={styles.gridItem}
+        onPress={() => handlePress(item)}
+        onLongPress={() => handleLongPress(item)}
+        activeOpacity={0.8}
+      >
+        <Image
+          source={{ uri: item.uri }}
+          style={styles.gridImage}
+          resizeMode="cover"
+        />
+        {selectionMode && (
+          <View style={[styles.selectionOverlay, isSelected && styles.selectedOverlay]}>
+            {isSelected && (
+              <View style={styles.checkmark}>
+                <Text style={styles.checkmarkText}>✓</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染顶部操作栏
+   */
+  const renderTopBar = () => {
+    if (!selectionMode) return null;
+    
+    return (
+      <View style={styles.selectionBar}>
+        <TouchableOpacity onPress={cancelSelection}>
+          <Text style={styles.selectionCancel}>取消</Text>
+        </TouchableOpacity>
+        <Text style={styles.selectionCount}>
+          已选 {selectedImages.size}/{images.length}
+        </Text>
+        <TouchableOpacity onPress={toggleSelectAll}>
+          <Text style={styles.selectionAll}>
+            {selectedImages.size === images.length ? '取消全选' : '全选'}
           </Text>
-        </View>
-        
-        <View style={styles.toolbarActions}>
-          <TouchableOpacity
-            style={[styles.toolbarButton, styles.deleteButton]}
-            onPress={handleBatchDelete}>
-            <Text style={[styles.toolbarButtonText, styles.deleteButtonText]}>
-              删除
-            </Text>
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       </View>
     );
   };
 
-  // 渲染时间轴布局
-  const renderTimeline = () => {
-    const { grouped, sortedDates } = getGroupedImages();
+  /**
+   * 渲染底部操作栏
+   */
+  const renderBottomBar = () => {
+    if (!selectionMode || selectedImages.size === 0) return null;
     
-    if (sortedDates.length === 0) {
-      return (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📷</Text>
-          <Text style={styles.emptyTitle}>暂无图片</Text>
-          <Text style={styles.emptySubtitle}>
-            该分类下还没有图�?
-          </Text>
-        </View>
-      );
-    }
-
+    const actions = getActionButtons();
+    
     return (
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.timelineContainer}
-        showsVerticalScrollIndicator={false}
-        onScroll={(event) => {
-          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          const paddingToBottom = 20; // 距离底部20px时开始加�?
-          
-          // 当滚动到接近底部时，自动加载更多图片
-          if (contentOffset.y + layoutMeasurement.height >= contentSize.height - paddingToBottom) {
-            loadMoreImages();
-          }
-        }}
-        scrollEventThrottle={16} // 16ms触发一次，�?0fps
-        >
-        
-        {sortedDates.map((dateKey) => {
-          const imagesForDate = grouped[dateKey];
-          const date = new Date(dateKey);
-          
-          // 自定义中文日期格式化，确保在模拟器中也能正确显示
-          const year = date.getFullYear();
-          const month = date.getMonth() + 1;
-          const day = date.getDate();
-          const weekday = date.getDay();
-          
-          const monthNames = ['一�?, '二月', '三月', '四月', '五月', '六月', 
-                             '七月', '八月', '九月', '十月', '十一�?, '十二�?];
-          const weekdayNames = ['星期�?, '星期一', '星期�?, '星期�?, '星期�?, '星期�?, '星期�?];
-          
-          const formattedDate = `${year}�?{month}�?{day}�?${weekdayNames[weekday]}`;
-          
-          return (
-            <View key={dateKey} style={styles.timelineGroup}>
-              {/* 日期标题 */}
-              <View style={styles.dateHeader}>
-                <View style={styles.dateLine} />
-                <Text style={styles.dateText}>{formattedDate}</Text>
-                <View style={styles.dateLine} />
-              </View>
-              
-              {/* 该日期的图片网格 */}
-              <View style={styles.imageGridContainer}>
-                {imagesForDate.map((item) => (
-                  <View key={item.id} style={styles.imageWrapper}>
-                    <ImageItem
-                      item={item}
-                      isSelected={selectedImages.includes(item.id)}
-                      onPress={handleImagePress}
-                      onLongPress={handleImageLongPress}
-                    />
-                  </View>
-                ))}
-              </View>
-            </View>
-          );
-        })}
-        
-        {/* 底部加载指示�?*/}
-        {hasMoreImages && (
-          <View style={styles.loadingMoreContainer}>
-            <ActivityIndicator size="small" color="#2196F3" />
-            <Text style={styles.loadingMoreText}>加载�?..</Text>
-          </View>
-        )}
-      </ScrollView>
+      <View style={styles.actionBar}>
+        {actions.map(action => (
+          <TouchableOpacity
+            key={action.id}
+            style={[styles.actionButton, { borderColor: action.color }]}
+            onPress={() => handleBatchAction(action.id)}
+          >
+            <Text style={styles.actionIcon}>{action.icon}</Text>
+            <Text style={[styles.actionLabel, { color: action.color }]}>
+              {action.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     );
   };
 
-  // 渲染图片网格（保留原有功能，现在使用时间轴布局�?
-  const renderImageGrid = () => {
-    return renderTimeline();
+  /**
+   * 渲染列表底部
+   */
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.footer}>
+        <ActivityIndicator size="small" color="#007AFF" />
+      </View>
+    );
   };
+
+  /**
+   * 渲染空状态
+   */
+  const renderEmpty = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyIcon}>📭</Text>
+      <Text style={styles.emptyText}>暂无图片</Text>
+    </View>
+  );
+
+  // ==================== 主渲染 ====================
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>加载�?..</Text>
+          <ActivityIndicator size="large" color="#007AFF" />
         </View>
       </SafeAreaView>
     );
@@ -432,290 +510,189 @@ const CategoryScreen = ({ route, navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      {renderSelectionToolbar()}
-      {renderImageGrid()}
+      {/* 顶部导航栏 */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backIcon}>‹</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{getPageTitle()}</Text>
+        <View style={styles.headerRight} />
+      </View>
 
-      {/* 批量删除进度对话�?*/}
-      <Modal
-        visible={showDeleteProgress}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowDeleteProgress(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>删除�?..</Text>
-            <Text style={styles.modalMessage}>
-              已删�? {deleteProgress.filesDeleted} �?
-              失败: {deleteProgress.filesFailed} �?
-              总计: {deleteProgress.total} �?
-            </Text>
-            <ActivityIndicator size="small" color="#2196F3" style={styles.modalIndicator} />
-          </View>
-        </View>
-      </Modal>
+      {/* 选择模式操作栏 */}
+      {renderTopBar()}
+
+      {/* 图片网格 */}
+      <FlatList
+        data={images.slice(0, page * ITEMS_PER_PAGE)}
+        renderItem={renderImageItem}
+        keyExtractor={(item) => item.id}
+        numColumns={GRID_COLUMNS}
+        contentContainerStyle={styles.gridContainer}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={renderEmpty}
+      />
+
+      {/* 底部操作栏 */}
+      {renderBottomBar()}
     </SafeAreaView>
   );
 };
 
+// ==================== 样式 ====================
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  backButton: {
-    padding: 12,
-    marginRight: 8,
-    borderRadius: 6,
-    backgroundColor: 'transparent',
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 24,
-    color: '#333',
-  },
-  title: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  headerButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#f0f0f0',
-  },
-  headerButtonActive: {
-    backgroundColor: '#2196F3',
-  },
-  headerButtonText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  headerButtonTextActive: {
-    color: '#fff',
-  },
-  selectionToolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  toolbarButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#f0f0f0',
-  },
-  toolbarButtonText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  deleteButton: {
-    backgroundColor: '#ff4444',
-  },
-  deleteButtonText: {
-    color: '#fff',
-  },
-  selectionCount: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
-  toolbarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  toolbarCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectAllButton: {
-    backgroundColor: '#2196F3',
-  },
-  selectAllButtonText: {
-    color: '#fff',
-  },
-  toolbarActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  scrollView: {
-    flex: 1,
-  },
-     imageGrid: {
-     padding: 8,
-   },
-   timelineContainer: {
-     padding: 8,
-   },
-   timelineGroup: {
-     marginBottom: 24,
-   },
-   dateHeader: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     marginBottom: 16,
-     paddingHorizontal: 8,
-   },
-   dateLine: {
-     flex: 1,
-     height: 1,
-     backgroundColor: '#e0e0e0',
-   },
-   dateText: {
-     fontSize: 16,
-     fontWeight: '600',
-     color: '#333',
-     marginHorizontal: 16,
-     textAlign: 'center',
-   },
-   imageGridContainer: {
-     flexDirection: 'row',
-     flexWrap: 'wrap',
-     justifyContent: 'flex-start',
-   },
-  imageWrapper: {
-    width: '33.33%',
-    aspectRatio: 1,
-    padding: 4,
-  },
-  imageContainer: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-    position: 'relative',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-  },
-  selectedImage: {
-    opacity: 0.7,
-  },
-  selectionIndicator: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectionText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    backgroundColor: '#000000',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
+  header: {
+    height: 56,
+    backgroundColor: '#1C1C1E',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
   },
-  imagePlaceholder: {
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backIcon: {
+    fontSize: 32,
+    color: '#007AFF',
+    fontWeight: 'bold',
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
+  },
+  
+  // 选择栏
+  selectionBar: {
+    height: 44,
+    backgroundColor: '#1C1C1E',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3A3A3C',
+  },
+  selectionCancel: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  selectionCount: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  selectionAll: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  
+  // 网格
+  gridContainer: {
+    padding: 2,
+  },
+  gridItem: {
+    width: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE,
+    padding: 2,
+  },
+  gridImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
-    backgroundColor: '#e0e0e0',
-    alignItems: 'center',
+  },
+  selectionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  placeholderText: {
-    fontSize: 40,
-    color: '#888',
+  selectedOverlay: {
+    backgroundColor: 'rgba(0,122,255,0.3)',
   },
-  placeholderFileName: {
-    marginTop: 8,
+  checkmark: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkmarkText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  
+  // 操作栏
+  actionBar: {
+    flexDirection: 'row',
+    backgroundColor: '#1C1C1E',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#3A3A3C',
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  actionIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  actionLabel: {
     fontSize: 12,
-    color: '#666',
+    fontWeight: '600',
   },
+  
+  // 底部加载
+  footer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  
+  // 空状态
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    paddingVertical: 60,
   },
   emptyIcon: {
-    fontSize: 60,
-    color: '#ccc',
-    marginBottom: 10,
+    fontSize: 64,
+    marginBottom: 16,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 20,
-    alignItems: 'center',
-    width: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#333',
-  },
-  modalMessage: {
+  emptyText: {
     fontSize: 16,
-    color: '#666',
-    marginBottom: 15,
-    textAlign: 'center',
+    color: '#8E8E93',
   },
-  modalIndicator: {
-    marginTop: 10,
-  },
-     loadingMoreContainer: {
-     padding: 20,
-     alignItems: 'center',
-     flexDirection: 'row',
-   },
-   loadingMoreText: {
-     marginLeft: 10,
-     fontSize: 14,
-     color: '#666',
-   },
 });
 
 export default CategoryScreen;
-
