@@ -1644,7 +1644,11 @@ class GalleryScannerService {
             );
             
             // 2. 创建 Blob（使用 ImageProcessor 统一接口）
-            const blob = await imageProcessor.createBlobFromImage(resizedResult.uri);
+            // PC端：resizedResult.blob 已经存在，直接使用
+            // 移动端：resizedResult.uri 是缩放后的临时文件，需要创建 Blob
+            const blob = resizedResult.blob 
+              ? resizedResult.blob 
+              : await imageProcessor.createBlobFromImage(resizedResult.uri);
             
             logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${blob.size}, blob.type=${blob.type}`);
             
