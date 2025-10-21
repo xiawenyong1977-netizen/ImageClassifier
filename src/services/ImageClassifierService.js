@@ -27,8 +27,8 @@ class ImageClassifierService {
     // 批量处理配置
     this.BATCH_CONFIG = {
       CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
-      UPLOAD_BATCH_SIZE: 20,      // 批量上传大小
-      REMOTE_TIMEOUT: 60000,      // 远程请求超时（毫秒）- 增加到60秒
+      UPLOAD_BATCH_SIZE: 5,       // 批量上传大小（移动端减小批次，避免请求包过大）
+      REMOTE_TIMEOUT: 120000,     // 远程请求超时（毫秒）- 增加到120秒（移动端网络较慢）
       HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
     };
     
@@ -1695,8 +1695,11 @@ class ImageClassifierService {
         const formData = new FormData();
         
         // 添加图片文件
+        let totalBlobSize = 0;
         for (const imageData of batch) {
-          logger.debug(`📤 添加到 FormData: ${imageData.fileName}, blob.size=${imageData.blob?.size}, blob.type=${imageData.blob?.type}`);
+          const blobSize = imageData.blob?.size || 0;
+          totalBlobSize += blobSize;
+          logger.debug(`📤 添加到 FormData: ${imageData.fileName}, blob.size=${(blobSize / 1024).toFixed(2)}KB`);
           formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
         }
         
@@ -1711,8 +1714,8 @@ class ImageClassifierService {
           headers['X-User-ID'] = userId;
         }
         
-        logger.debug(`🌐 发送请求到: ${config.baseURL}/api/v1/classify/batch`);
-        logger.debug(`📋 请求头:`, headers);
+        logger.info(`🌐 发送批量请求: ${batch.length}张图片, 总大小: ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB, 超时: ${timeout}ms`);
+        logger.debug(`📋 请求URL: ${config.baseURL}/api/v1/classify/batch`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
