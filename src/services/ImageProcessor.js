@@ -373,7 +373,74 @@ class ImageProcessor {
   }
 
   /**
-   * 【核心接口4】缩放图片文件
+   * 【核心接口4】从图片文件创建 Blob 对象（跨平台）
+   * 
+   * PC端：使用 fetch 直接读取文件为 Blob
+   * 移动端：读取文件为 base64，然后转换为 Blob
+   * 
+   * @param {string} imageUri - 图片路径
+   * @returns {Promise<Blob>} Blob 对象
+   */
+  async createBlobFromImage(imageUri) {
+    if (Platform.OS === 'web') {
+      // PC端：使用 fetch 读取文件
+      return await this._createBlobWithFetch(imageUri);
+    } else {
+      // 移动端：读取 base64 并转换
+      return await this._createBlobWithRNFS(imageUri);
+    }
+  }
+
+  /**
+   * 【PC端实现】使用 fetch 创建 Blob
+   */
+  async _createBlobWithFetch(imageUri) {
+    try {
+      const response = await fetch(imageUri);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      logger.debug(`✅ [PC] Blob 创建成功: size=${blob.size}, type=${blob.type}`);
+      return blob;
+    } catch (error) {
+      logger.error(`❌ [PC] Blob 创建失败: ${imageUri}`, error);
+      throw new Error(`创建 Blob 失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 【移动端实现】从文件读取 base64 并创建 Blob
+   */
+  async _createBlobWithRNFS(imageUri) {
+    try {
+      if (!RNFS) {
+        throw new Error('RNFS 模块未加载');
+      }
+
+      // 移除 file:// 前缀
+      const normalizedPath = imageUri.replace(/^file:\/\//, '');
+      
+      // 读取文件为 base64
+      const base64Data = await RNFS.readFile(normalizedPath, 'base64');
+      
+      // 将 base64 转换为 Uint8Array
+      const buffer = Buffer.from(base64Data, 'base64');
+      const uint8Array = new Uint8Array(buffer);
+      
+      // 创建 Blob
+      const blob = new Blob([uint8Array], { type: 'image/jpeg' });
+      
+      logger.debug(`✅ [Native] Blob 创建成功: size=${blob.size}, type=${blob.type}`);
+      return blob;
+    } catch (error) {
+      logger.error(`❌ [Native] Blob 创建失败: ${imageUri}`, error);
+      throw new Error(`创建 Blob 失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 【核心接口5】缩放图片文件
    * 
    * @param {string} imageUri - 图片路径
    * @param {number} targetWidth - 目标宽度

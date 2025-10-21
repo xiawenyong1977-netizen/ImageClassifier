@@ -1630,6 +1630,8 @@ class GalleryScannerService {
           try {
             // 使用 ImageProcessor 统一接口缩放图片（跨平台）
             const imageProcessor = require('./ImageProcessor').default || require('./ImageProcessor');
+            
+            // 1. 缩放图片
             const resizedResult = await imageProcessor.resizeImage(
               image.uri,
               1024,
@@ -1641,26 +1643,8 @@ class GalleryScannerService {
               }
             );
             
-            // 读取缩放后的文件为 Blob（用于上传）
-            let blob;
-            if (resizedResult.blob) {
-              // PC端：直接使用 blob
-              blob = resizedResult.blob;
-            } else {
-              // 移动端：读取缩放后的文件并转换为 Blob
-              const RNFS = require('../adapters/WebAdapters').RNFS;
-              const normalizedPath = resizedResult.uri.replace(/^file:\/\//, '');
-              const base64Data = await RNFS.readFile(normalizedPath, 'base64');
-              
-              // 将 base64 转换为 Uint8Array
-              const { Buffer } = require('buffer');
-              const buffer = Buffer.from(base64Data, 'base64');
-              const uint8Array = new Uint8Array(buffer);
-              
-              // 创建 Blob
-              blob = new Blob([uint8Array], { type: 'image/jpeg' });
-              logger.debug(`✅ [Native] Blob 创建成功: ${image.fileName}, size=${blob.size}`);
-            }
+            // 2. 创建 Blob（使用 ImageProcessor 统一接口）
+            const blob = await imageProcessor.createBlobFromImage(resizedResult.uri);
             
             logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${blob.size}, blob.type=${blob.type}`);
             
