@@ -541,7 +541,6 @@ class ImageProcessor {
       // 5. 生成输出URI
       let finalUri = outputPath || canvas.toDataURL(mimeType, quality);
 
-      logger.debug(`✅ 图片缩放完成: ${(blob.size / 1024).toFixed(2)} KB`);
 
       return {
         uri: finalUri,
@@ -572,7 +571,6 @@ class ImageProcessor {
         outputPath = null
       } = options;
 
-      logger.debug(`🔄 [Native] 缩放图片: ${imageUri} -> ${targetWidth}x${targetHeight}`);
 
       // 计算缩放模式
       const resizeMode = maintainAspectRatio ? 'contain' : 'stretch';
@@ -591,9 +589,6 @@ class ImageProcessor {
         { mode: resizeMode }
       );
 
-      logger.debug(`✅ 图片缩放完成: ${resizedImage.uri}`);
-      logger.debug(`📏 尺寸: ${resizedImage.width}x${resizedImage.height}`);
-      logger.debug(`📦 大小: ${(resizedImage.size / 1024).toFixed(2)} KB`);
 
       return {
         uri: resizedImage.uri,

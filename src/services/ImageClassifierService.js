@@ -1,6 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import { logger, ModelPathAdapter, CanvasAdapter } from '../adapters/WebAdapters';
+import { logger, ModelPathAdapter, CanvasAdapter, Platform } from '../adapters/WebAdapters';
 import imageProcessor from './ImageProcessor';
 
 class ImageClassifierService {
@@ -27,7 +27,7 @@ class ImageClassifierService {
     // 批量处理配置
     this.BATCH_CONFIG = {
       CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
-      UPLOAD_BATCH_SIZE: 5,       // 批量上传大小（移动端减小批次，避免请求包过大）
+      UPLOAD_BATCH_SIZE: 5,       // 批量上传大小（移动端会在每批次后清理临时文件）
       REMOTE_TIMEOUT: 120000,     // 远程请求超时（毫秒）- 增加到120秒（移动端网络较慢）
       HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
     };
@@ -1680,31 +1680,66 @@ class ImageClassifierService {
       return { success: true, total: 0, success_count: 0, fail_count: 0, items: [] };
     }
     
+    // 参数检查：确保不超过最大批次大小
+    const maxBatchSize = this.BATCH_CONFIG.UPLOAD_BATCH_SIZE;
+    if (imageDataList.length > maxBatchSize) {
+      throw new Error(`批次大小 ${imageDataList.length} 超过最大限制 ${maxBatchSize}，请在调用前分批`);
+    }
+    
     try {
       logger.debug(`⬆️  批量上传分类：${imageDataList.length} 张图片`);
       
-      // 分批处理（每批20张）
-      const batchSize = this.BATCH_CONFIG.UPLOAD_BATCH_SIZE;
-      const allItems = [];
-      let totalSuccess = 0;
-      let totalFail = 0;
-      
-      for (let i = 0; i < imageDataList.length; i += batchSize) {
-        const batch = imageDataList.slice(i, i + batchSize);
-        
-        const formData = new FormData();
+      try {
+        let formData = new FormData(); // 改为 let，因为重试时需要重建
         
         // 添加图片文件
         let totalBlobSize = 0;
-        for (const imageData of batch) {
-          const blobSize = imageData.blob?.size || 0;
-          totalBlobSize += blobSize;
-          logger.debug(`📤 添加到 FormData: ${imageData.fileName}, blob.size=${(blobSize / 1024).toFixed(2)}KB`);
-          formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
-        }
+        const fileUris = []; // 记录所有文件URI供诊断
         
+        for (const imageData of imageDataList) {
+            const blobSize = imageData.blobSize || imageData.blob?.size || 0;
+            totalBlobSize += blobSize;
+            
+            // React Native 的 FormData 需要特殊格式
+            if (Platform.OS !== 'web') {
+              // 移动端：使用 uri、type、name 格式（直接使用文件路径，不用 Blob）
+              const fileUri = imageData.resizedUri;
+              if (!fileUri || !fileUri.startsWith('file://')) {
+                logger.error(`❌ 无效的文件路径: ${fileUri}, imageData:`, {
+                  fileName: imageData.fileName,
+                  uri: imageData.uri,
+                  resizedUri: imageData.resizedUri
+                });
+                throw new Error(`无效的文件路径: ${fileUri}`);
+              }
+              
+              formData.append('images', {
+                uri: fileUri,
+                type: 'image/jpeg',
+                name: imageData.fileName || 'image.jpg'
+              });
+              fileUris.push(fileUri);
+            } else {
+              // PC端：使用 Blob
+              formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
+            }
+          }
+          
+        // 移动端：验证文件存在性
+        if (Platform.OS !== 'web') {
+          const RNFS = require('react-native-fs');
+          for (const fileUri of fileUris) {
+            const filePath = fileUri.replace('file://', '');
+            const exists = await RNFS.exists(filePath);
+            if (!exists) {
+              logger.error(`❌ FormData构建前，文件已不存在: ${fileUri}`);
+              throw new Error(`FormData构建失败：文件不存在 ${fileUri}`);
+            }
+          }
+        }
+          
         // 添加哈希列表
-        const hashes = batch.map(img => img.hash).filter(h => h);
+        const hashes = imageDataList.map(img => img.hash).filter(h => h);
         if (hashes.length > 0) {
           formData.append('image_hashes', JSON.stringify(hashes));
         }
@@ -1714,61 +1749,121 @@ class ImageClassifierService {
           headers['X-User-ID'] = userId;
         }
         
-        logger.info(`🌐 发送批量请求: ${batch.length}张图片, 总大小: ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB, 超时: ${timeout}ms`);
-        logger.debug(`📋 请求URL: ${config.baseURL}/api/v1/classify/batch`);
+        logger.info(`🌐 发送批量请求: ${imageDataList.length}张图片, 总大小: ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
         
-        const response = await fetch(`${config.baseURL}/api/v1/classify/batch`, {
-          method: 'POST',
-          headers: headers,
-          body: formData,
-          signal: controller.signal
-        });
+        let response;
+        let retryCount = 0;
+        const maxRetries = 2; // 最多重试2次
+        
+        while (retryCount <= maxRetries) {
+          try {
+            const retryInfo = retryCount > 0 ? ` (重试 ${retryCount}/${maxRetries})` : '';
+            logger.info(`🚀 开始发送请求 (${imageDataList.length}张图片, ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB)${retryInfo}...`);
+            const fetchStartTime = Date.now();
+            
+            response = await fetch(`${config.baseURL}/api/v1/classify/batch`, {
+              method: 'POST',
+              headers: headers,
+              body: formData,
+              signal: controller.signal
+            });
+            
+            const fetchDuration = Date.now() - fetchStartTime;
+            logger.info(`✅ 请求成功，状态码: ${response.status}, 耗时: ${fetchDuration}ms`);
+            break; // 成功，跳出重试循环
+          } catch (fetchError) {
+            retryCount++;
+            
+            // 如果还有重试机会，等待后重试
+            if (retryCount <= maxRetries && fetchError.message === 'Network request failed') {
+              logger.warn(`⚠️ 请求失败，${retryCount}/${maxRetries}次重试，等待1秒后重试...`);
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // 【关键】重建FormData对象，因为可能被破坏了
+              const newFormData = new FormData();
+              for (const imageData of imageDataList) {
+                if (Platform.OS !== 'web') {
+                  newFormData.append('images', {
+                    uri: imageData.resizedUri,
+                    type: 'image/jpeg',
+                    name: imageData.fileName || 'image.jpg'
+                  });
+                } else {
+                  newFormData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
+                }
+              }
+              if (hashes.length > 0) {
+                newFormData.append('image_hashes', JSON.stringify(hashes));
+              }
+              formData = newFormData;
+                
+                continue; // 继续下一次重试
+              }
+              
+            // 没有重试机会了，或者不是网络错误，抛出异常
+            clearTimeout(timeoutId);
+            throw fetchError; // 抛给外层catch处理
+          }
+        }
         
         clearTimeout(timeoutId);
         
         if (!response.ok) {
           const errorText = await response.text();
-          logger.error(`❌ 批量分类HTTP错误: ${response.status} ${response.statusText}`, errorText);
-          throw new Error(`批量分类失败: HTTP ${response.status} - ${errorText}`);
+          logger.error(`❌ HTTP错误: ${response.status} ${response.statusText}`, errorText);
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
         
         const result = await response.json();
         
-        // 记录批次结果详情
-        logger.debug(`📊 批次 ${Math.floor(i / batchSize) + 1} 原始结果:`, {
-          success: result.success,
-          total: result.total,
-          success_count: result.success_count,
-          fail_count: result.fail_count,
-          itemsLength: result.items?.length,
-          firstItem: result.items?.[0]
-        });
-        
         // 合并结果，保留原始 imageData 引用
         const itemsWithData = result.items.map((item, idx) => ({
           ...item,
-          imageData: batch[idx].imageData // 保留原始图片数据引用
+          imageData: imageDataList[idx].imageData // 保留原始图片数据引用
         }));
         
-        allItems.push(...itemsWithData);
-        totalSuccess += result.success_count;
-        totalFail += result.fail_count;
+        logger.debug(`✅ 批量分类完成：成功 ${result.success_count}/${result.total}`);
         
-        logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：成功 ${result.success_count}/${result.total}`);
+        // 清理这个批次的临时缩放文件（移动端）
+        if (Platform.OS !== 'web') {
+          await this.cleanupBatchTempFiles(imageDataList);
+        }
+      
+        return {
+          success: true,
+          total: imageDataList.length,
+          success_count: result.success_count,
+          fail_count: result.fail_count,
+          items: itemsWithData
+        };
+      } catch (batchError) {
+        // 异常处理（JSON解析失败、FormData构建失败等）
+        logger.error(`❌ 批量处理异常:`, batchError);
+        const failedItems = imageDataList.map((imageData, idx) => ({
+          index: idx,
+          filename: imageData.fileName,
+          success: false,
+          data: null,
+          error: batchError.message,
+          imageData: imageData.imageData
+        }));
+        
+        // 清理异常批次的临时文件（移动端）
+        if (Platform.OS !== 'web') {
+          await this.cleanupBatchTempFiles(imageDataList);
+        }
+        
+        return {
+          success: false,
+          total: imageDataList.length,
+          success_count: 0,
+          fail_count: imageDataList.length,
+          items: failedItems
+        };
       }
-      
-      logger.debug(`✅ 批量分类完成：总成功 ${totalSuccess}/${imageDataList.length}`);
-      
-      return {
-        success: true,
-        total: imageDataList.length,
-        success_count: totalSuccess,
-        fail_count: totalFail,
-        items: allItems
-      };
     } catch (error) {
       // 处理超时和取消请求的情况
       if (error.name === 'AbortError' || error.message === 'The user aborted a request.') {
@@ -1791,6 +1886,39 @@ class ImageClassifierService {
       logger.error('❌ 批量分类失败:', error.message || error);
       logger.error('❌ 错误详情:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 清理批次的临时缩放文件（移动端）
+   */
+  async cleanupBatchTempFiles(batch) {
+    try {
+      const RNFS = require('react-native-fs');
+      let deletedCount = 0;
+      
+      for (const imageData of batch) {
+        if (imageData.resizedUri && imageData.resizedUri.startsWith('file://')) {
+          const filePath = imageData.resizedUri.replace('file://', '');
+          try {
+            const exists = await RNFS.exists(filePath);
+            if (exists) {
+              await RNFS.unlink(filePath);
+              deletedCount++;
+            }
+          } catch (deleteError) {
+            // 忽略删除错误，不影响主流程
+            logger.debug(`⚠️ 清理临时文件失败: ${filePath}`, deleteError.message);
+          }
+        }
+      }
+      
+      if (deletedCount > 0) {
+        logger.debug(`🗑️ 清理了 ${deletedCount} 个临时缩放文件`);
+      }
+    } catch (error) {
+      // 清理失败不应影响主流程
+      logger.debug(`⚠️ 批量清理临时文件失败:`, error.message);
     }
   }
 

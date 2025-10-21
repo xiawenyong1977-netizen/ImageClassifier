@@ -466,12 +466,7 @@ class UnifiedDataService {
    */
   async readSettings() {
     try {
-      logger.debug('读取应用设置');
-      
       const settings = await this.imageStorageService.getSettings();
-      logger.debug('应用设置读取完成:', settings);
-      logger.debug('hideEmptyCategories 值:', settings.hideEmptyCategories, '类型:', typeof settings.hideEmptyCategories);
-      
       return settings;
       
     } catch (error) {

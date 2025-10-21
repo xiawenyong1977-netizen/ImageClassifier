@@ -37,8 +37,6 @@ class ColorHistogramExtractor {
       const width = Math.floor(dimensions.width * scale);
       const height = Math.floor(dimensions.height * scale);
       
-      logger.debug(`🎨 直方图提取: ${imageUri}, 缩放到 ${width}x${height}`);
-      
       // 使用 ImageProcessor 获取像素数据
       const pixels = await imageProcessor.getPixelData(imageUri, width, height, {
         mode: 'contain',
@@ -57,7 +55,6 @@ class ColorHistogramExtractor {
         extracted_at: new Date().toISOString()
       };
       
-      logger.debug(`✅ 提取颜色直方图成功: ${imageUri}`);
       return features;
       
     } catch (error) {

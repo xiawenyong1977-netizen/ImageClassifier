@@ -229,8 +229,6 @@ class ImageSimilarityService {
           windowGroups = this._findSimilarGroupsOriginal(windowWithFeatures, opts);
         }
         
-        logger.debug(`✅ 窗口${index + 1}完成: 发现${windowGroups.length}个相似组`);
-        
         return {
           windowGroups,
           processed: window.length,
@@ -436,8 +434,6 @@ class ImageSimilarityService {
     try {
       // 使用真实的颜色直方图提取器
       const features = await this.histogramExtractor.extractHistogram(image.uri);
-      
-      logger.debug(`✅ 提取图片特征成功: ${image.fileName}`);
       return features;
     } catch (error) {
       console.error('❌ 提取颜色直方图失败:', error);

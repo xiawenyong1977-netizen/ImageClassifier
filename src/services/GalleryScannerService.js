@@ -664,17 +664,9 @@ class GalleryScannerService {
 
   async scanDirectoryForUris(dirPath, onProgress = null, totalFoundSoFar = 0) {
     try {
-
-      logger.debug(`Starting optimized scan of directory: ${dirPath}`);
-
-      
-
       const exists = await RNFS.exists(dirPath);
 
       if (!exists) {
-
-        logger.debug(`Directory does not exist: ${dirPath}`);
-
         return [];
 
       }
@@ -693,7 +685,6 @@ class GalleryScannerService {
 
       
 
-      logger.debug(`📁 目录 ${dirPath} 包含 ${items.length} 个项目`);
 
       
 
@@ -1627,30 +1618,58 @@ class GalleryScannerService {
         // 并行处理当前批次
         const batchPromises = batch.map(async (image) => {
           try {
-            // 使用 ImageProcessor 统一接口缩放图片并获取 Blob（跨平台）
             const imageProcessor = require('./ImageProcessor').default || require('./ImageProcessor');
+            const { Platform } = require('../adapters/WebAdapters');
             
-            // 缩放图片并获取 Blob（封装了平台差异）
-            const result = await imageProcessor.resizeImageAndGetBlob(
-              image.uri,
-              1024,
-              1024,
-              {
-                maintainAspectRatio: true,
-                outputFormat: 'jpeg',
-                quality: 90
-              }
-            );
-            
-            logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${result.blob.size}, blob.type=${result.blob.type}`);
-            
-            return {
-              uri: image.uri,
-              hash: image.hash,
-              blob: result.blob,
-              fileName: image.fileName,
-              imageData: image
-            };
+            if (Platform.OS === 'web') {
+              // PC端：缩放并获取 Blob
+              const result = await imageProcessor.resizeImageAndGetBlob(
+                image.uri,
+                1024,
+                1024,
+                {
+                  maintainAspectRatio: true,
+                  outputFormat: 'jpeg',
+                  quality: 90
+                }
+              );
+              
+              return {
+                uri: image.uri,
+                resizedUri: result.uri,
+                hash: image.hash,
+                blob: result.blob,
+                blobSize: result.blob.size,
+                fileName: image.fileName,
+                imageData: image
+              };
+            } else {
+              // 移动端：只缩放，不创建Blob（FormData直接使用文件URI）
+              const result = await imageProcessor.resizeImage(
+                image.uri,
+                1024,
+                1024,
+                {
+                  maintainAspectRatio: true,
+                  outputFormat: 'jpeg',
+                  quality: 90
+                }
+              );
+              
+              // 获取文件大小（用于统计）
+              const RNFS = require('react-native-fs');
+              const stat = await RNFS.stat(result.uri.replace('file://', ''));
+              
+              return {
+                uri: image.uri,
+                resizedUri: result.uri,
+                hash: image.hash,
+                blob: null,  // 移动端不需要Blob
+                blobSize: stat.size,  // 用于日志统计
+                fileName: image.fileName,
+                imageData: image
+              };
+            }
           } catch (error) {
             logger.error('❌ 准备上传数据失败:', error);
             failedImages.push(image);
@@ -1661,6 +1680,13 @@ class GalleryScannerService {
         
         // 等待当前批次完成
         const batchResults = await Promise.all(batchPromises);
+        
+        // 【关键】等待文件完全写入磁盘（移动端需要）
+        // react-native-image-resizer 的 Promise resolve 后，文件可能还在写入
+        // 增加到500ms以确保文件系统完全同步
+        if (Platform.OS !== 'web') {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         
         // 收集成功的结果
         for (const result of batchResults) {
@@ -1685,8 +1711,8 @@ class GalleryScannerService {
         return { remainingImages: failedImages, processedCount: 0, failedCount };
       }
       
-      // 手动分批处理，以便控制进度更新
-      const remoteBatchSize = 20; // 每批20张图片
+      // 手动分批处理，以便控制进度更新（使用 ImageClassifierService 的批次配置）
+      const remoteBatchSize = this.imageClassifier.BATCH_CONFIG.UPLOAD_BATCH_SIZE; // 使用统一配置
       const allItems = [];
       let totalSuccess = 0;
       let totalFail = 0;
@@ -1713,6 +1739,11 @@ class GalleryScannerService {
         allItems.push(...batchResult.items);
         totalSuccess += batchResult.success_count;
         totalFail += batchResult.fail_count;
+        
+        // 批次之间添加短暂延迟，避免移动端网络限制
+        if (i + remoteBatchSize < uploadData.length) {
+          await new Promise(resolve => setTimeout(resolve, 100)); // 100ms延迟
+        }
       }
       
       // 构造最终结果
@@ -1736,7 +1767,6 @@ class GalleryScannerService {
       // 处理结果
       for (const item of result.items) {
         const imageData = item.imageData; // 已在 batchClassifyRemote 中保留
-        
         
         if (item.success && item.data) {
           // 判断是大模型还是小模型推理
