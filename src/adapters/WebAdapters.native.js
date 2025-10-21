@@ -85,7 +85,6 @@ export const normalizeFilePath = (filePath) => {
 // 文件统计信息
 export const getFileStats = async (filePath) => {
   const normalizedPath = normalizeFilePath(filePath);
-  logger.debug(`Getting file stats: ${normalizedPath}`);
   const stats = await RNFS_Native.stat(normalizedPath);
       return stats;
 };
@@ -93,7 +92,6 @@ export const getFileStats = async (filePath) => {
 // 读取文件用于EXIF
 export const readFileForExif = async (filePath) => {
   const normalizedPath = normalizeFilePath(filePath);
-  logger.debug(`Reading file for EXIF: ${normalizedPath}`);
   const buffer = await RNFS_Native.read(normalizedPath, 65536, 0, 'base64');
     const nodeBuffer = Buffer.from(buffer, 'base64');
     return nodeBuffer;

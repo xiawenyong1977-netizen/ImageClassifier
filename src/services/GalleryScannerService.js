@@ -275,7 +275,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
               width: dimensions.width,
               height: dimensions.height
             };
-            logger.debug(`✅ 通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
           }
         } catch (error) {
           logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);

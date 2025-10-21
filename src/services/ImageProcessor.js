@@ -335,35 +335,23 @@ class ImageProcessor {
         throw new Error('RNFS 模块未加载');
       }
 
-      logger.debug(`[Native] Step 1: 开始计算哈希: ${imageUri}`);
-      
       // 导入 CryptoJS
       const CryptoJS = require('crypto-js');
-      logger.debug(`[Native] Step 2: CryptoJS 加载成功`);
       
       // 移除 file:// 前缀
       const normalizedPath = imageUri.replace(/^file:\/\//, '');
-      logger.debug(`[Native] Step 3: 路径标准化: ${normalizedPath}`);
       
       // 读取文件为 base64
-      logger.debug(`[Native] Step 4: 开始读取文件...`);
       const base64Data = await RNFS.readFile(normalizedPath, 'base64');
-      logger.debug(`[Native] Step 5: 文件读取完成，大小: ${base64Data.length} 字符`);
       
       // 将 base64 转换为 WordArray
-      logger.debug(`[Native] Step 6: 开始解析 base64...`);
       const wordArray = CryptoJS.enc.Base64.parse(base64Data);
-      logger.debug(`[Native] Step 7: base64 解析完成`);
       
       // 计算 SHA-256
-      logger.debug(`[Native] Step 8: 开始计算 SHA-256...`);
       const hash = CryptoJS.SHA256(wordArray);
-      logger.debug(`[Native] Step 9: SHA-256 计算完成`);
       
       // 转换为十六进制字符串
-      logger.debug(`[Native] Step 10: 转换为十六进制...`);
       const hashHex = hash.toString(CryptoJS.enc.Hex);
-      logger.debug(`[Native] Step 11: ✅ 哈希计算完成: ${hashHex.substring(0, 16)}...`);
       
       return hashHex;
     } catch (error) {
@@ -401,7 +389,6 @@ class ImageProcessor {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       const blob = await response.blob();
-      logger.debug(`✅ [PC] Blob 创建成功: size=${blob.size}, type=${blob.type}`);
       return blob;
     } catch (error) {
       logger.error(`❌ [PC] Blob 创建失败: ${imageUri}`, error);
