@@ -58,7 +58,7 @@
 ### 下载安装
 
 **方式1：官网下载**
-1. 访问官网：https://www.xintuxiangce.top
+1. 访问官网：https://www.xintuxiangce.top/intro.html
 2. 点击下载按钮
 3. 运行安装程序
 4. 按照提示完成安装
@@ -241,7 +241,7 @@ npx react-native run-ios        # 运行iOS版本
 
 ## 📚 相关资源
 
-- [官方网站](https://www.xintuxiangce.top) - 软件下载和使用指南
+- [官方网站](https://www.xintuxiangce.top/intro.html) - 软件下载和使用指南
 - [使用教程](https://www.xintuxiangce.top/blog.html) - 详细的使用教程
 - [技术博客](https://www.xintuxiangce.top/blog.html) - AI照片分类技术解析
 - [常见问题](https://www.xintuxiangce.top/#faq) - FAQ解答
