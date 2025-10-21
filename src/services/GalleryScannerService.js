@@ -1628,11 +1628,11 @@ class GalleryScannerService {
         // 并行处理当前批次
         const batchPromises = batch.map(async (image) => {
           try {
-            // 使用 ImageProcessor 统一接口缩放图片（跨平台）
+            // 使用 ImageProcessor 统一接口缩放图片并获取 Blob（跨平台）
             const imageProcessor = require('./ImageProcessor').default || require('./ImageProcessor');
             
-            // 1. 缩放图片
-            const resizedResult = await imageProcessor.resizeImage(
+            // 缩放图片并获取 Blob（封装了平台差异）
+            const result = await imageProcessor.resizeImageAndGetBlob(
               image.uri,
               1024,
               1024,
@@ -1643,19 +1643,12 @@ class GalleryScannerService {
               }
             );
             
-            // 2. 创建 Blob（使用 ImageProcessor 统一接口）
-            // PC端：resizedResult.blob 已经存在，直接使用
-            // 移动端：resizedResult.uri 是缩放后的临时文件，需要创建 Blob
-            const blob = resizedResult.blob 
-              ? resizedResult.blob 
-              : await imageProcessor.createBlobFromImage(resizedResult.uri);
-            
-            logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${blob.size}, blob.type=${blob.type}`);
+            logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${result.blob.size}, blob.type=${result.blob.type}`);
             
             return {
               uri: image.uri,
               hash: image.hash,
-              blob: blob,
+              blob: result.blob,
               fileName: image.fileName,
               imageData: image
             };

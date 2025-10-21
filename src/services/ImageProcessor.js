@@ -440,7 +440,39 @@ class ImageProcessor {
   }
 
   /**
-   * 【核心接口5】缩放图片文件
+   * 【核心接口5】缩放图片并返回 Blob（用于上传）
+   * 
+   * 这是一个便捷方法，会自动处理平台差异：
+   * - PC端：缩放后直接返回 Blob
+   * - 移动端：缩放后读取临时文件并创建 Blob
+   * 
+   * @param {string} imageUri - 图片路径
+   * @param {number} targetWidth - 目标宽度
+   * @param {number} targetHeight - 目标高度
+   * @param {Object} options - 缩放选项
+   * @returns {Promise<{uri: string, width: number, height: number, blob: Blob}>} 缩放结果和 Blob
+   */
+  async resizeImageAndGetBlob(imageUri, targetWidth, targetHeight, options = {}) {
+    // 1. 缩放图片
+    const resizedResult = await this.resizeImage(imageUri, targetWidth, targetHeight, options);
+    
+    // 2. 获取 Blob
+    // PC端：resizedResult.blob 已经存在
+    // 移动端：需要基于 resizedResult.uri 创建 Blob
+    const blob = resizedResult.blob 
+      ? resizedResult.blob 
+      : await this.createBlobFromImage(resizedResult.uri);
+    
+    return {
+      uri: resizedResult.uri,
+      width: resizedResult.width,
+      height: resizedResult.height,
+      blob: blob
+    };
+  }
+
+  /**
+   * 【核心接口6】缩放图片文件
    * 
    * @param {string} imageUri - 图片路径
    * @param {number} targetWidth - 目标宽度
@@ -451,7 +483,7 @@ class ImageProcessor {
    * @param {number} options.quality - JPEG质量 (0-100)，默认 90
    * @param {string} options.outputPath - 输出路径，默认生成临时文件
    * 
-   * @returns {Promise<{uri: string, width: number, height: number}>} 缩放结果
+   * @returns {Promise<{uri: string, width: number, height: number, blob?: Blob}>} 缩放结果
    */
   async resizeImage(imageUri, targetWidth, targetHeight, options = {}) {
     // 根据平台选择不同的实现
