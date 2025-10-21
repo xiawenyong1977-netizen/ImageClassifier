@@ -1659,7 +1659,10 @@ class GalleryScannerService {
               
               // 创建 Blob
               blob = new Blob([uint8Array], { type: 'image/jpeg' });
+              logger.debug(`✅ [Native] Blob 创建成功: ${image.fileName}, size=${blob.size}`);
             }
+            
+            logger.debug(`📦 准备上传数据: ${image.fileName}, blob.size=${blob.size}, blob.type=${blob.type}`);
             
             return {
               uri: image.uri,

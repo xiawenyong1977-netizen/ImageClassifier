@@ -1696,6 +1696,7 @@ class ImageClassifierService {
         
         // 添加图片文件
         for (const imageData of batch) {
+          logger.debug(`📤 添加到 FormData: ${imageData.fileName}, blob.size=${imageData.blob?.size}, blob.type=${imageData.blob?.type}`);
           formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
         }
         
@@ -1709,6 +1710,9 @@ class ImageClassifierService {
         if (userId) {
           headers['X-User-ID'] = userId;
         }
+        
+        logger.debug(`🌐 发送请求到: ${config.baseURL}/api/v1/classify/batch`);
+        logger.debug(`📋 请求头:`, headers);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
