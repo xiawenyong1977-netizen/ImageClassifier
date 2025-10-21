@@ -197,10 +197,27 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 返回
+   * 返回（携带当前图片 ID，用于高亮）
    */
   const goBack = () => {
-    navigation.goBack();
+    // 使用 setParams 更新当前路由的参数，然后返回
+    if (navigation.canGoBack()) {
+      // 先获取前一个屏幕的 key
+      const routes = navigation.getState()?.routes;
+      const prevRoute = routes?.[routes.length - 2];
+      
+      if (prevRoute) {
+        // 设置前一个屏幕的参数
+        navigation.navigate(prevRoute.name, {
+          ...prevRoute.params,
+          returnedImageId: currentImage?.id,
+        });
+      } else {
+        navigation.goBack();
+      }
+    } else {
+      navigation.goBack();
+    }
   };
 
   // ==================== 图片操作 ====================
