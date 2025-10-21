@@ -238,13 +238,30 @@ class ParallelHashCalculator {
   }
 
   /**
-   * 处理本地文件的哈希计算
+   * 处理本地文件的哈希计算（跨平台适配）
    */
   async handleLocalFileHash(image, taskId) {
     try {
       // 读取文件数据
-      const blob = await readImageFileAsBlob(image.uri);
-      const arrayBuffer = await blob.arrayBuffer();
+      const blobData = await readImageFileAsBlob(image.uri);
+      
+      let arrayBuffer;
+      
+      // 判断平台：PC端返回真实Blob，移动端返回{base64, uri}
+      if (blobData.base64 && typeof blobData.base64 === 'string') {
+        // 移动端：从base64转换为ArrayBuffer
+        const { Buffer } = require('buffer');
+        const buffer = Buffer.from(blobData.base64, 'base64');
+        arrayBuffer = buffer.buffer.slice(
+          buffer.byteOffset,
+          buffer.byteOffset + buffer.byteLength
+        );
+      } else if (typeof blobData.arrayBuffer === 'function') {
+        // PC端：Blob对象，直接调用arrayBuffer()方法
+        arrayBuffer = await blobData.arrayBuffer();
+      } else {
+        throw new Error('无法获取文件数据：不支持的数据格式');
+      }
       
       // 在主线程中计算哈希（避免Worker限制）
       const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
@@ -322,20 +339,36 @@ class ParallelHashCalculator {
   }
 
   /**
-   * 单线程计算单个图片哈希
+   * 单线程计算单个图片哈希（跨平台适配）
    */
   async calculateHashSequential(image) {
     // 安全地加载图片数据
-    let blob;
+    let blobData;
     
     if (image.uri.startsWith('file://')) {
-      blob = await readImageFileAsBlob(image.uri);
+      blobData = await readImageFileAsBlob(image.uri);
     } else {
       const response = await fetch(image.uri);
-      blob = await response.blob();
+      blobData = await response.blob();
     }
     
-    const arrayBuffer = await blob.arrayBuffer();
+    let arrayBuffer;
+    
+    // 判断平台：PC端返回真实Blob，移动端返回{base64, uri}
+    if (blobData.base64 && typeof blobData.base64 === 'string') {
+      // 移动端：从base64转换为ArrayBuffer
+      const { Buffer } = require('buffer');
+      const buffer = Buffer.from(blobData.base64, 'base64');
+      arrayBuffer = buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength
+      );
+    } else if (typeof blobData.arrayBuffer === 'function') {
+      // PC端：Blob对象，直接调用arrayBuffer()方法
+      arrayBuffer = await blobData.arrayBuffer();
+    } else {
+      throw new Error('无法获取文件数据：不支持的数据格式');
+    }
     
     // 计算SHA-256哈希
     const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
