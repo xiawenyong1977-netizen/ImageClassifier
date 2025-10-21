@@ -186,6 +186,8 @@ const CategoryScreen = ({ route, navigation }) => {
     if (!selectionMode) {
       // 普通模式：跳转到预览页
       const index = images.findIndex(img => img.id === image.id);
+      
+      // ✅ 使用 FlatList 懒加载，支持任意数量图片
       navigation.navigate('ImagePreview', {
         image: image,
         allImages: images,

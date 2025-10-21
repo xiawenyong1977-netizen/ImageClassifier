@@ -78,8 +78,9 @@ const MainTabNavigator = () => (
         tabBarLabel: '暂存箱',
       }}
     >
-      {() => (
+      {({ navigation }) => (
         <CategoryScreen 
+          navigation={navigation}
           route={{ 
             params: { 
               category: 'tobecleaned',

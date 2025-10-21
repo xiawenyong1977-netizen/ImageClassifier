@@ -257,11 +257,30 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
       const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
 
-      // 提取图片尺寸信息
-      const imageDimensions = {
+      // 提取图片尺寸信息（优先使用 EXIF 中的尺寸）
+      let imageDimensions = {
         width: exifData.imageSize?.width || null,
         height: exifData.imageSize?.height || null
       };
+
+      // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
+      if (!imageDimensions.width || !imageDimensions.height) {
+        try {
+          const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
+          // 确保使用 file:// 格式的 URI
+          const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+          const dimensions = await imageProcessor.getImageDimensions(imageUri);
+          if (dimensions) {
+            imageDimensions = {
+              width: dimensions.width,
+              height: dimensions.height
+            };
+            logger.debug(`✅ 通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
+          }
+        } catch (error) {
+          logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);
+        }
+      }
 
       return { takenTime, locationInfo, imageDimensions };
 
@@ -348,19 +367,62 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
         const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
 
-        
+        // 提取图片尺寸信息
+        let imageDimensions = {
+          width: exifData.PixelXDimension || exifData.ImageWidth || null,
+          height: exifData.PixelYDimension || exifData.ImageLength || null
+        };
 
-        return { takenTime, locationInfo };
+        // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
+        if (!imageDimensions.width || !imageDimensions.height) {
+          try {
+            const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
+            // 确保使用 file:// 格式的 URI
+            const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+            const dimensions = await imageProcessor.getImageDimensions(imageUri);
+            if (dimensions) {
+              imageDimensions = {
+                width: dimensions.width,
+                height: dimensions.height
+              };
+              logger.debug(`✅ 通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
+            }
+          } catch (error) {
+            logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);
+          }
+        }
+
+        return { takenTime, locationInfo, imageDimensions };
 
         
 
       } catch (nativeError) {
 
+        // 即使 EXIF 读取失败，也尝试用 ImageProcessor 获取尺寸
+        let imageDimensions = { width: null, height: null };
+        try {
+          const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
+          // 确保使用 file:// 格式的 URI
+          const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+          const dimensions = await imageProcessor.getImageDimensions(imageUri);
+          if (dimensions) {
+            imageDimensions = {
+              width: dimensions.width,
+              height: dimensions.height
+            };
+            logger.debug(`✅ EXIF失败，通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
+          }
+        } catch (error) {
+          logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);
+        }
+
         return {
 
           takenTime: null,
 
-          locationInfo: createDefaultLocationInfo('none')
+          locationInfo: createDefaultLocationInfo('none'),
+
+          imageDimensions
 
         };
 
