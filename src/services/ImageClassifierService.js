@@ -1751,18 +1751,38 @@ class ImageClassifierService {
         
         logger.info(`🌐 发送批量请求: ${imageDataList.length}张图片, 总大小: ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB`);
         
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-        
         let response;
         let retryCount = 0;
         const maxRetries = 2; // 最多重试2次
         
         while (retryCount <= maxRetries) {
+          // 每次重试都创建新的 AbortController 和超时器
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => {
+            logger.warn(`⚠️ 请求超时 (${timeout}ms)，中止请求...`);
+            controller.abort();
+          }, timeout);
+          
           try {
             const retryInfo = retryCount > 0 ? ` (重试 ${retryCount}/${maxRetries})` : '';
             logger.info(`🚀 开始发送请求 (${imageDataList.length}张图片, ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB)${retryInfo}...`);
+            
+            // 移动端：fetch前再次验证文件（诊断用）
+            if (Platform.OS !== 'web') {
+              const RNFS = require('react-native-fs');
+              logger.debug(`📋 fetch前验证文件...`);
+              for (const imageData of imageDataList) {
+                const filePath = imageData.resizedUri.replace('file://', '');
+                const exists = await RNFS.exists(filePath);
+                if (!exists) {
+                  throw new Error(`fetch前文件已消失: ${imageData.fileName}`);
+                }
+              }
+              logger.debug(`✅ 所有文件验证通过`);
+            }
+            
             const fetchStartTime = Date.now();
+            logger.debug(`📤 调用 fetch()...`);
             
             response = await fetch(`${config.baseURL}/api/v1/classify/batch`, {
               method: 'POST',
@@ -1773,8 +1793,10 @@ class ImageClassifierService {
             
             const fetchDuration = Date.now() - fetchStartTime;
             logger.info(`✅ 请求成功，状态码: ${response.status}, 耗时: ${fetchDuration}ms`);
+            clearTimeout(timeoutId); // 成功后清除超时器
             break; // 成功，跳出重试循环
           } catch (fetchError) {
+            clearTimeout(timeoutId); // 失败后也要清除超时器
             retryCount++;
             
             // 如果还有重试机会，等待后重试
@@ -1800,16 +1822,13 @@ class ImageClassifierService {
               }
               formData = newFormData;
                 
-                continue; // 继续下一次重试
-              }
-              
+              continue; // 继续下一次重试
+            }
+            
             // 没有重试机会了，或者不是网络错误，抛出异常
-            clearTimeout(timeoutId);
             throw fetchError; // 抛给外层catch处理
           }
         }
-        
-        clearTimeout(timeoutId);
         
         if (!response.ok) {
           const errorText = await response.text();
