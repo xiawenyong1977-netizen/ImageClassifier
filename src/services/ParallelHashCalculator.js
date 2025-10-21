@@ -1,8 +1,10 @@
-import { readImageFileAsBlob, logger } from '../adapters/WebAdapters';
+import { logger } from '../adapters/WebAdapters';
+import imageProcessor from './ImageProcessor';
 
 /**
  * 并行哈希计算管理器
- * 使用多个Worker线程并行计算图片哈希值
+ * 使用多个Worker线程并行计算图片哈希值（PC端）
+ * 移动端使用单线程 + crypto-js
  */
 class ParallelHashCalculator {
   constructor(maxWorkers = 4) {
@@ -238,35 +240,12 @@ class ParallelHashCalculator {
   }
 
   /**
-   * 处理本地文件的哈希计算（跨平台适配）
+   * 处理本地文件的哈希计算（使用 ImageProcessor 统一接口）
    */
   async handleLocalFileHash(image, taskId) {
     try {
-      // 读取文件数据
-      const blobData = await readImageFileAsBlob(image.uri);
-      
-      let arrayBuffer;
-      
-      // 判断平台：PC端返回真实Blob，移动端返回{base64, uri}
-      if (blobData.base64 && typeof blobData.base64 === 'string') {
-        // 移动端：从base64转换为ArrayBuffer
-        const { Buffer } = require('buffer');
-        const buffer = Buffer.from(blobData.base64, 'base64');
-        arrayBuffer = buffer.buffer.slice(
-          buffer.byteOffset,
-          buffer.byteOffset + buffer.byteLength
-        );
-      } else if (typeof blobData.arrayBuffer === 'function') {
-        // PC端：Blob对象，直接调用arrayBuffer()方法
-        arrayBuffer = await blobData.arrayBuffer();
-      } else {
-        throw new Error('无法获取文件数据：不支持的数据格式');
-      }
-      
-      // 在主线程中计算哈希（避免Worker限制）
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      // 使用 ImageProcessor 统一接口计算哈希
+      const hashHex = await imageProcessor.calculateFileHash(image.uri);
       
       // 模拟Worker消息
       this.handleWorkerMessage({
@@ -339,43 +318,11 @@ class ParallelHashCalculator {
   }
 
   /**
-   * 单线程计算单个图片哈希（跨平台适配）
+   * 单线程计算单个图片哈希（使用 ImageProcessor 统一接口）
    */
   async calculateHashSequential(image) {
-    // 安全地加载图片数据
-    let blobData;
-    
-    if (image.uri.startsWith('file://')) {
-      blobData = await readImageFileAsBlob(image.uri);
-    } else {
-      const response = await fetch(image.uri);
-      blobData = await response.blob();
-    }
-    
-    let arrayBuffer;
-    
-    // 判断平台：PC端返回真实Blob，移动端返回{base64, uri}
-    if (blobData.base64 && typeof blobData.base64 === 'string') {
-      // 移动端：从base64转换为ArrayBuffer
-      const { Buffer } = require('buffer');
-      const buffer = Buffer.from(blobData.base64, 'base64');
-      arrayBuffer = buffer.buffer.slice(
-        buffer.byteOffset,
-        buffer.byteOffset + buffer.byteLength
-      );
-    } else if (typeof blobData.arrayBuffer === 'function') {
-      // PC端：Blob对象，直接调用arrayBuffer()方法
-      arrayBuffer = await blobData.arrayBuffer();
-    } else {
-      throw new Error('无法获取文件数据：不支持的数据格式');
-    }
-    
-    // 计算SHA-256哈希
-    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    
-    return hashHex;
+    // 使用 ImageProcessor 统一接口计算哈希
+    return await imageProcessor.calculateFileHash(image.uri);
   }
 
   /**

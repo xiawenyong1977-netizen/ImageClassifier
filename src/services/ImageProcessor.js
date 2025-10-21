@@ -17,7 +17,7 @@ import { logger, Platform, ImageResizer, RNFS, jpegJs, RNImage } from '../adapte
 
 class ImageProcessor {
   constructor() {
-    this.isInitialized = true;
+      this.isInitialized = true;
     
     // 单图片缓存：因为模型推理是串行的，只需要缓存当前正在处理的图片
     this.currentImageUri = null;  // 当前图片URI
@@ -289,7 +289,79 @@ class ImageProcessor {
   }
 
   /**
-   * 【核心接口3】缩放图片文件
+   * 【核心接口3】计算文件哈希值（SHA-256）
+   * 
+   * @param {string} imageUri - 图片路径
+   * @returns {Promise<string>} 哈希值（十六进制字符串）
+   */
+  async calculateFileHash(imageUri) {
+    if (Platform.OS === 'web') {
+      return await this._calculateHashWithWebCrypto(imageUri);
+    } else {
+      return await this._calculateHashWithCryptoJS(imageUri);
+    }
+  }
+
+  /**
+   * 【PC端实现】使用 Web Crypto API 计算哈希
+   */
+  async _calculateHashWithWebCrypto(imageUri) {
+    try {
+      // 读取文件为 Blob
+      const { readImageFileAsBlob } = require('../adapters/WebAdapters');
+      const blob = await readImageFileAsBlob(imageUri);
+      
+      // 转换为 ArrayBuffer
+      const arrayBuffer = await blob.arrayBuffer();
+      
+      // 计算 SHA-256
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      return hashHex;
+    } catch (error) {
+      logger.error(`❌ [Web] 计算哈希失败: ${imageUri}`, error);
+      throw new Error(`计算哈希失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 【移动端实现】使用 CryptoJS 计算哈希
+   */
+  async _calculateHashWithCryptoJS(imageUri) {
+    try {
+      if (!RNFS) {
+        throw new Error('RNFS 模块未加载');
+      }
+
+      // 导入 CryptoJS
+      const CryptoJS = require('crypto-js');
+      
+      // 移除 file:// 前缀
+      const normalizedPath = imageUri.replace(/^file:\/\//, '');
+      
+      // 读取文件为 base64
+      const base64Data = await RNFS.readFile(normalizedPath, 'base64');
+      
+      // 将 base64 转换为 WordArray
+      const wordArray = CryptoJS.enc.Base64.parse(base64Data);
+      
+      // 计算 SHA-256
+      const hash = CryptoJS.SHA256(wordArray);
+      
+      // 转换为十六进制字符串
+      const hashHex = hash.toString(CryptoJS.enc.Hex);
+      
+      return hashHex;
+    } catch (error) {
+      logger.error(`❌ [Native] 计算哈希失败: ${imageUri}`, error);
+      throw new Error(`计算哈希失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 【核心接口4】缩放图片文件
    * 
    * @param {string} imageUri - 图片路径
    * @param {number} targetWidth - 目标宽度

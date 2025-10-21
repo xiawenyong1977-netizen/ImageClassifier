@@ -1628,16 +1628,43 @@ class GalleryScannerService {
         // 并行处理当前批次
         const batchPromises = batch.map(async (image) => {
           try {
-            // 安全地读取本地图片文件
-            const blob = await readImageFileAsBlob(image.path);
+            // 使用 ImageProcessor 统一接口缩放图片（跨平台）
+            const imageProcessor = require('./ImageProcessor').default || require('./ImageProcessor');
+            const resizedResult = await imageProcessor.resizeImage(
+              image.uri,
+              1024,
+              1024,
+              {
+                maintainAspectRatio: true,
+                outputFormat: 'jpeg',
+                quality: 90
+              }
+            );
             
-            // 缩放图片到1024x1024（保持长宽比）
-            const resizedBlob = await this.resizeImageTo1024(blob, image.fileName);
+            // 读取缩放后的文件为 Blob（用于上传）
+            let blob;
+            if (resizedResult.blob) {
+              // PC端：直接使用 blob
+              blob = resizedResult.blob;
+            } else {
+              // 移动端：读取缩放后的文件并转换为 Blob
+              const RNFS = require('../adapters/WebAdapters').RNFS;
+              const normalizedPath = resizedResult.uri.replace(/^file:\/\//, '');
+              const base64Data = await RNFS.readFile(normalizedPath, 'base64');
+              
+              // 将 base64 转换为 Uint8Array
+              const { Buffer } = require('buffer');
+              const buffer = Buffer.from(base64Data, 'base64');
+              const uint8Array = new Uint8Array(buffer);
+              
+              // 创建 Blob
+              blob = new Blob([uint8Array], { type: 'image/jpeg' });
+            }
             
             return {
               uri: image.uri,
               hash: image.hash,
-              blob: resizedBlob,
+              blob: blob,
               fileName: image.fileName,
               imageData: image
             };
