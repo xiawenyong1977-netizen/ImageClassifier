@@ -113,17 +113,27 @@ const CategoryScreen = ({ route, navigation }) => {
         setLoading(true);
       }
 
-      const cache = GlobalImageCache.getCache();
-      let allImages = cache.allImages || [];
-
-      // 根据页面类型过滤图片
       let filteredImages = [];
-      if (category) {
-        filteredImages = allImages.filter(img => img.category === category);
+      
+      if (similarityGroupId) {
+        // 从相似组获取图片（使用 UnifiedDataService API）
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
+        filteredImages = groupData.images || [];
+        // 过滤掉 tobecleaned 分类的照片
+        filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
+        logger.debug(`从相似组获取图片: 总数=${filteredImages.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
       } else if (city) {
-        filteredImages = allImages.filter(img => img.city === city);
-      } else if (similarityGroupId) {
-        // TODO: 从相似组获取图片
+        // 按城市加载
+        filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
+        // 过滤掉 tobecleaned 分类的照片
+        filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
+        logger.debug(`从城市获取图片: 总数=${filteredImages.length}, city=${city}, 已过滤tobecleaned`);
+      } else if (category) {
+        // 按分类加载
+        filteredImages = await UnifiedDataService.readImagesByCategory(category);
+        logger.debug(`从分类获取图片: 总数=${filteredImages.length}, category=${category}`);
+      } else {
+        logger.error('没有有效的上下文参数（category、city、similarityGroupId），无法加载图片');
         filteredImages = [];
       }
 
