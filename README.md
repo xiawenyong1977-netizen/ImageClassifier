@@ -1,6 +1,6 @@
 # 芯图相册 - AI智能照片分类管理工具
 
-[![Website](https://img.shields.io/badge/website-https://www.xintuxiangce.top-blue.svg)](https://www.xintuxiangce.top)
+[![Website](https://img.shields.io/badge/website-https://www.xintuxiangce.top-blue.svg)](https://www.xintuxiangce.top/intro.html)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](https://www.xintuxiangce.top)
 [![AI](https://img.shields.io/badge/AI-90%25%2B%20Accuracy-brightgreen.svg)](https://www.xintuxiangce.top)
