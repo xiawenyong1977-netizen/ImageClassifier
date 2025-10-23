@@ -480,6 +480,9 @@ const HomeScreen = () => {
     logger.debug('HomeScreen 开始刷新数据');
     setRefreshing(true);
     try {
+      // 🆕 重建缓存
+      await UnifiedDataService.imageCache.refreshCache();
+      // 重新加载数据
       await loadData();
     } catch (error) {
       logger.error('刷新数据失败:', error);
@@ -511,6 +514,22 @@ const HomeScreen = () => {
         logger.debug('扫描进度:', progress);
         // 更新进度
         handleScanProgress(progress);
+        
+        // 🆕 检查是否需要刷新页面
+        if (progress.shouldRefresh) {
+          logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
+          // 异步刷新，不阻塞扫描进度
+          setImmediate(async () => {
+            try {
+              // 强制刷新存储服务缓存
+              await UnifiedDataService.imageCache.refreshCache();
+              // 然后刷新页面数据
+              await onRefresh();
+            } catch (error) {
+              logger.error('❌ 定期刷新失败:', error);
+            }
+          });
+        }
       });
       
       logger.debug('智能扫描完成');

@@ -755,18 +755,17 @@ class ImageClassifierService {
   // ==================== 并行推理相关函数 ====================
 
   /**
-   * 并行执行所有模型推理
+   * 并行/串行执行所有模型推理
+   * - 移动端：并行推理（React Native原生C++支持多线程）
+   * - PC端：串行推理（Web WASM受限于主线程）
    * @param {string} imageUri - 图片URI
    * @returns {Promise<Object>} 所有模型的推理结果
    */
   async runParallelInference(imageUri) {
     const startTime = Date.now();
-    logger.info('🚀 开始串行推理（避免资源竞争）... [V2.0 - ' + new Date().toLocaleTimeString() + ']');
     
-    // 串行执行推理，避免资源竞争导致单个模型变慢
-    let idCardResults = [];
-    let generalResults = [];
-    let mobileNetV3Results = {};
+    // 判断是否为移动端平台
+    const isMobile = Platform.OS === 'android' || Platform.OS === 'ios';
     
     // 详细耗时统计
     const timings = {
@@ -776,75 +775,111 @@ class ImageClassifierService {
       mobileNetV3: 0
     };
     
+    let results = {
+      idCard: [],
+      general: [],
+      mobileNetV3: {}
+    };
+    
     try {
-      // 串行执行，依次运行三个模型
-      
-      // 1. ID卡模型
-      const idCardStart = Date.now();
-      try {
-        idCardResults = await this.classifyImageWithYOLO(imageUri, 'idCard');
-        timings.idCard = Date.now() - idCardStart;
-        logger.info(`⏱️ ID卡模型推理耗时: ${timings.idCard}ms`);
-      } catch (error) {
-        timings.idCard = Date.now() - idCardStart;
-        console.error('❌ idCard 推理失败:', error);
-        idCardResults = [];
+      if (isMobile) {
+        // ============ 移动端：并行推理 ============
+        logger.info('🚀 开始并行推理（移动端原生多线程）...');
+        
+        const parallelStart = Date.now();
+        
+        const [idCardResults, generalResults, mobileNetV3Results] = await Promise.all([
+          // 1. ID卡模型
+          this.classifyImageWithYOLO(imageUri, 'idCard').catch(error => {
+            logger.error('❌ ID卡推理失败:', error.message);
+            return [];
+          }),
+          
+          // 2. YOLOv8模型
+          this.classifyImageWithYOLO(imageUri, 'yolo8s').catch(error => {
+            logger.error('❌ YOLO推理失败:', error.message);
+            return [];
+          }),
+          
+          // 3. MobileNetV3模型
+          this.classifyImageWithMobileNetV3(imageUri).catch(error => {
+            logger.error('❌ MobileNetV3推理失败:', error.message);
+            return {};
+          })
+        ]);
+        
+        const parallelTime = Date.now() - parallelStart;
+        
+        results = {
+          idCard: idCardResults || [],
+          general: generalResults || [],
+          mobileNetV3: mobileNetV3Results || {}
+        };
+        
+        logger.info(`✅ 并行推理完成！总耗时: ${parallelTime}ms`);
+        logger.debug(`  - ID卡: ${results.idCard.length} 个 | YOLO: ${results.general.length} 个 | MobileNetV3: ${results.mobileNetV3.predictions ? results.mobileNetV3.predictions.length : 0} 个`);
+        
+      } else {
+        // ============ PC端：串行推理 ============
+        logger.info('🚀 开始串行推理（PC端Web环境）...');
+        
+        // 1. ID卡模型
+        const idCardStart = Date.now();
+        try {
+          results.idCard = await this.classifyImageWithYOLO(imageUri, 'idCard');
+          timings.idCard = Date.now() - idCardStart;
+          logger.debug(`  - ID卡模型: ${timings.idCard}ms`);
+        } catch (error) {
+          timings.idCard = Date.now() - idCardStart;
+          logger.error('❌ ID卡推理失败:', error.message);
+          results.idCard = [];
+        }
+        
+        // 2. YOLOv8模型
+        const generalStart = Date.now();
+        try {
+          results.general = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
+          timings.general = Date.now() - generalStart;
+          logger.debug(`  - YOLOv8模型: ${timings.general}ms`);
+        } catch (error) {
+          timings.general = Date.now() - generalStart;
+          logger.error('❌ YOLO推理失败:', error.message);
+          results.general = [];
+        }
+        
+        // 3. MobileNetV3模型
+        const mobileNetStart = Date.now();
+        try {
+          results.mobileNetV3 = await this.classifyImageWithMobileNetV3(imageUri);
+          timings.mobileNetV3 = Date.now() - mobileNetStart;
+          logger.debug(`  - MobileNetV3模型: ${timings.mobileNetV3}ms`);
+        } catch (error) {
+          timings.mobileNetV3 = Date.now() - mobileNetStart;
+          logger.error('❌ MobileNetV3推理失败:', error.message);
+          results.mobileNetV3 = {};
+        }
+        
+        const serialTotalTime = timings.idCard + timings.general + timings.mobileNetV3;
+        logger.info(`✅ 串行推理完成！总耗时: ${serialTotalTime}ms`);
+        logger.debug(`  - ID卡: ${results.idCard.length} 个 | YOLO: ${results.general.length} 个 | MobileNetV3: ${results.mobileNetV3.predictions ? results.mobileNetV3.predictions.length : 0} 个`);
       }
-      
-      // 2. YOLOv8模型
-      const generalStart = Date.now();
-      try {
-        generalResults = await this.classifyImageWithYOLO(imageUri, 'yolo8s');
-        timings.general = Date.now() - generalStart;
-        logger.info(`⏱️ YOLOv8模型推理耗时: ${timings.general}ms`);
-      } catch (error) {
-        timings.general = Date.now() - generalStart;
-        console.error('❌ general 推理失败:', error);
-        generalResults = [];
-      }
-      
-      // 3. MobileNetV3模型
-      const mobileNetStart = Date.now();
-      try {
-        mobileNetV3Results = await this.classifyImageWithMobileNetV3(imageUri);
-        timings.mobileNetV3 = Date.now() - mobileNetStart;
-        logger.info(`⏱️ MobileNetV3模型推理耗时: ${timings.mobileNetV3}ms`);
-      } catch (error) {
-        timings.mobileNetV3 = Date.now() - mobileNetStart;
-        console.error('❌ mobileNetV3 推理失败:', error);
-        mobileNetV3Results = {};
-      }
-      
-      logger.debug(`✅ 所有模型推理完成:`);
-      logger.debug(`  - idCard: ${idCardResults.length} 个检测结果`);
-      logger.debug(`  - general: ${generalResults.length} 个检测结果`);
-      logger.debug(`  - mobileNetV3: ${mobileNetV3Results.predictions ? mobileNetV3Results.predictions.length : 0} 个检测结果`);
-      
-      // 性能分析
-      const serialTotalTime = timings.idCard + timings.general + timings.mobileNetV3;
-      
-      logger.info(`📊 串行推理性能统计:`);
-      logger.info(`  - ID卡模型: ${timings.idCard}ms`);
-      logger.info(`  - YOLOv8模型: ${timings.general}ms`);
-      logger.info(`  - MobileNetV3模型: ${timings.mobileNetV3}ms`);
-      logger.info(`  - 串行总时间: ${serialTotalTime}ms`);
       
     } catch (error) {
-      console.error('❌ 串行推理过程中发生错误:', error);
+      logger.error('❌ 推理过程中发生错误:', error);
+      // 返回空结果，避免中断流程
+      results = {
+        idCard: [],
+        general: [],
+        mobileNetV3: {}
+      };
     }
-    
-    // 处理结果
-    const serialResults = {
-      idCard: idCardResults || [],
-      general: generalResults || [],
-      mobileNetV3: mobileNetV3Results || {}
-    };
     
     const endTime = Date.now();
     timings.total = endTime - startTime;
-    logger.info(`⏱️ 串行推理总耗时: ${timings.total}ms`);
     
-    return serialResults;
+    logger.info(`⏱️ 推理总耗时: ${timings.total}ms`);
+    
+    return results;
   }
 
 
@@ -1988,7 +2023,7 @@ class ImageClassifierService {
       };
       
     } catch (error) {
-      logger.error('❌ 健康检查失败:', error);
+      logger.debug('⚠️ 健康检查失败:', error.message);
       return {
         available: false,
         reason: error.name === 'AbortError' ? '请求超时' : '网络错误或服务不可达'

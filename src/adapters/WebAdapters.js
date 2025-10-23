@@ -793,7 +793,7 @@ export const isMobile = Platform.OS === 'ios' || Platform.OS === 'android';
 // 11. Alert 适配
 export const Alert = {
   alert: (title, message, buttons, options) => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
       // Web环境使用自定义模态对话框
       const createCustomAlert = () => {
         // 创建遮罩层
@@ -931,8 +931,21 @@ export const Alert = {
       createCustomAlert();
     } else {
       // 移动端使用原生Alert
-      const { Alert: RNAlert } = require('react-native');
-      RNAlert.alert(title, message, buttons, options);
+      try {
+        // 动态导入React Native的Alert，避免循环依赖
+        const RNAlert = require('react-native').Alert;
+        RNAlert.alert(title, message, buttons, options);
+      } catch (error) {
+        // 如果导入失败，使用console.log作为后备
+        console.log(`Alert: ${title} - ${message}`);
+        if (buttons && buttons.length > 0) {
+          buttons.forEach(button => {
+            if (button.text) {
+              console.log(`Button: ${button.text}`);
+            }
+          });
+        }
+      }
     }
   }
 };

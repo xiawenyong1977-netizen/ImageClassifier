@@ -1,4 +1,4 @@
-rootProject.name = 'ImageClassifierApp'
+rootProject.name = '芯图相册'
 
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

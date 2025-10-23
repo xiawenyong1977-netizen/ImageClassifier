@@ -73,6 +73,7 @@ class ImageSimilarityService {
     const {
       timeWindow = 300, // 5分钟
       similarityThreshold = 0.8,
+      onProgress = null, // 进度回调函数
     } = options;
 
     logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}`);
@@ -99,6 +100,7 @@ class ImageSimilarityService {
           timeWindow,
           similarityThreshold,
           groupType: 'similar',
+          onProgress, // 传递进度回调
         }
       );
 
@@ -106,6 +108,14 @@ class ImageSimilarityService {
       await this._saveDetectionResults(detectionResult);
 
       logger.debug(`✅ 相似度检测完成: 发现${detectionResult.groups.length}个相似组, 处理${detectionResult.processed}张图片`);
+      
+      // 异步清理临时文件（不阻塞返回，延迟5秒确保文件释放）
+      // 使用 setImmediate 或 setTimeout 都是异步的，不影响性能
+      setTimeout(() => {
+        this._cleanupTempFiles().catch(err => {
+          logger.debug('后台清理临时文件出错:', err.message);
+        });
+      }, 5000);
 
       return {
         success: true,
@@ -209,11 +219,14 @@ class ImageSimilarityService {
         logger.info(`📊 全局图片总数${totalImageCount}张 < ${opts.globalImageCountThreshold}张，所有窗口使用颜色直方图算法`);
       }
       
-      // 5. 并行处理所有时间窗口
-      logger.debug(`🚀 开始并行处理${timeWindows.length}个时间窗口`);
+      // 5. 顺序处理时间窗口（支持进度回调）
+      logger.debug(`🚀 开始顺序处理${timeWindows.length}个时间窗口`);
       
-      const windowPromises = timeWindows.map(async (window, index) => {
-        logger.debug(`🪟 并行处理时间窗口${index + 1}: ${window.length}张图片`);
+      const windowResults = [];
+      let totalGroups = 0;
+      
+      for (let index = 0; index < timeWindows.length; index++) {
+        const window = timeWindows[index];
         
         let windowGroups;
         
@@ -229,15 +242,19 @@ class ImageSimilarityService {
           windowGroups = this._findSimilarGroupsOriginal(windowWithFeatures, opts);
         }
         
-        return {
+        totalGroups += windowGroups.length;
+        
+        windowResults.push({
           windowGroups,
           processed: window.length,
           windowIndex: index
-        };
-      });
-      
-      // 等待所有窗口处理完成
-      const windowResults = await Promise.all(windowPromises);
+        });
+        
+        // 更频繁的进度更新：每5个窗口、每3个相似组或最后一个窗口
+        if (opts.onProgress && (index % 5 === 0 || index === timeWindows.length - 1 || totalGroups % 3 === 0)) {
+          opts.onProgress(index + 1, timeWindows.length, totalGroups);
+        }
+      }
       
       // 合并结果
       const allGroups = windowResults.flatMap(result => result.windowGroups);
@@ -332,7 +349,6 @@ class ImageSimilarityService {
    * @private
    */
   async _loadInferenceDataForWindow(windowImages) {
-    logger.debug(`📥 批量加载推理结果: ${windowImages.length}张图片`);
     
     try {
       const storageService = this.getUnifiedDataService().imageStorageService;
@@ -344,7 +360,7 @@ class ImageSimilarityService {
       const detailedImagesMap = await storageService.getImagesByIds(imageIds);
       
       // 调试：检查返回值类型
-      logger.debug(`🔍 detailedImagesMap类型: ${detailedImagesMap?.constructor?.name}, 是Map: ${detailedImagesMap instanceof Map}`);
+      // logger.debug(`🔍 detailedImagesMap类型: ${detailedImagesMap?.constructor?.name}, 是Map: ${detailedImagesMap instanceof Map}`);
       
       // 确保返回的是Map对象
       if (!(detailedImagesMap instanceof Map)) {
@@ -374,7 +390,7 @@ class ImageSimilarityService {
         };
       });
       
-      logger.debug(`✅ 推理结果加载完成`);
+      // logger.debug(`✅ 推理结果加载完成`);
       return enhancedImages;
       
     } catch (error) {
@@ -556,12 +572,12 @@ class ImageSimilarityService {
    * @private
    */
   _findSimilarGroupsSimplified(windowImages, options) {
-    logger.debug(`🔍 使用简化算法处理窗口：${windowImages.length}张图片`);
+    // logger.debug(`🔍 使用简化算法处理窗口：${windowImages.length}张图片`);
     
     // 步骤1：找最大分类
     const dominantCategory = this._findDominantCategory(windowImages);
     
-    logger.debug(`📊 最大分类: ${dominantCategory.category} (${dominantCategory.count}张, ${dominantCategory.percentage.toFixed(1)}%)`);
+    // logger.debug(`📊 最大分类: ${dominantCategory.category} (${dominantCategory.count}张, ${dominantCategory.percentage.toFixed(1)}%)`);
     
     // 特殊分类跳过
     if (['screenshot', 'idcard'].includes(dominantCategory.category)) {
@@ -575,19 +591,19 @@ class ImageSimilarityService {
     );
     
     if (categoryImages.length < 3) {
-      logger.debug(`⚠️ 最大分类图片${categoryImages.length}张 < 3张，跳过相似度检测`);
+      // logger.debug(`⚠️ 最大分类图片${categoryImages.length}张 < 3张，跳过相似度检测`);
       return [];
     }
     
     // 步骤3：找最多的推理方式
     const dominantInference = this._findDominantInferenceType(categoryImages);
     
-    logger.debug(`🤖 最多推理方式: ${dominantInference.type} (${dominantInference.count}张)`);
+    // logger.debug(`🤖 最多推理方式: ${dominantInference.type} (${dominantInference.count}张)`);
     
     // 步骤4：只处理"最大分类+最多推理方式"的图片
     const targetImages = dominantInference.images;
     
-    logger.debug(`✅ 最终处理图片数: ${targetImages.length}张（其他${windowImages.length - targetImages.length}张跳过）`);
+    // logger.debug(`✅ 最终处理图片数: ${targetImages.length}张（其他${windowImages.length - targetImages.length}张跳过）`);
     
     if (targetImages.length < 3) {
       logger.debug(`⚠️ 目标图片${targetImages.length}张 < 3张，跳过相似度检测`);
@@ -637,7 +653,7 @@ class ImageSimilarityService {
       }
     }
     
-    logger.debug(`✅ 简化算法完成: 发现${groups.length}个相似组`);
+    // logger.debug(`✅ 简化算法完成: 发现${groups.length}个相似组`);
     
     return groups;
   }
@@ -976,6 +992,85 @@ class ImageSimilarityService {
   _mergeSimilarGroups(groups) {
     // 简化实现，实际应该检查跨窗口的相似性
     return groups;
+  }
+
+  /**
+   * 清理临时文件（移动端cache目录）
+   * 使用重试机制，确保文件被正确清理
+   * @private
+   */
+  async _cleanupTempFiles() {
+    try {
+      const { Platform, RNFS } = require('../adapters/WebAdapters');
+      
+      // 只在移动端执行
+      if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
+        return;
+      }
+      
+      if (!RNFS) {
+        return;
+      }
+      
+      // 获取cache目录路径
+      const cacheDir = RNFS.CachesDirectoryPath;
+      
+      // 读取cache目录中的文件
+      const files = await RNFS.readDir(cacheDir);
+      
+      // 过滤出临时JPEG文件
+      const tempFiles = files.filter(file => 
+        file.name.endsWith('.JPEG') || file.name.endsWith('.jpeg')
+      );
+      
+      if (tempFiles.length === 0) {
+        return;
+      }
+      
+      logger.info(`🧹 开始清理 ${tempFiles.length} 个临时文件...`);
+      
+      let cleanedCount = 0;
+      let failedFiles = [];
+      
+      // 第一次尝试：批量删除
+      for (const file of tempFiles) {
+        try {
+          await RNFS.unlink(file.path);
+          cleanedCount++;
+        } catch (error) {
+          failedFiles.push(file);
+        }
+      }
+      
+      // 如果有失败的文件，延迟3秒后重试
+      if (failedFiles.length > 0) {
+        logger.debug(`⏳ 等待3秒后重试清理 ${failedFiles.length} 个文件...`);
+        
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const retryFailed = [];
+        for (const file of failedFiles) {
+          try {
+            await RNFS.unlink(file.path);
+            cleanedCount++;
+          } catch (error) {
+            retryFailed.push(file);
+          }
+        }
+        
+        if (retryFailed.length > 0) {
+          logger.debug(`⚠️ ${retryFailed.length} 个文件清理失败，将在下次扫描时清理`);
+        }
+      }
+      
+      if (cleanedCount > 0) {
+        logger.info(`✅ 临时文件清理完成: ${cleanedCount}/${tempFiles.length} 个文件`);
+      }
+      
+    } catch (error) {
+      // 清理失败不影响主流程，静默处理
+      logger.debug('临时文件清理过程出错:', error.message);
+    }
   }
 }
 

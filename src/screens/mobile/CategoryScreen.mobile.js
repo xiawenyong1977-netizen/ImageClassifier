@@ -17,13 +17,12 @@ import {
   Image,
   StyleSheet,
   Dimensions,
-  Alert,
   ActivityIndicator,
   Share,
   Modal,
   ScrollView,
 } from 'react-native';
-import { SafeAreaView, useFocusEffect } from '../../adapters/WebAdapters';
+import { SafeAreaView, useFocusEffect, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
@@ -46,8 +45,8 @@ const CategoryScreen = ({ route, navigation }) => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
   
-  // 强制刷新计数器（用于触发重新渲染）
-  const [refreshCounter, setRefreshCounter] = useState(0);
+  // 选中数量状态
+  const [selectedCount, setSelectedCount] = useState(0);
   
   // 分类选择器模态框
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -75,7 +74,8 @@ const CategoryScreen = ({ route, navigation }) => {
    * 获取页面标题（与 PC 端格式一致）
    */
   const getPageTitle = () => {
-    const count = images.length;
+    // 🆕 添加空值检查
+    const count = Array.isArray(images) ? images.length : 0;
     
     if (similarityGroupId) {
       return `相似照片组 (${count}张)`;
@@ -112,22 +112,35 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // ==================== 选择模式相关函数 ====================
   
-  // 获取当前选中的图片数量（从 UnifiedDataService）
-  const getSelectedCount = useCallback(() => {
-    let count = 0;
-    for (const image of images) {
-      if (UnifiedDataService.isImageSelected(image.id)) {
-        count++;
+  // 计算选中数量的函数
+  const calculateSelectedCount = () => {
+    try {
+      if (similarityGroupId) {
+        // 相似组页面：获取相似组的选中图片数量
+        const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+        return selectedImages.length;
+      } else if (city) {
+        // 城市页面：获取城市的选中图片数量
+        const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
+        return selectedImages.length;
+      } else if (category) {
+        // 分类页面：获取分类的选中图片数量
+        const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
+        return selectedImages.length;
       }
+      return 0;
+    } catch (error) {
+      logger.error('获取选中数量失败:', error);
+      return 0;
     }
-    return count;
-  }, [images, refreshCounter]); // 依赖 refreshCounter 触发重新计算
+  };
   
   // 全选/取消全选（与 PC 端同步到 UnifiedDataService）
-  const toggleSelectAll = useCallback(() => {
-    const selectedCount = getSelectedCount();
+  const toggleSelectAll = () => {
+    // 实时获取当前状态，不依赖状态变量
+    const currentSelectedCount = calculateSelectedCount();
     
-    if (selectedCount === images.length && images.length > 0) {
+    if (currentSelectedCount === images.length && images.length > 0) {
       // 全部选中，则取消全选
       images.forEach(img => {
         UnifiedDataService.setImageSelection(img.id, false);
@@ -139,34 +152,30 @@ const CategoryScreen = ({ route, navigation }) => {
       });
     }
     
-    // 触发重新渲染
-    setRefreshCounter(prev => prev + 1);
-  }, [images, getSelectedCount]);
+    // 更新选中数量
+    setSelectedCount(calculateSelectedCount());
+  };
 
   // 切换图片选择状态（直接使用 UnifiedDataService，与 PC 端一致）
-  const toggleImageSelection = useCallback((imageId) => {
+  const toggleImageSelection = (imageId) => {
     const isCurrentlySelected = UnifiedDataService.isImageSelected(imageId);
     UnifiedDataService.setImageSelection(imageId, !isCurrentlySelected);
     
-    // 触发重新渲染
-    setRefreshCounter(prev => prev + 1);
-  }, []);
+    // 更新选中数量
+    setSelectedCount(calculateSelectedCount());
+  };
 
   // 进入选择模式
-  const enterSelectionMode = useCallback(() => {
+  const enterSelectionMode = () => {
     setSelectionMode(true);
-  }, []);
+  };
 
-  // 退出选择模式
-  const exitSelectionMode = useCallback(() => {
-    setSelectionMode(false);
-    setShowActionMenu(false);
-  }, []);
 
   // 批量修改分类
-  const handleBatchChangeCategory = useCallback(async (newCategory) => {
-    const selectedCount = getSelectedCount();
-    if (selectedCount === 0) return;
+  const handleBatchChangeCategory = async (newCategory) => {
+    // 实时获取选中数量，不依赖状态变量
+    const currentSelectedCount = calculateSelectedCount();
+    if (currentSelectedCount === 0) return;
     
     try {
       // 从 UnifiedDataService 获取选中的图片ID
@@ -202,7 +211,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 await loadImages();
                 
                 Alert.alert('操作完成', `已成功修改 ${processed} 张图片到"${targetCategoryName}"分类`);
-    } catch (error) {
+              } catch (error) {
                 logger.error('批量修改分类失败:', error);
                 Alert.alert('操作失败', '修改分类时发生错误，请重试');
               }
@@ -214,12 +223,13 @@ const CategoryScreen = ({ route, navigation }) => {
       logger.error('批量修改分类失败:', error);
       Alert.alert('错误', '操作失败，请重试');
     }
-  }, [getSelectedCount, images, loadImages]);
+  };
 
   // 批量删除/暂存
-  const handleBatchDelete = useCallback(() => {
-    const selectedCount = getSelectedCount();
-    if (selectedCount === 0) return;
+  const handleBatchDelete = () => {
+    // 实时获取选中数量，不依赖状态变量
+    const currentSelectedCount = calculateSelectedCount();
+    if (currentSelectedCount === 0) return;
     
     const selectedImageIds = images
       .filter(img => UnifiedDataService.isImageSelected(img.id))
@@ -243,7 +253,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 if (isTobecleaned) {
                   // 删除文件
                   await UnifiedDataService.writeDeleteImage(imageId);
-      } else {
+                } else {
                   // 移动到暂存箱
                   await UnifiedDataService.updateImageCategory(imageId, 'tobecleaned');
                   // 从相似组中移除
@@ -263,7 +273,7 @@ const CategoryScreen = ({ route, navigation }) => {
               await loadImages();
               
               Alert.alert('操作完成', `已成功${actionDescription} ${processed} 张图片`);
-    } catch (error) {
+            } catch (error) {
               logger.error(`批量${actionText}失败:`, error);
               Alert.alert('操作失败', `${actionText}时发生错误，请重试`);
             }
@@ -271,19 +281,19 @@ const CategoryScreen = ({ route, navigation }) => {
         },
       ]
     );
-  }, [getSelectedCount, images, category, loadImages]);
+  };
 
   // ==================== 时间轴分组相关函数 ====================
   
   // 时间轴标题点击处理 - 全选/取消全选该时间段的所有图片（与 PC 端一致）
-  const handleTimelineHeaderPress = useCallback((imagesForDate) => {
+  const handleTimelineHeaderPress = (imagesForDate) => {
     if (!selectionMode) {
       // 非选择模式下，进入选择模式并全选该组
       setSelectionMode(true);
       imagesForDate.forEach(img => {
         UnifiedDataService.setImageSelection(img.id, true);
       });
-      setRefreshCounter(prev => prev + 1);
+      setSelectedCount(calculateSelectedCount());
       return;
     }
     
@@ -306,21 +316,30 @@ const CategoryScreen = ({ route, navigation }) => {
       });
     }
     
-    // 触发重新渲染
-    setRefreshCounter(prev => prev + 1);
+    // 更新选中数量
+    setSelectedCount(calculateSelectedCount());
     
     // 检查是否还有选中的图片，如果没有则退出选择模式
-    const selectedCount = getSelectedCount();
-    if (selectedCount === 0) {
+    if (calculateSelectedCount() === 0) {
       setSelectionMode(false);
     }
-  }, [selectionMode, getSelectedCount]);
+  };
   
   // 按日期分组图片（与 PC 端字段对齐）
-  const groupImagesByDate = useCallback((imageList) => {
+  const groupImagesByDate = (imageList) => {
     const groups = {};
     
-    imageList.forEach(image => {
+    // 添加空值检查
+    if (!Array.isArray(imageList) || imageList.length === 0) {
+      return groups;
+    }
+    
+    imageList.forEach((image) => {
+      // 添加空值检查
+      if (!image || typeof image !== 'object') {
+        return;
+      }
+      
       // 优先使用拍摄时间（takenAt），如果没有则使用文件时间（timestamp）
       let date;
       if (image.takenAt) {
@@ -336,12 +355,8 @@ const CategoryScreen = ({ route, navigation }) => {
         date = new Date();
       }
       
-      // 格式化为 YYYY年MM月DD日
-      const dateKey = date.toLocaleDateString('zh-CN', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
+      // 使用安全的ISO格式，避免本地化问题
+      const dateKey = date.toISOString().split('T')[0];
       
       if (!groups[dateKey]) {
         groups[dateKey] = [];
@@ -349,96 +364,143 @@ const CategoryScreen = ({ route, navigation }) => {
       groups[dateKey].push(image);
     });
     
-    // 按日期排序（倒序）
-    const sortedGroups = {};
-    Object.keys(groups).sort((a, b) => {
-      // 将中文日期转换回 Date 对象进行比较
-      const dateA = new Date(a.replace(/年|月/g, '-').replace(/日/g, ''));
-      const dateB = new Date(b.replace(/年|月/g, '-').replace(/日/g, ''));
-      return dateB - dateA;
-    }).forEach(key => {
-      sortedGroups[key] = groups[key];
-    });
-    
-    return sortedGroups;
-  }, []);
+    return groups;
+  };
 
 
-  useEffect(() => {
-    loadImages();
-  }, [category, city, similarityGroupId]);
 
-  // 页面获得焦点时刷新数据（用于 Tab 切换）
+
+  // 页面获得焦点时刷新数据（用于 Tab 切换和从其他页面返回）
   useFocusEffect(
     useCallback(() => {
-      // 检查是否从 ImagePreview 返回，并携带了返回的图片 ID
-      const returnedImageId = route.params?.returnedImageId;
-      if (returnedImageId) {
-        logger.debug('🎯 从 ImagePreview 返回，当前图片ID:', returnedImageId);
-        // 设置高亮
-        setHighlightedImageId(returnedImageId);
+      const initData = async () => {
+        // 每次获得焦点时都刷新数据，确保数据同步
+        logger.debug('🔄 页面获得焦点，刷新数据...');
+        await loadImages(); // 等待数据加载和状态更新完成
         
-        // 3秒后取消高亮
-        setTimeout(() => {
-          setHighlightedImageId(null);
-        }, 3000);
+        // 重新计算选中数量 - 现在可以安全地使用最新的数据
+        setSelectedCount(calculateSelectedCount());
         
-        // 滚动到包含该图片的日期组
-        setTimeout(() => {
-          scrollToHighlightedImage(returnedImageId);
-        }, 100);
-        
-        // 清除 navigation 参数，避免重复触发
-        navigation.setParams({ returnedImageId: undefined });
-      } else {
-        // 正常的焦点刷新
-        loadImages(true);
-      }
-    }, [category, city, similarityGroupId, route.params?.returnedImageId])
+        // 检查是否从 ImagePreview 返回，并初始化高亮图片ID
+        const returnedImageId = route.params?.returnedImageId;
+        logger.debug('🎯 检查返回图片ID:', returnedImageId);
+        if (returnedImageId) {
+          logger.debug('🎯 从 ImagePreview 返回，初始化高亮图片ID:', returnedImageId);
+          setHighlightedImageId(returnedImageId);
+          
+          // 清除 navigation 参数，避免重复触发
+          navigation.setParams({ returnedImageId: undefined });
+        }
+      };
+      
+      initData();
+    }, [route.params?.returnedImageId])
   );
 
+  // 监听数据变化，执行滚动和高亮操作
+  useEffect(() => {
+    logger.debug('📜 useEffect 触发:', {
+      groupedImagesLength: Object.keys(groupedImages).length,
+      highlightedImageId: highlightedImageId,
+      hasData: Object.keys(groupedImages).length > 0,
+      hasHighlight: !!highlightedImageId
+    });
+    
+    if (Object.keys(groupedImages).length > 0 && highlightedImageId) {
+      logger.debug('📜 数据已加载，准备滚动到图片:', highlightedImageId);
+      
+      // 直接等待1秒，确保 FlatList 完全渲染和测量
+      setTimeout(() => {
+        scrollToHighlightedImage(highlightedImageId);
+      }, 1000); // 直接等待1秒
+      
+      // 不再自动取消高亮，让图片一直保持高亮状态
+    } else {
+      logger.debug('📜 滚动条件不满足:', {
+        hasData: Object.keys(groupedImages).length > 0,
+        hasHighlight: !!highlightedImageId
+      });
+    }
+  }, [groupedImages, highlightedImageId]); // 依赖两个状态，确保数据和高亮都准备好
+
   // 滚动到高亮图片所在的日期组
-  const scrollToHighlightedImage = useCallback((imageId) => {
-    if (!flatListRef.current || Object.keys(groupedImages).length === 0) return;
+  const scrollToHighlightedImage = (imageId) => {
+    logger.debug('📜 开始滚动到图片:', imageId);
+    
+    if (!flatListRef.current || Object.keys(groupedImages).length === 0) {
+      logger.warn('📜 滚动条件不满足:', { 
+        hasRef: !!flatListRef.current, 
+        groupedImagesLength: Object.keys(groupedImages).length,
+        imageId
+      });
+      return;
+    }
     
     // 查找图片所在的日期组索引
     const dateKeys = Object.keys(groupedImages);
-    let targetDateIndex = -1;
     
-    for (let i = 0; i < dateKeys.length; i++) {
-      const dateKey = dateKeys[i];
-      if (groupedImages[dateKey].some(img => img.id === imageId)) {
-        targetDateIndex = i;
-        break;
-      }
+    // 根据图片ID获取图片数据，然后根据时间找到日期组索引
+    const targetImage = images.find(img => img.id === imageId);
+    if (!targetImage) {
+      logger.warn('📜 未找到目标图片:', imageId);
+      return;
     }
     
-    if (targetDateIndex >= 0) {
-      logger.debug(`📜 滚动到日期组索引: ${targetDateIndex}`);
-      flatListRef.current.scrollToIndex({
-        index: targetDateIndex,
-        animated: true,
-        viewPosition: 0.3, // 将目标组滚动到屏幕上方 30% 的位置
+    // 获取图片的时间，优先使用takenAt，没有则使用timestamp
+    const imageTime = targetImage.takenAt || targetImage.timestamp;
+    if (!imageTime) {
+      logger.warn('📜 图片没有时间信息:', imageId);
+      return;
+    }
+    
+    // 将时间转换为日期键格式
+    const date = new Date(imageTime);
+    const targetDateKey = date.toISOString().split('T')[0];
+    
+    // 在日期组中找到对应的索引
+    const targetDateIndex = dateKeys.indexOf(targetDateKey);
+    
+    logger.debug('📜 查找图片在日期组中的位置:', { 
+      imageId, 
+      targetDateKey,
+      targetDateIndex,
+      totalGroups: dateKeys.length
+    });
+    
+    if (targetDateIndex >= 0 && targetDateIndex < dateKeys.length) {
+      logger.debug(`📜 准备滚动到日期组索引: ${targetDateIndex}, 总组数: ${dateKeys.length}`);
+      
+      // 直接滚动到目标日期组
+      try {
+        flatListRef.current.scrollToIndex({
+          index: targetDateIndex,
+          animated: true,
+          viewPosition: 0.3, // 将目标组滚动到屏幕上方 30% 的位置
+        });
+        logger.debug('📜 滚动命令执行成功');
+      } catch (error) {
+        logger.debug('📜 滚动失败，使用回退方案:', error);
+        // 简单回退：滚动到顶部
+        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      }
+    } else {
+      logger.debug('📜 未找到目标图片或索引无效:', { 
+        imageId, 
+        targetDateIndex, 
+        totalGroups: dateKeys.length,
+        dateKeys: dateKeys.slice(0, 5) // 只显示前5个日期键
       });
     }
-  }, [groupedImages]);
+  };
 
-  // 图片加载后自动分组
-  useEffect(() => {
-    if (images.length > 0) {
-      const grouped = groupImagesByDate(images);
-      setGroupedImages(grouped);
-    } else {
-      // 如果没有图片，清空分组
-      setGroupedImages({});
-    }
-  }, [images, groupImagesByDate]);
 
   /**
    * 加载图片列表
    */
   const loadImages = async (isRefresh = false) => {
     try {
+      logger.debug('🔍 loadImages 开始执行:', { isRefresh, category, city, similarityGroupId });
+      
       if (isRefresh) {
         setRefreshing(true);
         setPage(1);
@@ -449,56 +511,63 @@ const CategoryScreen = ({ route, navigation }) => {
       let filteredImages = [];
       
       if (similarityGroupId) {
-        // 从相似组获取图片（使用 UnifiedDataService API）
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         filteredImages = groupData.images || [];
-        // 过滤掉 tobecleaned 分类的照片
         filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
-        logger.debug(`从相似组获取图片: 总数=${filteredImages.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
       } else if (city) {
-        // 按城市加载
         filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
-        // 过滤掉 tobecleaned 分类的照片
         filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
-        logger.debug(`从城市获取图片: 总数=${filteredImages.length}, city=${city}, 已过滤tobecleaned`);
       } else if (category) {
-        // 按分类加载
+        logger.debug('🔍 开始加载分类图片:', category);
         filteredImages = await UnifiedDataService.readImagesByCategory(category);
-        logger.debug(`从分类获取图片: 总数=${filteredImages.length}, category=${category}`);
-    } else {
-        logger.error('没有有效的上下文参数（category、city、similarityGroupId），无法加载图片');
+        logger.debug('🔍 分类图片加载完成:', category, filteredImages.length);
+      } else {
+        logger.error('没有有效的上下文参数');
         filteredImages = [];
       }
 
-      // 按时间倒序排序
-      filteredImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      // 按时间排序
+      filteredImages.sort((a, b) => {
+        if (!a || !b) return 0;
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA;
+      });
 
+      // 设置状态
+      setLoading(false);
+      setRefreshing(false);
+      
+      // 直接设置状态，同步执行
       setImages(filteredImages);
       setHasMore(filteredImages.length > ITEMS_PER_PAGE);
       
-      // 检查是否有选中的图片（直接从 UnifiedDataService 查询）
+      // 同时设置分组图片
+      if (filteredImages.length > 0) {
+        logger.debug('🔍 groupImagesByDate 开始分组...');
+        const grouped = groupImagesByDate(filteredImages);
+        logger.debug('🔍 groupImagesByDate 分组完成:', Object.keys(grouped).length, '个日期组');
+        setGroupedImages(grouped);
+      } else {
+        logger.debug('🔍 groupImagesByDate 清空分组');
+        setGroupedImages({});
+      }
+      
+      // 检查选中状态
       let selectedCount = 0;
       for (const image of filteredImages) {
-        if (UnifiedDataService.isImageSelected(image.id)) {
+        if (image && image.id && UnifiedDataService.isImageSelected(image.id)) {
           selectedCount++;
         }
       }
       
-      // 如果有选中的图片，自动进入选择模式
-      if (selectedCount > 0) {
-        setSelectionMode(true);
-        logger.debug(`✅ 自动进入选择模式，已选中 ${selectedCount} 张图片`);
-    } else {
-        setSelectionMode(false);
-        logger.debug(`📋 无选中图片，普通浏览模式`);
-      }
+      setSelectionMode(selectedCount > 0);
       
       logger.debug(`📸 加载图片: ${filteredImages.length}张`);
-
+      
     } catch (error) {
       logger.error('❌ 加载图片失败:', error);
       Alert.alert('加载失败', error.message);
-    } finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -507,10 +576,10 @@ const CategoryScreen = ({ route, navigation }) => {
   /**
    * 下拉刷新
    */
-  const onRefresh = useCallback(async () => {
+  const onRefresh = async () => {
     await GlobalImageCache.buildCache();
     await loadImages(true);
-  }, [loadImages]);
+  };
 
   /**
    * 加载更多
@@ -534,7 +603,7 @@ const CategoryScreen = ({ route, navigation }) => {
     if (!selectionMode) {
       setSelectionMode(true);
       UnifiedDataService.setImageSelection(image.id, true);
-      setRefreshCounter(prev => prev + 1);
+      setSelectedCount(calculateSelectedCount());
     }
   };
 
@@ -561,38 +630,51 @@ const CategoryScreen = ({ route, navigation }) => {
       toggleImageSelection(image.id);
       
       // 如果没有选中任何图片，退出选择模式
-      const selectedCount = getSelectedCount();
-      if (selectedCount === 0) {
+      if (calculateSelectedCount() === 0) {
         setSelectionMode(false);
       }
     }
   };
 
   /**
-   * 取消选择模式（与 PC 端同步清除 UnifiedDataService）
+   * 退出选择模式（保持选中状态不变）
    */
-  const cancelSelection = () => {
-    // 清除所有选中状态
-    images.forEach(img => {
-      if (UnifiedDataService.isImageSelected(img.id)) {
-        UnifiedDataService.setImageSelection(img.id, false);
-      }
-    });
-    
+  function exitSelectionMode() {
     setSelectionMode(false);
-    setRefreshCounter(prev => prev + 1);
-  };
+    setShowActionMenu(false);
+    // 不改变任何选中状态，保持用户的选中结果
+  }
 
   // ==================== 批量操作 ====================
+
+  /**
+   * 获取当前选中的图片ID列表
+   */
+  const getSelectedImageIds = () => {
+    try {
+      if (similarityGroupId) {
+        const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+        return selectedImages.map(img => img.id);
+      } else if (city) {
+        const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
+        return selectedImages.map(img => img.id);
+      } else if (category) {
+        const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
+        return selectedImages.map(img => img.id);
+      }
+      return [];
+    } catch (error) {
+      logger.error('获取选中图片ID失败:', error);
+      return [];
+    }
+  };
 
   /**
    * 执行批量操作
    */
   const handleBatchAction = async (actionId) => {
     try {
-      const selectedIds = images
-        .filter(img => UnifiedDataService.isImageSelected(img.id))
-        .map(img => img.id);
+      const selectedIds = getSelectedImageIds();
       
       if (selectedIds.length === 0) {
         Alert.alert('提示', '请先选择图片');
@@ -656,8 +738,13 @@ const CategoryScreen = ({ route, navigation }) => {
     try {
       const categoryName = UnifiedDataService.getCategoryDisplayName(newCategory);
       
-      for (const imageId of imageIds) {
-        await UnifiedDataService.updateImageCategory(imageId, newCategory);
+      // 使用批量更新接口，提升性能
+      const result = await UnifiedDataService.updateImagesCategory(imageIds, newCategory, 'manual');
+      
+      if (result.success) {
+        logger.debug('✅ 批量更新分类成功:', result.processed, '张');
+      } else {
+        logger.warn('⚠️ 批量更新分类部分失败:', result.errors);
       }
       
       // 清除选中状态
@@ -665,11 +752,15 @@ const CategoryScreen = ({ route, navigation }) => {
         UnifiedDataService.setImageSelection(id, false);
       });
       
-      // 重新加载数据（与 PC 端一致，不需要重建缓存）
+      // 重新加载数据（上面的操作已经重建了缓存）
       await loadImages();
       setSelectionMode(false);
       
-      Alert.alert('成功', `已将 ${imageIds.length} 张图片移动到"${categoryName}"`);
+      const successMessage = result.success 
+        ? `已将 ${result.processed} 张图片移动到"${categoryName}"`
+        : `已将 ${result.processed} 张图片移动到"${categoryName}"，${result.errors?.length || 0} 张失败`;
+      
+      Alert.alert('操作完成', successMessage);
     } catch (error) {
       logger.error('❌ 批量修改分类失败:', error);
       Alert.alert('操作失败', error.message);
@@ -736,21 +827,18 @@ const CategoryScreen = ({ route, navigation }) => {
           text: '标记',
           onPress: async () => {
             try {
-              let processed = 0;
+              // 使用批量更新接口，提升性能
+              const result = await UnifiedDataService.updateImagesCategory(imageIds, 'tobecleaned', 'manual');
+              
+              // 清理相似组数据（如果图片在相似组中）
               for (const id of imageIds) {
                 try {
-                  // 更新分类为tobecleaned
-                  await UnifiedDataService.updateImageCategory(id, 'tobecleaned');
-                  
-                  // 清理相似组数据（如果图片在相似组中）
                   const image = images.find(img => img.id === id);
                   if (image && image.similarityGroupIndex) {
                     await UnifiedDataService.removeImageFromSimilarityGroup(id, image.similarityGroupIndex);
                   }
-                  
-                  processed++;
                 } catch (error) {
-                  logger.error(`❌ 标记图片失败: ${id}`, error);
+                  logger.error(`❌ 清理相似组数据失败: ${id}`, error);
                 }
               }
               
@@ -759,11 +847,15 @@ const CategoryScreen = ({ route, navigation }) => {
                 UnifiedDataService.setImageSelection(id, false);
               });
               
-              // 重新加载数据（与 PC 端一致，不需要重建缓存）
+              // 重新加载数据（上面的操作已经重建了缓存）
               await loadImages();
               setSelectionMode(false);
               
-              Alert.alert('操作完成', `已成功将 ${processed} 张图片移到待处置分类`);
+              const successMessage = result.success 
+                ? `已成功将 ${result.processed} 张图片移到待处置分类`
+                : `已成功将 ${result.processed} 张图片移到待处置分类，${result.errors?.length || 0} 张失败`;
+              
+              Alert.alert('操作完成', successMessage);
             } catch (error) {
               logger.error('❌ 批量暂存失败:', error);
               Alert.alert('操作失败', '暂存时发生错误，请重试');
@@ -798,7 +890,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 UnifiedDataService.setImageSelection(id, false);
               });
               
-              // 重新加载数据（与 PC 端一致，不需要重建缓存）
+              // 重新加载数据（上面的操作已经重建了缓存）
               await loadImages();
               setSelectionMode(false);
               
@@ -813,41 +905,45 @@ const CategoryScreen = ({ route, navigation }) => {
     );
   };
 
+
+
   /**
-   * 删除其他（保留选中）
+   * 保留选中（相似组分类中使用：将其他相似图片移到暂存箱）
    */
-  const batchDeleteOthers = async (keepIds) => {
-    const deleteIds = images.filter(img => !keepIds.includes(img.id)).map(img => img.id);
+  const batchKeep = async (keepIds) => {
+    if (!similarityGroupId) {
+      Alert.alert('提示', '此功能仅在相似组分类中可用');
+      return;
+    }
+    
+    const moveIds = images.filter(img => !keepIds.includes(img.id)).map(img => img.id);
+    
+    if (moveIds.length === 0) {
+      Alert.alert('提示', '没有需要移动的图片');
+      return;
+    }
     
     Alert.alert(
-      '删除其他图片',
-      `确定要删除未选中的 ${deleteIds.length} 张图片吗？\n\n将保留选中的 ${keepIds.length} 张图片`,
+      '保留选中图片',
+      `确定要保留选中的 ${keepIds.length} 张图片吗？\n\n其他 ${moveIds.length} 张相似图片将被移到暂存箱中。`,
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '删除',
-          style: 'destructive',
+          text: '确定',
           onPress: async () => {
-            await batchDelete(deleteIds);
+            // 复用批量移到暂存箱的函数
+            await batchMoveToStaging(moveIds);
+            
+            // 清除保留图片的选中状态
+            keepIds.forEach(id => {
+              UnifiedDataService.setImageSelection(id, false);
+            });
+            
+            Alert.alert('操作完成', `已保留 ${keepIds.length} 张图片，${moveIds.length} 张相似图片已移到暂存箱`);
           },
         },
       ]
     );
-  };
-
-  /**
-   * 全部删除
-   */
-  const batchDeleteAll = async () => {
-    const allIds = images.map(img => img.id);
-    await batchDelete(allIds);
-  };
-
-  /**
-   * 保留选中
-   */
-  const batchKeep = async (keepIds) => {
-    Alert.alert('成功', `已标记保留 ${keepIds.length} 张图片`);
   };
 
   // ==================== 渲染函数 ====================
@@ -856,6 +952,13 @@ const CategoryScreen = ({ route, navigation }) => {
    * 渲染图片项
    */
   const renderImageItem = ({ item }) => {
+    // 🆕 添加空值检查
+    if (!item || !item.id || !item.uri) {
+      console.warn('⚠️ renderImageItem 发现无效的图片对象:', item);
+      return null;
+    }
+    
+    logger.debug('🔍 renderImageItem 渲染图片:', item.id);
     const isSelected = UnifiedDataService.isImageSelected(item.id);
     
     return (
@@ -889,11 +992,11 @@ const CategoryScreen = ({ route, navigation }) => {
   const renderTopBar = () => {
     if (!selectionMode) return null;
 
-    const selectedCount = getSelectedCount();
+    // 使用状态中的选中数量
 
     return (
       <View style={styles.selectionBar}>
-        <TouchableOpacity onPress={cancelSelection}>
+        <TouchableOpacity onPress={exitSelectionMode}>
           <Text style={styles.selectionCancel}>取消</Text>
           </TouchableOpacity>
           <Text style={styles.selectionCount}>
@@ -912,7 +1015,6 @@ const CategoryScreen = ({ route, navigation }) => {
    * 渲染底部操作栏
    */
   const renderBottomBar = () => {
-    const selectedCount = getSelectedCount();
     if (!selectionMode || selectedCount === 0) return null;
     
     const actions = getActionButtons();
@@ -971,18 +1073,45 @@ const CategoryScreen = ({ route, navigation }) => {
         data={Object.keys(groupedImages)}
         keyExtractor={(dateKey) => dateKey}
         onScrollToIndexFailed={(info) => {
-          logger.warn('滚动失败:', info);
-          // 回退方案：滚动到顶部
-          setTimeout(() => {
-            flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-          }, 100);
+          // 使用debug级别日志，避免在release版本中显示告警
+          logger.debug('📜 滚动失败，使用回退方案:', info);
+          
+          // 智能回退方案
+          if (info.index >= 0 && info.index < Object.keys(groupedImages).length) {
+            // 如果目标索引有效，尝试滚动到接近的位置
+            const safeIndex = Math.min(info.index, Object.keys(groupedImages).length - 1);
+            logger.debug(`📜 回退到安全索引: ${safeIndex}`);
+            
+            setTimeout(() => {
+              try {
+                flatListRef.current?.scrollToIndex({
+                  index: safeIndex,
+                  animated: true,
+                  viewPosition: 0.5,
+                });
+              } catch (retryError) {
+                logger.debug('📜 回退滚动也失败，滚动到顶部');
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+              }
+            }, 200);
+          } else {
+            // 如果索引无效，滚动到顶部
+            setTimeout(() => {
+              flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+            }, 100);
+          }
         }}
         renderItem={({ item: dateKey }) => {
           const imagesForDate = groupedImages[dateKey];
           // 使用 UnifiedDataService 直接查询选中状态（与 PC 端一致）
-          const selectedCountInGroup = imagesForDate.filter(img => 
-            UnifiedDataService.isImageSelected(img.id)
-          ).length;
+          const selectedCountInGroup = imagesForDate.filter(img => {
+            // 🆕 添加空值检查
+            if (!img || !img.id) {
+              console.warn('⚠️ 时间轴中发现无效的图片对象:', img);
+              return false;
+            }
+            return UnifiedDataService.isImageSelected(img.id);
+          }).length;
           const someSelected = selectedCountInGroup > 0;
           
           return (
@@ -1007,55 +1136,63 @@ const CategoryScreen = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
             <View style={styles.timelineGrid}>
-              {groupedImages[dateKey].map((image, index) => (
-                <TouchableOpacity
-                  key={image.id}
-                  style={[
-                    styles.timelineItem,
-                    UnifiedDataService.isImageSelected(image.id) && styles.timelineItemSelected,
-                    highlightedImageId === image.id && styles.timelineItemHighlighted
-                  ]}
-                  onPress={() => {
-                    if (selectionMode) {
-                      toggleImageSelection(image.id);
-                    } else {
-                      const allImages = Object.values(groupedImages).flat();
-                      const currentIndex = allImages.findIndex(img => img.id === image.id);
-                      navigation.navigate('ImagePreview', {
-                        image: image,
-                        allImages: allImages,
-                        currentIndex: currentIndex,
-                        category,
-                        city,
-                        similarityGroupId,
-                        fromScreen: 'CategoryScreen'
-                      });
-                    }
-                  }}
-                  onLongPress={() => {
-                    if (!selectionMode) {
-                      enterSelectionMode();
-                      toggleImageSelection(image.id);
-                    }
-                  }}
-                >
-                  <Image
-                    source={{ uri: image.uri }}
-                    style={styles.timelineImage}
-                    resizeMode="cover"
-                  />
-                  {selectionMode && (
-                    <View style={[
-                      styles.timelineSelectionOverlay,
-                      UnifiedDataService.isImageSelected(image.id) && styles.timelineSelectionOverlaySelected
-                    ]}>
-                      <Text style={styles.timelineSelectionText}>
-                        {UnifiedDataService.isImageSelected(image.id) ? '✓' : ''}
-                      </Text>
-                  </View>
-                  )}
-                </TouchableOpacity>
-                ))}
+              {groupedImages[dateKey].map((image, index) => {
+                // 🆕 添加空值检查
+                if (!image || !image.id || !image.uri) {
+                  console.warn('⚠️ 时间轴渲染中发现无效的图片对象:', image);
+                  return null;
+                }
+                
+                return (
+                  <TouchableOpacity
+                    key={image.id}
+                    style={[
+                      styles.timelineItem,
+                      UnifiedDataService.isImageSelected(image.id) && styles.timelineItemSelected,
+                      highlightedImageId === image.id && styles.timelineItemHighlighted
+                    ]}
+                    onPress={() => {
+                      if (selectionMode) {
+                        toggleImageSelection(image.id);
+                      } else {
+                        const allImages = Object.values(groupedImages).flat();
+                        const currentIndex = allImages.findIndex(img => img.id === image.id);
+                        navigation.navigate('ImagePreview', {
+                          image: image,
+                          allImages: allImages,
+                          currentIndex: currentIndex,
+                          category,
+                          city,
+                          similarityGroupId,
+                          fromScreen: 'CategoryScreen'
+                        });
+                      }
+                    }}
+                    onLongPress={() => {
+                      if (!selectionMode) {
+                        enterSelectionMode();
+                        toggleImageSelection(image.id);
+                      }
+                    }}
+                  >
+                    <Image
+                      source={{ uri: image.uri }}
+                      style={styles.timelineImage}
+                      resizeMode="cover"
+                    />
+                    {selectionMode && (
+                      <View style={[
+                        styles.timelineSelectionOverlay,
+                        UnifiedDataService.isImageSelected(image.id) && styles.timelineSelectionOverlaySelected
+                      ]}>
+                        <Text style={styles.timelineSelectionText}>
+                          {UnifiedDataService.isImageSelected(image.id) ? '✓' : ''}
+                        </Text>
+                    </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
               </View>
             </View>
           );
@@ -1072,8 +1209,27 @@ const CategoryScreen = ({ route, navigation }) => {
    * 渲染分类选择器模态框
    */
   const renderCategoryModal = () => {
+    // 🆕 添加空值检查
+    if (!configService || !configService.isConfigLoaded()) {
+      console.warn('⚠️ configService 未加载，跳过分类模态框渲染');
+      return null;
+    }
+    
     const categories = configService.getAllCategoriesWithUI();
-    const availableCategories = categories.filter(cat => cat.id !== 'tobecleaned');
+    // 🆕 添加空值检查
+    if (!Array.isArray(categories)) {
+      console.warn('⚠️ getAllCategoriesWithUI 返回非数组数据:', categories);
+      return null;
+    }
+    
+    const availableCategories = categories.filter(cat => {
+      // 🆕 添加空值检查
+      if (!cat || typeof cat !== 'object') {
+        console.warn('⚠️ 发现无效的分类对象:', cat);
+        return false;
+      }
+      return cat.id !== 'tobecleaned';
+    });
 
     return (
       <Modal
@@ -1121,7 +1277,10 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // ==================== 主渲染 ====================
 
+  logger.debug('🔍 CategoryScreen 开始渲染:', { loading, imagesLength: images?.length });
+
   if (loading) {
+    logger.debug('🔍 CategoryScreen 渲染加载状态');
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -1131,11 +1290,23 @@ const CategoryScreen = ({ route, navigation }) => {
     );
   }
 
+  logger.debug('🔍 CategoryScreen 渲染主要内容');
+  
+  // 🆕 添加调试日志
+  logger.debug('🔍 CategoryScreen 开始渲染各个组件...');
+  
   return (
     <SafeAreaView style={styles.container}>
       {/* 顶部导航栏 */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => {
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            // 如果没有历史记录，导航到主页面
+            navigation.navigate('Home');
+          }
+        }} style={styles.backButton}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{getPageTitle()}</Text>

@@ -420,9 +420,16 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
                   {path}
                 </Text>
                 <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeGalleryPath(path)}>
-                  <Text style={styles.removeButtonText}>×</Text>
+                  style={[
+                    styles.removeButton,
+                    galleryPaths.length <= 1 && styles.removeButtonDisabled
+                  ]}
+                  onPress={() => removeGalleryPath(path)}
+                  disabled={galleryPaths.length <= 1}>
+                  <Text style={[
+                    styles.removeButtonText,
+                    galleryPaths.length <= 1 && styles.removeButtonTextDisabled
+                  ]}>×</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -657,6 +664,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  removeButtonDisabled: {
+    backgroundColor: '#ccc',
+    opacity: 0.6,
+  },
+  removeButtonTextDisabled: {
+    color: '#999',
   },
 });
 

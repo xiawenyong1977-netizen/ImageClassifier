@@ -204,6 +204,80 @@ const ImagePreviewScreen = ({
     }
   };
 
+  // 重新加载图片列表（当图片被移出当前列表时）
+  const reloadImageList = async () => {
+    try {
+      logger.debug('🔄 重新加载图片列表...', { category, city, similarityGroupId, fromScreen });
+      
+      let updatedImages = [];
+      
+      // 根据来源重新加载
+      if (fromScreen === 'Home') {
+        // 从首页最近照片进入
+        logger.debug('从最近照片重新加载...');
+        updatedImages = await UnifiedDataService.readRecentImages(50);
+      } else if (similarityGroupId) {
+        // 来自相似组
+        logger.debug('从相似组重新加载...');
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
+        const groupImages = groupData.images || [];
+        // 过滤掉 tobecleaned 分类的照片（保持与相似组页面一致）
+        updatedImages = groupImages.filter(img => img.category !== 'tobecleaned');
+      } else if (city) {
+        // 来自城市分类
+        logger.debug('从城市分类重新加载...');
+        const cityImages = await UnifiedDataService.readImagesByLocation(city);
+        // 过滤掉 tobecleaned 分类的照片（保持与城市页面一致）
+        updatedImages = cityImages.filter(img => img.category !== 'tobecleaned');
+      } else if (category) {
+        // 来自普通分类
+        logger.debug('从分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByCategory(category);
+      } else {
+        logger.warn('⚠️ 无法确定来源，无法重新加载');
+        return false;
+      }
+      
+      logger.debug(`✅ 重新加载完成，图片数：${categoryImages.length} → ${updatedImages.length}`);
+      
+      // 如果列表为空，返回上一页
+      if (updatedImages.length === 0) {
+        logger.debug('列表已空，返回上一页');
+        Alert.alert('提示', '当前分类已无图片', [
+          { text: '确定', onPress: handleBack }
+        ]);
+        return false;
+      }
+      
+      // 更新图片列表
+      setCategoryImages(updatedImages);
+      
+      // 调整当前索引，显示下一张（如果可能）
+      let newIndex = currentImageIndex;
+      if (currentImageIndex >= updatedImages.length) {
+        // 如果当前索引超出范围，跳到最后一张
+        newIndex = updatedImages.length - 1;
+        logger.debug(`索引超出范围，调整到最后一张：${newIndex}`);
+      }
+      
+      // 加载新的图片详情
+      setCurrentImageIndex(newIndex);
+      const nextImage = updatedImages[newIndex];
+      if (nextImage) {
+        logger.debug(`自动切换到图片：索引${newIndex}，ID=${nextImage.id}`);
+        const fullDetails = await UnifiedDataService.readImageDetailsById(nextImage.id);
+        if (fullDetails) {
+          setCurrentImage(fullDetails);
+        }
+      }
+      
+      return true;
+    } catch (error) {
+      logger.error('❌ 重新加载图片列表失败:', error);
+      return false;
+    }
+  };
+
   // 获取图片尺寸
   useEffect(() => {
     if (currentImage && currentImage.uri) {
@@ -425,7 +499,9 @@ const ImagePreviewScreen = ({
                 }));
                 
                 logger.debug('标记为待处置成功');
-                Alert.alert('操作完成', '图片已标记为待处置');
+                
+                // 重新加载图片列表
+                await reloadImageList();
                 
                 // 通知父组件数据已变化
                 if (onDataChange) {
@@ -487,6 +563,12 @@ const ImagePreviewScreen = ({
         confidence: 'manual' // 标记为人工分类
       }));
       logger.debug(`图片分类已修改为: ${getCategoryInfo(newCategory).name} (人工分类)`);
+      
+      // 重新加载图片列表（如果是从分类页进入的）
+      if (category && category !== newCategory) {
+        logger.debug('分类已改变，重新加载图片列表');
+        await reloadImageList();
+      }
       
       // 通知父组件数据已变化
       if (onDataChange) {
@@ -550,7 +632,7 @@ const ImagePreviewScreen = ({
             正在加载...
           </Text>
           <View style={styles.deleteButton}>
-            <Text style={styles.deleteButtonText}>🗑️</Text>
+            <Text style={styles.deleteButtonText}>📌</Text>
           </View>
         </View>
         <View style={styles.loadingContainer}>
@@ -575,7 +657,7 @@ const ImagePreviewScreen = ({
             图片未找到
           </Text>
           <View style={styles.deleteButton}>
-            <Text style={styles.deleteButtonText}>🗑️</Text>
+            <Text style={styles.deleteButtonText}>📌</Text>
           </View>
         </View>
         <View style={styles.errorContainer}>
@@ -609,7 +691,14 @@ const ImagePreviewScreen = ({
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={handleDelete}>
-          <Text style={styles.deleteButtonText}>🗑️</Text>
+          <Text style={[
+            styles.deleteButtonText,
+            currentImage?.category === 'tobecleaned' ? 
+              styles.deleteButtonDanger : 
+              styles.deleteButtonPrimary
+          ]}>
+            {currentImage?.category === 'tobecleaned' ? '🗑️' : '📌'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -1022,9 +1111,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   deleteButtonText: {
-    color: '#ff4444',
     fontSize: 20,
     fontWeight: '600',
+  },
+  deleteButtonDanger: {
+    color: '#ff4444',  // 红色 - 删除（tobecleaned）
+  },
+  deleteButtonPrimary: {
+    color: '#007AFF',  // 蓝色 - 暂存（其他分类）
   },
   // 主内容区域 - 使用Flex布局，避免滚动条
   mainContent: {

@@ -1,10 +1,10 @@
-import { logger } from '../adapters/WebAdapters';
+import { logger, Platform } from '../adapters/WebAdapters';
 import imageProcessor from './ImageProcessor';
 
 /**
  * 并行哈希计算管理器
- * 使用多个Worker线程并行计算图片哈希值（PC端）
- * 移动端使用单线程 + crypto-js
+ * PC端：使用Web Worker线程并行计算
+ * Android端：使用原生多线程（Java ExecutorService）
  */
 class ParallelHashCalculator {
   constructor(maxWorkers = 4) {
@@ -14,6 +14,9 @@ class ParallelHashCalculator {
     this.runningTasks = new Map();
     this.taskIdCounter = 0;
     this.isInitialized = false;
+    
+    // 移动端标记
+    this.isNativePlatform = Platform.OS === 'android' || Platform.OS === 'ios';
   }
 
   /**
@@ -141,11 +144,17 @@ class ParallelHashCalculator {
 
   /**
    * 并行计算多个图片的哈希值
-   * @param {Array} images - 图片数组，每个元素包含 { uri, fileName, ... }
+   * @param {Array} images - 图片数组，每个元素包含 { uri, fileName, path, ... }
    * @param {Function} onProgress - 进度回调函数
    * @returns {Promise<Array>} 包含哈希值的图片数组
    */
   async calculateHashesParallel(images, onProgress = null) {
+    // Android平台：使用原生多线程
+    if (this.isNativePlatform) {
+      return this.calculateHashesNative(images, onProgress);
+    }
+    
+    // PC端：使用Web Worker
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -323,6 +332,77 @@ class ParallelHashCalculator {
   async calculateHashSequential(image) {
     // 使用 ImageProcessor 统一接口计算哈希
     return await imageProcessor.calculateFileHash(image.uri);
+  }
+
+  /**
+   * 原生多线程哈希计算（Android/iOS）
+   * @param {Array} images - 图片数组
+   * @param {Function} onProgress - 进度回调
+   * @returns {Promise<Array>} 包含哈希值的图片数组
+   */
+  async calculateHashesNative(images, onProgress = null) {
+    try {
+      // 导入MediaStoreService（避免循环依赖）
+      const MediaStoreService = require('./MediaStoreService').default;
+      
+      if (!MediaStoreService.checkAvailability()) {
+        logger.warn('⚠️ MediaStore不可用，使用单线程计算');
+        return this.calculateHashesSequential(images, onProgress);
+      }
+      
+      const totalImages = images.length;
+      logger.info(`🚀 开始原生多线程哈希计算: ${totalImages} 张图片`);
+      
+      // 提取文件路径（优先使用path，其次uri）
+      const filePaths = images.map(img => {
+        if (img.path) {
+          return img.path;
+        } else if (img.uri) {
+          // 移除 file:// 前缀
+          return img.uri.replace('file://', '');
+        }
+        return null;
+      }).filter(p => p != null);
+      
+      if (filePaths.length === 0) {
+        logger.warn('⚠️ 没有有效的文件路径');
+        return images.map(img => ({ ...img, hash: null }));
+      }
+      
+      // 调用原生批量哈希计算
+      const result = await MediaStoreService.batchCalculateFileHash(filePaths);
+      
+      // 将结果映射回原始图片数组
+      const results = images.map((img, index) => {
+        const hashResult = result.results.find(r => r.index === index);
+        
+        if (hashResult && hashResult.success) {
+          return {
+            ...img,
+            hash: hashResult.hash
+          };
+        } else {
+          return {
+            ...img,
+            hash: null,
+            hashError: hashResult ? hashResult.error : '未找到结果'
+          };
+        }
+      });
+      
+      // 调用进度回调
+      if (onProgress) {
+        onProgress(result.successCount, totalImages);
+      }
+      
+      logger.info(`✅ 原生多线程哈希计算完成: 成功 ${result.successCount} 张，失败 ${result.failCount} 张，耗时 ${result.duration}ms`);
+      
+      return results;
+      
+    } catch (error) {
+      logger.error('❌ 原生哈希计算失败，回退到单线程:', error);
+      return this.calculateHashesSequential(images, onProgress);
+    }
   }
 
   /**

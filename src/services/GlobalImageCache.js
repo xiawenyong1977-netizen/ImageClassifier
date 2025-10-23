@@ -238,7 +238,7 @@ class GlobalImageCache {
       // 找到要更新的图片
       const imageIndex = this.cache.allImages.findIndex(img => img.id === imageId);
       if (imageIndex === -1) {
-        console.warn(`⚠️ 未找到图片: ${imageId}`);
+        logger.debug(`⚠️ 未找到图片: ${imageId}`);
         return false;
       }
       
@@ -292,24 +292,18 @@ class GlobalImageCache {
     
     // 调试：检查映射表状态
     if (index === undefined) {
-      console.warn(`⚠️ 图片ID ${imageId} 在映射表中未找到，尝试直接查找`);
+      logger.debug(`⚠️ 图片ID ${imageId} 在映射表中未找到，尝试直接查找`);
       
       // Fallback: 直接遍历查找
       const image = this.cache.allImages.find(img => img.id === imageId);
       if (image) {
-        console.warn(`⚠️ 通过直接查找找到了图片，映射表需要重建`);
+        logger.debug(`⚠️ 通过直接查找找到了图片，映射表需要重建`);
         // 重建映射表（打印日志）
         this._rebuildImageIdIndex(true);
         return image;
       }
       
-      console.warn(`⚠️ 直接查找也未找到图片 ${imageId}`);
-      logger.debug(`🔍 映射表大小: ${this.imageIdToIndex.size}`);
-      logger.debug(`🔍 缓存图片数量: ${this.cache.allImages.length}`);
-      
-      // 显示映射表中的前几个ID
-      const mapEntries = Array.from(this.imageIdToIndex.entries()).slice(0, 5);
-      logger.debug(`🔍 映射表前5个条目:`, mapEntries);
+      logger.debug(`⚠️ 直接查找也未找到图片 ${imageId}`);
       
       return null;
     }
@@ -334,7 +328,7 @@ class GlobalImageCache {
         logger.debug(`✅ 重建映射表后找到正确图片: ${imageId}`);
         return correctImage;
       } else {
-        console.warn(`⚠️ 重建映射表后仍未找到图片: ${imageId}`);
+        logger.debug(`⚠️ 重建映射表后仍未找到图片: ${imageId}`);
         return null;
       }
     }
@@ -557,7 +551,7 @@ class GlobalImageCache {
       // 找到要删除的图片
       const imageIndex = this.cache.allImages.findIndex(img => img.id === imageId);
       if (imageIndex === -1) {
-        console.warn(`⚠️ 未找到图片: ${imageId}`);
+        logger.debug(`⚠️ 未找到图片: ${imageId}`);
         return false;
       }
       
@@ -591,11 +585,22 @@ class GlobalImageCache {
   // 重新构建城市统计
   _rebuildCityCounts() {
     this.cache.cityCounts = {};
+    let cityImageCount = 0;
+    
     this.cache.allImages.forEach(img => {
       if (img.city) {
         this.cache.cityCounts[img.city] = (this.cache.cityCounts[img.city] || 0) + 1;
+        cityImageCount++;
       }
     });
+    
+    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片`);
+    
+    // 调试：显示前5个城市统计
+    const cityEntries = Object.entries(this.cache.cityCounts).slice(0, 5);
+    if (cityEntries.length > 0) {
+      logger.debug(`🏙️ 城市统计示例:`, cityEntries);
+    }
   }
   
   // 重新构建最近图片
@@ -702,25 +707,55 @@ class GlobalImageCache {
 
   // 获取指定分类的所有图片
   getImagesByCategory(category) {
+    logger.debug('🔍 getImagesByCategory 开始:', category);
+    
     const normalizedCategory = this._normalizeCategoryId(category);
-    return this.cache.allImages.filter(img => {
-      if (!img.category) {
-        console.error(`❌ 图片 ${img.id} 缺少分类信息:`, img);
-        throw new Error(`图片 ${img.id} 缺少分类信息`);
+    logger.debug('🔍 getImagesByCategory 标准化分类ID:', normalizedCategory);
+    
+    logger.debug('🔍 getImagesByCategory 开始过滤，总图片数:', this.cache.allImages.length);
+    
+    const result = this.cache.allImages.filter(img => {
+      // 🆕 添加空值检查
+      if (!img || typeof img !== 'object') {
+        console.warn(`⚠️ 发现无效的图片对象:`, img);
+        return false;
       }
+      
+      if (!img.category) {
+        console.error(`❌ 图片 ${img.id || 'unknown'} 缺少分类信息:`, img);
+        return false; // 改为返回false而不是抛出错误
+      }
+      
       const imgCategory = this._normalizeCategoryId(img.category);
       return imgCategory === normalizedCategory;
     });
+    
+    logger.debug('🔍 getImagesByCategory 过滤完成:', result.length);
+    return result;
   }
 
   // 获取指定城市的所有图片
   getImagesByCity(city) {
-    return this.cache.allImages.filter(img => img.city === city);
+    return this.cache.allImages.filter(img => {
+      // 🆕 添加空值检查
+      if (!img || typeof img !== 'object') {
+        console.warn(`⚠️ 发现无效的图片对象:`, img);
+        return false;
+      }
+      return img.city === city;
+    });
   }
 
   // 获取指定相似组的所有图片
   getImagesBySimilarityGroup(groupId) {
-    return this.cache.allImages.filter(img => img.similarityGroupIndex === groupId);
+    return this.cache.allImages.filter(img => {
+      // 🆕 添加空值检查
+      if (!img || typeof img !== 'object') {
+        console.warn(`⚠️ 发现无效的图片对象:`, img);
+        return false;
+      }
+      return img.similarityGroupIndex === groupId;
+    });
   }
 
   // 检查图片是否被选中
@@ -736,7 +771,7 @@ class GlobalImageCache {
     // 使用快速查找获取图片对象
     const image = this._getImageById(imageId);
     if (!image) {
-      console.warn(`⚠️ 未找到图片: ${imageId}`);
+      logger.debug(`⚠️ 未找到图片: ${imageId}`);
       return;
     }
     
@@ -764,7 +799,7 @@ class GlobalImageCache {
   setImageSelection(imageId, selected) {
     const image = this._getImageById(imageId);
     if (!image) {
-      console.warn(`⚠️ 未找到图片: ${imageId}`);
+      logger.debug(`⚠️ 未找到图片: ${imageId}`);
       return;
     }
 

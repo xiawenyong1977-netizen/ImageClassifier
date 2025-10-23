@@ -1045,7 +1045,7 @@ class ImageStorageService {
       }
       
       // 创建新的保存锁
-      this.saveLock = this._performSave(imageDataArray);
+      this.saveLock = this._performSaveOptimized(imageDataArray);
       const result = await this.saveLock;
       this.saveLock = null;
       
@@ -1059,6 +1059,128 @@ class ImageStorageService {
   }
   
   // 实际执行保存操作的方法
+  async _performSaveOptimized(imageDataArray) {
+    // 优化的保存方法：使用真正的批量插入
+    if (imageDataArray.length === 0) {
+      return { newCount: 0, updatedCount: 0 };
+    }
+
+    // 构建批量插入的SQL语句
+    const batchSize = 100; // 每批处理100条记录，避免SQL语句过长
+    let totalNewCount = 0;
+    let totalUpdatedCount = 0;
+
+    for (let i = 0; i < imageDataArray.length; i += batchSize) {
+      const batch = imageDataArray.slice(i, i + batchSize);
+      const { newCount, updatedCount } = await this._performBatchInsert(batch);
+      totalNewCount += newCount;
+      totalUpdatedCount += updatedCount;
+    }
+    
+    // 更新统计信息
+    await this.updateStats();
+    
+    return { newCount: totalNewCount, updatedCount: totalUpdatedCount };
+  }
+
+  // 执行批量插入的方法
+  async _performBatchInsert(imageDataArray) {
+    if (imageDataArray.length === 0) {
+      return { newCount: 0, updatedCount: 0 };
+    }
+
+    // 构建批量SQL语句
+    const placeholders = imageDataArray.map(() => 
+      '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).join(', ');
+
+    const sql = `
+      INSERT OR REPLACE INTO images (
+        id, uri, fileName, category, confidence, timestamp, takenAt,
+        size, mimeType, width, height, createdAt, updatedAt,
+        latitude, longitude, altitude, accuracy,
+        address, city, country, province, district, street, locationSource, cityDistance,
+        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
+      ) VALUES ${placeholders}
+    `;
+
+    // 构建参数数组
+    const params = [];
+    for (const imageData of imageDataArray) {
+      const imageRecord = {
+        id: imageData.id || this.storage.generateStableId(imageData.uri),
+        uri: imageData.uri,
+        category: imageData.category,
+        confidence: imageData.confidence,
+        timestamp: imageData.timestamp,
+        fileName: imageData.fileName,
+        size: imageData.size,
+        takenAt: imageData.takenAt || null,
+        latitude: imageData.latitude || null,
+        longitude: imageData.longitude || null,
+        altitude: imageData.altitude || null,
+        accuracy: imageData.accuracy || null,
+        address: imageData.address || null,
+        city: imageData.city || null,
+        country: imageData.country || null,
+        province: imageData.province || null,
+        district: imageData.district || null,
+        street: imageData.street || null,
+        locationSource: imageData.locationSource || null,
+        cityDistance: imageData.cityDistance || null,
+        idCardDetections: imageData.idCardDetections || null,
+        generalDetections: imageData.generalDetections || null,
+        mobileNetV3Detections: imageData.mobileNetV3Detections || null,
+        imageDimensions: imageData.imageDimensions || null,
+        message: imageData.message || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // 按SQL字段顺序添加参数
+      params.push(
+        imageRecord.id,
+        imageRecord.uri,
+        imageRecord.fileName,
+        imageRecord.category,
+        imageRecord.confidence,
+        imageRecord.timestamp,
+        imageRecord.takenAt,
+        imageRecord.size,
+        imageRecord.mimeType,
+        imageRecord.width,
+        imageRecord.height,
+        imageRecord.createdAt,
+        imageRecord.updatedAt,
+        imageRecord.latitude,
+        imageRecord.longitude,
+        imageRecord.altitude,
+        imageRecord.accuracy,
+        imageRecord.address,
+        imageRecord.city,
+        imageRecord.country,
+        imageRecord.province,
+        imageRecord.district,
+        imageRecord.street,
+        imageRecord.locationSource,
+        imageRecord.cityDistance,
+        // 修复：将对象转换为JSON字符串
+        imageRecord.idCardDetections ? JSON.stringify(imageRecord.idCardDetections) : null,
+        imageRecord.generalDetections ? JSON.stringify(imageRecord.generalDetections) : null,
+        imageRecord.mobileNetV3Detections ? JSON.stringify(imageRecord.mobileNetV3Detections) : null,
+        imageRecord.imageDimensions ? JSON.stringify(imageRecord.imageDimensions) : null,
+        imageRecord.message
+      );
+    }
+
+    // 执行批量插入
+    await this.storage.db.executeSql(sql, params);
+
+    // 由于使用了 INSERT OR REPLACE，我们无法准确区分新增和更新
+    // 返回一个估算值
+    return { newCount: imageDataArray.length, updatedCount: 0 };
+  }
+
   async _performSave(imageDataArray) {
     // 获取现有图片数据
     const existingImages = await this.getImages();
@@ -1365,16 +1487,25 @@ class ImageStorageService {
       }
       
       // 转换为精简数据结构 - 只包含界面显示必需字段
-      const simplifiedImages = fullImages.map(img => {
-        // 调试：检查原始数据中的分类信息
-        if (!img.category) {
-          logger.warn(`⚠️ 图片 ${img.id} 在数据库中缺少分类信息:`, {
-            id: img.id,
-            fileName: img.fileName,
-            category: img.category,
-            hasCategory: 'category' in img
-          });
-        }
+      const simplifiedImages = fullImages
+        .filter(img => {
+          // 🆕 过滤掉无效的图片对象
+          if (!img || typeof img !== 'object') {
+            logger.warn(`⚠️ 发现无效的图片对象，已过滤:`, img);
+            return false;
+          }
+          return true;
+        })
+        .map(img => {
+          // 调试：检查原始数据中的分类信息
+          if (!img.category) {
+            logger.warn(`⚠️ 图片 ${img.id} 在数据库中缺少分类信息:`, {
+              id: img.id,
+              fileName: img.fileName,
+              category: img.category,
+              hasCategory: 'category' in img
+            });
+          }
         
         return {
           id: img.id,
@@ -1527,7 +1658,7 @@ class ImageStorageService {
   // 获取默认扫描路径（平台相关）
   getDefaultScanPaths() {
     if (Platform.OS === 'web') {
-      // Web环境（Electron）：使用Electron API获取用户目录
+      // PC端：使用Electron API获取用户目录
       try {
         // 只在Electron环境中运行时动态加载os模块
         if (typeof window !== 'undefined' && window.require) {
@@ -1553,15 +1684,11 @@ class ImageStorageService {
         return ['C:\\Users\\Public\\Pictures'];
       }
     } else {
+      // 移动端：返回默认相册目录，避免全设备扫描
       return [
         '/storage/emulated/0/DCIM/Camera',
         '/storage/emulated/0/DCIM/Screenshots',
-        '/storage/emulated/0/Pictures',
-        '/storage/emulated/0/Download',
-        '/storage/emulated/0/WeChat/WeChat Images',
-        '/storage/emulated/0/QQ_Images',
-        '/storage/emulated/0/Telegram',
-        '/storage/emulated/0/WhatsApp/Media/WhatsApp Images',
+        '/storage/emulated/0/Pictures'
       ];
     }
   }
@@ -1635,6 +1762,11 @@ class ImageStorageService {
         if (result.scanPaths === undefined || result.scanPaths === null) {
           result.scanPaths = this.getDefaultScanPaths();
         }
+        // 如果用户明确设置了空数组，保持空数组（移动端扫描整个设备）
+        if (result.scanPaths && result.scanPaths.length === 0 && Platform.OS !== 'web') {
+          // 移动端空数组是有效的，表示扫描整个设备
+          result.scanPaths = [];
+        }
         if (result.hideEmptyCategories === undefined || result.hideEmptyCategories === null) {
           result.hideEmptyCategories = false;
         }
@@ -1667,9 +1799,15 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      // 验证scanPaths不能为空数组
-      if (settings.scanPaths && settings.scanPaths.length === 0) {
-        throw new Error('Scan paths cannot be empty. Please provide at least one directory.');
+      // 根据平台进行不同的验证
+      if (Platform.OS === 'web') {
+        // PC端：必须至少有一个目录
+        if (settings.scanPaths && settings.scanPaths.length === 0) {
+          throw new Error('PC端必须至少设置一个扫描目录。');
+        }
+      } else {
+        // 移动端：允许空数组，表示扫描整个设备（使用MediaStore）
+        // 空数组是有效的，表示使用MediaStore扫描整个设备
       }
       
       await this.storage.setItem(this.storageKeys.settings, settings);

@@ -14,13 +14,14 @@ import {
   TouchableOpacity,
   StyleSheet,
   Switch,
-  Alert,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
-import { SafeAreaView } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
+import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
 
 const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
@@ -29,6 +30,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   const [settings, setSettings] = useState({});
   const [storageType, setStorageType] = useState('检测中...');
   const [storageSize, setStorageSize] = useState('计算中...');
+  
+  // 扫描路径设置
+  const [galleryPaths, setGalleryPaths] = useState([]);
+  
+  // 目录选择器状态
+  const [showDirectoryPicker, setShowDirectoryPicker] = useState(false);
 
   // ==================== 初始化 ====================
   useEffect(() => {
@@ -42,15 +49,99 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const loadedSettings = await UnifiedDataService.readSettings();
-      setSettings(loadedSettings || {});
-      logger.debug('设置加载完成:', loadedSettings);
+      const savedSettings = await UnifiedDataService.readSettings();
+      
+      // 从统一设置中加载照片目录配置
+      if (savedSettings.scanPaths && savedSettings.scanPaths.length > 0) {
+        setGalleryPaths(savedSettings.scanPaths);
+      } else {
+        // 如果没有保存的路径，使用默认路径（移动端为空数组）
+        const imageStorageService = new ImageStorageService();
+        const defaultPaths = imageStorageService.getDefaultScanPaths();
+        setGalleryPaths(defaultPaths);
+      }
+      
+      // 设置其他设置项
+      setSettings(savedSettings);
+      
+      logger.debug('设置加载完成:', savedSettings);
     } catch (error) {
       logger.error('❌ 加载设置失败:', error);
       Alert.alert('错误', '加载设置失败');
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * 保存照片目录配置
+   */
+  const saveGalleryPaths = async (paths) => {
+    try {
+      logger.debug('正在保存目录配置到统一设置:', paths);
+      
+      // 移动端允许空数组，表示扫描整个设备
+      // 不需要验证路径不能为空数组
+      
+      // 通过UnifiedDataService保存到统一设置中
+      const newSettings = { ...settings, scanPaths: paths };
+      await UnifiedDataService.writeSettings(newSettings);
+      logger.debug('目录配置已保存到统一设置');
+      
+      setGalleryPaths(paths);
+      setSettings(newSettings);
+      
+    } catch (error) {
+      logger.error('Failed to save gallery paths:', error);
+      Alert.alert('错误', error.message || '保存照片目录失败');
+    }
+  };
+
+  /**
+   * 打开目录选择器
+   */
+  const openDirectoryPicker = () => {
+    setShowDirectoryPicker(true);
+  };
+
+  /**
+   * 关闭目录选择器
+   */
+  const closeDirectoryPicker = () => {
+    setShowDirectoryPicker(false);
+  };
+
+  /**
+   * 从目录选择器选择目录
+   */
+  const handleDirectorySelected = (selectedPath) => {
+    if (selectedPath && !galleryPaths.includes(selectedPath)) {
+      const updatedPaths = [...galleryPaths, selectedPath];
+      saveGalleryPaths(updatedPaths);
+    } else if (galleryPaths.includes(selectedPath)) {
+      Alert.alert('提示', '该目录已存在');
+    }
+  };
+
+  /**
+   * 删除路径
+   */
+  const removeGalleryPath = (pathToRemove) => {
+    Alert.alert(
+      '确认删除',
+      `确定要删除路径 "${pathToRemove}" 吗？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => {
+            const updatedPaths = galleryPaths.filter(path => path !== pathToRemove);
+            saveGalleryPaths(updatedPaths);
+          }
+        }
+      ]
+    );
   };
 
   /**
@@ -169,8 +260,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       {/* 设置列表 */}
       <ScrollView style={styles.scrollView}>
         {/* 分类操作 */}
-        {renderSectionTitle('分类操作')}
         <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.titleRow}>
+              <Text style={styles.sectionTitle}>分类操作</Text>
+            </View>
+          </View>
           {renderActionButton(
             '🗑️',
             '清空相册信息',
@@ -180,9 +275,46 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
           )}
         </View>
 
-        {/* 应用信息 */}
-        {renderSectionTitle('应用信息')}
+        {/* 目录设置 */}
         <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.titleRow}>
+              <Text style={styles.sectionTitle}>目录设置</Text>
+              <Text style={styles.sectionSubtitle}>
+                设置后扫描指定目录照片，无指定目录则扫描设备所有照片
+              </Text>
+            </View>
+          </View>
+          
+          {/* 目录选择器按钮 */}
+          <TouchableOpacity
+            style={styles.directoryPickerButton}
+            onPress={openDirectoryPicker}
+          >
+            <Text style={styles.directoryPickerButtonText}>📁 浏览选择目录</Text>
+          </TouchableOpacity>
+
+          {/* 路径列表 */}
+          {galleryPaths.map((path, index) => (
+            <View key={index} style={styles.pathItem}>
+              <Text style={styles.pathText}>{path}</Text>
+              <TouchableOpacity
+                style={styles.removeButton}
+                onPress={() => removeGalleryPath(path)}
+              >
+                <Text style={styles.removeButtonText}>×</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+
+        {/* 应用信息 */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.titleRow}>
+              <Text style={styles.sectionTitle}>应用信息</Text>
+            </View>
+          </View>
           {renderInfoItem('版本', '1.0.0')}
           {renderInfoItem('构建版本', '2025.01.20')}
           {renderInfoItem('平台', '移动端 (React Native)')}
@@ -193,6 +325,13 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         {/* 底部空白 */}
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* 目录选择器 */}
+      <DirectoryPicker
+        visible={showDirectoryPicker}
+        onClose={closeDirectoryPicker}
+        onSelectDirectory={handleDirectorySelected}
+      />
     </SafeAreaView>
   );
 };
@@ -213,6 +352,66 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#8E8E93',
+  },
+  
+  // 扫描路径设置样式
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontWeight: 'normal',
+    marginLeft: 8,
+    flex: 1,
+    textAlignVertical: 'center',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  directoryPickerButton: {
+    margin: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    padding: 16,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  directoryPickerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pathItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  pathText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    fontFamily: 'monospace',
+  },
+  removeButton: {
+    marginLeft: 12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ff4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   header: {
     height: 56,
@@ -236,9 +435,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#8E8E93',
-    paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 8,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    width: 120,
+    textAlignVertical: 'center',
   },
   section: {
     backgroundColor: '#FFFFFF',

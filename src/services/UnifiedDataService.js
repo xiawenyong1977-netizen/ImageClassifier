@@ -143,16 +143,35 @@ class UnifiedDataService {
    */
   async readImagesByCategory(category) {
     try {
+      logger.debug('🔍 readImagesByCategory 开始:', category);
+      
+      // 🆕 检查缓存是否初始化
+      if (!this.imageCache) {
+        logger.error('❌ imageCache 未初始化');
+        return [];
+      }
+      
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
+      logger.debug('🔍 readImagesByCategory 标准化分类ID:', normalizedCategory);
       
       // 直接从缓存获取分类图片
+      logger.debug('🔍 readImagesByCategory 调用 getImagesByCategory...');
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
+      logger.debug('🔍 readImagesByCategory getImagesByCategory 完成，结果:', categoryImages.length);
+      
+      // 🆕 检查返回的数据
+      if (!Array.isArray(categoryImages)) {
+        logger.error('❌ getImagesByCategory 返回的不是数组:', typeof categoryImages, categoryImages);
+        return [];
+      }
       
       // 只在有图片时打印日志
       if (categoryImages.length > 0) {
         logger.debug('从缓存读取分类图片:', normalizedCategory, categoryImages.length);
       }
+      
+      logger.debug('🔍 readImagesByCategory 完成:', categoryImages.length);
       return categoryImages;
       
     } catch (error) {
@@ -399,6 +418,56 @@ class UnifiedDataService {
    * 批量保存图片分类结果
    * 先写缓存，再写数据库
    */
+
+  /**
+   * 批量更新图片分类ID
+   * 优化性能，减少数据库调用次数
+   */
+  async updateImagesCategory(imageIds, newCategory, newConfidence = 'manual') {
+    try {
+      logger.debug('批量更新图片分类:', imageIds.length, '张图片 ->', newCategory);
+      
+      if (!imageIds || imageIds.length === 0) {
+        logger.warn('批量更新分类：没有图片ID');
+        return { success: true, processed: 0 };
+      }
+      
+      let processed = 0;
+      const errors = [];
+      
+      // 批量更新数据库
+      for (const imageId of imageIds) {
+        try {
+          await this.imageStorageService.updateImageCategory(imageId, newCategory, newConfidence);
+          processed++;
+        } catch (error) {
+          logger.error(`更新图片分类失败: ${imageId}`, error);
+          errors.push({ imageId, error: error.message });
+        }
+      }
+      
+      // 批量更新缓存
+      for (const imageId of imageIds) {
+        try {
+          this.imageCache.updateImageClassification(imageId, newCategory, { confidence: newConfidence });
+        } catch (error) {
+          logger.error(`更新缓存失败: ${imageId}`, error);
+        }
+      }
+      
+      logger.debug('批量更新分类完成:', processed, '张成功');
+      
+      return { 
+        success: errors.length === 0, 
+        processed, 
+        errors: errors.length > 0 ? errors : undefined 
+      };
+      
+    } catch (error) {
+      logger.error('批量更新图片分类失败:', error);
+      throw error;
+    }
+  }
 
   /**
    * 删除图片

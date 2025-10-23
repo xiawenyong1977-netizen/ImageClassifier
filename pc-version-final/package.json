@@ -13,7 +13,11 @@
     "electron": "electron .",
     "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
     "electron-pack": "npm run build && electron-builder",
-    "electron-pack-appx": "npm run build && electron-builder --win appx",
+    "electron:build": "npm run build && electron-builder --win nsis",
+    "electron:build-portable": "npm run build && electron-builder --win portable",
+    "electron:build-all": "npm run build && electron-builder --win nsis --win portable",
+    "electron:build-mac": "npm run build && electron-builder --mac dmg",
+    "electron:build-mac-zip": "npm run build && electron-builder --mac dmg --mac zip",
     "preelectron-pack": "npm run build"
   },
   "dependencies": {
@@ -74,13 +78,13 @@
       "icon": "public/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         },
         {
-          "target": "appx",
+          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -97,23 +101,44 @@
         }
       ]
     },
-    "appx": {
-      "applicationId": "ImageClassifier",
-      "displayName": "芯图相册",
-      "publisherDisplayName": "智语未来",
-      "identityName": "28A8A450.4144689735081",
-      "publisher": "CN=F5ED0799-D181-4743-8773-A1B629AE296D",
-      "backgroundColor": "#2f3241",
-      "languages": [
-        "zh-CN",
-        "en-US"
-      ],
-      "addAutoLaunchExtension": false,
-      "showNameOnTiles": true
-    },
     "mac": {
       "icon": "public/icon.icns",
-      "target": "dmg"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.photography",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "芯图相册",
+      "icon": "public/icon.icns",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "linux": {
       "icon": "public/icon.png",
@@ -122,8 +147,16 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "芯图相册",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "language": "2052",
+      "warningsAsErrors": false
     }
   }
 }

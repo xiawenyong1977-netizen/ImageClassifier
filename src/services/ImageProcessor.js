@@ -188,13 +188,9 @@ class ImageProcessor {
       const rawImageData = jpegJs.decode(buffer);
       const pixelData = rawImageData.data;
       
-      // 5. 清理临时文件
-      try {
-        await RNFS.unlink(resizedImage.uri);
-      } catch (unlinkError) {
-        // 清理失败不影响主流程
-        logger.warn(`清理临时文件失败: ${resizedImage.uri}`);
-      }
+      // 5. 不立即清理临时文件，收集待清理列表
+      // 临时文件会在相似度检测完成后统一批量清理
+      // 这样可以避免文件占用问题，且更高效
       
       return new Uint8ClampedArray(pixelData);
 

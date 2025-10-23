@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, StatusBar, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, Platform } from 'react-native';
 
 console.log('📦 App.js: 开始导入模块...');
 

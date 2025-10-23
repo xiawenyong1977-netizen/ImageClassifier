@@ -21,14 +21,14 @@ import {
   StyleSheet,
   Dimensions,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
-import { SafeAreaView, Platform, PermissionsAndroid } from '../../adapters/WebAdapters';
+import { SafeAreaView, Platform, PermissionsAndroid, Alert } from '../../adapters/WebAdapters';
 import { useFocusEffect } from '@react-navigation/native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import GalleryScannerService from '../../services/GalleryScannerService';
+import WakeLockService from '../../services/WakeLockService';
 import { logger } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -56,6 +56,11 @@ const HomeScreen = ({ navigation }) => {
   // 消息提示
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   
+  // 添加调试日志来跟踪状态更新
+  useEffect(() => {
+    logger.debug(`🔍 globalMessage 状态更新: ${globalMessage}`);
+  }, [globalMessage]);
+  
   // 隐藏空分类设置
   const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
 
@@ -64,7 +69,49 @@ const HomeScreen = ({ navigation }) => {
     initializeData();
     loadLastScanTime();
     loadHideEmptyCategoriesSetting();
+    
+    // 调试：检查当前权限状态
+    checkCurrentPermissionStatus();
   }, []);
+
+  /**
+   * 检查当前权限状态（调试用）
+   */
+  const checkCurrentPermissionStatus = async () => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    try {
+      logger.debug('🔍 检查当前权限状态...');
+      
+      let permissions = [];
+      if (Platform.Version >= 33) {
+        permissions = [
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+          PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION,
+        ];
+      } else {
+        permissions = [
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION,
+        ];
+      }
+
+      const checkResults = await Promise.all(
+        permissions.map(p => PermissionsAndroid.check(p))
+      );
+
+      logger.debug('📋 当前权限状态:', {
+        permissions,
+        results: checkResults,
+        allGranted: checkResults.every(result => result === true)
+      });
+    } catch (error) {
+      logger.error('❌ 检查权限状态失败:', error);
+    }
+  };
   
   // 监听页面焦点，当从其他页面返回时刷新数据
   useFocusEffect(
@@ -204,32 +251,31 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 加载城市列表
+   * 加载城市列表（包含最近一张照片）
    */
   const loadCities = async () => {
     try {
       const cache = GlobalImageCache.getCache();
       const cityCounts = cache.cityCounts || {};
+      const allImages = cache.allImages || [];
       
       // 构建城市列表并按数量降序排序
-      let cityList = Object.keys(cityCounts)
-        .map(cityName => ({
-          name: cityName,
-          count: cityCounts[cityName],
-        }))
+      const cityList = Object.keys(cityCounts)
+        .map(cityName => {
+          // 找到这个城市最近的一张照片（按时间戳降序）
+          const cityImages = allImages
+            .filter(img => img.city === cityName)
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          
+          const latestImage = cityImages.length > 0 ? cityImages[0] : null;
+          
+          return {
+            name: cityName,
+            count: cityCounts[cityName],
+            latestImageUri: latestImage ? latestImage.uri : null,
+          };
+        })
         .sort((a, b) => b.count - a.count);
-      
-      // 🧪 开发模式：如果没有城市数据，使用模拟数据（模拟器无法获取GPS）
-      if (cityList.length === 0 && Platform.OS === 'android') {
-        logger.debug('🧪 使用模拟城市数据（开发模式）');
-        cityList = [
-          { name: '北京', count: 15 },
-          { name: '上海', count: 12 },
-          { name: '深圳', count: 8 },
-          { name: '杭州', count: 6 },
-          { name: '成都', count: 3 },
-        ];
-      }
       
       setCities(cityList);
       logger.debug(`🏙️ 城市列表加载完成: ${cityList.length}个城市`);
@@ -279,6 +325,12 @@ const HomeScreen = ({ navigation }) => {
   const loadLastScanTime = async () => {
     try {
       const settings = await UnifiedDataService.readSettings();
+      logger.debug('🔍 检查扫描完成信息:', {
+        hasLastScanTime: !!settings?.lastScanTime,
+        lastScanTime: settings?.lastScanTime,
+        lastScanDuration: settings?.lastScanDurationSeconds
+      });
+      
       if (settings && settings.lastScanTime) {
         // 手动格式化时间（确保在 React Native 中显示中文格式）
         const date = new Date(settings.lastScanTime);
@@ -314,6 +366,7 @@ const HomeScreen = ({ navigation }) => {
         
         setGlobalMessage(`上次扫描: ${formattedTime} | 共 ${totalImages} 张 | ${formattedSize}${durationText}`);
       } else {
+        logger.debug('⚠️ 没有扫描完成记录，显示默认消息');
         setGlobalMessage('图片分类应用已就绪');
       }
     } catch (error) {
@@ -360,6 +413,13 @@ const HomeScreen = ({ navigation }) => {
    * 下拉刷新
    */
   const onRefresh = useCallback(async () => {
+    // 如果正在扫描，不执行刷新
+    if (isScanning) {
+      logger.debug('🔄 正在扫描中，跳过下拉刷新');
+      setRefreshing(false);
+      return;
+    }
+    
     setRefreshing(true);
     try {
       // 重建缓存
@@ -374,10 +434,10 @@ const HomeScreen = ({ navigation }) => {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [isScanning]);
 
   /**
-   * 检查并请求相册权限
+   * 检查并请求相册权限和位置权限
    */
   const checkAndRequestPermissions = async () => {
     if (Platform.OS !== 'android') {
@@ -385,7 +445,7 @@ const HomeScreen = ({ navigation }) => {
     }
 
     try {
-      logger.debug('📋 检查相册访问权限...');
+      logger.debug('📋 检查相册访问权限和位置权限...');
       logger.debug(`📱 Android 版本: API ${Platform.Version}`);
       
       // 根据 Android 版本请求不同的权限
@@ -394,13 +454,17 @@ const HomeScreen = ({ navigation }) => {
       if (Platform.Version >= 33) {
         // Android 13+ (API 33+): 使用新的媒体权限
         logger.debug('📋 Android 13+，请求新的媒体权限');
-        permissions = [PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES];
+        permissions = [
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+          PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION, // 读取照片GPS信息
+        ];
       } else {
         // Android 12 及以下: 使用旧的存储权限
         logger.debug('📋 Android 12-，请求旧的存储权限');
         permissions = [
           PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
           PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION, // 读取照片GPS信息
         ];
       }
 
@@ -435,14 +499,14 @@ const HomeScreen = ({ navigation }) => {
         logger.warn('⚠️ 部分权限被拒绝');
         Alert.alert(
           '权限不足',
-          '需要访问相册权限才能扫描图片。请在设置中授予权限。',
+          '需要访问相册权限和位置权限才能扫描图片并获取GPS信息。请在设置中授予权限。',
           [
             { text: '取消', style: 'cancel' },
             { 
               text: '去设置', 
               onPress: () => {
                 // TODO: 打开应用设置页面
-                Alert.alert('提示', '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限');
+                Alert.alert('提示', '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限和位置权限');
               }
             }
           ]
@@ -471,6 +535,12 @@ const HomeScreen = ({ navigation }) => {
       setGlobalMessage('正在初始化...');
       logger.debug('🔍 开始扫描相册...');
       
+      // 使用唤醒锁防止手机休眠影响扫描性能
+      const wakeLockAcquired = await WakeLockService.acquire(30 * 60 * 1000); // 30分钟超时
+      if (wakeLockAcquired) {
+        logger.info('🔋 已获取唤醒锁，防止手机休眠影响扫描性能');
+      }
+      
       const galleryScannerService = new GalleryScannerService();
       
       // 初始化服务
@@ -482,8 +552,25 @@ const HomeScreen = ({ navigation }) => {
         // progress已经包含了simpleMessage字段，这是PC端格式化后的消息
         if (progress) {
           const message = progress.simpleMessage || progress.message || '处理中...';
+          logger.debug(`🔍 准备更新消息: ${message}`);
           setGlobalMessage(message);
-          logger.debug(`🔍 更新消息: ${message}`);
+          logger.debug(`🔍 消息已更新: ${message}`);
+          
+          // 🆕 检查是否需要刷新页面
+          if (progress.shouldRefresh) {
+            logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
+            // 使用 setTimeout 确保状态更新不被阻塞
+            setTimeout(async () => {
+              try {
+                // 强制刷新存储服务缓存
+                await GlobalImageCache.refreshCache();
+                // 只刷新页面数据，不刷新扫描完成信息（扫描还在进行中）
+                await loadAllData();
+              } catch (error) {
+                logger.error('❌ 定期刷新失败:', error);
+              }
+            }, 0);
+          }
         }
       });
       
@@ -501,6 +588,8 @@ const HomeScreen = ({ navigation }) => {
       setGlobalMessage('扫描失败');
       Alert.alert('扫描失败', error.message);
     } finally {
+      // 释放唤醒锁
+      await WakeLockService.release();
       setIsScanning(false);
     }
   };
@@ -516,13 +605,24 @@ const HomeScreen = ({ navigation }) => {
       key={category.id}
       style={styles.categoryCard}
       onPress={() => {
-        if (category.id === 'tobecleaned') {
-          navigation.navigate('StagingBox');
-        } else {
-          navigation.navigate('Category', {
-            category: category.id,
-            fromScreen: 'Home',
-          });
+        try {
+          // 🆕 添加空值检查
+          if (!category || !category.id || !navigation) {
+            logger.warn('❌ 分类数据无效或导航对象为空:', { category, navigation: !!navigation });
+            return;
+          }
+          
+          logger.debug('📁 点击分类卡片:', category.id);
+          if (category.id === 'tobecleaned') {
+            navigation.navigate('StagingBox');
+          } else {
+            navigation.navigate('Category', {
+              category: category.id,
+              fromScreen: 'Home',
+            });
+          }
+        } catch (error) {
+          logger.error('❌ 分类卡片点击失败:', error);
         }
       }}
     >
@@ -588,10 +688,21 @@ const HomeScreen = ({ navigation }) => {
       key={group.groupId}
       style={styles.categoryCard}
       onPress={() => {
-        navigation.navigate('Category', {
-          similarityGroupId: group.groupId,
-          fromScreen: 'SimilarityGroup',
-        });
+        try {
+          // 🆕 添加空值检查
+          if (!group || !group.groupId || !navigation) {
+            logger.warn('❌ 相似组数据无效或导航对象为空:', { group, navigation: !!navigation });
+            return;
+          }
+          
+          logger.debug('🔗 点击相似组卡片:', group.groupId);
+          navigation.navigate('Category', {
+            similarityGroupId: group.groupId,
+            fromScreen: 'SimilarityGroup',
+          });
+        } catch (error) {
+          logger.error('❌ 相似组卡片点击失败:', error);
+        }
       }}
     >
       {/* 缩略图占满整个卡片 */}
@@ -639,16 +750,35 @@ const HomeScreen = ({ navigation }) => {
       key={city.name}
       style={styles.categoryCard}
       onPress={() => {
-        navigation.navigate('Category', {
-          city: city.name,
-          fromScreen: 'Home',
-        });
+        try {
+          // 🆕 添加空值检查
+          if (!city || !city.name || !navigation) {
+            logger.warn('❌ 城市数据无效或导航对象为空:', { city, navigation: !!navigation });
+            return;
+          }
+          
+          logger.debug('🏙️ 点击城市卡片:', city.name);
+          navigation.navigate('Category', {
+            city: city.name,
+            fromScreen: 'Home',
+          });
+        } catch (error) {
+          logger.error('❌ 城市卡片点击失败:', error);
+        }
       }}
     >
-      {/* 城市背景色 */}
-      <View style={[styles.thumbnail, { backgroundColor: '#FF9800' }]}>
-        <Text style={styles.emptyThumbnailText}>📍</Text>
-      </View>
+      {/* 显示缩略图或城市背景色 */}
+      {city.latestImageUri ? (
+        <Image
+          source={{ uri: city.latestImageUri }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#FF9800' }]}>
+          <Text style={styles.emptyThumbnailText}>📍</Text>
+        </View>
+      )}
       
       {/* 覆盖层显示城市信息 */}
       <View style={styles.categoryOverlay}>
@@ -695,12 +825,23 @@ const HomeScreen = ({ navigation }) => {
                 key={image.id || index}
                 style={styles.recentGridItem}
                 onPress={() => {
-                  navigation.navigate('ImagePreview', {
-                    image: image,
-                    allImages: recentImages,
-                    currentIndex: index,
-                    fromScreen: 'Home',
-                  });
+                  try {
+                    // 🆕 添加空值检查
+                    if (!image || !image.uri || !navigation) {
+                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, navigation: !!navigation });
+                      return;
+                    }
+                    
+                    logger.debug('📸 点击最近照片:', image.id || index);
+                    navigation.navigate('ImagePreview', {
+                      image: image,
+                      allImages: recentImages,
+                      currentIndex: index,
+                      fromScreen: 'Home',
+                    });
+                  } catch (error) {
+                    logger.error('❌ 最近照片点击失败:', error);
+                  }
                 }}
               >
                 <Image
@@ -766,7 +907,11 @@ const HomeScreen = ({ navigation }) => {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            enabled={!isScanning}
+          />
         }
       >
         {renderCategoriesSection()}

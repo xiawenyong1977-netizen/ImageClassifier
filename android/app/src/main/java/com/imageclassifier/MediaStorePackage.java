@@ -19,6 +19,7 @@ public class MediaStorePackage implements ReactPackage {
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
         List<NativeModule> modules = new ArrayList<>();
         modules.add(new MediaStoreModule(reactContext));
+        modules.add(new WakeLockModule(reactContext));
         return modules;
     }
 }

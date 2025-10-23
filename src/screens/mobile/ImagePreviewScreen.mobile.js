@@ -17,12 +17,11 @@ import {
   Image,
   StyleSheet,
   Dimensions,
-  Alert,
   FlatList,
   ScrollView,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import configService from '../../services/ConfigService';
 import { logger } from '../../adapters/WebAdapters';
@@ -44,6 +43,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // ==================== 状态管理 ====================
   const [currentImageIndex, setCurrentImageIndex] = useState(currentIndex);
   const [currentImage, setCurrentImage] = useState(initialImage); // 当前图片完整信息
+  const [allImagesState, setAllImagesState] = useState(allImages); // 可变的图片列表
   const [showInfo, setShowInfo] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const flatListRef = useRef(null);
@@ -56,10 +56,10 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // 调试：检查当前图片是否有效
   React.useEffect(() => {
     if (!currentImage || !currentImage.uri) {
-      logger.error(`⚠️ 当前图片无效！索引：${currentImageIndex}，总数：${allImages.length}`);
+      logger.error(`⚠️ 当前图片无效！索引：${currentImageIndex}，总数：${allImagesState.length}`);
       logger.error('当前图片对象:', currentImage);
     } else {
-      logger.debug(`✅ 当前图片：索引${currentImageIndex}/${allImages.length}，URI: ${currentImage.uri?.substring(0, 50)}...`);
+      logger.debug(`✅ 当前图片：索引${currentImageIndex}/${allImagesState.length}，URI: ${currentImage.uri?.substring(0, 50)}...`);
     }
   }, [currentImageIndex]);
 
@@ -80,7 +80,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // 当图片索引变化时，加载完整的图片详情
   React.useEffect(() => {
     const loadImageDetails = async () => {
-      const imageData = allImages[currentImageIndex];
+      const imageData = allImagesState[currentImageIndex];
       if (!imageData || !imageData.id) {
         logger.warn('图片数据无效，跳过详情加载');
         return;
@@ -113,9 +113,81 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     };
 
     loadImageDetails();
-  }, [currentImageIndex]);
+  }, [currentImageIndex, allImagesState]);
 
   // ==================== 工具函数 ====================
+
+  /**
+   * 重新加载图片列表（当图片被移出当前列表时）
+   */
+  const reloadImageList = async () => {
+    try {
+      logger.debug('🔄 重新加载图片列表...', { category, city, similarityGroupId });
+      
+      let updatedImages = [];
+      
+      // 根据来源重新加载
+      if (similarityGroupId) {
+        // 来自相似组
+        logger.debug('从相似组重新加载...');
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
+        const groupImages = groupData.images || [];
+        // 过滤掉 tobecleaned 分类的照片（保持与相似组页面一致）
+        updatedImages = groupImages.filter(img => img.category !== 'tobecleaned');
+      } else if (city) {
+        // 来自城市分类
+        logger.debug('从城市分类重新加载...');
+        const cityImages = await UnifiedDataService.readImagesByLocation(city);
+        // 过滤掉 tobecleaned 分类的照片（保持与城市页面一致）
+        updatedImages = cityImages.filter(img => img.category !== 'tobecleaned');
+      } else if (category) {
+        // 来自普通分类
+        logger.debug('从分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByCategory(category);
+      } else {
+        logger.warn('⚠️ 无法确定来源，无法重新加载');
+        return false;
+      }
+      
+      logger.debug(`✅ 重新加载完成，图片数：${allImagesState.length} → ${updatedImages.length}`);
+      
+      // 如果列表为空，返回上一页
+      if (updatedImages.length === 0) {
+        logger.debug('列表已空，返回上一页');
+        Alert.alert('提示', '当前分类已无图片', [
+          { text: '确定', onPress: goBack }
+        ]);
+        return false;
+      }
+      
+      // 更新图片列表
+      setAllImagesState(updatedImages);
+      
+      // 调整当前索引
+      let newIndex = currentImageIndex;
+      if (currentImageIndex >= updatedImages.length) {
+        // 如果当前索引超出范围，跳到最后一张
+        newIndex = updatedImages.length - 1;
+        logger.debug(`索引超出范围，调整到最后一张：${newIndex}`);
+      }
+      
+      // 滚动到正确位置
+      if (flatListRef.current && newIndex !== currentImageIndex) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({
+            index: newIndex,
+            animated: true
+          });
+          setCurrentImageIndex(newIndex);
+        }, 100);
+      }
+      
+      return true;
+    } catch (error) {
+      logger.error('❌ 重新加载图片列表失败:', error);
+      return false;
+    }
+  };
 
   /**
    * 计算显示的序号
@@ -123,7 +195,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const getDisplayNumbers = () => {
   return {
       displayIndex: currentImageIndex + 1,
-      displayTotal: allImages.length
+      displayTotal: allImagesState.length
     };
   };
 
@@ -189,7 +261,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 下一张
    */
   const goToNext = () => {
-    if (currentImageIndex < allImages.length - 1) {
+    if (currentImageIndex < allImagesState.length - 1) {
       const newIndex = currentImageIndex + 1;
       flatListRef.current?.scrollToIndex({ index: newIndex, animated: true });
       setCurrentImageIndex(newIndex);
@@ -315,7 +387,9 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 }));
                 
                 logger.debug('标记为待处置成功');
-                Alert.alert('操作完成', '图片已标记为待处置');
+                
+                // 重新加载图片列表
+                await reloadImageList();
     } catch (error) {
                 logger.error('标记为待处置失败:', error);
                 Alert.alert('错误', '标记为待处置失败，请重试');
@@ -337,12 +411,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     
     return configService.getAllCategoriesWithUI()
       .filter(category => category.id !== 'tobecleaned')
-      .slice(0, 7) // 只显示前7个
-      .map(category => ({
-        id: category.id,
-        name: category.chinese || category.english || category.id,
-        icon: '📷',
-      }));
+      .map(category => {
+        let name = category.chinese || category.english || category.id;
+        // 将名称改为两行显示（每行2个字）
+        if (name.length >= 3) {
+          // 3个字或更多：每2个字换行
+          const firstLine = name.substring(0, 2);
+          const secondLine = name.substring(2);
+          name = firstLine + '\n' + secondLine;
+        }
+        // 2个字或更少：不换行
+        return {
+          id: category.id,
+          name: name,
+          icon: '📷',
+        };
+      });
   };
 
   /**
@@ -384,6 +468,12 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       
       // 自动关闭分类选择器
       setShowActions(false);
+      
+      // 重新加载图片列表（如果是从分类页进入的）
+      if (category && category !== newCategory) {
+        logger.debug('分类已改变，重新加载图片列表');
+        await reloadImageList();
+      }
     } catch (error) {
       logger.error('修改分类失败:', error);
       Alert.alert('错误', '修改分类失败，请重试');
@@ -398,15 +488,23 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const renderHeader = () => {
     const { displayIndex, displayTotal } = getDisplayNumbers();
+    const categoryName = currentImage?.category ? getCategoryDisplayName(currentImage.category) : '';
 
   return (
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={styles.headerButton}>
           <Text style={styles.headerIcon}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {displayIndex} / {displayTotal}
-        </Text>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>
+            {displayIndex} / {displayTotal}
+          </Text>
+          {categoryName && (
+            <Text style={styles.headerCategory}>
+              {categoryName}
+            </Text>
+          )}
+        </View>
         <TouchableOpacity onPress={() => setShowInfo(!showInfo)} style={styles.headerButton}>
           <Text style={styles.headerIcon}>ℹ️</Text>
         </TouchableOpacity>
@@ -679,34 +777,13 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 渲染导航箭头（基于全局位置判断）
+   * 渲染导航箭头（已移除）
+   * 现代移动端设计趋势：完全移除导航按钮，使用纯手势操作
+   * 用户可以通过左右滑动来切换图片，更符合现代APP的设计理念
    */
   const renderNavigationArrows = () => {
-    const { displayIndex, displayTotal } = getDisplayNumbers();
-    
-    return (
-      <>
-        {/* 显示左箭头：不是第一张 */}
-        {displayIndex > 1 && (
-          <TouchableOpacity 
-            style={styles.navButtonLeft} 
-            onPress={goToPrevious}
-          >
-            <Text style={styles.navButtonText}>‹</Text>
-          </TouchableOpacity>
-        )}
-        
-        {/* 显示右箭头：不是最后一张 */}
-        {displayIndex < displayTotal && (
-              <TouchableOpacity
-            style={styles.navButtonRight} 
-            onPress={goToNext}
-          >
-            <Text style={styles.navButtonText}>›</Text>
-              </TouchableOpacity>
-        )}
-      </>
-    );
+    // 完全移除导航按钮，使用手势操作
+    return null;
   };
 
   // ==================== 主渲染 ====================
@@ -720,7 +797,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       <View style={styles.imageContainer}>
         <FlatList
           ref={flatListRef}
-          data={allImages}
+          data={allImagesState}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -794,10 +871,19 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#FFFFFF',
   },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
     fontSize: 16,
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  headerCategory: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
   },
   
   // 图片区域
@@ -821,36 +907,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   
-  // 导航箭头
-  navButtonLeft: {
-    position: 'absolute',
-    left: 16,
-    top: '50%',
-    marginTop: -32,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navButtonRight: {
-    position: 'absolute',
-    right: 16,
-    top: '50%',
-    marginTop: -32,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navButtonText: {
-    fontSize: 48,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
+  // 导航箭头样式已移除 - 使用纯手势操作
   
   // 信息面板
   infoPanel: {
@@ -963,20 +1020,22 @@ const styles = StyleSheet.create({
   },
   categoryGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-around',
     alignItems: 'center',
+    gap: 8,
   },
   categoryItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#3A3A3C',
     backgroundColor: 'rgba(58, 58, 60, 0.5)',
-    minWidth: 45,
-    height: 50,
+    width: 52,
+    minHeight: 50,
   },
   selectedCategory: {
     borderColor: '#007AFF',
@@ -987,6 +1046,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FFFFFF',
     textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 48,
   },
   selectedCategoryText: {
     color: '#007AFF',
