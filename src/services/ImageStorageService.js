@@ -22,6 +22,21 @@ class SQLiteAdapter {
       // 打开数据库
       this.db = SQLite.openDatabase(this.dbName, '1.0', 'Image Classifier DB', 200000);
       
+      // 为数据库对象添加executeSql方法（兼容性处理）
+      if (!this.db.executeSql) {
+        this.db.executeSql = (sql, params = []) => {
+          return new Promise((resolve, reject) => {
+            this.db.transaction((tx) => {
+              tx.executeSql(sql, params, (tx, result) => {
+                resolve([result]);
+              }, (tx, error) => {
+                reject(error);
+              });
+            });
+          });
+        };
+      }
+      
       // 创建表结构
       await this.createTables();
       
@@ -782,7 +797,6 @@ class IndexedDBAdapter {
             updatedAt: new Date().toISOString()
           };
           store.add(imageWithId);
-          logger.debug(`✅ 新增图片: ${imageData.fileName}`);
         }
       };
       
@@ -1085,6 +1099,69 @@ class ImageStorageService {
       return { newCount: 0, updatedCount: 0 };
     }
 
+    if (Platform.OS === 'web') {
+      // PC端：使用IndexedDB的批量插入
+      return await this._performBatchInsertIndexedDB(imageDataArray);
+    } else {
+      // 移动端：使用SQLite的批量插入
+      return await this._performBatchInsertSQLite(imageDataArray);
+    }
+  }
+
+  // PC端：IndexedDB批量插入实现
+  async _performBatchInsertIndexedDB(imageDataArray) {
+    await this.storage.init();
+    
+    let newCount = 0;
+    let updatedCount = 0;
+    
+    // 逐个处理图片数据（IndexedDB没有真正的批量插入，但我们可以优化）
+    for (const imageData of imageDataArray) {
+      try {
+        const imageRecord = {
+          id: imageData.id || this.storage.generateStableId(imageData.uri),
+          uri: imageData.uri,
+          category: imageData.category,
+          confidence: imageData.confidence,
+          timestamp: imageData.timestamp,
+          fileName: imageData.fileName,
+          size: imageData.size,
+          takenAt: imageData.takenAt || null,
+          latitude: imageData.latitude || null,
+          longitude: imageData.longitude || null,
+          altitude: imageData.altitude || null,
+          accuracy: imageData.accuracy || null,
+          address: imageData.address || null,
+          city: imageData.city || null,
+          country: imageData.country || null,
+          province: imageData.province || null,
+          district: imageData.district || null,
+          street: imageData.street || null,
+          locationSource: imageData.locationSource || null,
+          cityDistance: imageData.cityDistance || null,
+          idCardDetections: imageData.idCardDetections || null,
+          generalDetections: imageData.generalDetections || null,
+          mobileNetV3Detections: imageData.mobileNetV3Detections || null,
+          imageDimensions: imageData.imageDimensions || null,
+          message: imageData.message || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        // 使用IndexedDB的单条插入方法
+        await this.storage.addOrUpdateSingleImage(imageRecord);
+        newCount++; // IndexedDB的addOrUpdateSingleImage会处理新增/更新逻辑
+      } catch (error) {
+        logger.error('❌ IndexedDB批量插入单条记录失败:', error);
+        // 继续处理下一条记录
+      }
+    }
+    
+    return { newCount, updatedCount };
+  }
+
+  // 移动端：SQLite批量插入实现
+  async _performBatchInsertSQLite(imageDataArray) {
     // 构建批量SQL语句
     const placeholders = imageDataArray.map(() => 
       '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -1530,29 +1607,143 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       
-      // 一次性读取所有图片
-      const allImages = await this.storage.getItem(this.storageKeys.images);
-      if (!allImages) {
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB - 使用原生查询优化
+        return await this._getImagesByIdsIndexedDB(imageIds);
+      } else {
+        // 移动端：SQLite - 使用SQL查询优化
+        return await this._getImagesByIdsSQLite(imageIds);
+      }
+      
+    } catch (error) {
+      logger.error('批量获取图片失败:', error);
+      return new Map();
+    }
+  }
+
+  // PC端：IndexedDB优化查询
+  async _getImagesByIdsIndexedDB(imageIds) {
+    try {
+      // 确保数据库已初始化
+      await this.ensureInitialized();
+      
+      // 检查数据库对象
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB数据库对象为空');
         return new Map();
       }
       
       // 创建ID集合，提高查找效率
       const idSet = new Set(imageIds);
       
-      // 过滤并创建Map
-      const resultMap = new Map();
-      allImages.forEach(img => {
-        if (idSet.has(img.id)) {
-          resultMap.set(img.id, img);
-        }
+      return new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readonly');
+        const store = transaction.objectStore('images');
+        const resultMap = new Map();
+        
+        // 使用游标遍历，比getAll()更高效
+        const request = store.openCursor();
+        
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            const img = cursor.value;
+            if (idSet.has(img.id)) {
+              resultMap.set(img.id, img);
+            }
+            cursor.continue();
+          } else {
+            // 游标遍历完成
+            logger.debug(`📥 IndexedDB批量查询: 请求${imageIds.length}张, 找到${resultMap.size}张`);
+            resolve(resultMap);
+          }
+        };
+        
+        request.onerror = () => {
+          logger.error('IndexedDB游标查询失败:', request.error);
+          reject(request.error);
+        };
       });
       
-      // logger.debug(`📥 批量查询图片: 请求${imageIds.length}张, 找到${resultMap.size}张`);
+    } catch (error) {
+      logger.error('IndexedDB批量查询失败:', error);
+      return new Map();
+    }
+  }
+
+  // 移动端：SQLite优化查询
+  async _getImagesByIdsSQLite(imageIds) {
+    try {
+      if (!imageIds || imageIds.length === 0) {
+        return new Map();
+      }
       
+      // 确保数据库已初始化
+      await this.ensureInitialized();
+      
+      // 检查数据库对象
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ SQLite数据库对象为空');
+        return new Map();
+      }
+      
+      if (!this.storage.db.executeSql) {
+        logger.error('❌ SQLite数据库executeSql方法不存在');
+        return new Map();
+      }
+      
+      // 使用SQL IN查询，利用主键索引
+      const placeholders = imageIds.map(() => '?').join(',');
+      const sql = `SELECT * FROM images WHERE id IN (${placeholders})`;
+      
+      const [result] = await this.storage.db.executeSql(sql, imageIds);
+      
+      const resultMap = new Map();
+      if (result && result.rows) {
+        for (let i = 0; i < result.rows.length; i++) {
+          const row = result.rows.item(i);
+          // 解析JSON字段
+          const img = {
+            id: row.id,
+            uri: row.uri,
+            fileName: row.fileName,
+            category: row.category,
+            confidence: row.confidence,
+            timestamp: row.timestamp,
+            takenAt: row.takenAt,
+            size: row.size,
+            mimeType: row.mimeType,
+            width: row.width,
+            height: row.height,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            latitude: row.latitude,
+            longitude: row.longitude,
+            altitude: row.altitude,
+            accuracy: row.accuracy,
+            address: row.address,
+            city: row.city,
+            country: row.country,
+            province: row.province,
+            district: row.district,
+            street: row.street,
+            locationSource: row.locationSource,
+            cityDistance: row.cityDistance,
+            idCardDetections: row.idCardDetections ? JSON.parse(row.idCardDetections) : null,
+            generalDetections: row.generalDetections ? JSON.parse(row.generalDetections) : null,
+            mobileNetV3Detections: row.mobileNetV3Detections ? JSON.parse(row.mobileNetV3Detections) : null,
+            imageDimensions: row.imageDimensions ? JSON.parse(row.imageDimensions) : null,
+            message: row.message
+          };
+          resultMap.set(img.id, img);
+        }
+      }
+      
+      logger.debug(`📥 SQLite批量查询: 请求${imageIds.length}张, 找到${resultMap.size}张`);
       return resultMap;
       
     } catch (error) {
-      logger.error('批量获取图片失败:', error);
+      logger.error('SQLite批量查询失败:', error);
       return new Map();
     }
   }

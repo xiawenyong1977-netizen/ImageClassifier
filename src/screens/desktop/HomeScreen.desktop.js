@@ -46,10 +46,12 @@ const HomeScreen = () => {
   const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
   
   // 数据加载函数
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showLoading = true) => {
     try {
       logger.debug('HomeScreen 开始加载数据...');
-      setIsLoading(true);
+      if (showLoading) {
+        setIsLoading(true);
+      }
       
       // 并行加载所有数据
       const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings, allImages] = await Promise.all([
@@ -336,8 +338,10 @@ const HomeScreen = () => {
     if (progress.stage === 'completed') {
       setIsScanning(false);
       logger.debug('扫描完成，切换到正常模式');
-      // 重新加载数据
-      loadData();
+      // 只有在shouldRefresh为true时才重新加载数据
+      if (progress.shouldRefresh) {
+        loadData();
+      }
       // 显示扫描完成时间
       loadLastScanTime();
     }
@@ -475,21 +479,27 @@ const HomeScreen = () => {
     logger.debug('设置URL参数，imageId:', imageId, '上下文:', additionalProps);
   };
 
+
   // 处理刷新
   const onRefresh = useCallback(async () => {
     logger.debug('HomeScreen 开始刷新数据');
-    setRefreshing(true);
+    
+    // 如果正在扫描，不执行刷新
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过刷新');
+      return;
+    }
+    
+    // 移除setRefreshing(true)，避免UI闪烁
     try {
-      // 🆕 重建缓存
-      await UnifiedDataService.imageCache.refreshCache();
-      // 重新加载数据
-      await loadData();
+      // 重新加载数据（不再重建缓存，不显示loading状态）
+      await loadData(false);
     } catch (error) {
       logger.error('刷新数据失败:', error);
-    } finally {
-    setRefreshing(false);
     }
-  }, [loadData]);
+    // 移除setRefreshing(false)
+  }, [loadData, isScanning]);
+
 
   // 更新全局提示信息
   const updateGlobalMessage = useCallback((message) => {
@@ -521,8 +531,7 @@ const HomeScreen = () => {
           // 异步刷新，不阻塞扫描进度
           setImmediate(async () => {
             try {
-              // 刷新页面数据（缓存已在扫描服务中重建）
-              await onRefresh();
+              await loadData(false);
             } catch (error) {
               logger.error('❌ 定期刷新失败:', error);
             }
@@ -867,7 +876,7 @@ const HomeScreen = () => {
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>按内容</Text>
+          <Text style={styles.sectionTitle}>📁 按内容</Text>
             <TouchableOpacity
               style={styles.toggleButton}
               onPress={async () => {
@@ -945,7 +954,7 @@ const HomeScreen = () => {
         {/* 城市分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>按城市</Text>
+          <Text style={styles.sectionTitle}>🏙️ 按城市</Text>
           </View>
           <View style={styles.categoriesContainer}>
             {cityCounts && Object.keys(cityCounts).length > 0 ? (
@@ -973,7 +982,7 @@ const HomeScreen = () => {
         {similarityGroups && similarityGroups.length > 0 && (
           <View style={styles.categoriesSection}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>相似照片</Text>
+              <Text style={styles.sectionTitle}>🔗 相似照片</Text>
             </View>
             <View style={styles.categoriesContainer}>
               {similarityGroups.slice(0, 10).map((group) => (
@@ -988,7 +997,7 @@ const HomeScreen = () => {
 
         {/* 最近照片 */}
         <View style={styles.recentSection}>
-          <Text style={styles.sectionTitle}>最近</Text>
+          <Text style={styles.sectionTitle}>📸 最近照片</Text>
           <RecentImagesGrid 
             images={recentImages} 
             onImagePress={handleImagePress}
@@ -1026,24 +1035,19 @@ const HomeScreen = () => {
         {currentScreen === 'Home' && (
           <View style={styles.screenContainer}>
             {/* 消息提示区 - 只在显示正常内容时显示，readme时不显示 */}
-            {(() => {
-              const shouldShowReadme = (forceShowReadme || totalImagesCount === 0) && !isScanning;
-              // 只有在不显示 readme 时才显示提示条
-              return !shouldShowReadme ? (
-                <View style={styles.scanProgressBanner}>
-                  <Text style={styles.scanProgressMessage}>
-                    {globalMessage}
-                  </Text>
-                </View>
-              ) : null;
-            })()}
+            {!((forceShowReadme || totalImagesCount === 0) && !isScanning) && (
+              <View style={styles.scanProgressBanner}>
+                <Text style={styles.scanProgressMessage}>
+                  {globalMessage}
+                </Text>
+              </View>
+            )}
             {/* 当没有图片时显示 readme，否则显示正常内容 */}
-            {(() => {
-              logger.debug('readmeContent 长度:', readmeContent.length);
-              const shouldShowReadme = (forceShowReadme || totalImagesCount === 0) && !isScanning;
-              logger.debug('shouldShowReadme:', shouldShowReadme);
-              return shouldShowReadme ? <ReadmeView /> : renderHomeContent();
-            })()}
+            {(forceShowReadme || totalImagesCount === 0) && !isScanning ? (
+              <ReadmeView />
+            ) : (
+              renderHomeContent()
+            )}
           </View>
         )}
         

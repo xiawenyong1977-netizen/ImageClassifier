@@ -489,8 +489,6 @@ class ImageProcessor {
         outputPath = null
       } = options;
 
-      logger.debug(`🔄 [Canvas] 缩放图片: ${imageUri} -> ${targetWidth}x${targetHeight}`);
-
       // 1. 加载图片
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -504,8 +502,6 @@ class ImageProcessor {
       const originalWidth = img.naturalWidth;
       const originalHeight = img.naturalHeight;
       
-      logger.debug(`📐 原始尺寸: ${originalWidth}x${originalHeight}`);
-
       // 2. 计算最终尺寸
       let finalWidth, finalHeight;
       if (maintainAspectRatio) {
@@ -518,8 +514,6 @@ class ImageProcessor {
         finalWidth = targetWidth;
         finalHeight = targetHeight;
       }
-
-      logger.debug(`📏 最终尺寸: ${finalWidth}x${finalHeight}`);
 
       // 3. 创建Canvas并绘制缩放后的图片
       const canvas = document.createElement('canvas');

@@ -754,7 +754,9 @@ export const SQLite = {
   openDatabase: (name, version, displayName, size) => {
     if (Platform.OS === 'web') {
       logger.debug(`[Web] SQLite.openDatabase: ${name}`);
-      return {
+      
+      // 创建模拟的数据库对象
+      const db = {
         transaction: (fn) => {
           logger.debug('[Web] SQLite.transaction');
           fn({
@@ -778,6 +780,36 @@ export const SQLite = {
           });
         },
       };
+      
+      // 添加 executeSql 方法，与移动端保持一致
+      db.executeSql = (sql, params = []) => {
+        logger.debug('[Web] SQLite.executeSql (direct):', sql);
+        
+        // 在PC端，我们模拟数据库操作
+        // 对于批量插入等操作，我们返回成功结果
+        return new Promise((resolve, reject) => {
+          try {
+            // 模拟执行成功
+            const mockResult = {
+              rows: {
+                length: 0,
+                raw: () => [],
+                item: (index) => null
+              },
+              insertId: Math.floor(Math.random() * 1000), // 模拟插入ID
+              rowsAffected: params.length || 1 // 模拟影响的行数
+            };
+            
+            logger.debug('[Web] SQLite.executeSql completed successfully');
+            resolve([mockResult]);
+          } catch (error) {
+            logger.error('[Web] SQLite.executeSql error:', error);
+            reject(error);
+          }
+        });
+      };
+      
+      return db;
     } else {
       // 移动端使用原生API
       const SQLite = eval('require("react-native-sqlite-storage")');

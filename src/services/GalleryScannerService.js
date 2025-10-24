@@ -10,8 +10,8 @@ import {
 } from '../adapters/WebAdapters';
 
 import ImageClassifierService from './ImageClassifierService';
-
 import cityLocationService from './CityLocationService';
+import ImageProcessor from './ImageProcessor';
 
 
 
@@ -45,21 +45,59 @@ const createDefaultLocationInfo = (source = 'none') => ({
 
 
 
+// 验证EXIF时间戳是否合理（避免文件名数字被误用）
+const isValidExifTimestamp = (timestamp) => {
+  if (!timestamp || typeof timestamp !== 'number') {
+    return false;
+  }
+  
+  // 检查是否是文件名中的数字（通常是15位数字）
+  if (timestamp > 999999999999999) {
+    logger.warn(`⚠️ 检测到可能的文件名数字被误用为时间戳: ${timestamp}`);
+    return false;
+  }
+  
+  // 检查时间戳是否在合理范围内（1970年到2100年）
+  const year = new Date(timestamp * 1000).getFullYear();
+  return year >= 1970 && year <= 2100;
+};
+
 // 从exif-parser数据中提取GPS信息
 
 const extractGPSFromExifParser = async (exifData, fileName = '', useRemoteApi = true) => {
   if (!exifData?.tags) {
+    logger.debug(`🌍 EXIF GPS提取失败: 没有tags数据, 文件: ${fileName}`);
     return null;
   }
 
   const { GPSLatitude, GPSLongitude, GPSAltitude, GPSHPositioningError } = exifData.tags;
 
+  // 调试：检查GPS字段是否存在
+  logger.debug(`🌍 EXIF GPS字段检查:`, {
+    fileName: fileName,
+    hasGPSLatitude: !!GPSLatitude,
+    hasGPSLongitude: !!GPSLongitude,
+    hasGPSAltitude: !!GPSAltitude,
+    GPSLatitude: GPSLatitude,
+    GPSLongitude: GPSLongitude,
+    GPSAltitude: GPSAltitude
+  });
+
   if (!GPSLatitude || !GPSLongitude) {
+    logger.debug(`🌍 EXIF GPS提取失败: 缺少GPS坐标数据, 文件: ${fileName}`);
     return null;
   }
 
   // 查找最近的城市信息（根据远程服务状态决定是否使用远程API）
-  const nearestCity = await cityLocationService.findNearestCityAsync(GPSLatitude, GPSLongitude, 200, useRemoteApi);
+  logger.debug(`🌍 开始查找城市信息: GPS(${GPSLatitude}, ${GPSLongitude}), useRemoteApi=${useRemoteApi}`);
+  
+  let nearestCity = null;
+  try {
+    nearestCity = await cityLocationService.findNearestCityAsync(GPSLatitude, GPSLongitude, 200, useRemoteApi);
+    logger.debug(`🌍 城市信息查找完成:`, nearestCity);
+  } catch (error) {
+    logger.error(`🌍 城市信息查找失败:`, error);
+  }
 
   // 调试：记录城市信息提取结果
   if (nearestCity) {
@@ -310,8 +348,14 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         hasTags: !!exifData.tags,
         hasDateTimeOriginal: !!exifData.tags?.DateTimeOriginal,
         hasDateTime: !!exifData.tags?.DateTime,
+        hasGPSLatitude: !!exifData.tags?.GPSLatitude,
+        hasGPSLongitude: !!exifData.tags?.GPSLongitude,
+        hasGPSAltitude: !!exifData.tags?.GPSAltitude,
         DateTimeOriginal: exifData.tags?.DateTimeOriginal,
-        DateTime: exifData.tags?.DateTime
+        DateTime: exifData.tags?.DateTime,
+        GPSLatitude: exifData.tags?.GPSLatitude,
+        GPSLongitude: exifData.tags?.GPSLongitude,
+        GPSAltitude: exifData.tags?.GPSAltitude
       });
 
       // 提取拍照时间
@@ -326,7 +370,7 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         logger.debug(`🔍 EXIF DateTimeOriginal 原始值: ${exifTime}, 文件: ${fileName}`);
         
         // 验证时间戳是否合理（避免文件名数字被误用）
-        if (this.isValidExifTimestamp(exifTime)) {
+        if (isValidExifTimestamp(exifTime)) {
           // 检查是否是微秒级时间戳（大于 13 位数字）
           if (exifTime > 9999999999999) {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
@@ -345,7 +389,7 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         logger.debug(`🔍 EXIF DateTime 原始值: ${exifTime}, 文件: ${fileName}`);
         
         // 验证时间戳是否合理（避免文件名数字被误用）
-        if (this.isValidExifTimestamp(exifTime)) {
+        if (isValidExifTimestamp(exifTime)) {
           // 检查是否是微秒级时间戳（大于 13 位数字）
           if (exifTime > 9999999999999) {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
@@ -361,11 +405,17 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
       
 
       // 提取GPS信息
-      const gpsInfo = await extractGPSFromExifParser(exifData, fileName, useRemoteApi);
-
-      // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
-      if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
-        logger.debug(`🌍 EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
+      let gpsInfo = null;
+      try {
+        gpsInfo = await extractGPSFromExifParser(exifData, fileName, useRemoteApi);
+        
+        // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
+        if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
+          logger.debug(`🌍 EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
+        }
+      } catch (gpsError) {
+        logger.warn(`⚠️ GPS信息提取失败: ${gpsError.message}, 文件: ${fileName}`);
+        gpsInfo = null;
       }
 
       const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
@@ -379,10 +429,9 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
       // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
       if (!imageDimensions.width || !imageDimensions.height) {
         try {
-          const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
           // 确保使用 file:// 格式的 URI
           const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
-          const dimensions = await imageProcessor.getImageDimensions(imageUri);
+          const dimensions = await ImageProcessor.getImageDimensions(imageUri);
           if (dimensions) {
             imageDimensions = {
               width: dimensions.width,
@@ -493,10 +542,9 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
         if (!imageDimensions.width || !imageDimensions.height) {
           try {
-            const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
             // 确保使用 file:// 格式的 URI
             const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
-            const dimensions = await imageProcessor.getImageDimensions(imageUri);
+            const dimensions = await ImageProcessor.getImageDimensions(imageUri);
             if (dimensions) {
               imageDimensions = {
                 width: dimensions.width,
@@ -518,10 +566,9 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // 即使 EXIF 读取失败，也尝试用 ImageProcessor 获取尺寸
         let imageDimensions = { width: null, height: null };
         try {
-          const imageProcessor = require('../services/ImageProcessor').default || require('../services/ImageProcessor');
           // 确保使用 file:// 格式的 URI
           const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
-          const dimensions = await imageProcessor.getImageDimensions(imageUri);
+          const dimensions = await ImageProcessor.getImageDimensions(imageUri);
           if (dimensions) {
             imageDimensions = {
               width: dimensions.width,
@@ -2112,12 +2159,9 @@ class GalleryScannerService {
     // 并行处理所有图片
     const promises = images.map(async (image) => {
       try {
-        const imageProcessor = require('./ImageProcessor').default || require('./ImageProcessor');
-        const { Platform } = require('../adapters/WebAdapters');
-        
         if (Platform.OS === 'web') {
           // PC端：缩放并获取 Blob
-          const result = await imageProcessor.resizeImageAndGetBlob(
+          const result = await ImageProcessor.resizeImageAndGetBlob(
             image.uri,
             1024,
             1024,
@@ -2139,7 +2183,7 @@ class GalleryScannerService {
           };
         } else {
           // 移动端：只缩放，不创建Blob（FormData直接使用文件URI）
-          const result = await imageProcessor.resizeImage(
+          const result = await ImageProcessor.resizeImage(
             image.uri,
             1024,
             1024,
@@ -2151,7 +2195,6 @@ class GalleryScannerService {
           );
           
           // 获取文件大小（用于统计）
-          const RNFS = require('react-native-fs');
           const stat = await RNFS.stat(result.uri.replace('file://', ''));
           
           return {
@@ -2209,7 +2252,6 @@ class GalleryScannerService {
         // 【关键】等待文件完全写入磁盘（移动端需要）
         // react-native-image-resizer 的 Promise resolve 后，文件可能还在写入
         // 优化：减少延迟到150ms（实测足够）
-        const { Platform } = require('../adapters/WebAdapters');
         if (Platform.OS !== 'web') {
           await new Promise(resolve => setTimeout(resolve, 150));
         }
@@ -2223,16 +2265,6 @@ class GalleryScannerService {
         // 处理推理结果
         for (const item of batchResult.items) {
           const imageData = item.imageData;
-          
-          logger.debug(`🔍 处理推理结果: success=${item.success}, hasData=${!!item.data}, fileName=${imageData.fileName}`);
-          if (item.data) {
-            logger.debug(`📊 推理数据内容:`, {
-              category: item.data.category,
-              hasLocalResult: !!item.data.local_inference_result,
-              confidence: item.data.confidence,
-              description: item.data.description
-            });
-          }
           
           if (item.success && item.data) {
             // 判断是大模型还是小模型推理

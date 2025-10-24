@@ -5,7 +5,7 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
 
-const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmartScan }) => {
+const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmartScan, isScanning }) => {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [galleryPaths, setGalleryPaths] = useState([]); // 默认路径，将在loadSettings中设置
@@ -279,6 +279,16 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
 
 
   const handleClearData = async () => {
+    // 先检查是否正在扫描（使用全局变量）
+    if (typeof window !== 'undefined' && window.isScanning) {
+      Alert.alert(
+        '操作提示',
+        '扫描正在进行中，请等待扫描完成后再清空数据。',
+        [{ text: '确定', style: 'default' }]
+      );
+      return;
+    }
+
     Alert.alert(
       '清空照片信息',
       '确定要清空所有照片的分类和位置信息吗？此操作不可撤销。',
@@ -306,6 +316,16 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
 
   // 智能扫描
   const handleSmartScan = async () => {
+    // 先检查是否正在扫描（使用全局变量）
+    if (typeof window !== 'undefined' && window.isScanning) {
+      Alert.alert(
+        '操作提示',
+        '扫描正在进行中，请等待当前扫描完成后再开始新的扫描。',
+        [{ text: '确定', style: 'default' }]
+      );
+      return;
+    }
+
     try {
       Alert.alert(
         '智能扫描',
