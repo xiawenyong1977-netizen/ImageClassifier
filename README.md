@@ -1,6 +1,6 @@
 # 芯图相册 - AI智能照片分类管理工具
 
-[![Website](https://img.shields.io/badge/website-https://www.xintuxiangce.top-blue.svg)](https://www.xintuxiangce.top/intro.html)
+[![Website](https://img.shields.io/badge/website-https://www.xintuxiangce.top-blue.svg)](https://www.xintuxiangce.top)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](https://www.xintuxiangce.top)
 [![AI](https://img.shields.io/badge/AI-90%25%2B%20Accuracy-brightgreen.svg)](https://www.xintuxiangce.top)
@@ -58,7 +58,7 @@
 ### 下载安装
 
 **方式1：官网下载**
-1. 访问官网：https://www.xintuxiangce.top/intro.html
+1. 访问官网：https://www.xintuxiangce.top/
 2. 点击下载按钮
 3. 运行安装程序
 4. 按照提示完成安装
@@ -241,7 +241,7 @@ npx react-native run-ios        # 运行iOS版本
 
 ## 📚 相关资源
 
-- [官方网站](https://www.xintuxiangce.top/intro.html) - 软件下载和使用指南
+- [官方网站](https://www.xintuxiangce.top/) - 软件下载和使用指南
 - [使用教程](https://www.xintuxiangce.top/blog.html) - 详细的使用教程
 - [技术博客](https://www.xintuxiangce.top/blog.html) - AI照片分类技术解析
 - [常见问题](https://www.xintuxiangce.top/#faq) - FAQ解答
