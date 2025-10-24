@@ -27,7 +27,7 @@ class ImageClassifierService {
     // 批量处理配置
     this.BATCH_CONFIG = {
       CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
-      UPLOAD_BATCH_SIZE: 5,       // 批量上传大小（移动端会在每批次后清理临时文件）
+      UPLOAD_BATCH_SIZE: 20,       // 批量上传大小（移动端会在每批次后清理临时文件）
       REMOTE_TIMEOUT: 120000,     // 远程请求超时（毫秒）- 增加到120秒（移动端网络较慢）
       HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
     };
@@ -237,10 +237,6 @@ class ImageClassifierService {
     }
   }
 
-  /**
-   * 检测可用的执行提供者（GPU/CPU）
-   * @returns {Promise<string[]>} 可用的执行提供者列表
-   */
   async detectAvailableProviders() {
     // 如果已经检测过，直接返回缓存结果
     if (this.cachedProviders) {

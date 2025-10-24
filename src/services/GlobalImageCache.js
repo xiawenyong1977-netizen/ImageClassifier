@@ -70,8 +70,8 @@ class GlobalImageCache {
       return this.cache;
     }
 
-    // 只在真正开始构建时打印堆栈
-    logger.debug('开始构建缓存...', new Error().stack);
+    // 只在真正开始构建时打印
+    logger.debug('开始构建缓存...');
     this.isLoading = true;
 
     try {
@@ -707,12 +707,7 @@ class GlobalImageCache {
 
   // 获取指定分类的所有图片
   getImagesByCategory(category) {
-    logger.debug('🔍 getImagesByCategory 开始:', category);
-    
     const normalizedCategory = this._normalizeCategoryId(category);
-    logger.debug('🔍 getImagesByCategory 标准化分类ID:', normalizedCategory);
-    
-    logger.debug('🔍 getImagesByCategory 开始过滤，总图片数:', this.cache.allImages.length);
     
     const result = this.cache.allImages.filter(img => {
       // 🆕 添加空值检查
@@ -730,7 +725,6 @@ class GlobalImageCache {
       return imgCategory === normalizedCategory;
     });
     
-    logger.debug('🔍 getImagesByCategory 过滤完成:', result.length);
     return result;
   }
 

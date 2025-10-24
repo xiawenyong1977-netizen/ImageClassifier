@@ -104,9 +104,7 @@ class ImageSimilarityService {
         }
       );
 
-      // 保存检测结果
-      await this._saveDetectionResults(detectionResult);
-
+      // 检测结果已在窗口级实时保存，无需再次保存
       logger.debug(`✅ 相似度检测完成: 发现${detectionResult.groups.length}个相似组, 处理${detectionResult.processed}张图片`);
       
       // 异步清理临时文件（不阻塞返回，延迟5秒确保文件释放）
@@ -132,6 +130,40 @@ class ImageSimilarityService {
         groups: [],
         processed: 0
       };
+    }
+  }
+
+  /**
+   * 保存窗口相似组数据（实时保存）
+   * @param {Array} windowGroups - 窗口相似组数组
+   * @private
+   */
+  async _saveWindowGroups(windowGroups) {
+    try {
+      // 从窗口相似组中提取所有处理过的图片
+      const processedImages = [];
+      for (const group of windowGroups) {
+        processedImages.push(...group.images);
+      }
+
+      // 准备批量更新的相似度数据
+      const imageSimilarityArray = processedImages.map(imageData => ({
+        imageId: imageData.id,
+        similarityInfo: {
+          similarity_group_id: imageData.similarity_group_id,
+          similarity_group_type: imageData.similarity_group_type,
+          similarity_score: imageData.similarity_score,
+          is_similarity_processed: true
+        }
+      }));
+
+      // 使用批量更新函数，避免多次读取全部数据
+      await this.getUnifiedDataService().updateImagesSimilarity(imageSimilarityArray);
+      // logger.debug(`✅ 窗口相似组实时保存完成，更新${imageSimilarityArray.length}张图片`);
+
+    } catch (error) {
+      console.error('❌ 窗口相似组保存失败:', error);
+      throw error;
     }
   }
 
@@ -249,6 +281,11 @@ class ImageSimilarityService {
           processed: window.length,
           windowIndex: index
         });
+        
+        // 窗口级实时保存：每个窗口处理完立即保存
+        if (windowGroups.length > 0) {
+          await this._saveWindowGroups(windowGroups);
+        }
         
         // 更频繁的进度更新：每5个窗口、每3个相似组或最后一个窗口
         if (opts.onProgress && (index % 5 === 0 || index === timeWindows.length - 1 || totalGroups % 3 === 0)) {
@@ -634,7 +671,6 @@ class ImageSimilarityService {
           if (similarity >= options.textSimilarityThreshold) {
             similarImages.push(image2);
             processed.add(j);
-            logger.debug(`🔗 文本相似: ${image1.fileName} <-> ${image2.fileName} (${(similarity * 100).toFixed(1)}%)`);
           }
         } else {
           similarity = this._calculateObjectSimilarity(image1, image2);

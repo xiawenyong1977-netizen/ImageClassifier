@@ -532,6 +532,8 @@ export const ModelPathAdapter = {
   
   getExecutionProviders: () => {
     // React Native环境：优先使用XNNPACK，降级为CPU
+    // 注意：GPU推理可能因为内存拷贝开销而比CPU更慢
+    // 特别是对于轻量级模型，建议先进行性能测试
     return ['cpu'];
   },
 };

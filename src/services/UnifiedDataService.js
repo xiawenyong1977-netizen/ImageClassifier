@@ -153,12 +153,9 @@ class UnifiedDataService {
       
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
-      logger.debug('🔍 readImagesByCategory 标准化分类ID:', normalizedCategory);
       
       // 直接从缓存获取分类图片
-      logger.debug('🔍 readImagesByCategory 调用 getImagesByCategory...');
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
-      logger.debug('🔍 readImagesByCategory getImagesByCategory 完成，结果:', categoryImages.length);
       
       // 🆕 检查返回的数据
       if (!Array.isArray(categoryImages)) {
@@ -1160,7 +1157,7 @@ class UnifiedDataService {
    */
   async updateImagesSimilarity(imageSimilarityArray) {
     try {
-      logger.debug('批量更新图片相似度信息:', imageSimilarityArray.length);
+      // logger.debug('批量更新图片相似度信息:', imageSimilarityArray.length);
       await this.imageStorageService.updateImagesSimilarity(imageSimilarityArray);
       logger.debug('图片相似度信息更新完成');
     } catch (error) {
@@ -1180,7 +1177,7 @@ class UnifiedDataService {
    */
   async getSimilarityGroupsStats() {
     try {
-      logger.debug('📊 获取相似度组统计信息...');
+      // logger.debug('📊 获取相似度组统计信息...');
       
       // 使用 ImageStorageService 获取相似组数据
       const similarityGroups = await this.imageStorageService.getSimilarityGroups('similar');
@@ -1221,7 +1218,7 @@ class UnifiedDataService {
       // 按组大小排序（从大到小）
       groups.sort((a, b) => b.imageCount - a.imageCount);
       
-      logger.debug(`📊 相似度组统计: ${groups.length}个组`);
+      // logger.debug(`📊 相似度组统计: ${groups.length}个组`);
       return groups;
       
     } catch (error) {

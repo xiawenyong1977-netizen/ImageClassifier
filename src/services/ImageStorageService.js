@@ -421,15 +421,14 @@ class SQLiteAdapter {
   }
 
   generateStableId(uri) {
-    // 与IndexedDB保持一致的ID生成逻辑
+    // 只使用URI的哈希值，确保同一URI总是生成相同ID
     let hash = 0;
     for (let i = 0; i < uri.length; i++) {
       const char = uri.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
       hash = hash & hash;
     }
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-    return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
+    return `img_${Math.abs(hash).toString(36)}`;
   }
 
   // 🆕 专用方法：更新图片分类（单条记录）
@@ -896,16 +895,14 @@ class IndexedDBAdapter {
 
   // 生成稳定的ID
   generateStableId(uri) {
-    // 使用URI的简单哈希作为ID基础，确保相同URI总是生成相同ID
+    // 只使用URI的哈希值，确保同一URI总是生成相同ID
     let hash = 0;
     for (let i = 0; i < uri.length; i++) {
       const char = uri.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
       hash = hash & hash; // 转换为32位整数
     }
-    // 添加随机数确保唯一性，避免并发冲突
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-    return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
+    return `img_${Math.abs(hash).toString(36)}`;
   }
 }
 
@@ -1027,7 +1024,6 @@ class ImageStorageService {
       }
     }
   }
-
 
   // 批量保存图片详细信息
   async saveImageDetailedInfo(imageDataArray) {
@@ -1204,9 +1200,7 @@ class ImageStorageService {
           hash = ((hash << 5) - hash) + char;
           hash = hash & hash; // 转换为32位整数
         }
-        // 添加随机数确保唯一性，避免并发冲突
-        const randomSuffix = Math.random().toString(36).substring(2, 8);
-        return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
+        return `img_${Math.abs(hash).toString(36)}`;
       };
       
       const imageRecord = {
@@ -1413,9 +1407,7 @@ class ImageStorageService {
           hash = ((hash << 5) - hash) + char;
           hash = hash & hash; // 转换为32位整数
         }
-        // 添加随机数确保唯一性，避免并发冲突
-        const randomSuffix = Math.random().toString(36).substring(2, 8);
-        return `img_${Math.abs(hash).toString(36)}_${Date.now()}_${randomSuffix}`;
+        return `img_${Math.abs(hash).toString(36)}`;
       };
       
       const imageRecord = {
@@ -1555,7 +1547,7 @@ class ImageStorageService {
         }
       });
       
-      logger.debug(`📥 批量查询图片: 请求${imageIds.length}张, 找到${resultMap.size}张`);
+      // logger.debug(`📥 批量查询图片: 请求${imageIds.length}张, 找到${resultMap.size}张`);
       
       return resultMap;
       
@@ -2818,7 +2810,7 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       await this.storage.setItem(this.storageKeys.similarityGroupIndex, groupIndex);
-      logger.debug(`✅ 保存相似组索引成功，共${Object.keys(groupIndex).length}个组`);
+      // logger.debug(`✅ 保存相似组索引成功，共${Object.keys(groupIndex).length}个组`);
       return true;
     } catch (error) {
       logger.error(' 保存相似组索引失败:', error);
@@ -2986,7 +2978,7 @@ class ImageStorageService {
     try {
       await this.ensureInitialized();
       await this.storage.setItem(this.storageKeys.similarityData, similarityData);
-      logger.debug(`✅ 保存相似度数据成功，共${Object.keys(similarityData).length}条记录`);
+      // logger.debug(`✅ 保存相似度数据成功，共${Object.keys(similarityData).length}条记录`);
       return true;
     } catch (error) {
       logger.error(' 保存相似度数据失败:', error);

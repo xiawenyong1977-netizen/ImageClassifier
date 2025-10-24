@@ -28,6 +28,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // ==================== 状态管理 ====================
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState({});
+  
   const [storageType, setStorageType] = useState('检测中...');
   const [storageSize, setStorageSize] = useState('计算中...');
   
@@ -176,6 +177,17 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    * 清空相册信息
    */
   const handleClearData = () => {
+    // 先检查是否正在扫描（使用全局变量）
+    if (window.isScanning) {
+      Alert.alert(
+        '操作提示',
+        '扫描正在进行中，请等待扫描完成后再清空数据。',
+        [{ text: '确定', style: 'default' }]
+      );
+      return;
+    }
+
+    // 扫描未进行时才显示确认对话框
     Alert.alert(
       '确认清空',
       '确定要清空所有照片的分类和位置信息吗？\n\n⚠️ 此操作不可恢复！',

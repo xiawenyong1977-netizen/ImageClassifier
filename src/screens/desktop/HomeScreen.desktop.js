@@ -521,9 +521,7 @@ const HomeScreen = () => {
           // 异步刷新，不阻塞扫描进度
           setImmediate(async () => {
             try {
-              // 强制刷新存储服务缓存
-              await UnifiedDataService.imageCache.refreshCache();
-              // 然后刷新页面数据
+              // 刷新页面数据（缓存已在扫描服务中重建）
               await onRefresh();
             } catch (error) {
               logger.error('❌ 定期刷新失败:', error);

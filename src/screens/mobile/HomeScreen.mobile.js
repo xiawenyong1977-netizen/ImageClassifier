@@ -734,7 +734,7 @@ const HomeScreen = ({ navigation }) => {
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>相似照片</Text>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🔗 相似照片</Text>
         <View style={styles.categoriesGrid}>
           {similarityGroups.map(renderSimilarityGroupCard)}
         </View>
@@ -796,7 +796,7 @@ const HomeScreen = ({ navigation }) => {
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>按城市</Text>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🏙️ 按城市</Text>
         <View style={styles.categoriesGrid}>
           {cities.slice(0, 8).map(renderCityCard)}
         </View>
