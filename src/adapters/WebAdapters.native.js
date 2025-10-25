@@ -185,9 +185,15 @@ export const RNFS = {
       try {
         const { MediaStoreModule } = NativeModules;
         if (MediaStoreModule) {
-          const result = await MediaStoreModule.deleteFile(cleanPath);
-          if (result.success) {
-            return;
+          try {
+            const result = await MediaStoreModule.deleteFile(cleanPath);
+            if (result) {
+              return; // 删除成功
+            }
+            // 删除失败，继续尝试RNFS
+          } catch (error) {
+            // MediaStore 删除失败，降级到 RNFS
+            logger.warn('⚠️ MediaStore删除失败:', error.message);
           }
         }
       } catch (error) {

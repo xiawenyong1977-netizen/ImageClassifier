@@ -74,13 +74,13 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             }
             
             Log.d(TAG, "所有删除方法都失败了: " + filePath);
-            // 静默处理错误，不触发系统通知，只返回false
-            promise.resolve(false);
+            // 返回明确的错误信息
+            promise.reject("DELETE_FAILED", "文件删除失败，可能没有权限或文件不存在");
             
         } catch (Exception e) {
             Log.e(TAG, "删除文件时发生错误: " + e.getMessage(), e);
-            // 静默处理异常，不触发系统通知，只返回false
-            promise.resolve(false);
+            // 返回具体的错误信息
+            promise.reject("DELETE_ERROR", "删除文件时发生错误: " + e.getMessage());
         }
     }
 

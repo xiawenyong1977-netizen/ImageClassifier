@@ -533,12 +533,17 @@ export const RNFS = {
         
         if (MediaStoreModule) {
           logger.debug('📱 尝试使用MediaStore API删除');
-          const result = await MediaStoreModule.deleteFile(cleanPath);
-          if (result) {
-            logger.debug('✅ MediaStore删除成功');
-            return true;
+          try {
+            const result = await MediaStoreModule.deleteFile(cleanPath);
+            if (result) {
+              logger.debug('✅ MediaStore删除成功');
+              return true;
+            }
+            logger.warn('⚠️ MediaStore删除失败，降级到RNFS');
+          } catch (error) {
+            logger.warn('⚠️ MediaStore删除失败:', error.message);
+            // 继续尝试RNFS
           }
-          logger.warn('⚠️ MediaStore删除失败，降级到RNFS');
         }
       } catch (error) {
         logger.warn('⚠️ MediaStore删除失败:', error.message);

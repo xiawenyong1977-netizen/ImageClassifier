@@ -222,7 +222,8 @@ class MediaStoreService {
       return result;
     } catch (error) {
       logger.error(`❌ MediaStore: 删除文件失败 (path=${filePath})`, error);
-      return false;
+      // 抛出错误而不是静默返回false
+      throw new Error(`删除文件失败: ${error.message}`);
     }
   }
 
