@@ -49,7 +49,8 @@ public class MainApplication extends Application implements ReactApplication {
             new VectorIconsPackage(),
             new SQLitePluginPackage(),
             new OnnxruntimePackage(),
-            new MediaStorePackage()  // 添加MediaStore原生模块
+            new MediaStorePackage(),  // 添加MediaStore原生模块
+            new SharePackage()  // 添加Share原生模块
           );
         }
 

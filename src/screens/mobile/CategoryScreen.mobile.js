@@ -21,6 +21,7 @@ import {
   Share,
   Modal,
   ScrollView,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaView, useFocusEffect, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -816,17 +817,17 @@ const CategoryScreen = ({ route, navigation }) => {
         return;
       }
       
-      if (imageIds.length === 1) {
-        // 单张图片：直接分享
-        const image = images.find(img => img.id === imageIds[0]);
-        if (!image) {
-          Alert.alert('错误', '图片不存在');
-          return;
-        }
-        
-        try {
+      const selectedImages = images.filter(img => imageIds.includes(img.id));
+      if (selectedImages.length === 0) {
+        Alert.alert('错误', '没有找到选中的图片');
+        return;
+      }
+
+      try {
+        if (selectedImages.length === 1) {
+          // 单张图片：使用url参数
           const result = await Share.share({
-            url: image.uri,
+            url: selectedImages[0].uri,
             message: '分享图片',
           });
           
@@ -835,17 +836,68 @@ const CategoryScreen = ({ route, navigation }) => {
           } else if (result.action === Share.dismissedAction) {
             logger.debug('用户取消分享');
           }
-        } catch (error) {
-          logger.error('❌ 分享失败:', error);
-          Alert.alert('分享失败', '请重试');
+        } else {
+          // 多张图片：使用urls参数
+          const urls = selectedImages.map(img => img.uri);
+          
+          // 调试：打印图片URI信息
+          logger.debug('准备分享的图片URIs:', urls);
+          selectedImages.forEach((img, index) => {
+            logger.debug(`图片${index + 1}:`, {
+              id: img.id,
+              uri: img.uri,
+              path: img.path,
+              filename: img.filename
+            });
+          });
+          
+          // 尝试使用原生模块分享多张图片
+          try {
+            const { MultiImageShareModule } = NativeModules;
+            if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
+              // 使用原生模块分享
+              await MultiImageShareModule.shareMultipleImages(urls);
+              logger.debug(`✅ 原生模块分享 ${selectedImages.length} 张图片成功`);
+              Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+            } else {
+              // 回退到React Native Share
+              const result = await Share.share({
+                urls: urls,
+                message: `分享 ${selectedImages.length} 张图片`,
+              });
+              
+              if (result.action === Share.sharedAction) {
+                logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
+                Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+              } else if (result.action === Share.dismissedAction) {
+                logger.debug('用户取消分享');
+              }
+            }
+          } catch (nativeError) {
+            logger.error('❌ 原生模块分享失败:', nativeError);
+            
+            // 回退到React Native Share
+            try {
+              const result = await Share.share({
+                urls: urls,
+                message: `分享 ${selectedImages.length} 张图片`,
+              });
+              
+              if (result.action === Share.sharedAction) {
+                logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
+                Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+              } else if (result.action === Share.dismissedAction) {
+                logger.debug('用户取消分享');
+              }
+            } catch (shareError) {
+              logger.error('❌ React Native分享也失败:', shareError);
+              Alert.alert('分享失败', '分享失败，请重试');
+            }
+          }
         }
-    } else {
-        // 多张图片：提示用户
-        Alert.alert(
-          '分享多张图片',
-          `已选择 ${imageIds.length} 张图片。\n\n由于系统限制，一次只能分享一张图片。\n\n建议：\n1. 取消选择，只选一张图片\n2. 或使用相册的批量分享功能`,
-          [{ text: '知道了' }]
-        );
+      } catch (error) {
+        logger.error('❌ 分享失败:', error);
+        Alert.alert('分享失败', '分享失败，请重试');
       }
     } catch (error) {
       logger.error('❌ 分享操作失败:', error);
