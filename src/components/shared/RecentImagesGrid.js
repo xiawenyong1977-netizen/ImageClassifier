@@ -1,20 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, memo, useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import { logger } from '../../adapters/WebAdapters';
 
-const RecentImagesGrid = ({ images, onImagePress }) => {
-  const [imageErrors, setImageErrors] = useState({});
+// 优化的图片组件，避免不必要的重新渲染
+const MemoizedImage = memo(({ uri, imageId, onError, onLoad }) => {
+  const imageSource = useMemo(() => ({ uri }), [uri]);
   
-  if (!images || images.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>暂无照片</Text>
-      </View>
-    );
-  }
+  return (
+    <Image
+      source={imageSource}
+      style={styles.image}
+      onError={onError}
+      onLoad={onLoad}
+      resizeMode="cover"
+    />
+  );
+});
 
-  const handleImageError = (imageId) => {
+const RecentImagesGrid = memo(({ images, onImagePress }) => {
+  const [imageErrors, setImageErrors] = useState({});
+
+  const handleImageError = useCallback((imageId) => {
     setImageErrors(prev => {
       // 只有在状态真正变化时才更新，避免无限循环
       if (prev[imageId] === true) {
@@ -22,9 +29,9 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
       }
       return { ...prev, [imageId]: true };
     });
-  };
+  }, []);
 
-  const handleImageLoad = (imageId) => {
+  const handleImageLoad = useCallback((imageId) => {
     setImageErrors(prev => {
       // 只有在状态真正变化时才更新，避免无限循环
       if (prev[imageId] === false) {
@@ -32,7 +39,15 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
       }
       return { ...prev, [imageId]: false };
     });
-  };
+  }, []);
+
+  if (!images || images.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>暂无照片</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.grid}>
@@ -93,7 +108,7 @@ const RecentImagesGrid = ({ images, onImagePress }) => {
       })}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   grid: {

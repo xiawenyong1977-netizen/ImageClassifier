@@ -36,7 +36,6 @@ const HomeScreen = () => {
   const [lastScanTime, setLastScanTime] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
   const [totalImagesCount, setTotalImagesCount] = useState(0);
   const [readmeContent, setReadmeContent] = useState('');
   const [forceShowReadme, setForceShowReadme] = useState(false);
@@ -45,13 +44,10 @@ const HomeScreen = () => {
   // 使用 ref 存储设置值，避免异步状态更新问题
   const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
   
-  // 数据加载函数
-  const loadData = useCallback(async (showLoading = true) => {
+  // 数据加载函数（异步读取，但无loading状态）
+  const loadData = useCallback(async () => {
     try {
       logger.debug('HomeScreen 开始加载数据...');
-      if (showLoading) {
-        setIsLoading(true);
-      }
       
       // 并行加载所有数据
       const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings, allImages] = await Promise.all([
@@ -125,16 +121,13 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 数据加载完成, 图片总数:', totalCount);
       logger.debug('allImages 类型:', typeof allImages, 'isArray:', Array.isArray(allImages));
       
-      // 使用 setTimeout 确保状态更新后再设置 isLoading
-      setTimeout(() => {
-        setIsLoading(false);
-      }, 0);
-      
     } catch (error) {
       logger.error('HomeScreen 数据加载失败:', error);
-      setIsLoading(false);
     }
   }, []);
+
+  // 使用 useMemo 稳定 recentImages 引用，避免不必要的重新渲染
+  const stableRecentImages = useMemo(() => recentImages, [recentImages]);
   
   // 监听 hideEmptyCategories 变化，同步更新 ref
   useEffect(() => {
@@ -275,8 +268,11 @@ const HomeScreen = () => {
 
   // 初始化数据加载
   useEffect(() => {
-    loadData();
-    loadReadme();
+    const initializeData = async () => {
+      await loadData();
+      loadReadme();
+    };
+    initializeData();
   }, []);
   
   // 页面重新挂载时重新加载数据（通过页面切换实现）
@@ -420,7 +416,7 @@ const HomeScreen = () => {
   };
 
   // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
-  const handleImagePress = (image, fromScreen = 'Home', additionalProps = {}) => {
+  const handleImagePress = useCallback((image, fromScreen = 'Home', additionalProps = {}) => {
     logger.debug('点击图片，接收到的参数:', image, '来源页面:', fromScreen, '额外属性:', additionalProps);
     
     // 处理不同的参数格式
@@ -477,7 +473,7 @@ const HomeScreen = () => {
     
     setCurrentScreen('ImagePreview');
     logger.debug('设置URL参数，imageId:', imageId, '上下文:', additionalProps);
-  };
+  }, []);
 
 
   // 处理刷新
@@ -493,7 +489,7 @@ const HomeScreen = () => {
     // 移除setRefreshing(true)，避免UI闪烁
     try {
       // 重新加载数据（不再重建缓存，不显示loading状态）
-      await loadData(false);
+      await loadData();
     } catch (error) {
       logger.error('刷新数据失败:', error);
     }
@@ -531,7 +527,7 @@ const HomeScreen = () => {
           // 异步刷新，不阻塞扫描进度
           setImmediate(async () => {
             try {
-              await loadData(false);
+              await loadData();
             } catch (error) {
               logger.error('❌ 定期刷新失败:', error);
             }
@@ -603,105 +599,6 @@ const HomeScreen = () => {
   useEffect(() => {
     loadLastScanTime();
   }, []);
-
-
-  // 渲染分类卡片组件
-  const CategoryCard = ({ category, count, recentImages }) => {
-    return (
-      <TouchableOpacity
-        style={styles.categoryCard}
-        onPress={() => handleCategoryPress(category.id)}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: recentImages[0].uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
-            <Text style={styles.emptyThumbnailText}>📷</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示分类信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{category.name}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  // 渲染城市卡片组件
-  const CityCard = ({ city, count, recentImages }) => {
-    return (
-      <TouchableOpacity
-        style={styles.categoryCard}
-        onPress={() => handleCityPress(city)}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: recentImages[0].uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#FF5722' }]}>
-            <Text style={styles.emptyThumbnailText}>🏙️</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示城市信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{city}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  // 渲染相似照片卡片组件
-  const SimilarityCard = ({ group }) => {
-    return (
-      <TouchableOpacity
-        style={styles.categoryCard}
-        onPress={() => {
-          // 导航到相似照片详情页面
-          logger.debug('点击相似照片组:', group.groupId);
-          setCurrentScreen('Category');
-          setScreenProps(prev => ({
-            ...prev,
-            category: null, 
-            city: null, 
-            similarityGroupId: group.groupId,
-            fromScreen: 'SimilarityGroup'
-          }));
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {group.latestImageUri ? (
-          <Image
-            source={{ uri: group.latestImageUri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
-            <Text style={styles.emptyThumbnailText}>🔗</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示相似照片信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>相似照片</Text>
-          <Text style={styles.categoryCount}>{group.imageCount}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
 
   // 渲染 Readme 内容的组件
   const ReadmeView = () => {
@@ -947,6 +844,7 @@ const HomeScreen = () => {
                     category={category}
                     count={count}
                     recentImages={recentImages}
+                    onPress={handleCategoryPress}
                   />
                 );
               });
@@ -968,10 +866,11 @@ const HomeScreen = () => {
                   const recentImages = cityRecentImages[city] || [];
                   return (
                     <CityCard
-                    key={city}
+                      key={city}
                       city={city}
                       count={count}
                       recentImages={recentImages}
+                      onPress={handleCityPress}
                     />
                   );
                 })
@@ -992,6 +891,18 @@ const HomeScreen = () => {
                 <SimilarityCard
                   key={group.groupId}
                   group={group}
+                  onPress={(group) => {
+                    // 导航到相似照片详情页面
+                    logger.debug('点击相似照片组:', group.groupId);
+                    setCurrentScreen('Category');
+                    setScreenProps(prev => ({
+                      ...prev,
+                      category: null, 
+                      city: null, 
+                      similarityGroupId: group.groupId,
+                      fromScreen: 'SimilarityGroup'
+                    }));
+                  }}
                 />
               ))}
             </View>
@@ -1002,7 +913,7 @@ const HomeScreen = () => {
         <View style={styles.recentSection}>
           <Text style={styles.sectionTitle}>📸 最近照片</Text>
           <RecentImagesGrid 
-            images={recentImages} 
+            images={stableRecentImages} 
             onImagePress={handleImagePress}
           />
         </View>
@@ -1061,10 +972,10 @@ const HomeScreen = () => {
                   {...screenProps} 
                   forceRefresh={categoryDataChanged}
                   onDataChange={() => setCategoryDataChanged(true)}
-                  onBack={() => {
+                  onBack={async () => {
                     setCurrentScreen('Home');
                     logger.debug('从分类页面返回，重新加载数据');
-                    loadData();
+                    await loadData();
                   }}
                   navigation={{
                     onImagePress: (image, fromScreen, contextProps) => {
@@ -1086,7 +997,7 @@ const HomeScreen = () => {
             {ImagePreviewScreen ? (
               <ImagePreviewScreen 
                 onDataChange={() => setCategoryDataChanged(true)}
-                onBack={(returnedImageId) => {
+                onBack={async (returnedImageId) => {
                   logger.debug('ImagePreview 返回按钮被点击，返回的图片ID:', returnedImageId);
                   
                   // 从URL参数获取来源页面和图片ID
@@ -1124,7 +1035,7 @@ const HomeScreen = () => {
                     logger.debug('从首页返回');
                     setCurrentScreen('Home');
                     logger.debug('从图片预览返回，重新加载数据');
-                    loadData();
+                    await loadData();
                   }
                 }}
                 // 传递上下文参数
@@ -1143,10 +1054,10 @@ const HomeScreen = () => {
               <SettingsScreen
                 {...screenProps}
                 navigation={{
-                  goBack: () => {
+                  goBack: async () => {
                     setCurrentScreen('Home');
                     logger.debug('从设置页面返回，重新加载数据');
-                    loadData();
+                    await loadData();
                   }
                 }}
                 onScanProgress={handleScanProgress}
@@ -1159,17 +1070,6 @@ const HomeScreen = () => {
     );
   }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh]);
 
-  // 显示加载状态
-  if (isLoading) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>正在加载数据...</Text>
-        </View>
-      </View>
-    );
-  }
-
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
     recentImages: recentImages?.length || 0, 
@@ -1181,6 +1081,111 @@ const HomeScreen = () => {
   // 主要的返回语句
   return renderAllScreens;
 };
+
+// 渲染分类卡片组件
+const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => {
+  // 稳定化图片源对象，避免不必要的重新渲染
+  const imageSource = useMemo(() => 
+    recentImages.length > 0 ? { uri: recentImages[0].uri } : null, 
+    [recentImages[0]?.uri]
+  );
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(category.id)}
+    >
+      {/* 缩略图占满整个卡片 */}
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
+          <Text style={styles.emptyThumbnailText}>📷</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示分类信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{category.name}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// 渲染城市卡片组件
+const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
+  // 稳定化图片源对象，避免不必要的重新渲染
+  const imageSource = useMemo(() => 
+    recentImages.length > 0 ? { uri: recentImages[0].uri } : null, 
+    [recentImages[0]?.uri]
+  );
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(city)}
+    >
+      {/* 缩略图占满整个卡片 */}
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#FF5722' }]}>
+          <Text style={styles.emptyThumbnailText}>🏙️</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示城市信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{city}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// 渲染相似照片卡片组件
+const SimilarityCard = React.memo(({ group, onPress }) => {
+  // 稳定化图片源对象，避免不必要的重新渲染
+  const imageSource = useMemo(() => 
+    group.latestImageUri ? { uri: group.latestImageUri } : null, 
+    [group.latestImageUri]
+  );
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(group)}
+    >
+      {/* 缩略图占满整个卡片 */}
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
+          <Text style={styles.emptyThumbnailText}>🔗</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示相似照片信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>相似照片</Text>
+        <Text style={styles.categoryCount}>{group.imageCount}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 const styles = StyleSheet.create({
   container: {
