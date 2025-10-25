@@ -3,8 +3,18 @@ import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
 import { logger, Platform } from '../adapters/WebAdapters';
-import RNFS from 'react-native-fs';
-import MediaStoreService from './MediaStoreService.js';
+// 平台特定的导入
+let RNFS = null;
+let MediaStoreService = null;
+
+if (Platform.OS === 'android') {
+  try {
+    RNFS = require('react-native-fs').default;
+    MediaStoreService = require('./MediaStoreService.js').default;
+  } catch (error) {
+    console.warn('移动端模块导入失败:', error.message);
+  }
+}
 
 class UnifiedDataService {
   constructor() {
@@ -540,18 +550,21 @@ class UnifiedDataService {
             const filePath = imageUris[i].replace('file://', '');
             const imageId = uriToImageIdMap.get(imageUris[i]);
             
-            // 检查文件是否存在
-            const exists = await RNFS.exists(filePath);
-            if (!exists) {
-              logger.debug(`⚠️ 文件不存在，跳过删除: ${filePath}`);
-              filesDeleted++;
-              if (imageId) successfulImageIds.push(imageId); // 文件不存在也算成功
-              continue;
+            // 检查文件是否存在（仅移动端）
+            let exists = true;
+            if (Platform.OS === 'android' && RNFS) {
+              exists = await RNFS.exists(filePath);
+              if (!exists) {
+                logger.debug(`⚠️ 文件不存在，跳过删除: ${filePath}`);
+                filesDeleted++;
+                if (imageId) successfulImageIds.push(imageId); // 文件不存在也算成功
+                continue;
+              }
             }
             
             // 根据平台选择删除方式
             let deleteSuccess = false;
-            if (Platform.OS === 'android' && MediaStoreService.checkAvailability()) {
+            if (Platform.OS === 'android' && MediaStoreService && MediaStoreService.checkAvailability()) {
               // Android: 使用MediaStore删除（确保从媒体库中真正删除）
               const success = await MediaStoreService.deleteFile(filePath);
               if (success) {
@@ -561,7 +574,7 @@ class UnifiedDataService {
                 logger.warn(`⚠️ MediaStore删除失败: ${filePath}`);
                 deleteSuccess = false;
               }
-            } else {
+            } else if (RNFS) {
               // PC: 使用RNFS删除
               try {
                 await RNFS.unlink(filePath);
@@ -571,6 +584,10 @@ class UnifiedDataService {
                 logger.warn(`⚠️ RNFS删除失败: ${filePath}`, rnfsError);
                 deleteSuccess = false;
               }
+            } else {
+              // PC端没有RNFS，跳过物理文件删除
+              logger.debug(`⚠️ PC端跳过物理文件删除: ${filePath}`);
+              deleteSuccess = true; // 标记为成功，因为PC端不需要物理删除
             }
             
             if (deleteSuccess) {
