@@ -472,6 +472,38 @@ class SQLiteAdapter {
     }
   }
 
+  // 批量更新图片分类ID
+  async batchUpdateImageCategory(imageIds, newCategory, newConfidence) {
+    await this.init();
+    
+    if (!imageIds || imageIds.length === 0) {
+      return { success: true, processed: 0 };
+    }
+    
+    const placeholders = imageIds.map(() => '?').join(',');
+    const sql = `
+      UPDATE images 
+      SET category = ?, confidence = ?, updatedAt = ?
+      WHERE id IN (${placeholders})
+    `;
+    
+    const params = [
+      newCategory,
+      newConfidence,
+      new Date().toISOString(),
+      ...imageIds
+    ];
+    
+    const [result] = await this.db.executeSql(sql, params);
+    
+    logger.debug(`✅ SQLite批量更新分类: ${result.rowsAffected}张图片 -> ${newCategory}`);
+    
+    return {
+      success: true,
+      processed: result.rowsAffected
+    };
+  }
+
   // 🆕 专用方法：删除单张图片（单条记录）
   async deleteImageById(imageId) {
     await this.init();
@@ -1460,6 +1492,64 @@ class ImageStorageService {
     }
   }
 
+  // 批量更新图片分类ID（统一接口，内部处理平台差异）
+  async batchUpdateImageCategory(imageIds, newCategory, newConfidence = 'manual') {
+    try {
+      await this.ensureInitialized();
+      
+      logger.debug(`🔄 批量更新图片分类: ${imageIds.length}张图片 -> ${newCategory}`);
+      
+      if (!imageIds || imageIds.length === 0) {
+        return { success: true, processed: 0 };
+      }
+      
+      let processed = 0;
+      const errors = [];
+      
+      if (Platform.OS !== 'web' && this.storage.batchUpdateImageCategory) {
+        // 移动端：使用SQLite批量更新
+        const result = await this.storage.batchUpdateImageCategory(imageIds, newCategory, newConfidence);
+        processed = result.processed;
+      } else {
+        // PC端：逐个更新（IndexedDB没有批量更新API）
+        for (const imageId of imageIds) {
+          try {
+            await this.updateImageCategory(imageId, newCategory, newConfidence);
+            processed++;
+          } catch (error) {
+            logger.error(`更新图片分类失败: ${imageId}`, error);
+            errors.push({ imageId, error: error.message });
+          }
+        }
+      }
+      
+      // 🆕 如果移动到tobecleaned分类，批量清理相似组信息（在更新统计信息之前）
+      if (newCategory === 'tobecleaned') {
+        logger.debug(`🧹 批量清理相似组信息: ${imageIds.length}张图片`);
+        try {
+          await this.batchRemoveFromSimilarityGroups(imageIds);
+        } catch (error) {
+          logger.warn(`批量清理相似组信息失败:`, error);
+        }
+      }
+      
+      // 更新统计信息
+      await this.updateStats();
+      
+      logger.debug(`✅ 批量更新分类完成: ${processed}张成功`);
+      
+      return {
+        success: errors.length === 0,
+        processed,
+        errors: errors.length > 0 ? errors : undefined
+      };
+      
+    } catch (error) {
+      logger.error('批量更新图片分类失败:', error);
+      throw error;
+    }
+  }
+
   // Save image classification result
   async saveImageClassification(imageData) {
     try {
@@ -2031,165 +2121,118 @@ class ImageStorageService {
     }
   }
 
-  // Delete image
-  async deleteImage(imageId) {
+
+
+
+
+
+
+
+  // 批量从相似组中移除图片（优化版本）
+  async batchRemoveFromSimilarityGroups(imageIds) {
     try {
       await this.ensureInitialized();
       
-      logger.debug(`🗑️ 删除图片: ${imageId}`);
-      
-      //移动端：使用SQLite专用方法
-      if (Platform.OS !== 'web' && this.storage.deleteImageById) {
-        const result = await this.storage.deleteImageById(imageId);
-        
-        if (!result.success) {
-          throw new Error(result.message);
-        }
-        
-        // 删除物理文件
-        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
-          try {
-            const filePath = result.image.uri.replace('file://', '');
-            const exists = await RNFS.exists(filePath);
-            if (exists) {
-              await RNFS.unlink(filePath);
-              logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
-            }
-          } catch (fileError) {
-            logger.warn('删除物理文件失败:', fileError);
-          }
-        }
-        
-        // 更新统计信息
-        await this.updateStats();
-        
-        return { success: true, message: 'Image deleted successfully' };
+      if (!imageIds || imageIds.length === 0) {
+        return;
       }
       
-      // PC端：使用IndexedDB事务
-      if (!this.storage || !this.storage.db) {
-        logger.error('❌ IndexedDB未初始化');
-        throw new Error('IndexedDB未初始化');
-      }
+      // 一次性获取相似度数据和组索引
+      const similarityData = await this.getSimilarityData();
+      const groupIndex = await this.getSimilarityGroupIndex();
       
-      // 先删除数据库记录
-      const result = await new Promise((resolve, reject) => {
-        const transaction = this.storage.db.transaction(['images'], 'readwrite');
-        const store = transaction.objectStore('images');
-        
-        // 直接使用id主键查找图片（id是keyPath，不需要索引）
-        const getRequest = store.get(imageId);
-        
-        getRequest.onsuccess = () => {
-          const existingImage = getRequest.result;
-          
-          if (!existingImage) {
-            logger.error(`❌ 未找到图片: ${imageId}`);
-            reject(new Error(`图片不存在: ${imageId}`));
-            return;
-          }
-          
-          logger.debug(`🗑️ 找到要删除的图片: ${existingImage.fileName}`);
-          
-          // 使用delete删除记录（基于id主键）
-          const deleteRequest = store.delete(imageId);
-          
-          deleteRequest.onsuccess = () => {
-            logger.debug(`✅ 图片删除成功: ${existingImage.fileName}`);
-            resolve({
-              success: true,
-              message: 'Image deleted successfully',
-              image: existingImage
-            });
-          };
-          
-          deleteRequest.onerror = () => {
-            logger.error(`❌ 图片删除失败: ${deleteRequest.error}`);
-            reject(deleteRequest.error);
-          };
-        };
-        
-        getRequest.onerror = () => {
-          logger.error(`❌ 查找图片失败: ${getRequest.error}`);
-          reject(getRequest.error);
-        };
-      });
+      // 按组ID分组要删除的图片
+      const groupsToUpdate = new Map();
+      const imagesToRemove = [];
       
-      // 删除物理文件（在事务完成后）
-      try {
-        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
-          const filePath = result.image.uri.replace('file://', '');
-          const exists = await RNFS.exists(filePath);
-          if (exists) {
-            await RNFS.unlink(filePath);
-            logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
+      for (const imageId of imageIds) {
+        const imageData = similarityData[imageId];
+        if (imageData && imageData.similarity_group_id) {
+          const groupId = imageData.similarity_group_id;
+          if (!groupsToUpdate.has(groupId)) {
+            groupsToUpdate.set(groupId, []);
           }
+          groupsToUpdate.get(groupId).push(imageId);
+          imagesToRemove.push(imageId);
         }
-      } catch (fileError) {
-        console.warn('Failed to delete physical file:', fileError);
       }
       
-      // 更新统计信息（在事务完成后）
+      logger.debug(`🧹 批量清理: ${imagesToRemove.length}张图片，涉及${groupsToUpdate.size}个相似组`);
+      
+      // 批量更新每个相似组
+      for (const [groupId, imageIdsInGroup] of groupsToUpdate) {
+        const currentGroupImages = groupIndex[groupId] || [];
+        const remainingImages = currentGroupImages.filter(id => !imageIdsInGroup.includes(id));
+        
+        if (remainingImages.length <= 1) {
+          // 如果删除后只剩0或1张图片，删除整个组
+          delete groupIndex[groupId];
+          logger.debug(`🧹 删除相似组: ${groupId} (剩余${remainingImages.length}张)`);
+        } else {
+          // 更新组索引
+          groupIndex[groupId] = remainingImages;
+          logger.debug(`🧹 更新相似组: ${groupId} (${currentGroupImages.length} -> ${remainingImages.length}张)`);
+        }
+      }
+      
+      // 批量删除相似度数据
+      for (const imageId of imagesToRemove) {
+        delete similarityData[imageId];
+      }
+      
+      // 一次性保存更新后的数据
+      await this.saveSimilarityData(similarityData);
+      await this.saveSimilarityGroupIndex(groupIndex);
+      
+      logger.debug(`✅ 批量清理相似组完成: ${imagesToRemove.length}张图片`);
+      
+    } catch (error) {
+      logger.error('批量清理相似组失败:', error);
+      throw error;
+    }
+  }
+
+  // Delete multiple images (只删除数据库记录，不删除物理文件)
+  async deleteImages(imageIds) {
+    try {
+      await this.ensureInitialized();
+      
+      logger.debug(`🗑️ 批量删除数据库记录: ${imageIds.length} 张图片`);
+      
+      let filesDeleted = 0;
+      let filesFailed = 0;
+      
+      for (let i = 0; i < imageIds.length; i++) {
+        try {
+          // 调用存储适配器的删除方法
+          await this.storage.deleteImageById(imageIds[i]);
+          filesDeleted++;
+          logger.debug(`🗑️ 数据库记录删除: ${i + 1}/${imageIds.length}: ${imageIds[i]}`);
+        } catch (error) {
+          filesFailed++;
+          console.error(`❌ 数据库记录删除失败: ${imageIds[i]}:`, error);
+        }
+      }
+      
+      logger.debug(`✅ 数据库批量删除完成: ${filesDeleted} 成功, ${filesFailed} 失败`);
+      
+      // 统一更新统计信息（批量操作完成后）
       await this.updateStats();
       
       return {
-        success: true,
-        message: 'Image deleted successfully'
+        success: filesFailed === 0,
+        filesDeleted,
+        filesFailed,
+        total: imageIds.length
       };
       
     } catch (error) {
-      console.error('Failed to delete image:', error);
+      logger.error('批量删除数据库记录失败:', error);
       throw error;
     }
   }
 
   // Delete multiple images with progress callback
-  async deleteImages(imageIds, onProgress) {
-    try {
-      await this.ensureInitialized();
-      
-      logger.debug(`Deleting ${imageIds.length} images...`);
-      
-      let filesDeleted = 0;
-      let filesFailed = 0;
-      
-      // Initialize progress
-      if (onProgress) {
-        onProgress({
-          filesDeleted: 0,
-          filesFailed: 0,
-          total: imageIds.length
-        });
-      }
-      
-      for (let i = 0; i < imageIds.length; i++) {
-        try {
-          await this.deleteImage(imageIds[i]);
-          filesDeleted++;
-          logger.debug(`Deleted image ${i + 1}/${imageIds.length}: ${imageIds[i]}`);
-        } catch (error) {
-          filesFailed++;
-          console.error(`Failed to delete image ${imageIds[i]}:`, error);
-        }
-        
-        // Update progress
-        if (onProgress) {
-          onProgress({
-            filesDeleted,
-            filesFailed,
-            total: imageIds.length
-          });
-        }
-      }
-      
-      logger.debug(`Batch delete completed: ${filesDeleted} deleted, ${filesFailed} failed`);
-      return { success: true, filesDeleted, filesFailed };
-      
-    } catch (error) {
-      console.error('Failed to delete images:', error);
-      throw error;
-    }
-  }
 
   // Delete image with progress callback and result
   async deleteImageWithResult(imageId, onProgress) {

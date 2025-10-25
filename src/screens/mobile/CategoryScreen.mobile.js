@@ -52,6 +52,14 @@ const CategoryScreen = ({ route, navigation }) => {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [pendingImageIds, setPendingImageIds] = useState([]);
   
+  // 操作进度相关状态
+  const [showDeleteProgress, setShowDeleteProgress] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 0 });
+  
+  const [showUpdateProgress, setShowUpdateProgress] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState({ filesProcessed: 0, filesFailed: 0, total: 0 });
+  const [updateOperationType, setUpdateOperationType] = useState(''); // 'changeCategory' 或 'moveToStaging'
+  
   // 分页
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -143,12 +151,22 @@ const CategoryScreen = ({ route, navigation }) => {
     if (currentSelectedCount === images.length && images.length > 0) {
       // 全部选中，则取消全选
       images.forEach(img => {
-        UnifiedDataService.setImageSelection(img.id, false);
+        try {
+          UnifiedDataService.setImageSelection(img.id, false);
+        } catch (error) {
+          // 忽略已删除图片的错误
+          logger.debug(`⚠️ 跳过已删除图片的选择操作: ${img.id}`);
+        }
       });
     } else {
       // 否则全选当前页面的所有图片
       images.forEach(img => {
-        UnifiedDataService.setImageSelection(img.id, true);
+        try {
+          UnifiedDataService.setImageSelection(img.id, true);
+        } catch (error) {
+          // 忽略已删除图片的错误
+          logger.debug(`⚠️ 跳过已删除图片的选择操作: ${img.id}`);
+        }
       });
     }
     
@@ -202,15 +220,17 @@ const CategoryScreen = ({ route, navigation }) => {
                 
                 // 清除选中状态
                 selectedImageIds.forEach(id => {
-                  UnifiedDataService.setImageSelection(id, false);
+                  try {
+                    UnifiedDataService.setImageSelection(id, false);
+                  } catch (error) {
+                    logger.debug(`⚠️ 跳过已删除图片的选择操作: ${id}`);
+                  }
                 });
                 setSelectionMode(false);
                 setShowActionMenu(false);
                 
                 // 刷新数据
                 await loadImages();
-                
-                Alert.alert('操作完成', `已成功修改 ${processed} 张图片到"${targetCategoryName}"分类`);
               } catch (error) {
                 logger.error('批量修改分类失败:', error);
                 Alert.alert('操作失败', '修改分类时发生错误，请重试');
@@ -264,15 +284,17 @@ const CategoryScreen = ({ route, navigation }) => {
               
               // 清除选中状态
               selectedImageIds.forEach(id => {
-                UnifiedDataService.setImageSelection(id, false);
+                try {
+                  UnifiedDataService.setImageSelection(id, false);
+                } catch (error) {
+                  logger.debug(`⚠️ 跳过已删除图片的选择操作: ${id}`);
+                }
               });
               setSelectionMode(false);
               setShowActionMenu(false);
               
               // 刷新数据
               await loadImages();
-              
-              Alert.alert('操作完成', `已成功${actionDescription} ${processed} 张图片`);
             } catch (error) {
               logger.error(`批量${actionText}失败:`, error);
               Alert.alert('操作失败', `${actionText}时发生错误，请重试`);
@@ -738,8 +760,35 @@ const CategoryScreen = ({ route, navigation }) => {
     try {
       const categoryName = UnifiedDataService.getCategoryDisplayName(newCategory);
       
-      // 使用批量更新接口，提升性能
+      // 1. 先更新UI（立即响应用户操作）
+      imageIds.forEach(id => {
+        UnifiedDataService.setImageSelection(id, false);
+      });
+      setImages(prevImages => {
+        const newImages = prevImages.filter(img => !imageIds.includes(img.id));
+        
+        // 同时更新分组图片
+        if (newImages.length > 0) {
+          const grouped = groupImagesByDate(newImages);
+          setGroupedImages(grouped);
+        } else {
+          setGroupedImages({});
+        }
+        
+        return newImages;
+      });
+      setSelectionMode(false);
+      
+      // 2. 显示进度提示
+      setShowUpdateProgress(true);
+      setUpdateOperationType('changeCategory');
+      setUpdateProgress({ filesProcessed: imageIds.length, filesFailed: 0, total: imageIds.length });
+      
+      // 3. 执行数据库操作（后台进行）
       const result = await UnifiedDataService.updateImagesCategory(imageIds, newCategory, 'manual');
+      
+      // 4. 更新失败数量（如果有）
+      setUpdateProgress({ filesProcessed: result.processed, filesFailed: result.errors?.length || 0, total: imageIds.length });
       
       if (result.success) {
         logger.debug('✅ 批量更新分类成功:', result.processed, '张');
@@ -747,22 +796,11 @@ const CategoryScreen = ({ route, navigation }) => {
         logger.warn('⚠️ 批量更新分类部分失败:', result.errors);
       }
       
-      // 清除选中状态
-      imageIds.forEach(id => {
-        UnifiedDataService.setImageSelection(id, false);
-      });
-      
-      // 重新加载数据（上面的操作已经重建了缓存）
-      await loadImages();
-      setSelectionMode(false);
-      
-      const successMessage = result.success 
-        ? `已将 ${result.processed} 张图片移动到"${categoryName}"`
-        : `已将 ${result.processed} 张图片移动到"${categoryName}"，${result.errors?.length || 0} 张失败`;
-      
-      Alert.alert('操作完成', successMessage);
+      // 5. 关闭进度提示
+      setShowUpdateProgress(false);
     } catch (error) {
       logger.error('❌ 批量修改分类失败:', error);
+      setShowUpdateProgress(false);
       Alert.alert('操作失败', error.message);
     }
   };
@@ -827,37 +865,41 @@ const CategoryScreen = ({ route, navigation }) => {
           text: '标记',
           onPress: async () => {
             try {
-              // 使用批量更新接口，提升性能
-              const result = await UnifiedDataService.updateImagesCategory(imageIds, 'tobecleaned', 'manual');
-              
-              // 清理相似组数据（如果图片在相似组中）
-              for (const id of imageIds) {
-                try {
-                  const image = images.find(img => img.id === id);
-                  if (image && image.similarityGroupIndex) {
-                    await UnifiedDataService.removeImageFromSimilarityGroup(id, image.similarityGroupIndex);
-                  }
-                } catch (error) {
-                  logger.error(`❌ 清理相似组数据失败: ${id}`, error);
-                }
-              }
-              
-              // 清除选中状态
+              // 1. 先更新UI（立即响应用户操作）
               imageIds.forEach(id => {
                 UnifiedDataService.setImageSelection(id, false);
               });
-              
-              // 重新加载数据（上面的操作已经重建了缓存）
-              await loadImages();
+              setImages(prevImages => {
+                const newImages = prevImages.filter(img => !imageIds.includes(img.id));
+                
+                // 同时更新分组图片
+                if (newImages.length > 0) {
+                  const grouped = groupImagesByDate(newImages);
+                  setGroupedImages(grouped);
+                } else {
+                  setGroupedImages({});
+                }
+                
+                return newImages;
+              });
               setSelectionMode(false);
               
-              const successMessage = result.success 
-                ? `已成功将 ${result.processed} 张图片移到待处置分类`
-                : `已成功将 ${result.processed} 张图片移到待处置分类，${result.errors?.length || 0} 张失败`;
+              // 2. 显示进度提示
+              setShowUpdateProgress(true);
+              setUpdateOperationType('moveToStaging');
+              setUpdateProgress({ filesProcessed: imageIds.length, filesFailed: 0, total: imageIds.length });
               
-              Alert.alert('操作完成', successMessage);
+              // 3. 执行数据库操作（后台进行）
+              const result = await UnifiedDataService.updateImagesCategory(imageIds, 'tobecleaned', 'manual');
+              
+              // 4. 更新失败数量（如果有）
+              setUpdateProgress({ filesProcessed: result.processed, filesFailed: result.errors?.length || 0, total: imageIds.length });
+              
+              // 5. 关闭进度提示
+              setShowUpdateProgress(false);
             } catch (error) {
               logger.error('❌ 批量暂存失败:', error);
+              setShowUpdateProgress(false);
               Alert.alert('操作失败', '暂存时发生错误，请重试');
             }
           },
@@ -880,23 +922,68 @@ const CategoryScreen = ({ route, navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 使用批量删除 API（与 PC 端一致）
-              await UnifiedDataService.writeDeleteImages(imageIds, (progress) => {
+              // 1. 显示进度提示
+              setShowDeleteProgress(true);
+              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: imageIds.length });
+              
+              // 2. 执行删除操作
+              const result = await UnifiedDataService.writeDeleteImages(imageIds, (progress) => {
                 logger.debug(`删除进度: ${progress.filesDeleted}/${progress.total}`);
+                setDeleteProgress(progress);
               });
               
-              // 清除选中状态
-              imageIds.forEach(id => {
-                UnifiedDataService.setImageSelection(id, false);
-              });
+              // 3. 根据删除结果更新UI
+              if (result && result.success) {
+                // 只有真正删除成功的图片才从UI中移除
+                const successfulImageIds = result.successfulImageIds || [];
+                const failedImageIds = result.failedImageIds || [];
+                
+                // 清除选中状态
+                imageIds.forEach(id => {
+                  try {
+                    UnifiedDataService.setImageSelection(id, false);
+                  } catch (error) {
+                    logger.debug(`⚠️ 跳过已删除图片的选择操作: ${id}`);
+                  }
+                });
+                
+                // 只从UI中移除成功删除的图片
+                setImages(prevImages => {
+                  const newImages = prevImages.filter(img => !successfulImageIds.includes(img.id));
+                  
+                  // 同时更新分组图片
+                  if (newImages.length > 0) {
+                    const grouped = groupImagesByDate(newImages);
+                    setGroupedImages(grouped);
+                  } else {
+                    setGroupedImages({});
+                  }
+                  
+                  return newImages;
+                });
+                
+                setSelectionMode(false);
+                
+                // 显示删除结果（只有失败时才显示弹窗）
+                if (result.filesFailed > 0) {
+                  Alert.alert(
+                    '删除完成', 
+                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                    [
+                      { text: '知道了', style: 'default' }
+                    ]
+                  );
+                }
+                // 全部成功时不显示弹窗，静默完成
+              } else {
+                Alert.alert('删除失败', '删除操作失败，请重试');
+              }
               
-              // 重新加载数据（上面的操作已经重建了缓存）
-              await loadImages();
-              setSelectionMode(false);
-              
-              Alert.alert('删除完成', `已删除 ${imageIds.length} 张图片`);
+              // 4. 关闭进度提示
+              setShowDeleteProgress(false);
             } catch (error) {
               logger.error('❌ 批量删除失败:', error);
+              setShowDeleteProgress(false);
               Alert.alert('操作失败', '删除时发生错误，请重试');
             }
           },
@@ -939,7 +1026,6 @@ const CategoryScreen = ({ route, navigation }) => {
               UnifiedDataService.setImageSelection(id, false);
             });
             
-            Alert.alert('操作完成', `已保留 ${keepIds.length} 张图片，${moveIds.length} 张相似图片已移到暂存箱`);
           },
         },
       ]
@@ -1324,6 +1410,68 @@ const CategoryScreen = ({ route, navigation }) => {
 
       {/* 分类选择器模态框 */}
       {renderCategoryModal()}
+      
+      {/* 删除进度弹窗 */}
+      <Modal
+        visible={showDeleteProgress}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteProgress(false)}>
+        <View style={styles.progressModalOverlay}>
+          <View style={styles.progressModalContent}>
+            <Text style={styles.progressModalTitle}>正在删除图片</Text>
+            <Text style={styles.progressModalText}>
+              已删除: {deleteProgress.filesDeleted}/{deleteProgress.total}
+            </Text>
+            {deleteProgress.filesFailed > 0 && (
+              <Text style={styles.progressModalError}>
+                失败: {deleteProgress.filesFailed}
+              </Text>
+            )}
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { width: `${(deleteProgress.filesDeleted / deleteProgress.total) * 100}%` }
+                ]} 
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* 更新进度弹窗 */}
+      <Modal
+        visible={showUpdateProgress}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowUpdateProgress(false)}>
+        <View style={styles.progressModalOverlay}>
+          <View style={styles.progressModalContent}>
+            <Text style={styles.progressModalTitle}>
+              {updateOperationType === 'changeCategory' 
+                ? `正在修改${updateProgress.total}张图片的分类`
+                : updateOperationType === 'moveToStaging'
+                ? `正在将${updateProgress.total}张图片放入暂存箱`
+                : '正在处理图片'
+              }
+            </Text>
+            {updateProgress.filesFailed > 0 && (
+              <Text style={styles.progressModalError}>
+                失败: {updateProgress.filesFailed}
+              </Text>
+            )}
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { width: '100%' } // 批量操作显示100%进度条
+                ]} 
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1625,7 +1773,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
     fontWeight: '500',
-   },
+  },
+  
+  // 删除进度弹窗样式
+  progressModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  progressModalContent: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 12,
+    padding: 24,
+    minWidth: 280,
+    alignItems: 'center',
+  },
+  progressModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 12,
+  },
+  progressModalText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  progressModalError: {
+    fontSize: 14,
+    color: '#FF3B30',
+    marginBottom: 16,
+  },
+  progressBar: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#3A3A3C',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 2,
+  },
 });
 
 export default CategoryScreen;

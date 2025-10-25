@@ -2,7 +2,9 @@
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
-import { logger } from '../adapters/WebAdapters';
+import { logger, Platform } from '../adapters/WebAdapters';
+import RNFS from 'react-native-fs';
+import MediaStoreService from './MediaStoreService.js';
 
 class UnifiedDataService {
   constructor() {
@@ -432,15 +434,11 @@ class UnifiedDataService {
       let processed = 0;
       const errors = [];
       
-      // 批量更新数据库
-      for (const imageId of imageIds) {
-        try {
-          await this.imageStorageService.updateImageCategory(imageId, newCategory, newConfidence);
-          processed++;
-        } catch (error) {
-          logger.error(`更新图片分类失败: ${imageId}`, error);
-          errors.push({ imageId, error: error.message });
-        }
+      // 批量更新数据库（使用统一接口）
+      const result = await this.imageStorageService.batchUpdateImageCategory(imageIds, newCategory, newConfidence);
+      processed = result.processed;
+      if (result.errors) {
+        errors.push(...result.errors);
       }
       
       // 批量更新缓存
@@ -500,31 +498,129 @@ class UnifiedDataService {
    * 批量删除图片
    * 先写缓存，再写数据库
    */
-  async writeDeleteImages(imageIds, onProgress) {
-    try {
-      logger.debug('批量删除图片:', imageIds.length);
-      
-      // 1. 先写数据库
-      const result = await this.imageStorageService.deleteImages(imageIds, onProgress);
-      logger.debug('数据库批量删除完成');
-      
-      // 2. 精确批量删除缓存
-      const deleteSuccess = this.imageCache.removeImages(imageIds);
-      if (deleteSuccess) {
-        logger.debug('缓存精确批量删除完成');
-      } else {
-        logger.warn('缓存精确批量删除失败，将进行全量更新');
-        await this.imageCache.refreshCache();
-        logger.debug('缓存全量更新完成');
+    async writeDeleteImages(imageIds, onProgress) {
+      try {
+        logger.debug('批量删除图片:', imageIds.length);
+        
+        // 1. 先记录图片URI（在删除数据库记录之前）
+        const imageUris = [];
+        for (const imageId of imageIds) {
+          const image = this.imageCache._getImageById(imageId);
+          if (image && image.uri && image.uri.startsWith('file://')) {
+            imageUris.push(image.uri);
+          }
+        }
+        logger.debug(`记录到${imageUris.length}个物理文件路径`);
+        
+        // 2. 先尝试删除物理文件
+        let filesDeleted = 0;
+        let filesFailed = 0;
+        const successfulImageIds = [];
+        
+        // Initialize progress for physical file deletion
+        if (onProgress) {
+          onProgress({
+            filesDeleted: 0,
+            filesFailed: 0,
+            total: imageUris.length
+          });
+        }
+        
+        // 创建URI到ImageId的映射
+        const uriToImageIdMap = new Map();
+        for (let i = 0; i < imageIds.length; i++) {
+          const image = this.imageCache._getImageById(imageIds[i]);
+          if (image && image.uri && image.uri.startsWith('file://')) {
+            uriToImageIdMap.set(image.uri, imageIds[i]);
+          }
+        }
+        
+        for (let i = 0; i < imageUris.length; i++) {
+          try {
+            const filePath = imageUris[i].replace('file://', '');
+            const imageId = uriToImageIdMap.get(imageUris[i]);
+            
+            // 检查文件是否存在
+            const exists = await RNFS.exists(filePath);
+            if (!exists) {
+              logger.debug(`⚠️ 文件不存在，跳过删除: ${filePath}`);
+              filesDeleted++;
+              if (imageId) successfulImageIds.push(imageId); // 文件不存在也算成功
+              continue;
+            }
+            
+            // 根据平台选择删除方式
+            let deleteSuccess = false;
+            if (Platform.OS === 'android' && MediaStoreService.checkAvailability()) {
+              // Android: 使用MediaStore删除（确保从媒体库中真正删除）
+              const success = await MediaStoreService.deleteFile(filePath);
+              if (success) {
+                logger.debug(`🗑️ MediaStore删除成功: ${filePath}`);
+                deleteSuccess = true;
+              } else {
+                logger.warn(`⚠️ MediaStore删除失败: ${filePath}`);
+                deleteSuccess = false;
+              }
+            } else {
+              // PC: 使用RNFS删除
+              try {
+                await RNFS.unlink(filePath);
+                logger.debug(`🗑️ RNFS删除成功: ${filePath}`);
+                deleteSuccess = true;
+              } catch (rnfsError) {
+                logger.warn(`⚠️ RNFS删除失败: ${filePath}`, rnfsError);
+                deleteSuccess = false;
+              }
+            }
+            
+            if (deleteSuccess) {
+              filesDeleted++;
+              if (imageId) successfulImageIds.push(imageId); // 记录成功删除的图片ID
+            } else {
+              filesFailed++;
+            }
+          } catch (fileError) {
+            filesFailed++;
+            logger.warn(`❌ 删除物理文件失败: ${imageUris[i]}`, fileError);
+          }
+          
+          // Update progress for physical file deletion
+          if (onProgress) {
+            onProgress({
+              filesDeleted,
+              filesFailed,
+              total: imageUris.length
+            });
+          }
+        }
+        
+        // 3. 只有物理文件删除成功的，才删除数据库记录
+        let result = { success: true, processed: 0 };
+        if (successfulImageIds.length > 0) {
+          result = await this.imageStorageService.deleteImages(successfulImageIds);
+          logger.debug('数据库批量删除完成');
+          
+          // 4. 重建缓存（简单可靠）
+          await this.imageCache.refreshCache();
+          logger.debug('缓存重建完成');
+        }
+        
+        logger.debug('物理文件批量删除完成');
+        
+        // 返回删除结果，包含成功和失败的统计
+        return {
+          ...result,
+          filesDeleted,
+          filesFailed,
+          successfulImageIds,
+          failedImageIds: imageIds.filter(id => !successfulImageIds.includes(id))
+        };
+        
+      } catch (error) {
+        logger.error('批量删除图片失败:', error);
+        throw error;
       }
-      
-      return result;
-      
-    } catch (error) {
-      logger.error('批量删除图片失败:', error);
-      throw error;
     }
-  }
 
   /**
    * 读取应用设置

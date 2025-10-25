@@ -473,20 +473,12 @@ const ImagePreviewScreen = ({
             onPress: async () => {
               logger.debug('用户确认标记为待处置，开始更新分类...');
               try {
-                // 更新分类为tobecleaned
+                // 更新分类为tobecleaned（服务层会自动清理相似组信息）
                 await UnifiedDataService.updateImageCategory(
                   currentImage.id, 
                   'tobecleaned', 
                   'manual'
                 );
-                
-                // 清理相似组数据（如果图片在相似组中）
-                if (currentImage.similarityGroupIndex) {
-                  await UnifiedDataService.removeImageFromSimilarityGroup(
-                    currentImage.id, 
-                    currentImage.similarityGroupIndex
-                  );
-                }
                 
                 // 更新本地状态
                 setCurrentImage(prev => ({ 

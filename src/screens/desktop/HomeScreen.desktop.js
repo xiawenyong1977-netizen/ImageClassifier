@@ -915,6 +915,10 @@ const HomeScreen = () => {
               
               const visibleCategories = categories.filter(category => {
                 const count = categoryCounts[category.id] || 0;
+                // 暂存箱不显示在分类列表中，因为底部导航有专门入口
+                if (category.id === 'tobecleaned') {
+                  return false;
+                }
                 // 如果开启了隐藏空分类且该分类数量为0，则不显示
                 if (hideEmptyCategoriesRef.current && count === 0) {
                   return false;

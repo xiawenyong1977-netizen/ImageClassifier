@@ -1003,8 +1003,8 @@ const CategoryScreen = ({
                 // 清除选中状态
                 clearCategorySelections();
                 
-                // 重新加载图片数据
-                await loadImages();
+                // 更新本地状态，移除已删除的图片（避免重新加载全量数据）
+                setImages(prevImages => prevImages.filter(img => !selectedImageIds.includes(img.id)));
                 
                 // 发送完成消息通知HomeScreen更新数据
                 if (typeof window !== 'undefined') {
@@ -1047,22 +1047,9 @@ const CategoryScreen = ({
                 clearCategorySelections();
                 // 批量更新图片分类为tobecleaned，并从相似组中移除
                 let processed = 0;
-                for (const imageId of selectedImageIds) {
-                  try {
-                    // 更新分类为tobecleaned
-                    await UnifiedDataService.updateImageCategory(imageId, 'tobecleaned');
-                    
-                    // 清理相似组数据（如果图片在相似组中）
-                    const image = UnifiedDataService.imageCache._getImageById(imageId);
-                    if (image && image.similarityGroupIndex) {
-                      await UnifiedDataService.removeImageFromSimilarityGroup(imageId, image.similarityGroupIndex);
-                    }
-                    
-                    processed++;
-                  } catch (error) {
-                    logger.error(`Failed to update image ${imageId}:`, error);
-                  }
-                }
+                // 使用批量更新接口，提升性能（服务层会自动清理相似组信息）
+                const result = await UnifiedDataService.updateImagesCategory(selectedImageIds, 'tobecleaned', 'manual');
+                processed = result.processed;
                 
           
                 

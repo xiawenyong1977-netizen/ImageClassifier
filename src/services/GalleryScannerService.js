@@ -1416,6 +1416,27 @@ class GalleryScannerService {
       // 阶段2: 文件比对
       const { deletedUris, newImages } = await this.compareFilesPhase(allImages, scanStartTime);
       
+      // 检查是否有新增或移除的文件
+      if (deletedUris.length === 0 && newImages.length === 0) {
+        logger.info('✅ 文件比对完成：没有新增也没有移除的文件，扫描结束');
+        this.sendProgressMessage('file_comparison', allImages.length, allImages.length, '没有新增也没有移除的文件，扫描结束');
+        
+        // 如果加载了模型，才需要卸载
+        if (this.imageClassifier.isInitialized) {
+          logger.debug('🔄 卸载本地模型，释放内存...');
+          this.imageClassifier.unloadAllModels();
+        }
+        
+        return {
+          success: true,
+          deleted: 0,
+          newImages: 0,
+          processed: 0,
+          failed: 0,
+          skipped: true // 标记为跳过后续处理
+        };
+      }
+      
       // 阶段3-4: 漏斗式处理（内部会按需加载模型）
       const { processedCount, failedCount } = await this.processImagesPhase(newImages, scanStartTime);
       

@@ -3,11 +3,13 @@ package com.imageclassifier;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.os.Build;
+import android.Manifest;
 
 import androidx.exifinterface.media.ExifInterface;
 
@@ -55,26 +57,18 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
         try {
             Log.d(TAG, "尝试删除文件: " + filePath);
             
-            // 方法1: 使用MediaStore删除
-            boolean deleted = deleteFileViaMediaStore(filePath);
-            if (deleted) {
-                Log.d(TAG, "MediaStore删除成功: " + filePath);
-                promise.resolve(true);
-                return;
-            }
-            
-            // 方法2: 使用File.delete()删除
-            deleted = deleteFileDirectly(filePath);
+            // 方法1: 使用File.delete()删除（优先）
+            boolean deleted = deleteFileDirectly(filePath);
             if (deleted) {
                 Log.d(TAG, "直接删除成功: " + filePath);
                 promise.resolve(true);
                 return;
             }
             
-            // 方法3: 使用系统命令删除
-            deleted = deleteFileViaSystem(filePath);
+            // 方法2: 使用MediaStore删除（备选）
+            deleted = deleteFileViaMediaStore(filePath);
             if (deleted) {
-                Log.d(TAG, "系统命令删除成功: " + filePath);
+                Log.d(TAG, "MediaStore删除成功: " + filePath);
                 promise.resolve(true);
                 return;
             }
@@ -92,7 +86,33 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
 
     private boolean deleteFileViaMediaStore(String filePath) {
         try {
+            // 检查权限
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
+                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                    != PackageManager.PERMISSION_GRANTED) {
+                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
+                    return false;
+                }
+            } else {
+                // Android 12 及以下需要 WRITE_EXTERNAL_STORAGE 权限
+                if (reactContext.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                    Log.w(TAG, "缺少 WRITE_EXTERNAL_STORAGE 权限");
+                    return false;
+                }
+            }
+            
             ContentResolver contentResolver = reactContext.getContentResolver();
+            
+            // 先检查文件是否存在
+            File file = new File(filePath);
+            if (!file.exists()) {
+                Log.w(TAG, "文件不存在: " + filePath);
+                return false;
+            }
+            
+            Log.d(TAG, "开始查询MediaStore，文件路径: " + filePath);
             
             // 查询文件的MediaStore ID
             String selection = MediaStore.Images.Media.DATA + "=?";
@@ -106,9 +126,12 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 null
             );
             
+            Log.d(TAG, "MediaStore查询结果: cursor=" + (cursor != null ? "非空" : "空"));
+            
             if (cursor != null && cursor.moveToFirst()) {
                 int idColumn = cursor.getColumnIndex(MediaStore.Images.Media._ID);
                 long id = cursor.getLong(idColumn);
+                Log.d(TAG, "找到MediaStore ID: " + id);
                 cursor.close();
                 
                 // 使用MediaStore删除文件
@@ -117,12 +140,16 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                     String.valueOf(id)
                 );
                 
+                Log.d(TAG, "删除URI: " + deleteUri);
                 int deletedRows = contentResolver.delete(deleteUri, null, null);
                 Log.d(TAG, "MediaStore删除结果: " + deletedRows + " 行");
                 
                 // 验证文件是否真的被删除了
-                File file = new File(filePath);
-                return !file.exists();
+                boolean fileStillExists = file.exists();
+                Log.d(TAG, "文件删除后状态: " + (fileStillExists ? "仍存在" : "已删除"));
+                return !fileStillExists;
+            } else {
+                Log.w(TAG, "MediaStore中未找到文件记录: " + filePath);
             }
             
             if (cursor != null) {

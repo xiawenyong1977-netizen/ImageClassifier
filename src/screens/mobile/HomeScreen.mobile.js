@@ -204,6 +204,10 @@ const HomeScreen = ({ navigation }) => {
       const categoryList = allCategories
         .filter(categoryConfig => {
           const count = categoryCounts[categoryConfig.id] || 0;
+          // 暂存箱不显示在分类列表中，因为底部导航有专门入口
+          if (categoryConfig.id === 'tobecleaned') {
+            return false;
+          }
           // 如果开启了隐藏空分类且该分类数量为0，则不显示
           if (hideEmptyCategories && count === 0) {
             return false;
@@ -582,7 +586,6 @@ const HomeScreen = ({ navigation }) => {
       
       // 加载最近扫描信息
       await loadLastScanTime();
-      Alert.alert('扫描完成', '相册扫描已完成');
     } catch (error) {
       logger.error('❌ 扫描失败:', error);
       setGlobalMessage('扫描失败');
