@@ -1,4 +1,4 @@
-import { AsyncStorage, RNFS, logger, Platform, SQLite } from '../adapters/WebAdapters';
+import { AsyncStorage, logger, Platform, SQLite } from '../adapters/WebAdapters';
 import configService from './ConfigService.js';
 
 // SQLite 适配器类（移动端）
@@ -2206,8 +2206,19 @@ class ImageStorageService {
         try {
           // 根据平台选择删除方法
           if (Platform.OS === 'web') {
-            // PC端：使用IndexedDB删除
-            await this.deleteImageById(imageIds[i]);
+            // PC端：使用IndexedDB事务删除
+            if (!this.storage || !this.storage.db) {
+              throw new Error('IndexedDB未初始化');
+            }
+            
+            await new Promise((resolve, reject) => {
+              const transaction = this.storage.db.transaction(['images'], 'readwrite');
+              const store = transaction.objectStore('images');
+              const request = store.delete(imageIds[i]);
+              
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(new Error('IndexedDB删除失败'));
+            });
           } else {
             // 移动端：使用SQLite删除
             await this.storage.deleteImageById(imageIds[i]);
@@ -2240,170 +2251,6 @@ class ImageStorageService {
 
   // Delete multiple images with progress callback
 
-  // Delete image with progress callback and result
-  async deleteImageWithResult(imageId, onProgress) {
-    try {
-      logger.debug('🗑️ deleteImageWithResult 开始执行，图片ID:', imageId);
-      await this.ensureInitialized();
-      
-      // 初始化进度
-      if (onProgress) {
-        onProgress({
-          filesDeleted: 0,
-          filesFailed: 0,
-          total: 1
-        });
-      }
-      
-      // 🆕 移动端：使用SQLite专用方法
-      if (Platform.OS !== 'web' && this.storage.deleteImageById) {
-        const result = await this.storage.deleteImageById(imageId);
-        
-        if (!result.success) {
-          return result;
-        }
-        
-        // 删除物理文件
-        let fileDeleted = false;
-        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
-          try {
-            const filePath = result.image.uri.replace('file://', '');
-            const exists = await RNFS.exists(filePath);
-            if (exists) {
-              await RNFS.unlink(filePath);
-              logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
-              fileDeleted = true;
-            }
-          } catch (fileError) {
-            logger.warn('删除物理文件失败:', fileError);
-          }
-        }
-        
-        // 更新统计信息
-        await this.updateStats();
-        
-        // 更新最终进度
-        if (onProgress) {
-          onProgress({
-            filesDeleted: fileDeleted ? 1 : 0,
-            filesFailed: fileDeleted ? 0 : 1,
-            total: 1
-          });
-        }
-        
-        return { success: true, message: 'Image deleted successfully' };
-      }
-      
-      // PC端：使用IndexedDB事务
-      if (!this.storage || !this.storage.db) {
-        logger.error('❌ IndexedDB未初始化');
-        return {
-          success: false,
-          message: 'IndexedDB未初始化'
-        };
-      }
-      
-      // 先删除数据库记录
-      const result = await new Promise((resolve, reject) => {
-        const transaction = this.storage.db.transaction(['images'], 'readwrite');
-        const store = transaction.objectStore('images');
-        
-        // 直接使用id主键查找图片（id是keyPath，不需要索引）
-        const getRequest = store.get(imageId);
-        
-        getRequest.onsuccess = () => {
-          const existingImage = getRequest.result;
-          
-          if (!existingImage) {
-            logger.debug('🗑️ 图片未找到');
-            resolve({
-              success: false,
-              message: 'Image not found'
-            });
-            return;
-          }
-          
-          logger.debug(`🗑️ 找到要删除的图片: ${existingImage.fileName}`);
-          
-          // 使用delete删除记录（基于id主键）
-          const deleteRequest = store.delete(imageId);
-          
-          deleteRequest.onsuccess = () => {
-            logger.debug(`✅ 图片删除成功: ${existingImage.fileName}`);
-            resolve({
-              success: true,
-              message: 'Image deleted successfully',
-              image: existingImage
-            });
-          };
-          
-          deleteRequest.onerror = () => {
-            logger.error(`❌ 图片删除失败: ${deleteRequest.error}`);
-            resolve({
-              success: false,
-              message: `Failed to delete image: ${deleteRequest.error.message}`
-            });
-          };
-        };
-        
-        getRequest.onerror = () => {
-          logger.error(`❌ 查找图片失败: ${getRequest.error}`);
-          resolve({
-            success: false,
-            message: `Failed to find image: ${getRequest.error.message}`
-          });
-        };
-      });
-      
-      if (!result.success) {
-        return result;
-      }
-      
-      // 删除物理文件（在事务完成后）
-      let fileDeleted = false;
-      try {
-        if (result.image && result.image.uri && result.image.uri.startsWith('file://')) {
-          const filePath = result.image.uri.replace('file://', '');
-          const exists = await RNFS.exists(filePath);
-          if (exists) {
-            await RNFS.unlink(filePath);
-            logger.debug(`🗑️ 物理文件已删除: ${filePath}`);
-            fileDeleted = true;
-          }
-        }
-      } catch (fileError) {
-        console.warn('Failed to delete physical file:', fileError);
-        return {
-          success: false,
-          message: `Failed to delete physical file: ${fileError.message}`
-        };
-      }
-      
-      // 更新统计信息（在事务完成后）
-      await this.updateStats();
-      
-      // 更新最终进度
-      if (onProgress) {
-        onProgress({
-          filesDeleted: fileDeleted ? 1 : 0,
-          filesFailed: fileDeleted ? 0 : 1,
-          total: 1
-        });
-      }
-      
-      return {
-        success: true,
-        message: 'Image deleted successfully'
-      };
-      
-    } catch (error) {
-      console.error('Failed to delete image:', error);
-      return {
-        success: false,
-        message: error.message
-      };
-    }
-  }
 
   // Update statistics
   async updateStats() {

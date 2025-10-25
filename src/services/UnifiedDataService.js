@@ -2,19 +2,7 @@
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
-import { logger, Platform } from '../adapters/WebAdapters';
-// 平台特定的导入
-let RNFS = null;
-let MediaStoreService = null;
-
-if (Platform.OS === 'android') {
-  try {
-    RNFS = require('react-native-fs').default;
-    MediaStoreService = require('./MediaStoreService.js').default;
-  } catch (error) {
-    console.warn('移动端模块导入失败:', error.message);
-  }
-}
+import { logger, Platform, RNFS } from '../adapters/WebAdapters';
 
 class UnifiedDataService {
   constructor() {
@@ -360,38 +348,6 @@ class UnifiedDataService {
 
   // ==================== 写接口 ====================
   
-  /**
-   * 更新图片分类ID（独立接口，只更新分类相关字段）
-   */
-  async updateImageCategory(imageId, newCategory, newConfidence = 'manual') {
-    try {
-      logger.debug('更新图片分类:', imageId, '->', newCategory);
-      
-      // 1. 先写数据库
-      const updatedImage = await this.imageStorageService.updateImageCategory(imageId, newCategory, newConfidence);
-      logger.debug('数据库更新完成');
-      
-      // 2. 精确更新缓存（只更新分类相关字段）
-      const updateSuccess = this.imageCache.updateImageClassification(
-        imageId, 
-        newCategory, 
-        { confidence: newConfidence } // 只传递需要更新的字段
-      );
-      if (updateSuccess) {
-        logger.debug('缓存精确更新完成');
-      } else {
-        logger.warn('缓存精确更新失败，将进行全量更新');
-        await this.imageCache.refreshCache();
-        logger.debug('缓存全量更新完成');
-      }
-      
-      return updatedImage;
-      
-    } catch (error) {
-      logger.error('更新图片分类失败:', error);
-      throw error;
-    }
-  }
 
   /**
    * 保存图片分类结果
@@ -474,36 +430,7 @@ class UnifiedDataService {
     }
   }
 
-  /**
-   * 删除图片
-   * 先写缓存，再写数据库
-   */
-  async writeDeleteImage(imageId) {
-    try {
-      logger.debug('删除图片:', imageId);
-      
-      // 1. 先写数据库
-      const result = await this.imageStorageService.deleteImage(imageId);
-      logger.debug('数据库删除完成');
-      
-      // 2. 精确删除缓存
-      const deleteSuccess = this.imageCache.removeImage(imageId);
-      if (deleteSuccess) {
-        logger.debug('缓存精确删除完成');
-      } else {
-        logger.warn('缓存精确删除失败，将进行全量更新');
-        await this.imageCache.refreshCache();
-        logger.debug('缓存全量更新完成');
-      }
-      
-      return result;
-      
-    } catch (error) {
-      logger.error('删除图片失败:', error);
-      throw error;
-    }
-  }
-
+  
   /**
    * 批量删除图片
    * 先写缓存，再写数据库
@@ -550,44 +477,30 @@ class UnifiedDataService {
             const filePath = imageUris[i].replace('file://', '');
             const imageId = uriToImageIdMap.get(imageUris[i]);
             
-            // 检查文件是否存在（仅移动端）
-            let exists = true;
-            if (Platform.OS === 'android' && RNFS) {
-              exists = await RNFS.exists(filePath);
-              if (!exists) {
-                logger.debug(`⚠️ 文件不存在，跳过删除: ${filePath}`);
-                filesDeleted++;
-                if (imageId) successfulImageIds.push(imageId); // 文件不存在也算成功
-                continue;
-              }
+            // 检查文件是否存在
+            const exists = await RNFS.exists(filePath);
+            if (!exists) {
+              logger.debug(`⚠️ 文件不存在，跳过删除: ${filePath}`);
+              filesDeleted++;
+              if (imageId) successfulImageIds.push(imageId); // 文件不存在也算成功
+              continue;
             }
             
-            // 根据平台选择删除方式
+            // 统一使用RNFS删除文件
             let deleteSuccess = false;
-            if (Platform.OS === 'android' && MediaStoreService && MediaStoreService.checkAvailability()) {
-              // Android: 使用MediaStore删除（确保从媒体库中真正删除）
-              const success = await MediaStoreService.deleteFile(filePath);
-              if (success) {
-                logger.debug(`🗑️ MediaStore删除成功: ${filePath}`);
+            try {
+              await RNFS.unlink(filePath);
+              logger.debug(`🗑️ RNFS删除成功: ${filePath}`);
+              deleteSuccess = true;
+            } catch (rnfsError) {
+              // RNFS在某些情况下会抛出"File does not exist"异常，但这通常表示删除成功
+              if (rnfsError.message && rnfsError.message.includes('File does not exist')) {
+                logger.debug(`🗑️ RNFS删除成功（文件已不存在）: ${filePath}`);
                 deleteSuccess = true;
               } else {
-                logger.warn(`⚠️ MediaStore删除失败: ${filePath}`);
-                deleteSuccess = false;
-              }
-            } else if (RNFS) {
-              // PC: 使用RNFS删除
-              try {
-                await RNFS.unlink(filePath);
-                logger.debug(`🗑️ RNFS删除成功: ${filePath}`);
-                deleteSuccess = true;
-              } catch (rnfsError) {
                 logger.warn(`⚠️ RNFS删除失败: ${filePath}`, rnfsError);
                 deleteSuccess = false;
               }
-            } else {
-              // PC端没有RNFS，跳过物理文件删除
-              logger.debug(`⚠️ PC端跳过物理文件删除: ${filePath}`);
-              deleteSuccess = true; // 标记为成功，因为PC端不需要物理删除
             }
             
             if (deleteSuccess) {

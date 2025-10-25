@@ -323,8 +323,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           onPress: async () => {
               logger.debug('用户确认删除，开始删除流程...');
               try {
-                logger.debug('调用writeDeleteImage方法...');
-                const result = await UnifiedDataService.writeDeleteImage(currentImage.id);
+                logger.debug('调用writeDeleteImages方法...');
+                const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
                 
                 logger.debug('删除结果:', result);
               if (result.success) {
@@ -333,8 +333,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                     { text: '确定', onPress: goBack },
                   ]);
               } else {
-                  logger.error('删除失败:', result.message);
-                Alert.alert('删除失败', result.message);
+                  logger.error('删除失败:', result);
+                Alert.alert('删除失败', `删除失败，请检查文件权限`);
               }
             } catch (error) {
                 logger.error('❌ 删除图片失败:', error);
@@ -362,11 +362,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               logger.debug('用户确认标记为待处置，开始更新分类...');
               try {
                 // 更新分类为 tobecleaned（服务层会自动清理相似组信息）
-                await UnifiedDataService.updateImageCategory(
-                  currentImage.id, 
-                  'tobecleaned', 
-                  'manual'
-                );
+                await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
                 
                 // 更新本地状态
       setCurrentImage(prev => ({ 
@@ -443,11 +439,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       });
       
       // 使用专门的分类更新接口
-      await UnifiedDataService.updateImageCategory(
-        currentImage.id, 
-        newCategory, 
-        'manual'
-      );
+      await UnifiedDataService.updateImagesCategory([currentImage.id], newCategory, 'manual');
       
       // 更新本地状态
       setCurrentImage(prev => ({ 

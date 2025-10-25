@@ -1421,6 +1421,9 @@ class GalleryScannerService {
         logger.info('✅ 文件比对完成：没有新增也没有移除的文件，扫描结束');
         this.sendProgressMessage('file_comparison', allImages.length, allImages.length, '没有新增也没有移除的文件，扫描结束');
         
+        // 发送完成消息
+        this.sendProgressMessage('completed', allImages.length, allImages.length);
+        
         // 如果加载了模型，才需要卸载
         if (this.imageClassifier.isInitialized) {
           logger.debug('🔄 卸载本地模型，释放内存...');

@@ -214,7 +214,7 @@ const CategoryScreen = ({ route, navigation }) => {
               try {
                 let processed = 0;
                 for (const imageId of selectedImageIds) {
-                  await UnifiedDataService.updateImageCategory(imageId, newCategory);
+                  await UnifiedDataService.updateImagesCategory([imageId], newCategory);
                   processed++;
                 }
                 
@@ -275,7 +275,7 @@ const CategoryScreen = ({ route, navigation }) => {
                   await UnifiedDataService.writeDeleteImage(imageId);
                 } else {
                   // 移动到暂存箱
-                  await UnifiedDataService.updateImageCategory(imageId, 'tobecleaned');
+                  await UnifiedDataService.updateImagesCategory([imageId], 'tobecleaned');
                   // 从相似组中移除
                   await UnifiedDataService.removeImageFromSimilarityGroup(imageId);
                 }
@@ -296,6 +296,7 @@ const CategoryScreen = ({ route, navigation }) => {
               // 刷新数据
               await loadImages();
             } catch (error) {
+              setShowDeleteProgress(false);
               logger.error(`批量${actionText}失败:`, error);
               Alert.alert('操作失败', `${actionText}时发生错误，请重试`);
             }

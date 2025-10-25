@@ -432,7 +432,7 @@ const ImagePreviewScreen = ({
                 setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
                 
                 logger.debug('调用deleteImage方法...');
-                const result = await UnifiedDataService.writeDeleteImage(currentImage.id);
+                const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
                 
                 logger.debug('删除结果:', result);
                 if (result.success) {
@@ -474,11 +474,7 @@ const ImagePreviewScreen = ({
               logger.debug('用户确认标记为待处置，开始更新分类...');
               try {
                 // 更新分类为tobecleaned（服务层会自动清理相似组信息）
-                await UnifiedDataService.updateImageCategory(
-                  currentImage.id, 
-                  'tobecleaned', 
-                  'manual'
-                );
+                await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
                 
                 // 更新本地状态
                 setCurrentImage(prev => ({ 
@@ -535,11 +531,7 @@ const ImagePreviewScreen = ({
       logger.debug(`  - 数据库中其他图片有检测结果的数量: ${otherImagesWithDetections.length}`);
       
       // 使用专门的分类更新接口，只更新分类相关字段
-      await UnifiedDataService.updateImageCategory(
-        currentImage.id, 
-        newCategory, 
-        'manual'
-      );
+      await UnifiedDataService.updateImagesCategory([currentImage.id], newCategory, 'manual');
       
       // 调试：修改分类后检查数据库中其他图片的检测结果
       logger.debug('修改分类后检查数据库中其他图片的检测结果...');

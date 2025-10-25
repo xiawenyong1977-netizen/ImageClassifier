@@ -896,7 +896,7 @@ const CategoryScreen = ({
                 let processed = 0;
                 
                 for (const image of selectedImagesList) {
-                  await UnifiedDataService.updateImageCategory(image.id, newCategory, 'manual');
+                  await UnifiedDataService.updateImagesCategory([image.id], newCategory, 'manual');
                   processed++;
                 }
                 
@@ -976,12 +976,15 @@ const CategoryScreen = ({
 
     // 检查当前模式是否为tobecleaned分类
     const isToBeCleanedCategory = normalizedCategory === 'tobecleaned';
+    
+    // 使用实际要删除的图片数量
+    const actualSelectedCount = currentCategorySelectedImages.length;
 
     if (isToBeCleanedCategory) {
       // 如果是tobecleaned分类，执行真正的删除操作
       Alert.alert(
         '确认删除',
-        `确定要删除选中的 ${selectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
+        `确定要删除选中的 ${actualSelectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
         [
           { text: '取消', style: 'cancel' },
           {
@@ -990,36 +993,36 @@ const CategoryScreen = ({
             onPress: async () => {
               try {
                 setShowDeleteProgress(true);
-                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: selectedCount });
+                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: actualSelectedCount });
                 
                 const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
-                await UnifiedDataService.writeDeleteImages(
+                const result = await UnifiedDataService.writeDeleteImages(
                   selectedImageIds,
                   (progress) => {
                     setDeleteProgress(progress);
                   }
                 );
                 
+                // 立即关闭删除进度对话框
+                setShowDeleteProgress(false);
+                
+                // 检查删除结果
+                if (result.filesFailed > 0) {
+                  // 有文件删除失败，但不显示提示框，只在控制台记录
+                  console.warn(`部分删除失败: 成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张图片删除失败`);
+                  
+                  // 只移除成功删除的图片
+                  setAllImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));
+                } else {
+                  // 全部删除成功，移除所有选中的图片
+                  setAllImages(prevImages => prevImages.filter(img => !selectedImageIds.includes(img.id)));
+                }
+                
                 // 清除选中状态
                 clearCategorySelections();
                 
-                // 更新本地状态，移除已删除的图片（避免重新加载全量数据）
-                setImages(prevImages => prevImages.filter(img => !selectedImageIds.includes(img.id)));
-                
-                // 发送完成消息通知HomeScreen更新数据
-                if (typeof window !== 'undefined') {
-                  window.dispatchEvent(new CustomEvent('scanProgress', {
-                    detail: {
-                      stage: 'completed',
-                      message: `已删除 ${selectedCount} 张图片`,
-                      filesProcessed: selectedCount,
-                      filesFailed: 0
-                    }
-                  }));
-                }
-                
-                // 立即关闭删除进度对话框
-                setShowDeleteProgress(false);
+                // 重新加载图片以确保UI正确更新
+                await loadImages();
                 
               } catch (error) {
                 setShowDeleteProgress(false);
@@ -1033,7 +1036,7 @@ const CategoryScreen = ({
       // 如果不是tobecleaned分类，将选中的图片设置为tobecleaned分类
       Alert.alert(
         '暂存',
-        `确定要将选中的 ${selectedCount} 张图片暂存到待处置吗？\n\n这些图片将被移动到"待处置"分类中。`,
+        `确定要将选中的 ${actualSelectedCount} 张图片暂存到待处置吗？\n\n这些图片将被移动到"待处置"分类中。`,
         [
           { text: '取消', style: 'cancel' },
           {
