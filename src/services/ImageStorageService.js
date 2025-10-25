@@ -2204,8 +2204,14 @@ class ImageStorageService {
       
       for (let i = 0; i < imageIds.length; i++) {
         try {
-          // 调用存储适配器的删除方法
-          await this.storage.deleteImageById(imageIds[i]);
+          // 根据平台选择删除方法
+          if (Platform.OS === 'web') {
+            // PC端：使用IndexedDB删除
+            await this.deleteImageById(imageIds[i]);
+          } else {
+            // 移动端：使用SQLite删除
+            await this.storage.deleteImageById(imageIds[i]);
+          }
           filesDeleted++;
           logger.debug(`🗑️ 数据库记录删除: ${i + 1}/${imageIds.length}: ${imageIds[i]}`);
         } catch (error) {
