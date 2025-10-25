@@ -553,8 +553,24 @@ export const RNFS = {
       try {
         const RNFS = eval('require("react-native-fs")');
         logger.debug('📁 使用RNFS删除');
+        
+        // 先检查文件是否存在
+        const fileExists = await RNFS.exists(cleanPath);
+        if (!fileExists) {
+          logger.warn('⚠️ 文件不存在，无需删除:', cleanPath);
+          return true;
+        }
+        
         await RNFS.unlink(cleanPath);
-        logger.debug('✅ RNFS删除成功');
+        
+        // 验证文件是否真的被删除了
+        const stillExists = await RNFS.exists(cleanPath);
+        if (stillExists) {
+          logger.error('❌ RNFS删除失败，文件仍然存在:', cleanPath);
+          throw new Error('文件删除失败，文件仍然存在');
+        }
+        
+        logger.debug('🗑️ RNFS删除成功:', cleanPath);
         return true;
       } catch (error) {
         logger.error('❌ RNFS删除失败:', error.message);

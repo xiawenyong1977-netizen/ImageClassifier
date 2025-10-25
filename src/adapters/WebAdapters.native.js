@@ -201,10 +201,52 @@ export const RNFS = {
       }
       
       // 降级到RNFS（用于删除临时文件）
-      return await RNFS_Native.unlink(cleanPath);
+      try {
+        // 先检查文件是否存在
+        const fileExists = await RNFS_Native.exists(cleanPath);
+        if (!fileExists) {
+          logger.warn('⚠️ 文件不存在，无需删除:', cleanPath);
+          return;
+        }
+        
+        await RNFS_Native.unlink(cleanPath);
+        
+        // 验证文件是否真的被删除了
+        const stillExists = await RNFS_Native.exists(cleanPath);
+        if (stillExists) {
+          logger.error('❌ RNFS删除失败，文件仍然存在:', cleanPath);
+          throw new Error('文件删除失败，文件仍然存在');
+        }
+        
+        logger.debug('🗑️ RNFS删除成功:', cleanPath);
+      } catch (error) {
+        logger.error('❌ RNFS删除失败:', error.message);
+        throw error;
+      }
     } else {
       // iOS：直接使用RNFS
-      return await RNFS_Native.unlink(cleanPath);
+      try {
+        // 先检查文件是否存在
+        const fileExists = await RNFS_Native.exists(cleanPath);
+        if (!fileExists) {
+          logger.warn('⚠️ 文件不存在，无需删除:', cleanPath);
+          return;
+        }
+        
+        await RNFS_Native.unlink(cleanPath);
+        
+        // 验证文件是否真的被删除了
+        const stillExists = await RNFS_Native.exists(cleanPath);
+        if (stillExists) {
+          logger.error('❌ RNFS删除失败，文件仍然存在:', cleanPath);
+          throw new Error('文件删除失败，文件仍然存在');
+        }
+        
+        logger.debug('🗑️ RNFS删除成功:', cleanPath);
+      } catch (error) {
+        logger.error('❌ RNFS删除失败:', error.message);
+        throw error;
+      }
     }
   },
   copyFile: async (from, to) => {
