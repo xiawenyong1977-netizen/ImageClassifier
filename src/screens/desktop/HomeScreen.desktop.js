@@ -941,7 +941,17 @@ const HomeScreen = () => {
             <Text style={styles.titleBarTitle}>芯图相册</Text>
           </View>
           <View style={styles.titleBarRight}>
-            {/* 右侧留空，为系统控制按钮让出空间 */}
+            {/* 设置按钮 */}
+            <TouchableOpacity 
+              style={styles.titleBarSettingsButton}
+              onPress={() => {
+                logger.debug('标题栏设置按钮被点击');
+                setCurrentScreen('Settings');
+                setScreenProps({});
+              }}
+            >
+              <Text style={styles.titleBarSettingsIcon}>⚙️</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1213,7 +1223,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#2f3241', // 恢复背景色，与 titleBarOverlay 一致
     height: 60,
-    paddingRight: 120, // 为系统控制按钮留出空间
+    paddingRight: 160, // 为系统控制按钮和设置按钮留出空间
     zIndex: 1000,
   },
   titleBarLeft: {
@@ -1235,6 +1245,19 @@ const styles = StyleSheet.create({
   titleBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  titleBarSettingsButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(116, 177, 190, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  titleBarSettingsIcon: {
+    fontSize: 16,
+    color: '#74b1be',
   },
   // 扫描进度提示区样式
   scanProgressBanner: {
