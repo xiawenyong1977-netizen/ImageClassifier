@@ -269,18 +269,37 @@ const CategoryScreen = ({ route, navigation }) => {
           style: isTobecleaned ? 'destructive' : 'default',
           onPress: async () => {
             try {
-              let processed = 0;
-              for (const imageId of selectedImageIds) {
-                if (isTobecleaned) {
-                  // 删除文件
-                  await UnifiedDataService.writeDeleteImage(imageId);
-                } else {
-                  // 移动到暂存箱
-                  await UnifiedDataService.updateImagesCategory([imageId], 'tobecleaned');
-                  // 从相似组中移除
+              if (isTobecleaned) {
+                // 批量删除文件
+                const result = await UnifiedDataService.writeDeleteImages(selectedImageIds, (progress) => {
+                  logger.debug(`删除进度: ${progress.filesDeleted}/${progress.total}`);
+                });
+                
+                // 显示删除结果（只有失败时才显示弹窗）
+                if (result.filesFailed > 0) {
+                  Alert.alert(
+                    '删除完成', 
+                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                    [
+                      { text: '知道了', style: 'default' }
+                    ]
+                  );
+                }
+                
+                // 只从UI中移除成功删除的图片
+                if (result.successfulImageIds && result.successfulImageIds.length > 0) {
+                  setImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));
+                }
+              } else {
+                // 移动到暂存箱
+                await UnifiedDataService.updateImagesCategory(selectedImageIds, 'tobecleaned');
+                // 从相似组中移除
+                for (const imageId of selectedImageIds) {
                   await UnifiedDataService.removeImageFromSimilarityGroup(imageId);
                 }
-                processed++;
+                
+                // 刷新数据
+                await loadImages();
               }
               
               // 清除选中状态
@@ -294,10 +313,7 @@ const CategoryScreen = ({ route, navigation }) => {
               setSelectionMode(false);
               setShowActionMenu(false);
               
-              // 刷新数据
-              await loadImages();
             } catch (error) {
-              setShowDeleteProgress(false);
               logger.error(`批量${actionText}失败:`, error);
               Alert.alert('操作失败', `${actionText}时发生错误，请重试`);
             }

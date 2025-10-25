@@ -1008,8 +1008,14 @@ const CategoryScreen = ({
                 
                 // 检查删除结果
                 if (result.filesFailed > 0) {
-                  // 有文件删除失败，但不显示提示框，只在控制台记录
-                  console.warn(`部分删除失败: 成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张图片删除失败`);
+                  // 有文件删除失败，显示权限提示
+                  Alert.alert(
+                    '删除完成', 
+                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                    [
+                      { text: '知道了', style: 'default' }
+                    ]
+                  );
                   
                   // 只移除成功删除的图片
                   setAllImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));

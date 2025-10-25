@@ -525,14 +525,17 @@ class UnifiedDataService {
         }
         
         // 3. 只有物理文件删除成功的，才删除数据库记录
-        let result = { success: true, processed: 0 };
+        let result = { success: filesFailed === 0, processed: 0 };
         if (successfulImageIds.length > 0) {
-          result = await this.imageStorageService.deleteImages(successfulImageIds);
+          const dbResult = await this.imageStorageService.deleteImages(successfulImageIds);
           logger.debug('数据库批量删除完成');
           
           // 4. 重建缓存（简单可靠）
           await this.imageCache.refreshCache();
           logger.debug('缓存重建完成');
+          
+          // 合并数据库删除结果
+          result.processed = dbResult.filesDeleted;
         }
         
         logger.debug('物理文件批量删除完成');
