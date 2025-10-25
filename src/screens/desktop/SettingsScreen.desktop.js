@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
-import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
 
-const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmartScan, isScanning }) => {
+const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScanning }) => {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [galleryPaths, setGalleryPaths] = useState([]); // 默认路径，将在loadSettings中设置
@@ -301,6 +300,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
             try {
               // 调用UnifiedDataService清空数据
               await UnifiedDataService.clearAllData();
+              
+              // 发送数据清空事件，通知HomeScreen刷新数据
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('dataCleared'));
+              }
+              
               // 重新加载设置以反映清空后的状态
               await loadSettings();
               Alert.alert('成功', '照片信息已清空！');
@@ -314,44 +319,6 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
     );
   };
 
-  // 智能扫描
-  const handleSmartScan = async () => {
-    // 先检查是否正在扫描（使用全局变量）
-    if (typeof window !== 'undefined' && window.isScanning) {
-      Alert.alert(
-        '操作提示',
-        '扫描正在进行中，请等待当前扫描完成后再开始新的扫描。',
-        [{ text: '确定', style: 'default' }]
-      );
-      return;
-    }
-
-    try {
-      Alert.alert(
-        '智能扫描',
-        '确定要开始智能扫描吗？这将扫描配置的目录并自动分类图片。',
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '确定',
-            onPress: async () => {
-              try {
-                // 调用从HomeScreen传递过来的扫描函数
-                await startSmartScan();
-                Alert.alert('成功', '智能扫描完成！');
-              } catch (error) {
-                logger.error('智能扫描失败:', error);
-                Alert.alert('错误', '智能扫描失败，请重试');
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      logger.error('启动智能扫描失败:', error);
-      Alert.alert('错误', '启动智能扫描失败，请重试');
-    }
-  };
 
   
 
@@ -388,18 +355,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, startSmar
           
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={handleSmartScan}>
-            <Text style={styles.actionButtonText}>🤖 开始智能分类</Text>
-            <Text style={styles.actionButtonDescription}>
-              扫描配置的目录并自动分类图片
-            </Text>
-          </TouchableOpacity>
-          
-
-          <TouchableOpacity
-            style={styles.actionButton}
             onPress={handleClearData}>
-            <Text style={styles.actionButtonText}>🗑️ 清空相册信息</Text>
+            <Text style={styles.actionButtonTextRed}>🗑️ 清空相册信息</Text>
             <Text style={styles.actionButtonDescription}>
               清空所有照片的分类和位置信息
             </Text>
@@ -581,6 +538,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
+    marginBottom: 4,
+  },
+  actionButtonTextRed: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF4444', // 红色文字
     marginBottom: 4,
   },
   actionButtonDescription: {

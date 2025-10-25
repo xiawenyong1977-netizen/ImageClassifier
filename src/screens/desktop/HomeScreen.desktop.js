@@ -365,16 +365,30 @@ const HomeScreen = () => {
       handleScanProgress(event.detail);
     };
 
+    const handleDataCleared = () => {
+      logger.debug('收到数据清空事件，立即刷新数据');
+      loadData();
+    };
+
+    const handleDataRefreshed = () => {
+      logger.debug('收到数据刷新事件，立即刷新数据');
+      loadData();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('navigate-to-settings', handleNavigateToSettings);
       window.addEventListener('scanProgress', handleScanProgressEvent);
+      window.addEventListener('dataCleared', handleDataCleared);
+      window.addEventListener('dataRefreshed', handleDataRefreshed);
       
       return () => {
         window.removeEventListener('navigate-to-settings', handleNavigateToSettings);
         window.removeEventListener('scanProgress', handleScanProgressEvent);
+        window.removeEventListener('dataCleared', handleDataCleared);
+        window.removeEventListener('dataRefreshed', handleDataRefreshed);
       };
     }
-  }, [handleScanProgress]);
+  }, [handleScanProgress, loadData]);
 
   // 页面切换时加载对应组件
   useEffect(() => {
@@ -1071,7 +1085,7 @@ const HomeScreen = () => {
                   }
                 }}
                 onScanProgress={handleScanProgress}
-                startSmartScan={startSmartScan}
+                isScanning={isScanning}
               />
             ) : <View style={styles.loadingContainer}><Text>Loading Settings...</Text></View>}
           </View>
