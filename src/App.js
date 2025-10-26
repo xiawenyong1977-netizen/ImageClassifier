@@ -76,6 +76,7 @@ const MainTabNavigator = () => (
       options={{ 
         title: '暂存箱',
         tabBarLabel: '暂存箱',
+        tabBarStyle: { display: 'none' }, // 隐藏底部导航栏
       }}
     >
       {({ navigation }) => (

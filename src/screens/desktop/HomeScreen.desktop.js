@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   Dimensions,
   Image,
+  Animated,
 } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
@@ -40,6 +41,7 @@ const HomeScreen = () => {
   const [readmeContent, setReadmeContent] = useState('');
   const [forceShowReadme, setForceShowReadme] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const rotationValue = useRef(new Animated.Value(0)).current;
   
   // 使用 ref 存储设置值，避免异步状态更新问题
   const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
@@ -521,6 +523,12 @@ const HomeScreen = () => {
     try {
       logger.debug('HomeScreen 启动智能扫描');
       
+      // 先检查是否正在扫描
+      if (isScanning) {
+        logger.debug('扫描正在进行中，跳过新的扫描请求');
+        return;
+      }
+      
       // 立即设置扫描状态，清除强制显示 readme 状态
       setForceShowReadme(false);
       setIsScanning(true);
@@ -550,13 +558,43 @@ const HomeScreen = () => {
       });
       
       logger.debug('智能扫描完成');
+      setIsScanning(false);
     } catch (error) {
       logger.error('智能扫描失败:', error);
       setGlobalMessage('扫描失败: ' + error.message);
       setIsScanning(false); // 扫描失败时也要重置状态
       throw error;
     }
-  }, [handleScanProgress]);
+  }, [handleScanProgress, isScanning, loadData]);
+
+  // 开始旋转动画
+  const startRotation = useCallback(() => {
+    rotationValue.setValue(0);
+    Animated.loop(
+      Animated.timing(rotationValue, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: false, // 在web环境下可能需要设置为false
+      })
+    ).start();
+  }, [rotationValue]);
+
+  // 停止旋转动画
+  const stopRotation = useCallback(() => {
+    rotationValue.stopAnimation();
+    rotationValue.setValue(0);
+  }, [rotationValue]);
+
+  // 监听扫描状态变化，控制动画
+  useEffect(() => {
+    if (isScanning) {
+      logger.debug('开始旋转动画');
+      startRotation();
+    } else {
+      logger.debug('停止旋转动画');
+      stopRotation();
+    }
+  }, [isScanning, startRotation, stopRotation]);
 
   // 加载最近扫描时间
   const loadLastScanTime = async () => {
@@ -986,6 +1024,26 @@ const HomeScreen = () => {
             ) : (
               renderHomeContent()
             )}
+            
+            {/* FAB扫描按钮 - 只在Home页面显示 */}
+            <TouchableOpacity 
+              style={styles.fabButton}
+              onPress={startSmartScan}
+              disabled={isScanning}
+            >
+              <Animated.View
+                style={{
+                  transform: [{
+                    rotate: rotationValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '360deg'],
+                    })
+                  }]
+                }}
+              >
+                <Text style={styles.fabButtonText}>⟳</Text>
+              </Animated.View>
+            </TouchableOpacity>
           </View>
         )}
         
@@ -1092,7 +1150,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1563,6 +1621,28 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
+  },
+  // FAB按钮样式
+  fabButton: {
+    position: 'fixed',
+    bottom: 80,
+    right: 16,
+    width: 56,
+    height: 56,
+    backgroundColor: '#007AFF',
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    zIndex: 9999,
+  },
+  fabButtonText: {
+    fontSize: 24,
+    color: '#fff',
   },
 });
 
