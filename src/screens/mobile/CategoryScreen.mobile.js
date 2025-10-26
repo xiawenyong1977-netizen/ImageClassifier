@@ -246,83 +246,6 @@ const CategoryScreen = ({ route, navigation }) => {
     }
   };
 
-  // 批量删除/暂存
-  const handleBatchDelete = () => {
-    // 实时获取选中数量，不依赖状态变量
-    const currentSelectedCount = calculateSelectedCount();
-    if (currentSelectedCount === 0) return;
-    
-    const selectedImageIds = images
-      .filter(img => UnifiedDataService.isImageSelected(img.id))
-      .map(img => img.id);
-    const isTobecleaned = category === 'tobecleaned';
-    const actionText = isTobecleaned ? '删除' : '暂存';
-    const actionDescription = isTobecleaned ? '永久删除' : '移动到暂存箱';
-    
-    Alert.alert(
-      `确认${actionText}`,
-      `确定要${actionDescription} ${selectedImageIds.length} 张图片吗？${isTobecleaned ? '此操作不可撤销！' : ''}`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: actionText,
-          style: isTobecleaned ? 'destructive' : 'default',
-          onPress: async () => {
-            try {
-              if (isTobecleaned) {
-                // 批量删除文件
-                const result = await UnifiedDataService.writeDeleteImages(selectedImageIds, (progress) => {
-                  logger.debug(`删除进度: ${progress.filesDeleted}/${progress.total}`);
-                });
-                
-                // 显示删除结果（只有失败时才显示弹窗）
-                if (result.filesFailed > 0) {
-                  Alert.alert(
-                    '删除完成', 
-                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
-                    [
-                      { text: '知道了', style: 'default' }
-                    ]
-                  );
-                }
-                
-                // 只从UI中移除成功删除的图片
-                if (result.successfulImageIds && result.successfulImageIds.length > 0) {
-                  setImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));
-                }
-              } else {
-                // 移动到暂存箱
-                await UnifiedDataService.updateImagesCategory(selectedImageIds, 'tobecleaned');
-                // 从相似组中移除
-                for (const imageId of selectedImageIds) {
-                  await UnifiedDataService.removeImageFromSimilarityGroup(imageId);
-                }
-                
-                // 刷新数据
-                await loadImages();
-              }
-              
-              // 清除选中状态
-              selectedImageIds.forEach(id => {
-                try {
-                  UnifiedDataService.setImageSelection(id, false);
-                } catch (error) {
-                  logger.debug(`⚠️ 跳过已删除图片的选择操作: ${id}`);
-                }
-              });
-              setSelectionMode(false);
-              setShowActionMenu(false);
-              
-            } catch (error) {
-              logger.error(`批量${actionText}失败:`, error);
-              Alert.alert('操作失败', `${actionText}时发生错误，请重试`);
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // ==================== 时间轴分组相关函数 ====================
   
   // 时间轴标题点击处理 - 全选/取消全选该时间段的所有图片（与 PC 端一致）
@@ -1002,7 +925,7 @@ const CategoryScreen = ({ route, navigation }) => {
               });
               
               // 3. 根据删除结果更新UI
-              if (result && result.success) {
+              if (result) {
                 // 只有真正删除成功的图片才从UI中移除
                 const successfulImageIds = result.successfulImageIds || [];
                 const failedImageIds = result.failedImageIds || [];
@@ -1017,27 +940,29 @@ const CategoryScreen = ({ route, navigation }) => {
                 });
                 
                 // 只从UI中移除成功删除的图片
-                setImages(prevImages => {
-                  const newImages = prevImages.filter(img => !successfulImageIds.includes(img.id));
-                  
-                  // 同时更新分组图片
-                  if (newImages.length > 0) {
-                    const grouped = groupImagesByDate(newImages);
-                    setGroupedImages(grouped);
-                  } else {
-                    setGroupedImages({});
-                  }
-                  
-                  return newImages;
-                });
+                if (successfulImageIds.length > 0) {
+                  setImages(prevImages => {
+                    const newImages = prevImages.filter(img => !successfulImageIds.includes(img.id));
+                    
+                    // 同时更新分组图片
+                    if (newImages.length > 0) {
+                      const grouped = groupImagesByDate(newImages);
+                      setGroupedImages(grouped);
+                    } else {
+                      setGroupedImages({});
+                    }
+                    
+                    return newImages;
+                  });
+                }
                 
                 setSelectionMode(false);
                 
                 // 显示删除结果（只有失败时才显示弹窗）
-                if (result.filesFailed > 0) {
+                if (result.filesFailed > 0 || !result.success) {
                   Alert.alert(
                     '删除完成', 
-                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                    `成功删除 ${result.filesDeleted || 0} 张图片，${result.filesFailed || imageIds.length} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
                     [
                       { text: '知道了', style: 'default' }
                     ]
@@ -1045,7 +970,11 @@ const CategoryScreen = ({ route, navigation }) => {
                 }
                 // 全部成功时不显示弹窗，静默完成
               } else {
-                Alert.alert('删除失败', '删除操作失败，请重试');
+                // result 为 null，说明删除操作根本没有返回结果
+                Alert.alert(
+                  '删除失败', 
+                  '删除操作失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。'
+                );
               }
               
               // 4. 关闭进度提示
@@ -1053,7 +982,17 @@ const CategoryScreen = ({ route, navigation }) => {
             } catch (error) {
               logger.error('❌ 批量删除失败:', error);
               setShowDeleteProgress(false);
-              Alert.alert('操作失败', '删除时发生错误，请重试');
+              
+              // 检查是否是权限相关的错误
+              const errorMessage = error?.message || '';
+              if (errorMessage.includes('权限') || errorMessage.includes('删除失败')) {
+                Alert.alert(
+                  '删除失败', 
+                  '删除文件失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。'
+                );
+              } else {
+                Alert.alert('操作失败', '删除时发生错误，请重试');
+              }
             }
           },
         },
