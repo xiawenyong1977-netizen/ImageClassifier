@@ -464,6 +464,12 @@ const CategoryScreen = ({ route, navigation }) => {
     try {
       logger.debug('🔍 loadImages 开始执行:', { isRefresh, category, city, similarityGroupId });
       
+      // 🆕 如果缓存正在构建中，等待构建完成
+      if (GlobalImageCache.isLoading) {
+        logger.debug('⏳ 缓存正在构建中，等待完成...');
+        await GlobalImageCache.buildCache();
+      }
+      
       if (isRefresh) {
         setRefreshing(true);
         setPage(1);
