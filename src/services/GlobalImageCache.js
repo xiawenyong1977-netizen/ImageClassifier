@@ -295,8 +295,12 @@ class GlobalImageCache {
       // 映射表中找不到，尝试直接查找
       const image = this.cache.allImages.find(img => img.id === imageId);
       if (image) {
-        // 找到了说明映射表需要重建
-        console.warn(`⚠️ 映射表不一致，重建中: 查找 ${imageId}`);
+        // 找到了说明映射表过期
+        // 但如果正在构建缓存，不重建映射表，直接返回
+        if (this.isLoading) {
+          return image; // 安全：buildCache已经设置好完整的allImages
+        }
+        // 不在构建中，重建映射表
         this._rebuildImageIdIndex(false);
         return image;
       }
@@ -306,27 +310,28 @@ class GlobalImageCache {
     }
     
     const image = this.cache.allImages[index];
+    
+    // 索引处没有对象
     if (!image) {
-      console.error(`❌ 索引 ${index} 处的图片对象为空，重建映射表`);
+      // 如果正在构建缓存，直接返回null，不要重建
+      if (this.isLoading) {
+        return null;
+      }
       this._rebuildImageIdIndex(false);
       return null;
     }
     
-    // 验证ID是否匹配
+    // 验证ID匹配
     if (image.id !== imageId) {
-      console.error(`❌ ID不匹配! 查找: ${imageId}, 找到: ${image.id}，映射表已损坏，重建中`);
-      // 重建映射表
-      this._rebuildImageIdIndex(false);
-      
-      // 再次尝试查找
-      const correctImage = this.cache.allImages.find(img => img.id === imageId);
-      if (correctImage) {
-        console.log(`✅ 重建映射表后找到正确图片: ${imageId}`);
-        return correctImage;
-      } else {
-        console.warn(`⚠️ 重建映射表后仍未找到图片: ${imageId}`);
-        return null;
+      // 如果正在构建缓存，使用find查找，不要重建
+      if (this.isLoading) {
+        return this.cache.allImages.find(img => img.id === imageId) || null;
       }
+      
+      // 不在构建中，重建映射表
+      this._rebuildImageIdIndex(false);
+      const correctImage = this.cache.allImages.find(img => img.id === imageId);
+      return correctImage || null;
     }
     
     return image;
