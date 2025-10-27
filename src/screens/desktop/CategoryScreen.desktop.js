@@ -2305,6 +2305,7 @@ const CategoryScreen = ({
           visible={showEnhanceModal}
           onClose={handleCloseEnhanceModal}
           preset={enhancePreset}
+          availablePresets={availableEnhancePresets}
           progress={enhanceProgress}
           selectedImages={snapshotImagesRef.current}
           results={enhanceResults}
@@ -2324,6 +2325,7 @@ const EnhanceModal = ({
   visible,
   onClose,
   preset,
+  availablePresets = [],
   progress,
   selectedImages = [],
   results = [],
@@ -2338,16 +2340,9 @@ const EnhanceModal = ({
   const isFailed = currentResult.status === 'failed';
   const isSaved = currentResult.saved === true;
   
-  // 获取当前预设名称（根据preset ID查找）
+  // 获取当前预设名称（从可用预设列表中查找）
   const getPresetName = () => {
-    const presetOptions = [
-      { id: 'portrait', name: '人像美颜' },
-      { id: 'enhance', name: '清晰增强' },
-      { id: 'color', name: '色彩优化' },
-      { id: 'document', name: '证件处理' },
-      { id: 'custom', name: '自定义' }
-    ];
-    const found = presetOptions.find(p => p.id === preset);
+    const found = availablePresets.find(p => p.id === preset);
     return found ? found.name : 'AI增强';
   };
   
