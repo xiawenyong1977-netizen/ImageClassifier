@@ -2384,57 +2384,7 @@ const EnhanceModal = ({
     }
   };
 
-  // 区域1：缩略图导航（带状态标记，可点击切换）
-  const renderThumbnailNav = () => (
-    <View style={styles.enhanceThumbnailNavSection}>
-      <ScrollView 
-        horizontal 
-        style={styles.enhanceThumbnailsContainer}
-        showsHorizontalScrollIndicator={false}
-      >
-        {selectedImages.map((img, index) => {
-          const status = getImageStatus(index);
-          const isActive = index === currentIndex;
-          
-          return (
-            <TouchableOpacity
-              key={img.id}
-              style={[
-                styles.enhanceThumbnailWrapper,
-                isActive && styles.enhanceThumbnailWrapperActive
-              ]}
-              onPress={() => onIndexChange(index)}
-              disabled={isProcessing && status === 'pending'}
-            >
-              <Image
-                source={{ uri: img.uri }}
-                style={[
-                  styles.enhanceThumbnailImage,
-                  isActive && styles.enhanceThumbnailImageActive
-                ]}
-                resizeMode="cover"
-              />
-              {/* 状态标记 */}
-              <View style={[
-                styles.enhanceThumbnailBadge,
-                status === 'completed' && styles.enhanceThumbnailBadgeSuccess,
-                status === 'processing' && styles.enhanceThumbnailBadgeProcessing,
-                status === 'failed' && styles.enhanceThumbnailBadgeFailed,
-                status === 'pending' && styles.enhanceThumbnailBadgePending
-              ]}>
-                {status === 'completed' && <Text style={styles.enhanceThumbnailBadgeText}>✓</Text>}
-                {status === 'processing' && <ActivityIndicator size="small" color="#fff" />}
-                {status === 'failed' && <Text style={styles.enhanceThumbnailBadgeText}>✕</Text>}
-                {status === 'pending' && <Text style={styles.enhanceThumbnailBadgeText}>{index + 1}</Text>}
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </View>
-  );
-
-  // 区域2：大图对比视图
+  // 大图对比视图
   const renderComparisonView = () => {
     const status = getImageStatus(currentIndex);
     
@@ -2613,16 +2563,18 @@ const EnhanceModal = ({
         <View style={styles.enhanceModalContent}>
           {/* 标题栏 */}
           <View style={styles.enhanceModalHeader}>
-            <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
+            <View style={styles.enhanceModalTitleContainer}>
+              <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
+              <Text style={styles.enhanceModalCounter}>
+                {progress.current}/{progress.total}
+              </Text>
+            </View>
             <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
               <Text style={styles.enhanceModalCloseButtonText}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          {/* 区域1：缩略图导航 */}
-          {renderThumbnailNav()}
-
-          {/* 区域2：大图对比视图 */}
+          {/* 大图对比视图 */}
           {renderComparisonView()}
         </View>
       </View>
@@ -3458,65 +3410,31 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
   },
+  enhanceModalTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   enhanceModalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+  },
+  enhanceModalCounter: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2196F3',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   enhanceModalSubtitle: {
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
     marginBottom: 20,
-  },
-  // 缩略图相关样式
-  enhanceThumbnailsContainer: {
-    marginBottom: 0,
-    maxHeight: 80,
-  },
-  enhanceThumbnailWrapper: {
-    width: 80,
-    height: 80,
-    marginRight: 10,
-    position: 'relative',
-    borderRadius: 6,
-    overflow: 'hidden',
-    backgroundColor: '#f0f0f0',
-  },
-  enhanceThumbnailImage: {
-    width: '100%',
-    height: '100%',
-  },
-  enhanceThumbnailImageCompleted: {
-    opacity: 0.6,
-  },
-  enhanceThumbnailBadge: {
-    position: 'absolute',
-    top: 3,
-    right: 3,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#999',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  enhanceThumbnailBadgeSuccess: {
-    backgroundColor: '#4CAF50',
-  },
-  enhanceThumbnailBadgeProcessing: {
-    backgroundColor: '#2196F3',
-  },
-  enhanceThumbnailBadgeFailed: {
-    backgroundColor: '#f44336',
-  },
-  enhanceThumbnailBadgePending: {
-    backgroundColor: '#999',
-  },
-  enhanceThumbnailBadgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
   },
   // 预设方案按钮组
   enhancePresetButtonGroup: {
@@ -3580,25 +3498,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  // ==================== 新三区域布局样式 ====================
-  
-  // 区域1：缩略图导航区域
-  enhanceThumbnailNavSection: {
-    marginBottom: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  enhanceThumbnailWrapperActive: {
-    borderWidth: 2,
-    borderColor: '#2196F3',
-  },
-  enhanceThumbnailImageActive: {
-    opacity: 1,
-  },
-
-
-  // 区域3：大图对比区域
+  // ==================== 大图对比区域样式 ====================
   enhanceComparisonSection: {
     flex: 1,  // 占据剩余所有空间
   },
