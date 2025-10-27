@@ -582,7 +582,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>编辑增强方案</Text>
+              <Text style={styles.modalTitle}>{editingPreset.name}</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => {
