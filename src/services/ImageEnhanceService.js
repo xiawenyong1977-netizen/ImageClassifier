@@ -10,6 +10,7 @@
 import { logger } from '../adapters/WebAdapters';
 import ImageProcessor from './ImageProcessor';
 import ImageStorageService from './ImageStorageService';
+import WeChatAuthService from './WeChatAuthService';
 
 class ImageEnhanceService {
   constructor() {
@@ -135,14 +136,21 @@ class ImageEnhanceService {
       logger.debug(`⏱️ 设置超时时间: ${dynamicTimeout}ms (${imageCount}张图片)`);
       const timeoutId = setTimeout(() => controller.abort(), dynamicTimeout);
 
-      // 获取客户端ID
+      // 获取客户端ID和OpenID
       const clientId = await this.getClientId();
+      const openId = await WeChatAuthService.getOpenId();
+      
+      // 构建请求头
+      const headers = { 'X-User-ID': clientId };
+      if (openId) {
+        headers['X-WeChat-OpenID'] = openId;
+      }
       
       const response = await fetch(
         `${this.apiConfig.baseURL}${this.apiConfig.endpoints.submit}`, 
         {
           method: 'POST',
-          headers: { 'X-User-ID': clientId },
+          headers: headers,
           body: formData,
           signal: controller.signal
         }

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput, Image } from 'react-native';
 import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageStorageService from '../../services/ImageStorageService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 
 const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScanning }) => {
   const [settings, setSettings] = useState({});
@@ -18,10 +19,79 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   const [editingPreset, setEditingPreset] = useState(null); // 当前编辑的预设 {id, name, icon, prompt, description}
   const [showEditModal, setShowEditModal] = useState(false);
 
+  // 微信授权相关状态
+  const [wechatStatus, setWechatStatus] = useState('checking'); // checking, not_followed, followed
+  const [qrCode, setQrCode] = useState('');
+  const [qrTicket, setQrTicket] = useState('');
+  const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
+  const [checkingFollow, setCheckingFollow] = useState(false);
+
 
   useEffect(() => {
     loadSettings();
+    checkWeChatStatus();
   }, []);
+
+  // 检查微信关注状态
+  const checkWeChatStatus = async () => {
+    try {
+      // 1. 检查本地是否有 openId
+      const openId = await WeChatAuthService.getOpenId();
+      
+      if (openId) {
+        // 有 openId，说明已关注，查询额度
+        setWechatStatus('followed');
+        await loadCredits();
+      } else {
+        // 没有 openId，未关注
+        setWechatStatus('not_followed');
+      }
+    } catch (error) {
+      logger.error('检查微信状态失败:', error);
+      setWechatStatus('not_followed');
+    }
+  };
+
+  // 生成二维码
+  const generateQrCode = async () => {
+    try {
+      setCheckingFollow(true);
+      const { qrcode, ticket } = await WeChatAuthService.generateQrCode();
+      setQrCode(qrcode);
+      setQrTicket(ticket);
+      
+      // 开始轮询检查关注状态
+      WeChatAuthService.startCheckingFollowStatus(
+        ticket,
+        async ({ followed, openId }) => {
+          if (followed && openId) {
+            setWechatStatus('followed');
+            await loadCredits();
+            Alert.alert('成功', '关注成功！已获得AI图像增强额度');
+          }
+          setCheckingFollow(false);
+        },
+        (error) => {
+          logger.error('检查关注状态失败:', error);
+          setCheckingFollow(false);
+        }
+      );
+    } catch (error) {
+      logger.error('生成二维码失败:', error);
+      Alert.alert('错误', '生成二维码失败，请重试');
+      setCheckingFollow(false);
+    }
+  };
+
+  // 加载额度信息
+  const loadCredits = async () => {
+    try {
+      const creditsData = await WeChatAuthService.getCredits();
+      setCredits(creditsData);
+    } catch (error) {
+      logger.error('加载额度失败:', error);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -513,37 +583,102 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         {/* AI Image Enhancement Presets */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>✨ AI图像增强</Text>
-          <Text style={styles.sectionDescription}>
-            配置AI图像增强的预设方案，可自定义提示词
-          </Text>
           
-          {Object.entries(aiEnhancePresets)
-            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
-            .map(([presetId, preset]) => (
-              <View key={presetId} style={styles.presetItem}>
-                <View style={styles.presetLeft}>
-                  <Text style={styles.presetIcon}>{preset.icon}</Text>
-                  <View style={styles.presetInfo}>
-                    <Text style={styles.presetName}>{preset.name}</Text>
-                    <Text style={styles.presetPrompt} numberOfLines={2}>
-                      {preset.prompt || '（未设置提示词）'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.presetRight}>
-                  <TouchableOpacity
-                    style={styles.editPresetButton}
-                    onPress={() => openEditPreset(presetId)}>
-                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
-                  </TouchableOpacity>
-                  <Switch
-                    value={preset.enabled}
-                    onValueChange={() => togglePresetEnabled(presetId)}
-                    trackColor={{ false: '#ccc', true: '#4CAF50' }}
+          {/* 微信授权状态 */}
+          {wechatStatus === 'checking' && (
+            <View style={styles.wechatAuthContainer}>
+              <ActivityIndicator size="small" color="#2196F3" />
+              <Text style={styles.wechatAuthText}>检查授权状态中...</Text>
+            </View>
+          )}
+          
+          {wechatStatus === 'not_followed' && (
+            <View style={styles.wechatAuthContainer}>
+              <Text style={styles.wechatAuthTitle}>
+                🔐 关注公众号获取AI图像增强额度
+              </Text>
+              <Text style={styles.wechatAuthDescription}>
+                关注公众号后即可免费使用AI图像增强功能
+              </Text>
+              
+              {qrCode ? (
+                <View style={styles.qrCodeContainer}>
+                  <Image
+                    source={{ uri: `data:image/png;base64,${qrCode}` }}
+                    style={styles.qrCodeImage}
                   />
+                  {checkingFollow && (
+                    <Text style={styles.qrCodeHint}>
+                      正在检测关注状态...
+                    </Text>
+                  )}
+                  {!checkingFollow && (
+                    <Text style={styles.qrCodeHint}>
+                      请使用微信扫描二维码关注公众号
+                    </Text>
+                  )}
                 </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.generateQrButton}
+                  onPress={generateQrCode}>
+                  <Text style={styles.generateQrButtonText}>
+                    {checkingFollow ? '生成中...' : '🔲 生成二维码'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+          
+          {wechatStatus === 'followed' && (
+            <>
+              {/* 额度显示 */}
+              <View style={styles.creditsContainer}>
+                <Text style={styles.creditsTitle}>💰 使用额度</Text>
+                <View style={styles.creditsInfo}>
+                  <Text style={styles.creditsLabel}>剩余额度：</Text>
+                  <Text style={styles.creditsValue}>
+                    {credits.remaining} / {credits.total}
+                  </Text>
+                </View>
+                <Text style={styles.creditsDescription}>
+                  已使用 {credits.used} 次，建议合理使用额度
+                </Text>
               </View>
-            ))}
+              
+              <Text style={styles.sectionDescription}>
+                配置AI图像增强的预设方案，可自定义提示词
+              </Text>
+              
+              {Object.entries(aiEnhancePresets)
+                .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+                .map(([presetId, preset]) => (
+                  <View key={presetId} style={styles.presetItem}>
+                    <View style={styles.presetLeft}>
+                      <Text style={styles.presetIcon}>{preset.icon}</Text>
+                      <View style={styles.presetInfo}>
+                        <Text style={styles.presetName}>{preset.name}</Text>
+                        <Text style={styles.presetPrompt} numberOfLines={2}>
+                          {preset.prompt || '（未设置提示词）'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.presetRight}>
+                      <TouchableOpacity
+                        style={styles.editPresetButton}
+                        onPress={() => openEditPreset(presetId)}>
+                        <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
+                      </TouchableOpacity>
+                      <Switch
+                        value={preset.enabled}
+                        onValueChange={() => togglePresetEnabled(presetId)}
+                        trackColor={{ false: '#ccc', true: '#4CAF50' }}
+                      />
+                    </View>
+                  </View>
+                ))}
+            </>
+          )}
         </View>
 
         {/* App Info */}
@@ -1076,6 +1211,93 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#fff',
+  },
+  // 微信授权样式
+  wechatAuthContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  wechatAuthTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  wechatAuthDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  wechatAuthText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 12,
+  },
+  qrCodeContainer: {
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  qrCodeImage: {
+    width: 200,
+    height: 200,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 8,
+  },
+  qrCodeHint: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  generateQrButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+  },
+  generateQrButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  // 额度显示样式
+  creditsContainer: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  creditsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  creditsInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  creditsLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  creditsValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2196F3',
+    marginLeft: 8,
+  },
+  creditsDescription: {
+    fontSize: 13,
+    color: '#999',
   },
 });
 

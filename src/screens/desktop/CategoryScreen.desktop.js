@@ -5,6 +5,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Mod
 import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 
 // 使用统一数据服务
 
@@ -1189,6 +1190,37 @@ const CategoryScreen = ({
       if (images.length === 0) {
         logger.error('❌ 没有图片数据');
         Alert.alert('错误', '没有可处理的图片');
+        return;
+      }
+
+      // 检查微信授权和额度
+      try {
+        const credits = await WeChatAuthService.getCredits();
+        
+        if (credits.remaining < images.length) {
+          Alert.alert(
+            '额度不足',
+            `当前剩余额度：${credits.remaining}次\n需要处理：${images.length}张图片\n\n请前往设置页面关注公众号获取更多额度`,
+            [
+              { text: '取消', style: 'cancel' },
+              { 
+                text: '去设置', 
+                onPress: () => {
+                  // 触发导航到设置页面
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('navigate-to-settings'));
+                  }
+                }
+              }
+            ]
+          );
+          return;
+        }
+        
+        logger.debug(`✅ 额度充足: 剩余${credits.remaining}次，需要${images.length}次`);
+      } catch (error) {
+        logger.error('检查额度失败:', error);
+        Alert.alert('错误', '无法检查使用额度，请重试');
         return;
       }
       
