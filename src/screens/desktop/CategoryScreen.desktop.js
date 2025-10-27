@@ -2338,6 +2338,19 @@ const EnhanceModal = ({
   const isFailed = currentResult.status === 'failed';
   const isSaved = currentResult.saved === true;
   
+  // 获取当前预设名称（根据preset ID查找）
+  const getPresetName = () => {
+    const presetOptions = [
+      { id: 'portrait', name: '人像美颜' },
+      { id: 'enhance', name: '清晰增强' },
+      { id: 'color', name: '色彩优化' },
+      { id: 'document', name: '证件处理' },
+      { id: 'custom', name: '自定义' }
+    ];
+    const found = presetOptions.find(p => p.id === preset);
+    return found ? found.name : 'AI增强';
+  };
+  
   // 获取图片状态（从后端实时返回或results）
   const getImageStatus = (index) => {
     // 优先使用results（处理完成后的最终结果）
@@ -2605,7 +2618,7 @@ const EnhanceModal = ({
         <View style={styles.enhanceModalContent}>
           {/* 标题栏 */}
           <View style={styles.enhanceModalHeader}>
-            <Text style={styles.enhanceModalTitle}>AI 图像增强</Text>
+            <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
             <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
               <Text style={styles.enhanceModalCloseButtonText}>✕</Text>
             </TouchableOpacity>
