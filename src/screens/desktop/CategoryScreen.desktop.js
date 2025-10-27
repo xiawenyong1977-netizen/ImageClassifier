@@ -480,6 +480,24 @@ const CategoryScreen = ({
     };
     
     loadEnhancePresets();
+    
+    // 监听设置更新事件，当用户在设置页面修改增强方案时自动刷新
+    const handleSettingsUpdated = (event) => {
+      if (event.detail?.key === 'aiEnhancePresets') {
+        logger.debug('📋 检测到AI增强预设已更新，重新加载');
+        loadEnhancePresets();
+      }
+    };
+    
+    if (typeof window !== 'undefined') {
+      window.addEventListener('settingsUpdated', handleSettingsUpdated);
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('settingsUpdated', handleSettingsUpdated);
+      }
+    };
   }, []);
   
   // 监听从ImagePreview返回时的页码，恢复状态

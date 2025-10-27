@@ -12,6 +12,11 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   const [originalPaths, setOriginalPaths] = useState([]); // 原始路径，用于比较变更
   const [storageType, setStorageType] = useState('检测中...'); // 存储类型
   const [storageSize, setStorageSize] = useState('计算中...'); // 存储大小
+  
+  // AI增强预设相关状态
+  const [aiEnhancePresets, setAiEnhancePresets] = useState({});
+  const [editingPreset, setEditingPreset] = useState(null); // 当前编辑的预设 {id, name, icon, prompt, description}
+  const [showEditModal, setShowEditModal] = useState(false);
 
 
   useEffect(() => {
@@ -37,6 +42,11 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       
       // 设置其他设置项
       setSettings(savedSettings);
+      
+      // 加载AI增强预设
+      if (savedSettings.aiEnhancePresets) {
+        setAiEnhancePresets(savedSettings.aiEnhancePresets);
+      }
       
       // 检测存储类型
       await detectStorageType();
@@ -276,6 +286,93 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
     );
   };
 
+  // ========== AI增强预设管理 ==========
+  
+  // 打开编辑预设模态框
+  const openEditPreset = (presetId) => {
+    const preset = aiEnhancePresets[presetId];
+    if (preset) {
+      setEditingPreset({
+        id: presetId,
+        name: preset.name,
+        icon: preset.icon,
+        prompt: preset.prompt,
+        description: preset.description,
+        enabled: preset.enabled,
+        sortOrder: preset.sortOrder
+      });
+      setShowEditModal(true);
+    }
+  };
+
+  // 保存编辑的预设
+  const saveEditedPreset = async () => {
+    if (!editingPreset) return;
+    
+    try {
+      const updatedPresets = {
+        ...aiEnhancePresets,
+        [editingPreset.id]: {
+          name: editingPreset.name,
+          icon: editingPreset.icon,
+          prompt: editingPreset.prompt,
+          description: editingPreset.description,
+          enabled: editingPreset.enabled,
+          sortOrder: editingPreset.sortOrder
+        }
+      };
+      
+      const newSettings = { ...settings, aiEnhancePresets: updatedPresets };
+      await UnifiedDataService.writeSettings(newSettings);
+      
+      setAiEnhancePresets(updatedPresets);
+      setSettings(newSettings);
+      setShowEditModal(false);
+      setEditingPreset(null);
+      
+      // 通知其他页面设置已更新
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+          detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
+        }));
+      }
+      
+      Alert.alert('成功', '预设已保存');
+    } catch (error) {
+      logger.error('保存AI增强预设失败:', error);
+      Alert.alert('错误', '保存预设失败，请重试');
+    }
+  };
+
+  // 切换预设启用状态
+  const togglePresetEnabled = async (presetId) => {
+    try {
+      const updatedPresets = {
+        ...aiEnhancePresets,
+        [presetId]: {
+          ...aiEnhancePresets[presetId],
+          enabled: !aiEnhancePresets[presetId].enabled
+        }
+      };
+      
+      const newSettings = { ...settings, aiEnhancePresets: updatedPresets };
+      await UnifiedDataService.writeSettings(newSettings);
+      
+      setAiEnhancePresets(updatedPresets);
+      setSettings(newSettings);
+      
+      // 通知其他页面设置已更新
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+          detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
+        }));
+      }
+    } catch (error) {
+      logger.error('切换预设状态失败:', error);
+      Alert.alert('错误', '操作失败，请重试');
+    }
+  };
+
 
   const handleClearData = async () => {
     // 先检查是否正在扫描（使用全局变量）
@@ -413,6 +510,41 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           </View>
         </View>
 
+        {/* AI Image Enhancement Presets */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>✨ AI图像增强</Text>
+          <Text style={styles.sectionDescription}>
+            配置AI图像增强的预设方案，可自定义提示词
+          </Text>
+          
+          {Object.entries(aiEnhancePresets)
+            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+            .map(([presetId, preset]) => (
+              <View key={presetId} style={styles.presetItem}>
+                <View style={styles.presetLeft}>
+                  <Text style={styles.presetIcon}>{preset.icon}</Text>
+                  <View style={styles.presetInfo}>
+                    <Text style={styles.presetName}>{preset.name}</Text>
+                    <Text style={styles.presetPrompt} numberOfLines={2}>
+                      {preset.prompt || '（未设置提示词）'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.presetRight}>
+                  <TouchableOpacity
+                    style={styles.editPresetButton}
+                    onPress={() => openEditPreset(presetId)}>
+                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
+                  </TouchableOpacity>
+                  <Switch
+                    value={preset.enabled}
+                    onValueChange={() => togglePresetEnabled(presetId)}
+                    trackColor={{ false: '#ccc', true: '#4CAF50' }}
+                  />
+                </View>
+              </View>
+            ))}
+        </View>
 
         {/* App Info */}
         <View style={styles.section}>
@@ -444,6 +576,96 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           </View>
         </View>
       </ScrollView>
+
+      {/* Edit Preset Modal */}
+      {showEditModal && editingPreset && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>编辑增强方案</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingPreset(null);
+                }}>
+                <Text style={styles.modalCloseButtonText}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              <View style={styles.presetInfoDisplay}>
+                <Text style={styles.presetIconLarge}>{editingPreset.icon}</Text>
+                <View>
+                  <Text style={styles.presetNameLarge}>{editingPreset.name}</Text>
+                  <Text style={styles.presetDescriptionSmall}>{editingPreset.description}</Text>
+                </View>
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>提示词</Text>
+                <TextInput
+                  style={[styles.modalInput, styles.modalTextArea]}
+                  value={editingPreset.prompt}
+                  onChangeText={(text) => setEditingPreset({ ...editingPreset, prompt: text })}
+                  placeholder="输入AI增强的提示词，例如：修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变"
+                  multiline
+                  numberOfLines={6}
+                  textAlignVertical="top"
+                />
+                
+                {/* 证件类型快捷按钮（仅限证件处理预设） */}
+                {editingPreset.id === 'document' && (
+                  <View style={styles.documentButtonsContainer}>
+                    <TouchableOpacity
+                      style={styles.documentButton}
+                      onPress={() => {
+                        const idCardPrompt = '增强身份证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做身份证证件照，白色背景，深色有领上衣，面部光线均匀';
+                        setEditingPreset({ ...editingPreset, prompt: idCardPrompt });
+                      }}>
+                      <Text style={styles.documentButtonText}>🆔 身份证</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.documentButton}
+                      onPress={() => {
+                        const passportPrompt = '增强护照照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做护照证件照，白色背景，深色有领上衣，面部光线均匀，眼神平视前方';
+                        setEditingPreset({ ...editingPreset, prompt: passportPrompt });
+                      }}>
+                      <Text style={styles.documentButtonText}>📘 护照</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.documentButton}
+                      onPress={() => {
+                        const hkMacauPrompt = '增强港澳通行证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做港澳通行证证件照，白色或淡蓝色背景，深色有领上衣，面部光线均匀';
+                        setEditingPreset({ ...editingPreset, prompt: hkMacauPrompt });
+                      }}>
+                      <Text style={styles.documentButtonText}>🏝️ 港澳通行证</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingPreset(null);
+                }}>
+                <Text style={styles.modalCancelButtonText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveButton}
+                onPress={saveEditedPreset}>
+                <Text style={styles.modalSaveButtonText}>保存</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -654,6 +876,206 @@ const styles = StyleSheet.create({
   },
   removeButtonTextDisabled: {
     color: '#999',
+  },
+  // AI增强预设样式
+  sectionDescription: {
+    fontSize: 14,
+    color: '#666',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  presetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  presetLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 12,
+  },
+  presetIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  presetInfo: {
+    flex: 1,
+  },
+  presetName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  presetPrompt: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  presetRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  editPresetButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#2196F3',
+    borderRadius: 6,
+  },
+  editPresetButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // 模态框样式
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    width: '90%',
+    maxWidth: 600,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalCloseButton: {
+    padding: 4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseButtonText: {
+    fontSize: 24,
+    color: '#666',
+    lineHeight: 24,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  presetInfoDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  presetIconLarge: {
+    fontSize: 36,
+  },
+  presetNameLarge: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  presetDescriptionSmall: {
+    fontSize: 13,
+    color: '#666',
+  },
+  modalField: {
+    marginBottom: 0,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#333',
+    backgroundColor: '#fafafa',
+  },
+  modalTextArea: {
+    height: 150,
+    paddingTop: 10,
+  },
+  documentButtonsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  documentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  documentButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#333',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalCancelButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modalSaveButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+  },
+  modalSaveButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

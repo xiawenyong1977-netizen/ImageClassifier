@@ -2047,43 +2047,61 @@ class ImageStorageService {
           result.scanInterval = 5;
         }
         
-        // 🆕 初始化 AI 增强预设方案（如果不存在）
+        // 🆕 定义默认 AI 增强预设方案
+        const defaultAiEnhancePresets = {
+          portrait: {
+            name: '人像美颜',
+            icon: '👤',
+            prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
+            description: '适合人物照片',
+            enabled: true,
+            sortOrder: 1
+          },
+          enhance: {
+            name: '清晰增强',
+            icon: '✨',
+            prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
+            description: '适合模糊照片',
+            enabled: true,
+            sortOrder: 2
+          },
+          color: {
+            name: '色彩优化',
+            icon: '🎨',
+            prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
+            description: '适合偏暗照片',
+            enabled: true,
+            sortOrder: 3
+          },
+          document: {
+            name: '证件处理',
+            icon: '🪪',
+            prompt: '增强证件照片的清晰度和对比度，优化文字识别效果，提升证件信息的可读性，适用于身份证、护照、港澳通行证等各类证件照片',
+            description: '适合证件照片',
+            enabled: true,
+            sortOrder: 4
+          },
+          custom: {
+            name: '自定义',
+            icon: '⚙️',
+            prompt: '',
+            description: '自定义编辑需求',
+            enabled: true,
+            sortOrder: 5
+          }
+        };
+        
+        // 初始化或合并 AI 增强预设方案
         if (!result.aiEnhancePresets) {
-          result.aiEnhancePresets = {
-            portrait: {
-              name: '人像美颜',
-              icon: '👤',
-              prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
-              description: '适合人物照片',
-              enabled: true,
-              sortOrder: 1
-            },
-            enhance: {
-              name: '清晰增强',
-              icon: '✨',
-              prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
-              description: '适合模糊照片',
-              enabled: true,
-              sortOrder: 2
-            },
-            color: {
-              name: '色彩优化',
-              icon: '🎨',
-              prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
-              description: '适合偏暗照片',
-              enabled: true,
-              sortOrder: 3
-            },
-            custom: {
-              name: '自定义',
-              icon: '⚙️',
-              prompt: '',
-              description: '自定义编辑需求',
-              enabled: true,
-              sortOrder: 4
-            }
-          };
+          result.aiEnhancePresets = defaultAiEnhancePresets;
           logger.debug('✅ 已初始化 AI 增强预设方案（首次使用）');
+        } else {
+          // 合并默认预设与用户配置，补充缺失的新预设
+          result.aiEnhancePresets = {
+            ...defaultAiEnhancePresets,
+            ...result.aiEnhancePresets
+          };
+          logger.debug('✅ 已合并 AI 增强预设方案（包含新预设）');
         }
         
         // 🆕 初始化默认预设
