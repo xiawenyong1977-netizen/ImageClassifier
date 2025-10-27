@@ -592,6 +592,38 @@ class UnifiedDataService {
     }
   }
 
+  // ==================== AI图像增强接口 ====================
+  
+  /**
+   * 添加单张图片（用于AI增强图）
+   * @param {Object} imageData - 图片数据
+   * @returns {Promise<Object>} - 保存后的图片数据
+   */
+  async addImage(imageData) {
+    try {
+      logger.debug('添加新图片:', imageData.fileName);
+      
+      // 1. 确保服务已初始化
+      await this.imageStorageService.ensureInitialized();
+      
+      // 2. 使用适配器的方法写入数据库
+      // ImageStorageService 使用适配器模式：this.storage 是 IndexedDBAdapter 或 SQLiteAdapter
+      await this.imageStorageService.storage.addOrUpdateSingleImage(imageData);
+      logger.debug('✅ 数据库写入完成');
+      
+      // 3. 刷新缓存（从数据库重建，包括新添加的图片和统计信息）
+      await this.imageCache.refreshCache();
+      logger.debug('✅ 缓存已刷新');
+      
+      return imageData;
+      
+    } catch (error) {
+      logger.error('❌ 添加图片失败:', error);
+      throw error;
+    }
+  }
+
+
   /**
    * 获取客户端唯一ID
    */

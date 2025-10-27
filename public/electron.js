@@ -346,6 +346,48 @@ function setupIpcHandlers() {
       return { success: false, message: '文件夹选择失败: ' + error.message };
     }
   });
+
+  // ========== AI图像增强相关 IPC handlers ==========
+  
+  /**
+   * 确保目录存在（递归创建）
+   * 用于创建 xualbum 目录来存储增强后的图片
+   */
+  ipcMain.handle('ensure-directory', async (event, dirPath) => {
+    try {
+      const fs = require('fs').promises;
+      await fs.mkdir(dirPath, { recursive: true });
+      logger.debug('✅ 目录已创建:', dirPath);
+      return { success: true, path: dirPath };
+    } catch (error) {
+      logger.error('❌ 创建目录失败:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  /**
+   * 保存文件到指定路径
+   * 用于保存增强后的图片到 xualbum 目录
+   */
+  ipcMain.handle('save-file-to-path', async (event, { path, buffer }) => {
+    try {
+      const fs = require('fs').promises;
+      const pathModule = require('path');
+      
+      // 确保父目录存在
+      const dir = pathModule.dirname(path);
+      await fs.mkdir(dir, { recursive: true });
+      
+      // 写入文件
+      await fs.writeFile(path, Buffer.from(buffer));
+      logger.debug('✅ 文件已保存:', path);
+      
+      return { success: true, path };
+    } catch (error) {
+      logger.error('❌ 保存文件失败:', error);
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 // 在应用启动前设置 GPU 相关参数，解决 GPU 状态错误

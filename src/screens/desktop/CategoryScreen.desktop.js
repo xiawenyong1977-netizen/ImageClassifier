@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Mod
 // 分页方案实现
 import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import ImageEnhanceService from '../../services/ImageEnhanceService';
 
 // 使用统一数据服务
 
@@ -93,14 +94,19 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
   // 在Electron环境中直接使用file://URI
   const webUri = displayItem.uri;
   
-  // 调试日志
-  if (shouldLoad) {
-    logger.debug(`图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, webUri: ${webUri}, imageError: ${imageError}`);
-    logger.debug(`原始数据: item.uri=${item.uri}, displayItem.uri=${displayItem?.uri}`);
-    logger.debug(`分类信息: item.category=${item.category}, displayItem.category=${displayItem?.category}`);
-    if (!webUri) {
-      logger.warn(`图片缺少URI: ${item.id}, 将显示占位符`);
-    }
+  // 调试日志（已注释以减少控制台输出）
+  // if (shouldLoad) {
+  //   logger.debug(`图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, webUri: ${webUri}, imageError: ${imageError}`);
+  //   logger.debug(`原始数据: item.uri=${item.uri}, displayItem.uri=${displayItem?.uri}`);
+  //   logger.debug(`分类信息: item.category=${item.category}, displayItem.category=${displayItem?.category}`);
+  //   if (!webUri) {
+  //     logger.warn(`图片缺少URI: ${item.id}, 将显示占位符`);
+  //   }
+  // }
+  
+  // 只在出现问题时输出警告
+  if (shouldLoad && !webUri) {
+    logger.warn(`⚠️ 图片缺少URI: ${item.id}, 将显示占位符`);
   }
   
   const handleImageLoad = () => {
@@ -385,7 +391,38 @@ const CategoryScreen = ({
   // 操作菜单状态
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [showCategorySubmenu, setShowCategorySubmenu] = useState(false);
+  const [showEnhanceSubmenu, setShowEnhanceSubmenu] = useState(false);
   const [selectionVersion, setSelectionVersion] = useState(0); // 用于强制刷新选中计数
+  
+  // ==================== AI图像增强相关状态 ====================
+  const [showEnhanceModal, setShowEnhanceModal] = useState(false);
+  const [enhancePreset, setEnhancePreset] = useState('portrait');
+  const [enhanceProgress, setEnhanceProgress] = useState({
+    current: 0,
+    total: 0,
+    status: 'idle', // 'idle' | 'processing' | 'completed' | 'failed'
+    imageStatuses: [] // 每张图片的实时状态: [{index, status, result_url}]
+  });
+  const [enhanceResults, setEnhanceResults] = useState([]); // 所有图片的处理结果
+  const [currentImageIndex, setCurrentImageIndex] = useState(0); // 当前查看的图片索引
+  const [isProcessing, setIsProcessing] = useState(false); // 是否正在处理
+  const [availableEnhancePresets, setAvailableEnhancePresets] = useState([]); // AI增强预设方案列表
+  const snapshotImagesRef = useRef([]); // 模态框打开时的图片快照，使用 ref 而非 state（不需要触发渲染）
+  const backgroundTaskRef = useRef(null); // 后台任务处理的Promise
+  
+  // 分页相关状态 - 优先使用从prop传递的值（返回时恢复）
+  const [currentPage, setCurrentPage] = useState(propCurrentPage || initialPage);
+  const [itemsPerPage, setItemsPerPage] = useState(propItemsPerPage);
+  const [totalPages, setTotalPages] = useState(0);
+  const [pageInput, setPageInput] = useState('');
+  
+  // 下拉选择框状态
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownOptions = [20, 50, 100, 1000];
+  
+  // 虚拟滚动相关状态
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
   
   // 监听选中状态变化，强制刷新Header
   useEffect(() => {
@@ -414,15 +451,36 @@ const CategoryScreen = ({
     }
   }, [showActionMenu]);
   
-  // 分页相关状态 - 优先使用从prop传递的值（返回时恢复）
-  const [currentPage, setCurrentPage] = useState(propCurrentPage || initialPage);
-  const [itemsPerPage, setItemsPerPage] = useState(propItemsPerPage);
-  const [totalPages, setTotalPages] = useState(0);
-  const [pageInput, setPageInput] = useState('');
-  
-  // 下拉选择框状态
-  const [showDropdown, setShowDropdown] = useState(false);
-  const dropdownOptions = [20, 50, 100, 1000];
+  // 加载AI增强预设方案
+  useEffect(() => {
+    const loadEnhancePresets = async () => {
+      try {
+        const imageStorageService = UnifiedDataService.imageStorageService;
+        if (imageStorageService) {
+          const settings = await imageStorageService.getSettings();
+          if (settings?.aiEnhancePresets) {
+            const presets = Object.entries(settings.aiEnhancePresets)
+              .filter(([_, preset]) => preset.enabled !== false) // 只显示启用的方案
+              .sort(([_, a], [__, b]) => (a.sortOrder || 0) - (b.sortOrder || 0)) // 按sortOrder排序
+              .map(([id, preset]) => ({
+                id,
+                name: preset.name,
+                icon: preset.icon,
+                description: preset.description,
+                prompt: preset.prompt
+              }));
+            
+            setAvailableEnhancePresets(presets);
+            logger.debug('📋 可用增强方案数量:', presets.length);
+          }
+        }
+      } catch (error) {
+        logger.error('加载AI增强预设方案失败:', error);
+      }
+    };
+    
+    loadEnhancePresets();
+  }, []);
   
   // 监听从ImagePreview返回时的页码，恢复状态
   useEffect(() => {
@@ -595,10 +653,6 @@ const CategoryScreen = ({
     
     return { grouped, sortedDates };
   }, [allImages, currentPage, itemsPerPage]);
-  
-  // 滚动状态（保留用于其他功能）
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [containerHeight, setContainerHeight] = useState(0);
   
   // 移除无用的刷新状态（分页方案不需要下拉刷新）
   
@@ -939,6 +993,390 @@ const CategoryScreen = ({
     }
   }, [category, city, similarityGroupId, loadImages]);
 
+  // ==================== AI图像增强处理函数 ====================
+  // 事件处理函数：接收preset参数，直接开始处理
+  const handleAIEnhance = (preset) => {
+    logger.debug('🎨 开始AI图像增强, 方案:', preset);
+    
+    // 捕获当前选中的图片（快照）
+    const selectedCount = selectedImages.length;
+    
+    // 检查是否有选中图片
+    if (selectedCount === 0) {
+      Alert.alert('提示', '请先选择要增强的图片');
+      return;
+    }
+    
+    // 开始增强的内部函数
+    const startEnhancement = () => {
+      // 捕获当前选中的图片快照（完整对象）
+      const imagesToEnhance = allImages.filter(img => selectedImages.includes(img.id));
+      logger.debug('📸 捕获图片快照:', imagesToEnhance.length, '张图片');
+      
+      // 存储快照到 ref（同步，立即可用）
+      snapshotImagesRef.current = imagesToEnhance;
+      
+      // 重置状态（使用快照的数量）
+      setEnhancePreset(preset);
+      setEnhanceResults([]);
+      setCurrentImageIndex(0);
+      setIsProcessing(false);
+      setEnhanceProgress({
+        current: 0,
+        total: imagesToEnhance.length,
+        status: 'idle',
+        imageStatuses: []
+      });
+      
+      // 显示增强模态框并立即开始处理
+      setShowEnhanceModal(true);
+      
+      // 延迟一小段时间后自动开始处理（等待Modal渲染完成）
+      // 直接传递快照数据，避免依赖 state 的异步更新
+      setTimeout(() => {
+        handleStartEnhance(preset, imagesToEnhance);
+      }, 100);
+    };
+    
+    // 检查数量限制（建议最多9张）
+    const MAX_ENHANCE_COUNT = 9;
+    if (selectedCount > MAX_ENHANCE_COUNT) {
+      Alert.alert(
+        '提示',
+        `一次最多处理 ${MAX_ENHANCE_COUNT} 张图片\n` +
+        `您当前选择了 ${selectedCount} 张\n` +
+        `建议分批处理以获得更好的体验\n\n` +
+        `预计处理时间：\n` +
+        `- ${MAX_ENHANCE_COUNT} 张约需 ${MAX_ENHANCE_COUNT * 10}-${MAX_ENHANCE_COUNT * 30} 秒\n` +
+        `- ${selectedCount} 张约需 ${selectedCount * 10}-${selectedCount * 30} 秒`,
+        [
+          {
+            text: '取消',
+            style: 'cancel'
+          },
+          {
+            text: `继续处理全部 ${selectedCount} 张`,
+            onPress: () => {
+              logger.debug('用户选择继续处理全部图片');
+              startEnhancement();
+            }
+          }
+        ]
+      );
+      return;
+    }
+    
+    // 数量合理，直接开始
+    startEnhancement();
+  };
+
+  // 关闭增强模态框
+  const handleCloseEnhanceModal = () => {
+    // 关闭模态框
+    setShowEnhanceModal(false);
+    
+    // 清空快照数据
+    snapshotImagesRef.current = [];
+  };
+
+  // 保存并添加到暂存箱（合并原有的"保存到本地"和"添加为新图"）
+  // 事件处理函数：捕获点击时刻用户看到的图片
+  const handleSaveAndAdd = async () => {
+    if (enhanceResults.length === 0) return;
+    
+    // 捕获点击时刻的结果（快照）
+    const resultToAdd = enhanceResults[currentImageIndex];
+    if (!resultToAdd) return;
+    
+    // 如果已经保存过，不再重复保存
+    if (resultToAdd.saved) {
+      Alert.alert('提示', '该图片已保存过');
+      return;
+    }
+    
+    try {
+      logger.debug('➕ 开始添加为新图:', resultToAdd.originalFileName);
+      
+      // 1. 下载增强后的图片
+      const imageBlob = await ImageEnhanceService.downloadEnhancedImage(resultToAdd.enhancedUri);
+      
+      // 2. 保存到 xualbum 目录
+      const saveResult = await ImageEnhanceService.saveToXualbum(
+        imageBlob,
+        resultToAdd.originalFileName
+      );
+      
+      logger.debug('✅ 图片已保存到:', saveResult.filePath);
+      
+      // 3. 添加到数据库（tobecleaned 分类）
+      const timestamp = Date.now();
+      const newImageId = `img_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const imageData = {
+        id: newImageId,
+        fileName: saveResult.fileName,
+        uri: `file:///${saveResult.filePath.replace(/\\/g, '/')}`,
+        path: saveResult.filePath,
+        category: 'tobecleaned',
+        timestamp: timestamp,
+        takenAt: timestamp,
+        
+        metadata: {
+          source: 'ai_enhanced',
+          originalImageId: resultToAdd.originalImageId,
+          enhancePreset: resultToAdd.preset,
+          enhancedAt: timestamp,
+          taskId: resultToAdd.taskId
+        }
+      };
+      
+      // 4. 添加到数据库
+      await UnifiedDataService.addImage(imageData);
+      logger.debug('✅ 图片已添加到数据库:', newImageId);
+      
+      // 5. 标记该图片为已保存
+      setEnhanceResults(prevResults => 
+        prevResults.map((result, index) => 
+          index === currentImageIndex 
+            ? { ...result, saved: true, savedAt: timestamp }
+            : result
+        )
+      );
+      
+      // 6. 刷新列表（如果在暂存箱，可以立即看到新图片）
+      if (category === 'tobecleaned') {
+        await loadImages();
+      }
+      
+      Alert.alert('成功', '已保存到暂存箱，可继续查看其他图片');
+      
+      // 不关闭结果模态框，让用户可以继续查看和保存其他图片
+      
+    } catch (error) {
+      logger.error('❌ 添加为新图失败:', error);
+      Alert.alert('错误', `添加失败: ${error.message}`);
+    }
+  };
+
+  // 开始增强处理（从方案按钮触发）
+  // preset: 选中的增强方案
+  // imagesToProcess: 要处理的图片数组（可选，如果不传则使用 ref 中的快照）
+  const handleStartEnhance = async (preset, imagesToProcess = null) => {
+    try {
+      logger.debug('🚀 开始处理增强任务, 方案:', preset);
+      
+      // 优先使用传入的图片数组，否则使用 ref 中的快照
+      const images = imagesToProcess || snapshotImagesRef.current;
+      
+      if (images.length === 0) {
+        logger.error('❌ 没有图片数据');
+        Alert.alert('错误', '没有可处理的图片');
+        return;
+      }
+      
+      // 标记处理中
+      setIsProcessing(true);
+      setEnhanceProgress({
+        current: 0,
+        total: images.length,
+        status: 'processing',
+        imageStatuses: []
+      });
+      
+      logger.debug(`准备处理 ${images.length} 张图片`);
+      
+      // 创建处理任务（存储在ref中，支持后台运行）
+      const processTask = async () => {
+        const results = [];
+        
+        try {
+          // 1. 预处理所有图片
+          logger.debug(`📦 开始预处理 ${images.length} 张图片...`);
+          const preparedImages = [];
+          
+          for (let i = 0; i < images.length; i++) {
+            const image = images[i];
+            logger.debug(`  预处理 ${i + 1}/${images.length}: ${image.fileName}`);
+            
+            try {
+              const preparedImage = await ImageEnhanceService.prepareImageForEnhance(image.uri);
+              preparedImages.push({
+                ...preparedImage,
+                originalImage: image  // 保存原始图片信息
+              });
+            } catch (error) {
+              logger.error(`预处理失败: ${image.fileName}`, error);
+              // 预处理失败的图片跳过
+            }
+          }
+          
+          if (preparedImages.length === 0) {
+            throw new Error('所有图片预处理失败');
+          }
+          
+          logger.debug(`✅ 预处理完成: ${preparedImages.length}/${images.length} 张`);
+          
+          // 2. 批量提交增强任务（使用快照的配置）
+          const taskResult = await ImageEnhanceService.submitEnhanceTask(
+            preparedImages,
+            preset
+          );
+          
+          logger.debug(`✅ 批量任务已提交: taskId=${taskResult.task_id}, total=${taskResult.total_images}`);
+          
+          // 立即更新UI，显示任务已开始
+          setEnhanceProgress({
+            current: 0,
+            total: taskResult.total_images,
+            status: 'processing',
+            progress: 0,
+            imageStatuses: []
+          });
+          
+          // 3. 轮询任务状态（带进度回调）
+          let pollCount = 0;
+          const enhanceResult = await ImageEnhanceService.pollTaskStatus(
+            taskResult.task_id,
+            (status) => {
+              pollCount++;
+              
+              // 基于 completed_images 和 status 更新进度
+              const completedImages = status.completed_images || 0;
+              
+              // 计算进度百分比：主要基于 completed_images
+              let progressPercent = 0;
+              if (completedImages > 0) {
+                // 使用已完成的图片数量计算进度
+                progressPercent = (completedImages / taskResult.total_images) * 100;
+              } else if (status.status === 'processing') {
+                // 如果 completed_images 为 0 但状态是处理中，基于轮询次数估算（假设10秒一张图）
+                const estimatedCurrent = Math.min(pollCount * 0.2, taskResult.total_images);
+                progressPercent = (estimatedCurrent / taskResult.total_images) * 100;
+              }
+              
+              // 解析每张图片的实时状态（从 status.results 数组）
+              // 后端现在会实时返回每张图片的处理状态
+              const imageStatuses = status.results || [];
+              
+              // 打印状态更新（仅在有变化时）
+              if (imageStatuses.length > 0) {
+                logger.debug(`📷 后端返回状态（${imageStatuses.length}张）:`, imageStatuses.map(img => 
+                  `[index=${img.index}, status=${img.status}, filename=${img.filename || 'N/A'}]`
+                ).join(', '));
+              }
+              
+              setEnhanceProgress({
+                current: completedImages > 0 ? completedImages : Math.floor(pollCount * 0.2),
+                total: taskResult.total_images,
+                status: status.status === 'completed' ? 'completed' : 'processing',
+                progress: progressPercent,
+                imageStatuses: imageStatuses
+              });
+              
+              logger.debug(`📊 进度更新 [轮询${pollCount}次]: ${completedImages}/${taskResult.total_images} (${progressPercent.toFixed(1)}%) - 状态: ${status.status}`);
+            }
+          );
+          
+          logger.debug(`✅ 任务完成，收到 ${enhanceResult.results?.length || 0} 个结果`);
+          
+          // 4. 处理结果（API 返回格式: { status: 'completed', results: [{result_url, ...}, ...] }）
+          let successCount = 0;
+          let failedCount = 0;
+          
+          if (enhanceResult.results && enhanceResult.results.length > 0) {
+            enhanceResult.results.forEach((result, index) => {
+              const originalImage = preparedImages[index]?.originalImage;
+              
+              if (result.status === 'completed' && result.result_url) {
+                // ✅ 成功的图片
+                if (originalImage) {
+                  results.push({
+                    originalImageId: originalImage.id,
+                    originalUri: originalImage.uri,
+                    originalFileName: originalImage.fileName,
+                    enhancedUri: result.result_url,
+                    taskId: taskResult.task_id,
+                    preset: preset,
+                    status: 'success'  // 标记为成功
+                  });
+                  successCount++;
+                  logger.debug(`✅ 图片${index + 1}处理成功: ${originalImage.fileName}`);
+                }
+              } else {
+                // ❌ 失败的图片
+                const errorMsg = result.error || '未知错误';
+                logger.warn(`❌ 图片${index + 1}处理失败:`, {
+                  fileName: originalImage?.fileName || result.filename,
+                  status: result.status,
+                  error: errorMsg
+                });
+                
+                // 将失败的图片也加入结果，但标记为失败状态
+                if (originalImage) {
+                  results.push({
+                    originalImageId: originalImage.id,
+                    originalUri: originalImage.uri,
+                    originalFileName: originalImage.fileName,
+                    enhancedUri: null,  // 没有增强后的图片
+                    taskId: taskResult.task_id,
+                    preset: preset,
+                    status: 'failed',  // 标记为失败
+                    errorMessage: errorMsg.includes('Throttling') ? 'API配额限制，请稍后重试' : errorMsg
+                  });
+                  failedCount++;
+                }
+              }
+            });
+            
+            logger.debug(`📊 处理结果: 成功 ${successCount} 张，失败 ${failedCount} 张`);
+            
+            // 如果所有图片都失败，抛出错误
+            if (successCount === 0) {
+              throw new Error(`所有图片处理失败，请检查API配额或稍后重试`);
+            }
+          } else {
+            throw new Error('未获取到增强结果');
+          }
+          
+        } catch (error) {
+          logger.error('❌ 批量增强失败:', error);
+          Alert.alert('错误', `处理失败: ${error.message}`);
+        }
+        
+        // 处理完成
+        logger.debug(`✅ 全部处理完成，成功 ${results.length}/${imagesToProcess.length} 张`);
+        
+        setEnhanceProgress({
+          current: imagesToProcess.length,
+          total: imagesToProcess.length,
+          status: 'completed'
+        });
+        
+        setEnhanceResults(results);
+        setIsProcessing(false);
+        setCurrentImageIndex(0); // 重置到第一张图片
+        
+        // 如果所有图片都处理失败，显示提示
+        if (results.length === 0 || results.every(r => r.status === 'failed')) {
+          Alert.alert('处理完成', '所有图片处理失败，请重试');
+        }
+      };
+      
+      // 存储任务引用并执行
+      backgroundTaskRef.current = processTask();
+      await backgroundTaskRef.current;
+      
+    } catch (error) {
+      logger.error('❌ 增强处理失败:', error);
+      setEnhanceProgress(prev => ({
+        ...prev,
+        status: 'failed'
+      }));
+      setIsProcessing(false);
+      Alert.alert('错误', `处理失败: ${error.message}`);
+    }
+  };
+
   // Batch delete
   const handleBatchDelete = useCallback(() => {
     // 使用UnifiedDataService获取标准化的分类ID
@@ -1108,14 +1546,14 @@ const CategoryScreen = ({
           english: names.english
         }));
       
-      logger.debug('调试信息 - 可用分类:', availableCategories);
+      // logger.debug('调试信息 - 可用分类:', availableCategories);
     }
     
     // 使用本地selectedImages state计算选中数量
     // 这个state在loadImages时已经根据当前分类/城市/相似组过滤过了
     const currentSelectedCount = selectedImages.length;
     
-    logger.debug(`HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
+    // logger.debug(`HeaderComponent 渲染: category=${category}, normalizedCategory=${normalizedCategory}, city=${city}, currentSelectedCount=${currentSelectedCount}`);
     
     return (
     <View style={styles.header}>
@@ -1281,9 +1719,52 @@ const CategoryScreen = ({
                   </TouchableOpacity>
                 )}
                 
-                {/* tobecleaned分类：删除 + 复制 */}
+                {/* tobecleaned分类：AI增强（带二级菜单） + 删除 + 复制 */}
                 {normalizedCategory === 'tobecleaned' && (
                   <>
+                    <TouchableOpacity
+                      style={styles.actionMenuItem}
+                      activeOpacity={1}
+                      onMouseEnter={() => {
+                        logger.debug('🖱️ 鼠标进入AI图像增强菜单项');
+                        setShowEnhanceSubmenu(true);
+                      }}
+                      onMouseLeave={() => {
+                        logger.debug('🖱️ 鼠标离开AI图像增强菜单项');
+                        setShowEnhanceSubmenu(false);
+                      }}
+                    >
+                      <View style={styles.actionMenuItemWithSubmenu}>
+                        <Text style={styles.actionMenuItemText}>✨ AI图像增强 ›</Text>
+                        
+                        {/* 二级菜单：增强方案列表 */}
+                        {showEnhanceSubmenu && availableEnhancePresets.length > 0 && (
+                          <View 
+                            style={styles.categorySubmenu}
+                            onMouseEnter={() => setShowEnhanceSubmenu(true)}
+                            onMouseLeave={() => setShowEnhanceSubmenu(false)}
+                          >
+                            {availableEnhancePresets.map((preset) => (
+                              <TouchableOpacity
+                                key={preset.id}
+                                style={styles.categorySubmenuItem}
+                                onPress={() => {
+                                  logger.debug('选择方案:', preset.id, preset.name);
+                                  setShowActionMenu(false);
+                                  setShowCategorySubmenu(false);
+                                  setShowEnhanceSubmenu(false);
+                                  handleAIEnhance(preset.id);
+                                }}>
+                                <Text style={styles.categorySubmenuItemText}>
+                                  {preset.icon ? `${preset.icon} ` : ''}{preset.name}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                    
                     <TouchableOpacity
                       style={[styles.actionMenuItem, styles.actionMenuItemDanger]}
                       onPress={() => {
@@ -1344,7 +1825,7 @@ const CategoryScreen = ({
       };
     }, [item.id]); // 只依赖 item.id，不依赖 selected
     
-    logger.debug(`LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
+    // logger.debug(`LazyImageContainer渲染: ${item.id}, selected: ${selected}, index: ${index}, total: ${total}`);
     
     // 处理右键点击
     const handleRightPress = () => {
@@ -1765,7 +2246,7 @@ const CategoryScreen = ({
     );
 
 
-  logger.debug('CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
+  // logger.debug('CategoryScreen 开始渲染，category:', category, 'city:', city, 'allImages.length:', allImages.length);
   
   return (
     <View style={styles.container}>
@@ -1799,7 +2280,327 @@ const CategoryScreen = ({
           </View>
         </View>
       </Modal>
+
+      {/* AI 图像增强模态框 */}
+      {showEnhanceModal && (
+        <EnhanceModal
+          visible={showEnhanceModal}
+          onClose={handleCloseEnhanceModal}
+          preset={enhancePreset}
+          progress={enhanceProgress}
+          selectedImages={snapshotImagesRef.current}
+          results={enhanceResults}
+          currentIndex={currentImageIndex}
+          isProcessing={isProcessing}
+          onIndexChange={setCurrentImageIndex}
+          onSave={handleSaveAndAdd}
+        />
+      )}
+
     </View>
+  );
+};
+
+// ==================== EnhanceModal 组件 ====================
+const EnhanceModal = ({
+  visible,
+  onClose,
+  preset,
+  progress,
+  selectedImages = [],
+  results = [],
+  currentIndex,
+  isProcessing,
+  onIndexChange,
+  onSave
+}) => {
+  // 获取当前图片的信息
+  const currentImage = selectedImages[currentIndex] || selectedImages[0] || {};
+  const currentResult = results[currentIndex] || {};
+  const isFailed = currentResult.status === 'failed';
+  const isSaved = currentResult.saved === true;
+  
+  // 获取图片状态（从后端实时返回或results）
+  const getImageStatus = (index) => {
+    // 优先使用results（处理完成后的最终结果）
+    if (results.length > 0 && results[index]) {
+      return results[index].status === 'failed' ? 'failed' : 'completed';
+    }
+    
+    // 其次使用后端实时状态
+    if (progress.imageStatuses && progress.imageStatuses.length > 0) {
+      const imageStatus = progress.imageStatuses.find(img => img.index === index);
+      if (imageStatus) {
+        return imageStatus.status;
+      }
+    }
+    
+    // 如果正在处理，根据进度估算
+    if (isProcessing) {
+      if (index < progress.current) return 'completed';
+      if (index === progress.current) return 'processing';
+      return 'pending';
+    }
+    
+    return 'pending';
+  };
+
+  // 导航按钮处理
+  const goToPrevious = () => {
+    if (currentIndex > 0) {
+      onIndexChange(currentIndex - 1);
+    }
+  };
+
+  const goToNext = () => {
+    if (currentIndex < selectedImages.length - 1) {
+      onIndexChange(currentIndex + 1);
+    }
+  };
+
+  // 区域1：缩略图导航（带状态标记，可点击切换）
+  const renderThumbnailNav = () => (
+    <View style={styles.enhanceThumbnailNavSection}>
+      <ScrollView 
+        horizontal 
+        style={styles.enhanceThumbnailsContainer}
+        showsHorizontalScrollIndicator={false}
+      >
+        {selectedImages.map((img, index) => {
+          const status = getImageStatus(index);
+          const isActive = index === currentIndex;
+          
+          return (
+            <TouchableOpacity
+              key={img.id}
+              style={[
+                styles.enhanceThumbnailWrapper,
+                isActive && styles.enhanceThumbnailWrapperActive
+              ]}
+              onPress={() => onIndexChange(index)}
+              disabled={isProcessing && status === 'pending'}
+            >
+              <Image
+                source={{ uri: img.uri }}
+                style={[
+                  styles.enhanceThumbnailImage,
+                  isActive && styles.enhanceThumbnailImageActive
+                ]}
+                resizeMode="cover"
+              />
+              {/* 状态标记 */}
+              <View style={[
+                styles.enhanceThumbnailBadge,
+                status === 'completed' && styles.enhanceThumbnailBadgeSuccess,
+                status === 'processing' && styles.enhanceThumbnailBadgeProcessing,
+                status === 'failed' && styles.enhanceThumbnailBadgeFailed,
+                status === 'pending' && styles.enhanceThumbnailBadgePending
+              ]}>
+                {status === 'completed' && <Text style={styles.enhanceThumbnailBadgeText}>✓</Text>}
+                {status === 'processing' && <ActivityIndicator size="small" color="#fff" />}
+                {status === 'failed' && <Text style={styles.enhanceThumbnailBadgeText}>✕</Text>}
+                {status === 'pending' && <Text style={styles.enhanceThumbnailBadgeText}>{index + 1}</Text>}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+
+  // 区域2：大图对比视图
+  const renderComparisonView = () => {
+    const status = getImageStatus(currentIndex);
+    
+    // 显示原图
+    const renderOriginalImage = () => (
+      <View style={styles.enhanceComparisonImageContainer}>
+        <View style={styles.enhanceComparisonImageLabelContainer}>
+          <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
+          {selectedImages.length > 1 && (
+            <Text style={styles.enhanceComparisonImageCounter}>
+              {currentIndex + 1}/{selectedImages.length}
+            </Text>
+          )}
+        </View>
+        <Image
+          source={{ uri: currentImage.uri }}
+          style={styles.enhanceComparisonImage}
+          resizeMode="contain"
+        />
+      </View>
+    );
+
+    // 显示增强图或状态
+    const renderEnhancedImage = () => {
+      // 未开始处理
+      if (!isProcessing && results.length === 0) {
+        return (
+          <View style={styles.enhanceComparisonImageContainer}>
+            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
+              <Text style={styles.enhanceComparisonPlaceholderIcon}>🎨</Text>
+              <Text style={styles.enhanceComparisonPlaceholderText}>选择方案开始处理</Text>
+            </View>
+          </View>
+        );
+      }
+
+      // 处理中 - 显示状态
+      if (status === 'pending' || status === 'processing') {
+        return (
+          <View style={styles.enhanceComparisonImageContainer}>
+            <Text style={styles.enhanceComparisonImageLabel}>
+              {status === 'processing' ? '处理中' : '等待处理'}
+            </Text>
+            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
+              {status === 'processing' ? (
+                <>
+                  <ActivityIndicator size="large" color="#2196F3" />
+                  <Text style={styles.enhanceComparisonPlaceholderText}>AI增强处理中...</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.enhanceComparisonPlaceholderIcon}>⏳</Text>
+                  <Text style={styles.enhanceComparisonPlaceholderText}>等待处理</Text>
+                </>
+              )}
+            </View>
+          </View>
+        );
+      }
+
+      // 处理失败
+      if (status === 'failed' || isFailed) {
+        return (
+          <View style={styles.enhanceComparisonImageContainer}>
+            <Text style={styles.enhanceComparisonImageLabel}>处理失败</Text>
+            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonFailedContainer]}>
+              <Text style={styles.enhanceComparisonFailedIcon}>⚠️</Text>
+              <Text style={styles.enhanceComparisonFailedTitle}>处理失败</Text>
+              <Text style={styles.enhanceComparisonFailedMessage}>
+                {currentResult.errorMessage || '未知错误'}
+              </Text>
+              <Text style={styles.enhanceComparisonFailedHint}>
+                请尝试单独处理此图片，或稍后重试
+              </Text>
+            </View>
+          </View>
+        );
+      }
+
+      // 处理成功 - 显示增强后的图片
+      if (status === 'completed' && currentResult.enhancedUri) {
+        return (
+          <View style={styles.enhanceComparisonImageContainer}>
+            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+            <Image
+              source={{ uri: currentResult.enhancedUri }}
+              style={styles.enhanceComparisonImage}
+              resizeMode="contain"
+            />
+          </View>
+        );
+      }
+
+      // 默认占位
+      return (
+        <View style={styles.enhanceComparisonImageContainer}>
+          <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+          <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
+            <Text style={styles.enhanceComparisonPlaceholderText}>暂无结果</Text>
+          </View>
+        </View>
+      );
+    };
+
+    return (
+      <View style={styles.enhanceComparisonSection}>
+        <View style={styles.enhanceComparisonContainer}>
+          {/* 左侧：原图和增强图 */}
+          <View style={styles.enhanceComparisonImages}>
+            {renderOriginalImage()}
+            {renderEnhancedImage()}
+          </View>
+
+          {/* 右侧：操作按钮区 */}
+          <View style={styles.enhanceComparisonRightButtons}>
+            {/* 上一张按钮 */}
+            {selectedImages.length > 1 && (
+              <TouchableOpacity
+                style={[
+                  styles.enhanceComparisonNavButtonVertical,
+                  currentIndex === 0 && styles.enhanceComparisonNavButtonDisabled
+                ]}
+                onPress={goToPrevious}
+                disabled={currentIndex === 0}
+              >
+                <Text style={styles.enhanceComparisonNavButtonText}>↑</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* 下一张按钮 */}
+            {selectedImages.length > 1 && (
+              <TouchableOpacity
+                style={[
+                  styles.enhanceComparisonNavButtonVertical,
+                  currentIndex === selectedImages.length - 1 && styles.enhanceComparisonNavButtonDisabled
+                ]}
+                onPress={goToNext}
+                disabled={currentIndex === selectedImages.length - 1}
+              >
+                <Text style={styles.enhanceComparisonNavButtonText}>↓</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* 保存按钮 */}
+            <TouchableOpacity
+              style={[
+                styles.enhanceComparisonSaveButtonVertical,
+                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonDisabled
+              ]}
+              onPress={onSave}
+              disabled={status !== 'completed' || !currentResult.enhancedUri || isSaved}
+            >
+              <Text style={[
+                styles.enhanceComparisonSaveButtonText,
+                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonTextDisabled
+              ]}>
+                {isSaved ? '✅' : '💾'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+      style={{ zIndex: 999999 }}
+    >
+      <View style={styles.enhanceModalOverlay}>
+        <View style={styles.enhanceModalContent}>
+          {/* 标题栏 */}
+          <View style={styles.enhanceModalHeader}>
+            <Text style={styles.enhanceModalTitle}>AI 图像增强</Text>
+            <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
+              <Text style={styles.enhanceModalCloseButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 区域1：缩略图导航 */}
+          {renderThumbnailNav()}
+
+          {/* 区域2：大图对比视图 */}
+          {renderComparisonView()}
+        </View>
+      </View>
+    </Modal>
   );
 };
 
@@ -2551,6 +3352,595 @@ const styles = StyleSheet.create({
   categorySubmenuItemText: {
     fontSize: 13,
     color: '#333',
+  },
+  
+  // ==================== AI图像增强样式 ====================
+  enhanceModalOverlay: {
+    position: 'fixed',
+    top: 60,  // 从标题栏下方开始（electron.js中titleBarOverlay.height = 60）
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999999,
+    display: 'flex',
+  },
+  enhanceModalContent: {
+    position: 'relative',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '95%',
+    maxWidth: 1200,
+    maxHeight: 'calc(100vh - 100px)',  // 扣除标题栏高度和边距
+    height: 'calc(100vh - 100px)',  // 设置固定高度，确保模态框足够高
+    marginTop: 20,  // 距离标题栏底部的间距
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    padding: 16,
+    zIndex: 1000000,
+    display: 'flex',
+    flexDirection: 'column',  // 垂直布局，让内容可以滚动
+    overflow: 'hidden',  // 防止内容溢出
+  },
+  enhanceModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    position: 'relative',
+    zIndex: 1000001,
+    flexShrink: 0,  // 标题栏不收缩
+  },
+  enhanceModalScrollContent: {
+    flex: 1,  // 占据剩余空间
+    overflow: 'auto',  // 允许滚动
+  },
+  enhanceModalScrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: 20,  // 底部留白
+  },
+  enhanceModalCloseButton: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#f5f5f5',
+    cursor: 'pointer',
+    position: 'relative',
+    zIndex: 1000002,
+    transition: 'all 0.2s ease',
+    ':hover': {
+      backgroundColor: '#ff4444',
+    },
+  },
+  enhanceModalCloseButtonText: {
+    fontSize: 18,
+    color: '#666',
+    lineHeight: 16,
+    fontWeight: 'bold',
+  },
+  enhanceConfigView: {
+    padding: 24,
+  },
+  enhanceProgressView: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  enhanceModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  enhanceModalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  // 缩略图相关样式
+  enhanceThumbnailsContainer: {
+    marginBottom: 0,
+    maxHeight: 80,
+  },
+  enhanceThumbnailWrapper: {
+    width: 80,
+    height: 80,
+    marginRight: 10,
+    position: 'relative',
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  enhanceThumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  enhanceThumbnailImageCompleted: {
+    opacity: 0.6,
+  },
+  enhanceThumbnailBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#999',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enhanceThumbnailBadgeSuccess: {
+    backgroundColor: '#4CAF50',
+  },
+  enhanceThumbnailBadgeProcessing: {
+    backgroundColor: '#2196F3',
+  },
+  enhanceThumbnailBadgeFailed: {
+    backgroundColor: '#f44336',
+  },
+  enhanceThumbnailBadgePending: {
+    backgroundColor: '#999',
+  },
+  enhanceThumbnailBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  // 预设方案按钮组
+  enhancePresetButtonGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 0,
+    justifyContent: 'flex-start',
+  },
+  enhancePresetButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#ddd',
+    cursor: 'pointer',
+  },
+  enhancePresetButtonActive: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  enhancePresetButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  enhancePresetButtonTextActive: {
+    color: '#fff',
+  },
+  enhanceModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  enhanceModalButtonSecondary: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    cursor: 'pointer',
+  },
+  enhanceModalButtonSecondaryText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  enhanceModalButtonPrimary: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#2196F3',
+    cursor: 'pointer',
+  },
+  enhanceModalButtonPrimaryText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  enhanceProgressIndicator: {
+    marginBottom: 20,
+  },
+
+  // ==================== 新三区域布局样式 ====================
+  
+  // 区域1：缩略图导航区域
+  enhanceThumbnailNavSection: {
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  enhanceThumbnailWrapperActive: {
+    borderWidth: 2,
+    borderColor: '#2196F3',
+  },
+  enhanceThumbnailImageActive: {
+    opacity: 1,
+  },
+
+
+  // 区域3：大图对比区域
+  enhanceComparisonSection: {
+    flex: 1,  // 占据剩余所有空间
+  },
+  enhanceComparisonContainer: {
+    flexDirection: 'row',
+    alignItems: 'stretch',  // 拉伸子元素高度
+    justifyContent: 'space-between',
+    gap: 16,
+    height: '100%',
+  },
+  enhanceComparisonImages: {
+    flexDirection: 'row',
+    flex: 1,
+    gap: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enhanceComparisonRightButtons: {
+    width: 80,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  enhanceComparisonImageContainer: {
+    flex: 1,
+    maxWidth: 500,
+    alignItems: 'center',
+  },
+  enhanceComparisonImageLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  enhanceComparisonImageLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  enhanceComparisonImageCounter: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#999',
+  },
+  enhanceComparisonImage: {
+    width: '100%',
+    height: 480,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  enhanceComparisonPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+  },
+  enhanceComparisonPlaceholderIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  enhanceComparisonPlaceholderText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
+  },
+  enhanceComparisonFailedContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff5f5',
+    borderWidth: 1,
+    borderColor: '#ffcccc',
+  },
+  enhanceComparisonFailedIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  enhanceComparisonFailedTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#f44336',
+    marginBottom: 8,
+  },
+  enhanceComparisonFailedMessage: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 20,
+  },
+  enhanceComparisonFailedHint: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  enhanceComparisonNavButtonVertical: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    cursor: 'pointer',
+  },
+  enhanceComparisonNavButtonDisabled: {
+    opacity: 0.3,
+    cursor: 'not-allowed',
+  },
+  enhanceComparisonNavButtonText: {
+    fontSize: 24,
+    color: '#333',
+    lineHeight: 24,
+  },
+  enhanceComparisonSaveButtonVertical: {
+    width: 60,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#2196F3',
+    cursor: 'pointer',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enhanceComparisonSaveButtonDisabled: {
+    backgroundColor: '#e0e0e0',
+    cursor: 'not-allowed',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  enhanceComparisonSaveButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  enhanceComparisonSaveButtonTextDisabled: {
+    color: '#999',
+  },
+  
+  // EnhanceResultModal 样式（已废弃，保留以防需要回退）
+  enhanceResultModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enhanceResultModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '95%',
+    maxWidth: 1200,
+    maxHeight: '90%',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  enhanceResultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  enhanceResultTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  enhanceResultCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    cursor: 'pointer',
+  },
+  enhanceResultCloseButtonText: {
+    fontSize: 18,
+    color: '#666',
+  },
+  enhanceResultCounter: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  enhanceResultComparison: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 20,
+  },
+  enhanceResultImageContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  enhanceResultImageLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+    marginBottom: 8,
+  },
+  enhanceResultImage: {
+    width: '100%',
+    height: 400,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  enhanceResultNavigation: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 20,
+  },
+  enhanceResultNavButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#2196F3',
+    cursor: 'pointer',
+  },
+  enhanceResultNavButtonDisabled: {
+    backgroundColor: '#ccc',
+    cursor: 'not-allowed',
+  },
+  enhanceResultNavButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  enhanceResultActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  enhanceResultActionButton: {
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    cursor: 'pointer',
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  enhanceResultActionButtonPrimary: {
+    backgroundColor: '#2196F3',
+  },
+  enhanceResultActionButtonDisabled: {
+    backgroundColor: '#cccccc',
+    opacity: 0.6,
+  },
+  enhanceResultActionButtonText: {
+    fontSize: 15,
+    color: '#666',
+    fontWeight: '600',
+  },
+  enhanceResultActionButtonTextDisabled: {
+    color: '#999',
+  },
+  enhanceResultActionButtonTextPrimary: {
+    color: '#fff',
+  },
+  
+  // 失败状态样式
+  enhanceResultFailedContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+    borderColor: '#ff3b30',
+    borderStyle: 'dashed',
+  },
+  enhanceResultFailedIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  enhanceResultFailedTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ff3b30',
+    marginBottom: 8,
+  },
+  enhanceResultFailedMessage: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 20,
+  },
+  enhanceResultFailedHint: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  
+  // ==================== 浮动进度提示样式 ====================
+  floatingProgressContainer: {
+    position: 'fixed',
+    right: 20,
+    bottom: 20,
+    zIndex: 9999,
+  },
+  floatingProgressBox: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    minWidth: 240,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    cursor: 'pointer',
+  },
+  floatingProgressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  floatingProgressIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  floatingProgressTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  floatingProgressText: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 8,
+  },
+  floatingProgressBar: {
+    height: 6,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  floatingProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#2196F3',
+    borderRadius: 3,
+  },
+  floatingProgressHint: {
+    fontSize: 11,
+    color: '#999',
+    textAlign: 'center',
   },
 });
 

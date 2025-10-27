@@ -357,6 +357,32 @@ class ImageProcessor {
   }
 
   /**
+   * 【核心接口3.5】计算 Blob 对象的 SHA-256 哈希值
+   * 
+   * 用于已经在内存中的 Blob 对象，无需从文件读取
+   * 常用场景：计算缩放/处理后的图片哈希，避免额外的文件 I/O
+   * 
+   * @param {Blob} blob - Blob 对象
+   * @returns {Promise<string>} 哈希值（十六进制字符串）
+   */
+  async calculateBlobHash(blob) {
+    try {
+      // 转换为 ArrayBuffer
+      const arrayBuffer = await blob.arrayBuffer();
+      
+      // 计算 SHA-256
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      return hashHex;
+    } catch (error) {
+      logger.error(`❌ 计算 Blob 哈希失败:`, error);
+      throw new Error(`计算哈希失败: ${error.message}`);
+    }
+  }
+
+  /**
    * 【核心接口4】从图片文件创建 Blob 对象（跨平台）
    * 
    * PC端：使用 fetch 直接读取文件为 Blob

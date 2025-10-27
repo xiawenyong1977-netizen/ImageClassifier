@@ -2047,22 +2047,151 @@ class ImageStorageService {
           result.scanInterval = 5;
         }
         
+        // 🆕 初始化 AI 增强预设方案（如果不存在）
+        if (!result.aiEnhancePresets) {
+          result.aiEnhancePresets = {
+            portrait: {
+              name: '人像美颜',
+              icon: '👤',
+              prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
+              description: '适合人物照片',
+              enabled: true,
+              sortOrder: 1
+            },
+            enhance: {
+              name: '清晰增强',
+              icon: '✨',
+              prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
+              description: '适合模糊照片',
+              enabled: true,
+              sortOrder: 2
+            },
+            color: {
+              name: '色彩优化',
+              icon: '🎨',
+              prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
+              description: '适合偏暗照片',
+              enabled: true,
+              sortOrder: 3
+            },
+            custom: {
+              name: '自定义',
+              icon: '⚙️',
+              prompt: '',
+              description: '自定义编辑需求',
+              enabled: true,
+              sortOrder: 4
+            }
+          };
+          logger.debug('✅ 已初始化 AI 增强预设方案（首次使用）');
+        }
+        
+        // 🆕 初始化默认预设
+        if (!result.aiEnhanceDefaultPreset) {
+          result.aiEnhanceDefaultPreset = 'portrait';
+        }
+        
+        // 🆕 初始化最近使用的提示词
+        if (!result.aiEnhanceRecentPrompts) {
+          result.aiEnhanceRecentPrompts = [];
+        }
+        
         return result;
       }
       
       // 如果没有设置数据，返回默认设置
-      return {
+      const defaultSettings = {
         scanPaths: this.getDefaultScanPaths(),
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
+        
+        // 🆕 AI 增强预设方案
+        aiEnhancePresets: {
+          portrait: {
+            name: '人像美颜',
+            icon: '👤',
+            prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
+            description: '适合人物照片',
+            enabled: true,
+            sortOrder: 1
+          },
+          enhance: {
+            name: '清晰增强',
+            icon: '✨',
+            prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
+            description: '适合模糊照片',
+            enabled: true,
+            sortOrder: 2
+          },
+          color: {
+            name: '色彩优化',
+            icon: '🎨',
+            prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
+            description: '适合偏暗照片',
+            enabled: true,
+            sortOrder: 3
+          },
+          custom: {
+            name: '自定义',
+            icon: '⚙️',
+            prompt: '',
+            description: '自定义编辑需求',
+            enabled: true,
+            sortOrder: 4
+          }
+        },
+        aiEnhanceDefaultPreset: 'portrait',
+        aiEnhanceRecentPrompts: []
       };
+      
+      logger.debug('✅ 返回默认设置（包含 AI 增强预设方案）');
+      return defaultSettings;
       
     } catch (error) {
       console.error('Failed to get settings:', error);
+      // 错误情况下也返回默认设置
       return {
         scanPaths: this.getDefaultScanPaths(),
         hideEmptyCategories: false,
-        scanInterval: 5, // 默认5分钟扫描间隔
+        scanInterval: 5,
+        
+        // 🆕 AI 增强预设方案
+        aiEnhancePresets: {
+          portrait: {
+            name: '人像美颜',
+            icon: '👤',
+            prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
+            description: '适合人物照片',
+            enabled: true,
+            sortOrder: 1
+          },
+          enhance: {
+            name: '清晰增强',
+            icon: '✨',
+            prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
+            description: '适合模糊照片',
+            enabled: true,
+            sortOrder: 2
+          },
+          color: {
+            name: '色彩优化',
+            icon: '🎨',
+            prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
+            description: '适合偏暗照片',
+            enabled: true,
+            sortOrder: 3
+          },
+          custom: {
+            name: '自定义',
+            icon: '⚙️',
+            prompt: '',
+            description: '自定义编辑需求',
+            enabled: true,
+            sortOrder: 4
+          }
+        },
+        aiEnhanceDefaultPreset: 'portrait',
+        aiEnhanceRecentPrompts: []
       };
     }
   }
