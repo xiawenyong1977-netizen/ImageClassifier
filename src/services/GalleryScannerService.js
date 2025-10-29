@@ -856,7 +856,7 @@ class GalleryScannerService {
     };
   }
 
-  async scanGalleryWithProgress(onProgress = null) {
+  async scanGalleryWithProgress(onProgress = null, options = null) {
     try {
       logger.debug('Starting full scan of local gallery...');
       
@@ -865,6 +865,9 @@ class GalleryScannerService {
         window.isScanning = true;
       }
       
+      // 处理可选项（例如非会员比较限制）
+      this.compareLimit = options && typeof options.compareLimit === 'number' ? options.compareLimit : null;
+
       // 确保使用最新的配置
       const settings = await UnifiedDataService.readSettings();
       let scanPaths = settings.scanPaths || [];
@@ -1602,7 +1605,16 @@ class GalleryScannerService {
    */
   async compareFilesPhase(allImages, scanStartTime) {
     // 阶段2: 文件比对
-    this.sendProgressMessage('file_comparison', 0, allImages.length);
+    // 如果设置了比较限制，只在提示中显示被限制后的数量
+    const effectiveAllImages = (() => {
+      if (this.compareLimit && Array.isArray(allImages) && allImages.length > this.compareLimit) {
+        const sorted = [...allImages].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        return sorted.slice(0, this.compareLimit);
+      }
+      return allImages;
+    })();
+
+    this.sendProgressMessage('file_comparison', 0, effectiveAllImages.length);
     
     // 让出控制权，让UI有机会显示进度提示
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -1622,7 +1634,7 @@ class GalleryScannerService {
     
     // 获取当前文件URI集合
     const currentFileUris = new Set();
-    allImages.forEach(img => {
+    effectiveAllImages.forEach(img => {
       currentFileUris.add(img.uri);
     });
     
@@ -1638,13 +1650,15 @@ class GalleryScannerService {
     await new Promise(resolve => setTimeout(resolve, 0));
     
     // 找出差异
-    const deletedUris = []; // 数据库中有，但文件系统中没有
+    let deletedUris = []; // 数据库中有，但文件系统中没有（非会员限制时跳过计算）
     const newUris = []; // 文件系统中有，但数据库中没有
     
-    // 找出被删除的文件
-    for (const uri of existingUris) {
-      if (!currentFileUris.has(uri)) {
-        deletedUris.push(uri);
+    // 找出被删除的文件（仅会员或未限制时计算，避免误判）
+    if (!this.compareLimit) {
+      for (const uri of existingUris) {
+        if (!currentFileUris.has(uri)) {
+          deletedUris.push(uri);
+        }
       }
     }
     
@@ -1655,8 +1669,8 @@ class GalleryScannerService {
       }
     }
     
-    // 过滤出需要处理的新图片
-    const newImages = allImages.filter(img => newUris.includes(img.uri));
+    // 过滤出需要处理的新图片（基于受限集合）
+    const newImages = effectiveAllImages.filter(img => newUris.includes(img.uri));
     
     logger.debug(`🔍 增量扫描结果: 删除 ${deletedUris.length} 个文件，新增 ${newUris.length} 个文件`);
     

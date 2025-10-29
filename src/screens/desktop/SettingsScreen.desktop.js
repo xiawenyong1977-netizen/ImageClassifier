@@ -22,33 +22,33 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   // 微信授权相关状态
   const [wechatStatus, setWechatStatus] = useState('checking'); // checking, not_followed, followed
   const [qrCode, setQrCode] = useState('');
-  const [qrTicket, setQrTicket] = useState('');
   const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
   const [checkingFollow, setCheckingFollow] = useState(false);
 
 
   useEffect(() => {
     loadSettings();
-    checkWeChatStatus();
+    checkMembershipStatus();
   }, []);
 
-  // 检查微信关注状态
-  const checkWeChatStatus = async () => {
+  // 检查会员状态（替代关注状态）
+  const checkMembershipStatus = async () => {
     try {
-      // 1. 检查本地是否有 openId
-      const openId = await WeChatAuthService.getOpenId();
-      
-      if (openId) {
-        // 有 openId，说明已关注，查询额度
-        setWechatStatus('followed');
+      logger.debug('🔍 开始检查会员状态...');
+      const { isMember } = await WeChatAuthService.getMembershipStatus();
+      if (isMember) {
+        logger.debug('✅ 用户为会员');
+        setWechatStatus('member'); // 复用现有UI分支但用更语义的值
         await loadCredits();
       } else {
-        // 没有 openId，未关注
-        setWechatStatus('not_followed');
+        logger.debug('❌ 用户非会员');
+        setWechatStatus('not_member');
+        await generateQrCode();
       }
     } catch (error) {
-      logger.error('检查微信状态失败:', error);
-      setWechatStatus('not_followed');
+      logger.error('检查会员状态失败:', error);
+      setWechatStatus('not_member');
+      await generateQrCode();
     }
   };
 
@@ -56,26 +56,24 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   const generateQrCode = async () => {
     try {
       setCheckingFollow(true);
-      const { qrcode, ticket } = await WeChatAuthService.generateQrCode();
+      const { qrcode } = await WeChatAuthService.generateQrCode();
       setQrCode(qrcode);
-      setQrTicket(ticket);
       
-      // 开始轮询检查关注状态
-      WeChatAuthService.startCheckingFollowStatus(
-        ticket,
-        async ({ followed, openId }) => {
-          if (followed && openId) {
-            setWechatStatus('followed');
+      // 轮询会员状态
+      const poll = setInterval(async () => {
+        try {
+          const { isMember } = await WeChatAuthService.getMembershipStatus();
+          if (isMember) {
+            setWechatStatus('member');
             await loadCredits();
-            Alert.alert('成功', '关注成功！已获得AI图像增强额度');
+            Alert.alert('成功', '会员已激活！');
+            clearInterval(poll);
+            setCheckingFollow(false);
           }
-          setCheckingFollow(false);
-        },
-        (error) => {
-          logger.error('检查关注状态失败:', error);
-          setCheckingFollow(false);
+        } catch (e) {
+          logger.debug('⏳ 轮询会员状态中...');
         }
-      );
+      }, 2000);
     } catch (error) {
       logger.error('生成二维码失败:', error);
       Alert.alert('错误', '生成二维码失败，请重试');
@@ -516,9 +514,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           <View style={styles.placeholder} />
         </View>
 
-        {/* Actions */}
+        {/* 智能分类 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>分类操作</Text>
+          <Text style={styles.sectionTitle}>智能分类</Text>
           
           <TouchableOpacity
             style={styles.actionButton}
@@ -529,156 +527,191 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             </Text>
           </TouchableOpacity>
 
-        </View>
+          {/* 目录设置 - 作为智能分类的子区域 */}
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>目录设置</Text>
+            
+            {/* 添加新目录 */}
+            <View style={styles.addPathContainer}>
+              <TextInput
+                style={styles.pathInput}
+                placeholder="输入目录路径（例如：D:\Photos）"
+                value={newPath}
+                onChangeText={setNewPath}
+                placeholderTextColor="#999"
+              />
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={selectFolder}>
+                <Text style={styles.selectButtonText}>📁</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={addGalleryPath}>
+                <Text style={styles.addButtonText}>+ 添加</Text>
+              </TouchableOpacity>
+            </View>
 
-        {/* Gallery Paths Settings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>照片目录</Text>
-          
-          {/* 添加新目录 */}
-          <View style={styles.addPathContainer}>
-            <TextInput
-              style={styles.pathInput}
-              placeholder="输入目录路径（例如：D:\Photos）"
-              value={newPath}
-              onChangeText={setNewPath}
-              placeholderTextColor="#999"
-            />
-            <TouchableOpacity
-              style={styles.selectButton}
-              onPress={selectFolder}>
-              <Text style={styles.selectButtonText}>📁</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={addGalleryPath}>
-              <Text style={styles.addButtonText}>+ 添加</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 目录列表 */}
-          <View style={styles.pathsList}>
-            {galleryPaths.map((path, index) => (
-              <View key={index} style={styles.pathItem}>
-                <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
-                  {path}
-                </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.removeButton,
-                    galleryPaths.length <= 1 && styles.removeButtonDisabled
-                  ]}
-                  onPress={() => removeGalleryPath(path)}
-                  disabled={galleryPaths.length <= 1}>
-                  <Text style={[
-                    styles.removeButtonText,
-                    galleryPaths.length <= 1 && styles.removeButtonTextDisabled
-                  ]}>×</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+            {/* 目录列表 */}
+            <View style={styles.pathsList}>
+              {galleryPaths.map((path, index) => (
+                <View key={index} style={styles.pathItem}>
+                  <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
+                    {path}
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.removeButton,
+                      galleryPaths.length <= 1 && styles.removeButtonDisabled
+                    ]}
+                    onPress={() => removeGalleryPath(path)}
+                    disabled={galleryPaths.length <= 1}>
+                    <Text style={[
+                      styles.removeButtonText,
+                      galleryPaths.length <= 1 && styles.removeButtonTextDisabled
+                    ]}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
           </View>
         </View>
 
         {/* AI Image Enhancement Presets */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>✨ AI图像增强</Text>
+          <Text style={styles.sectionTitle}>✨ 照片创玩</Text>
           
-          {/* 微信授权状态 */}
-          {wechatStatus === 'checking' && (
-            <View style={styles.wechatAuthContainer}>
-              <ActivityIndicator size="small" color="#2196F3" />
-              <Text style={styles.wechatAuthText}>检查授权状态中...</Text>
-            </View>
-          )}
+          <Text style={styles.sectionDescription}>
+            配置照片创玩的预设方案，可自定义提示词
+          </Text>
           
-          {wechatStatus === 'not_followed' && (
-            <View style={styles.wechatAuthContainer}>
-              <Text style={styles.wechatAuthTitle}>
-                🔐 关注公众号获取AI图像增强额度
-              </Text>
-              <Text style={styles.wechatAuthDescription}>
-                关注公众号后即可免费使用AI图像增强功能
-              </Text>
-              
-              {qrCode ? (
-                <View style={styles.qrCodeContainer}>
-                  <Image
-                    source={{ uri: `data:image/png;base64,${qrCode}` }}
-                    style={styles.qrCodeImage}
+          {Object.entries(aiEnhancePresets)
+            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+            .map(([presetId, preset]) => (
+              <View key={presetId} style={styles.presetItem}>
+                <View style={styles.presetLeft}>
+                  <Text style={styles.presetIcon}>{preset.icon}</Text>
+                  <View style={styles.presetInfo}>
+                    <Text style={styles.presetName}>{preset.name}</Text>
+                    <Text style={styles.presetPrompt} numberOfLines={2}>
+                      {preset.prompt || '（未设置提示词）'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.presetRight}>
+                  <TouchableOpacity
+                    style={styles.editPresetButton}
+                    onPress={() => openEditPreset(presetId)}>
+                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
+                  </TouchableOpacity>
+                  <Switch
+                    value={preset.enabled}
+                    onValueChange={() => togglePresetEnabled(presetId)}
+                    trackColor={{ false: '#ccc', true: '#4CAF50' }}
                   />
-                  {checkingFollow && (
-                    <Text style={styles.qrCodeHint}>
-                      正在检测关注状态...
-                    </Text>
-                  )}
-                  {!checkingFollow && (
-                    <Text style={styles.qrCodeHint}>
-                      请使用微信扫描二维码关注公众号
-                    </Text>
-                  )}
                 </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.generateQrButton}
-                  onPress={generateQrCode}>
-                  <Text style={styles.generateQrButtonText}>
-                    {checkingFollow ? '生成中...' : '🔲 生成二维码'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+              </View>
+            ))}
           
-          {wechatStatus === 'followed' && (
-            <>
-              {/* 额度显示 */}
-              <View style={styles.creditsContainer}>
-                <Text style={styles.creditsTitle}>💰 使用额度</Text>
-                <View style={styles.creditsInfo}>
-                  <Text style={styles.creditsLabel}>剩余额度：</Text>
-                  <Text style={styles.creditsValue}>
-                    {credits.remaining} / {credits.total}
-                  </Text>
-                </View>
-                <Text style={styles.creditsDescription}>
-                  已使用 {credits.used} 次，建议合理使用额度
+          {/* 如果已关注，显示额度 */}
+          {wechatStatus === 'member' && (
+            <View style={styles.creditsContainer}>
+              <Text style={styles.creditsTitle}>💰 使用额度</Text>
+              <View style={styles.creditsInfo}>
+                <Text style={styles.creditsLabel}>剩余额度：</Text>
+                <Text style={styles.creditsValue}>
+                  {credits.remaining} / {credits.total}
                 </Text>
               </View>
-              
-              <Text style={styles.sectionDescription}>
-                配置AI图像增强的预设方案，可自定义提示词
+              <Text style={styles.creditsDescription}>
+                已使用 {credits.used} 次，建议合理使用额度
               </Text>
-              
-              {Object.entries(aiEnhancePresets)
-                .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
-                .map(([presetId, preset]) => (
-                  <View key={presetId} style={styles.presetItem}>
-                    <View style={styles.presetLeft}>
-                      <Text style={styles.presetIcon}>{preset.icon}</Text>
-                      <View style={styles.presetInfo}>
-                        <Text style={styles.presetName}>{preset.name}</Text>
-                        <Text style={styles.presetPrompt} numberOfLines={2}>
-                          {preset.prompt || '（未设置提示词）'}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.presetRight}>
-                      <TouchableOpacity
-                        style={styles.editPresetButton}
-                        onPress={() => openEditPreset(presetId)}>
-                        <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
-                      </TouchableOpacity>
-                      <Switch
-                        value={preset.enabled}
-                        onValueChange={() => togglePresetEnabled(presetId)}
-                        trackColor={{ false: '#ccc', true: '#4CAF50' }}
-                      />
-                    </View>
-                  </View>
-                ))}
-            </>
+            </View>
           )}
+        </View>
+
+        {/* 会员服务 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>会员服务</Text>
+          
+          {/* 免费会员 */}
+          <View style={styles.membershipCard}>
+            <View style={styles.membershipHeader}>
+              <Text style={styles.membershipIcon}>🆓</Text>
+              <View>
+                <Text style={styles.membershipName}>免费会员</Text>
+                <Text style={styles.membershipTag}>当前状态</Text>
+              </View>
+            </View>
+            <View style={styles.membershipFeatures}>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✓</Text>
+                <Text style={styles.membershipFeatureText}>智能分类：100张照片</Text>
+              </View>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✗</Text>
+                <Text style={styles.membershipFeatureText}>照片创玩：0张</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* 付费会员 */}
+          <View style={styles.membershipCardPremium}>
+            {/* 标题栏和内容在同一水平行 */}
+            <View style={styles.membershipRow}>
+              {/* 左侧：标题和权益 */}
+              <View style={styles.membershipLeft}>
+                <View style={styles.membershipHeader}>
+                  <Text style={styles.membershipIcon}>💎</Text>
+                  <View>
+                    <Text style={styles.membershipName}>终身会员</Text>
+                    <Text style={styles.membershipTagPremium}>
+                      {wechatStatus === 'member' ? '已激活' : '未激活'}
+                    </Text>
+                  </View>
+                </View>
+                
+                {/* 权益列表 */}
+                <View style={styles.membershipFeaturesColumn}>
+                  <View style={styles.membershipFeatureItem}>
+                    <Text style={styles.membershipFeatureIcon}>✓</Text>
+                    <Text style={styles.membershipFeatureText}>智能分类：照片数不限</Text>
+                  </View>
+                  <View style={styles.membershipFeatureItem}>
+                    <Text style={styles.membershipFeatureIcon}>✓</Text>
+                    <Text style={styles.membershipFeatureText}>照片创玩：免费10张</Text>
+                  </View>
+                  <View style={styles.membershipFeatureItem}>
+                    <Text style={styles.membershipFeatureIcon}>✓</Text>
+                    <Text style={styles.membershipFeatureText}>更多配额需购买算力</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 右侧：二维码区域（未关注时显示） */}
+              {wechatStatus !== 'member' && (
+                <View style={styles.membershipQrColumn}>
+                  {qrCode ? (
+                    <Image
+                      source={{ uri: qrCode }}
+                      style={styles.membershipQrCode}
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.membershipQrButton}
+                      onPress={generateQrCode}>
+                      <Text style={styles.membershipQrButtonText}>
+                        {checkingFollow ? '生成中...' : '🔲 生成二维码'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  <Text style={styles.membershipQrHint}>
+                    微信扫码关注"芯图相册"，开通会员
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
         </View>
 
         {/* App Info */}
@@ -853,6 +886,17 @@ const styles = StyleSheet.create({
     color: '#333',
     padding: 16,
     paddingBottom: 8,
+  },
+  subSection: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  subSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
   },
   settingItem: {
     flexDirection: 'row',
@@ -1298,6 +1342,129 @@ const styles = StyleSheet.create({
   creditsDescription: {
     fontSize: 13,
     color: '#999',
+  },
+  // 会员服务样式
+  membershipCard: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  membershipCardPremium: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#fff7e6',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ffd700',
+  },
+  membershipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  membershipIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  membershipName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  membershipTag: {
+    fontSize: 13,
+    color: '#4CAF50',
+    backgroundColor: '#e8f5e9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  membershipTagPremium: {
+    fontSize: 13,
+    color: '#ff9800',
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  membershipRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  membershipLeft: {
+    flex: 1,
+  },
+  membershipBody: {
+    flexDirection: 'row',
+    gap: 20,
+    marginTop: 8,
+  },
+  membershipFeaturesColumn: {
+    flex: 1,
+    gap: 8,
+  },
+  membershipFeatures: {
+    gap: 8,
+  },
+  membershipQrColumn: {
+    width: 200,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 0,
+  },
+  membershipLeft: {
+    width: 320,
+  },
+  membershipFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  membershipFeatureIcon: {
+    fontSize: 16,
+    color: '#4CAF50',
+    minWidth: 20,
+  },
+  membershipFeatureText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  membershipQrTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  membershipQrCode: {
+    width: 150,
+    height: 150,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    marginBottom: 12,
+  },
+  membershipQrHint: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  membershipQrButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+  },
+  membershipQrButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

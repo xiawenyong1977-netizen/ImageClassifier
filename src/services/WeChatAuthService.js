@@ -22,7 +22,8 @@ class WeChatAuthService {
       endpoints: {
         qrcode: '/api/v1/auth/wechat/qrcode',
         checkFollow: '/api/v1/auth/wechat/check-follow',
-        credits: '/api/v1/user/credits'
+        credits: '/api/v1/user/credits',
+        membership: '/api/v1/user/member-status'
       },
       timeout: 30000 // 30秒超时
     };
@@ -42,6 +43,60 @@ class WeChatAuthService {
     } catch (error) {
       logger.error('❌ 获取客户端ID失败:', error);
       return '';
+    }
+  }
+
+  /**
+   * 查询会员状态
+   * 返回 { isMember: boolean }
+   */
+  async getMembershipStatus() {
+    try {
+      const clientId = await this.getClientId();
+      if (!clientId) {
+        throw new Error('客户端ID未找到');
+      }
+
+      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.membership}?client_id=${clientId}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
+
+      const response = await fetch(url, { method: 'GET', signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        const text = await response.text();
+        logger.error(`❌ 查询会员状态失败 (${response.status}):`, text);
+        throw new Error(`查询会员状态失败: ${response.status}`);
+      }
+
+      const result = await response.json();
+      // 兼容多种返回格式
+      // 1) { success: true, data: { is_member: true } }
+      // 2) { is_member: true }
+      // 3) { member: true } 或 'TRUE'
+      let isMember = false;
+      if (result && typeof result === 'object') {
+        if (result.data && (typeof result.data.is_member !== 'undefined' || typeof result.data.member !== 'undefined')) {
+          const v = result.data.is_member ?? result.data.member;
+          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
+        } else if (typeof result.is_member !== 'undefined') {
+          const v = result.is_member;
+          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
+        } else if (typeof result.member !== 'undefined') {
+          const v = result.member;
+          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
+        }
+      }
+
+      return { isMember: !!isMember };
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        logger.error('❌ 查询会员状态超时');
+        throw new Error('查询会员状态超时，请检查网络连接');
+      }
+      logger.error('❌ 查询会员状态失败:', error);
+      // 失败时按非会员处理，避免阻塞扫描
+      return { isMember: false };
     }
   }
 
@@ -94,30 +149,56 @@ class WeChatAuthService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
 
+      // 生成随机的scene_str（用于标识这个二维码请求）
+      const sceneStr = `qrcode_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+      const requestBody = {
+        client_id: clientId,
+        scene_str: sceneStr
+      };
+      
+      logger.debug('📤 发送请求:', url);
+      logger.debug('📤 请求体:', requestBody);
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-Client-Id': clientId
+          'Content-Type': 'application/json'
         },
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       });
 
       clearTimeout(timeoutId);
 
+      logger.debug(`📡 API响应状态: ${response.status} ${response.statusText}`);
+      
+      const responseText = await response.text();
+      logger.debug(`📡 API响应内容:`, responseText);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        logger.error(`❌ 生成二维码失败 (${response.status}):`, errorText);
-        throw new Error(`生成二维码失败: ${response.status}`);
+        logger.error(`❌ 生成二维码失败 (${response.status}):`, responseText);
+        logger.error('❌ 请求URL:', url);
+        logger.error('❌ 请求体:', requestBody);
+        logger.error('❌ 客户端ID:', clientId);
+        let errorMessage = '生成二维码失败';
+        try {
+          const errorJson = JSON.parse(responseText);
+          errorMessage = errorJson.detail || errorJson.message || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
-      const result = await response.json();
+      const result = JSON.parse(responseText);
+      logger.debug(`📡 API返回结果:`, result);
       
-      if (result.success && result.data) {
+      if (result.success && result.qrcode_url && result.ticket) {
         logger.debug('✅ 二维码生成成功');
         return {
-          qrcode: result.data.qrcode, // Base64 编码的二维码图片
-          ticket: result.data.ticket  // 二维码票据
+          qrcode: result.qrcode_url, // 二维码URL
+          ticket: result.ticket  // 二维码票据
         };
       } else {
         throw new Error(result.message || '生成二维码失败');
@@ -128,17 +209,16 @@ class WeChatAuthService {
         logger.error('❌ 生成二维码超时');
         throw new Error('生成二维码超时，请检查网络连接');
       }
-      logger.error('❌ 生成二维码失败:', error);
-      throw error;
+      logger.error('❌ 生成二维码失败:', error.message || error);
+      throw new Error(error.message || '生成二维码失败');
     }
   }
 
   /**
-   * 检查关注状态
-   * @param {string} ticket - 二维码票据
-   * @returns {Promise<{followed: boolean, openId: string}>}
+   * 检查关注状态（不再返回 open_id）
+   * @returns {Promise<{followed: boolean, openId: string}>} // openId 兼容保留为空字符串
    */
-  async checkFollowStatus(ticket) {
+  async checkFollowStatus() {
     try {
       const clientId = await this.getClientId();
       
@@ -146,21 +226,14 @@ class WeChatAuthService {
         throw new Error('客户端ID未找到');
       }
 
-      if (!ticket) {
-        throw new Error('二维码票据缺失');
-      }
-
       logger.debug('🔍 正在检查关注状态...');
 
-      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.checkFollow}?ticket=${ticket}`;
+      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.checkFollow}?client_id=${clientId}`;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
 
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'X-Client-Id': clientId
-        },
         signal: controller.signal
       });
 
@@ -173,23 +246,27 @@ class WeChatAuthService {
       }
 
       const result = await response.json();
+      logger.debug('📡 API返回结果:', result);
       
-      if (result.success && result.data) {
-        const { followed, openId } = result.data;
-        
-        if (followed && openId) {
-          // 保存 openId 到本地
-          await this.saveOpenId(openId);
-          logger.debug('✅ 用户已关注，openId已保存');
+      // 新接口不再返回 open_id，仅解析关注状态
+      // 兼容旧格式字段名：subscribed / followed，可能包在 data 中
+      let followed = false;
+      if (result && typeof result === 'object') {
+        if (typeof result.subscribed !== 'undefined') {
+          followed = !!result.subscribed;
+        } else if (typeof result.followed !== 'undefined') {
+          followed = !!result.followed;
+        } else if (result.success && result.data && (typeof result.data.subscribed !== 'undefined' || typeof result.data.followed !== 'undefined')) {
+          const v = (typeof result.data.subscribed !== 'undefined') ? result.data.subscribed : result.data.followed;
+          followed = !!v;
         }
-        
-        return {
-          followed: followed || false,
-          openId: openId || ''
-        };
-      } else {
-        return { followed: false, openId: '' };
       }
+
+      // 不再保存 openId，本函数仅返回关注布尔值；为兼容调用处结构，返回空字符串
+      return {
+        followed: !!followed,
+        openId: ''
+      };
 
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -214,23 +291,20 @@ class WeChatAuthService {
         throw new Error('客户端ID未找到');
       }
 
-      if (!openId) {
-        // 没有 openId 表示未关注，返回0额度
-        return { total: 0, used: 0, remaining: 0 };
-      }
-
       logger.debug('💰 正在查询额度...');
 
       const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.credits}`;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
 
+      const headers = { 'X-Client-Id': clientId };
+      if (openId) {
+        headers['X-WeChat-OpenID'] = openId;
+      }
+
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'X-Client-Id': clientId,
-          'X-WeChat-OpenID': openId
-        },
+        headers,
         signal: controller.signal
       });
 
@@ -243,18 +317,23 @@ class WeChatAuthService {
       }
 
       const result = await response.json();
+      logger.debug('📡 额度API返回结果:', result);
       
-      if (result.success && result.data) {
-        const { total, used, remaining } = result.data;
-        logger.debug(`✅ 额度查询成功: 总计${total}，已用${used}，剩余${remaining}`);
-        return {
-          total: total || 0,
-          used: used || 0,
-          remaining: remaining || 0
-        };
-      } else {
-        return { total: 0, used: 0, remaining: 0 };
+      // 解析两种返回结构：1) { success, data: {...} } 2) { success, ... } 直接根级字段
+      let total = 0, used = 0, remaining = 0;
+      if (result.success) {
+        const source = result.data || result;
+        total = source.total_credits || source.total || 0;
+        used = source.used_credits || source.used || 0;
+        remaining = source.remaining_credits || source.remaining || 0;
       }
+
+      if (total > 0 || used > 0 || remaining > 0) {
+        logger.debug(`✅ 额度查询成功: 总计${total}，已用${used}，剩余${remaining}`);
+        return { total, used, remaining };
+      }
+
+      return { total: 0, used: 0, remaining: 0 };
 
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -268,19 +347,18 @@ class WeChatAuthService {
 
   /**
    * 轮询检查关注状态
-   * @param {string} ticket - 二维码票据
    * @param {Function} onFollowed - 关注成功回调
    * @param {Function} onError - 错误回调
    * @returns {Function} 停止轮询的函数
    */
-  startCheckingFollowStatus(ticket, onFollowed, onError) {
+  startCheckingFollowStatus(onFollowed, onError) {
     let isPolling = true;
     
     const checkInterval = setInterval(async () => {
       if (!isPolling) return;
       
       try {
-        const { followed, openId } = await this.checkFollowStatus(ticket);
+        const { followed, openId } = await this.checkFollowStatus();
         
         if (followed && openId) {
           clearInterval(checkInterval);

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 import { logger } from '../../adapters/WebAdapters';
@@ -34,6 +35,7 @@ const HomeScreen = () => {
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
+  const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
@@ -529,6 +531,24 @@ const HomeScreen = () => {
         return;
       }
       
+      // 查询会员状态
+      let compareLimitOption = null;
+      try {
+        const { isMember } = await WeChatAuthService.getMembershipStatus();
+        if (!isMember) {
+          // 非会员提示与限制：在扫描按钮附近显示浮窗提示
+          setShowScanTip(true);
+          setTimeout(() => setShowScanTip(false), 4000);
+          compareLimitOption = { compareLimit: 100 };
+        }
+      } catch (e) {
+        // 查询失败按非会员策略处理，但不阻断扫描
+        logger.debug('会员状态查询失败，按非会员处理:', e?.message || e);
+        setShowScanTip(true);
+        setTimeout(() => setShowScanTip(false), 4000);
+        compareLimitOption = { compareLimit: 100 };
+      }
+
       // 立即设置扫描状态，清除强制显示 readme 状态
       setForceShowReadme(false);
       setIsScanning(true);
@@ -555,7 +575,7 @@ const HomeScreen = () => {
             }
           });
         }
-      });
+      }, compareLimitOption);
       
       logger.debug('智能扫描完成');
       setIsScanning(false);
@@ -1044,6 +1064,11 @@ const HomeScreen = () => {
                 <Text style={styles.fabButtonText}>⟳</Text>
               </Animated.View>
             </TouchableOpacity>
+            {showScanTip && (
+              <View style={styles.scanTipContainer}>
+                <Text style={styles.scanTipText}>为相册智能分类100张，在设置页面开通终身会员后，无限制</Text>
+              </View>
+            )}
           </View>
         )}
         
@@ -1643,6 +1668,23 @@ const styles = StyleSheet.create({
   fabButtonText: {
     fontSize: 24,
     color: '#fff',
+  },
+  // 扫描浮窗提示样式（贴近扫描按钮）
+  scanTipContainer: {
+    position: 'fixed',
+    bottom: 144, // 比按钮高出约64px
+    right: 16,
+    maxWidth: 320,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    zIndex: 10000,
+  },
+  scanTipText: {
+    fontSize: 12,
+    color: '#fff',
+    lineHeight: 18,
   },
 });
 

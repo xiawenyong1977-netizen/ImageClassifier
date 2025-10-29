@@ -1014,7 +1014,7 @@ const CategoryScreen = ({
 
   // ==================== AI图像增强处理函数 ====================
   // 事件处理函数：接收preset参数，直接开始处理
-  const handleAIEnhance = (preset) => {
+  const handleAIEnhance = async (preset) => {
     logger.debug('🎨 开始AI图像增强, 方案:', preset);
     
     // 捕获当前选中的图片（快照）
@@ -1057,36 +1057,44 @@ const CategoryScreen = ({
       }, 100);
     };
     
-    // 检查数量限制（建议最多9张）
+    // 检查数量限制（最多9张）
     const MAX_ENHANCE_COUNT = 9;
     if (selectedCount > MAX_ENHANCE_COUNT) {
       Alert.alert(
         '提示',
-        `一次最多处理 ${MAX_ENHANCE_COUNT} 张图片\n` +
-        `您当前选择了 ${selectedCount} 张\n` +
-        `建议分批处理以获得更好的体验\n\n` +
-        `预计处理时间：\n` +
-        `- ${MAX_ENHANCE_COUNT} 张约需 ${MAX_ENHANCE_COUNT * 10}-${MAX_ENHANCE_COUNT * 30} 秒\n` +
-        `- ${selectedCount} 张约需 ${selectedCount * 10}-${selectedCount * 30} 秒`,
+        `数量不能超过 ${MAX_ENHANCE_COUNT} 张，请选择不超过 ${MAX_ENHANCE_COUNT} 张的图片数量`,
         [
-          {
-            text: '取消',
-            style: 'cancel'
-          },
-          {
-            text: `继续处理全部 ${selectedCount} 张`,
-            onPress: () => {
-              logger.debug('用户选择继续处理全部图片');
-              startEnhancement();
-            }
-          }
+          { text: '确定', style: 'default' }
         ]
       );
       return;
     }
-    
-    // 数量合理，直接开始
-    startEnhancement();
+
+    // 查询额度并提示将消耗额度
+    try {
+      const credits = await WeChatAuthService.getCredits();
+      const remaining = typeof credits?.remaining === 'number' ? credits.remaining : 0;
+      // 不足则阻断并提示前往充值
+      if (remaining < selectedCount) {
+        Alert.alert(
+          '额度不足',
+          `当前剩余额度：${remaining} 次\n需要处理：${selectedCount} 张\n\n请前往芯图相册服务号购买额度`,
+          [{ text: '确定', style: 'default' }]
+        );
+        return;
+      }
+      // 足够则二次确认
+      Alert.alert(
+        '提示',
+        `你选择了 ${selectedCount} 张图片，将会消耗 ${selectedCount} 个额度\n当前剩余额度：${remaining}`,
+        [
+          { text: '确定', onPress: () => startEnhancement() }
+        ]
+      );
+    } catch (e) {
+      // 查询失败不阻断，直接开始
+      startEnhancement();
+    }
   };
 
   // 关闭增强模态框
@@ -1127,31 +1135,141 @@ const CategoryScreen = ({
       
       logger.debug('✅ 图片已保存到:', saveResult.filePath);
       
-      // 3. 添加到数据库（tobecleaned 分类）
-      const timestamp = Date.now();
-      const newImageId = `img_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const imageData = {
-        id: newImageId,
-        fileName: saveResult.fileName,
-        uri: `file:///${saveResult.filePath.replace(/\\/g, '/')}`,
-        path: saveResult.filePath,
-        category: 'tobecleaned',
-        timestamp: timestamp,
-        takenAt: timestamp,
-        
-        metadata: {
-          source: 'ai_enhanced',
-          originalImageId: resultToAdd.originalImageId,
-          enhancePreset: resultToAdd.preset,
-          enhancedAt: timestamp,
-          taskId: resultToAdd.taskId
+      // 3. 从原图获取分类信息（message和detection_results）
+      // allImages 只包含精简信息，需要调用详细信息接口获取完整信息
+      let originalImage = null;
+      try {
+        if (resultToAdd.originalImageId) {
+          originalImage = await UnifiedDataService.readImageDetailsById(resultToAdd.originalImageId);
+          logger.debug('✅ 从数据库获取完整原图信息');
+        } else if (resultToAdd.originalUri) {
+          // 如果没有 ID，尝试从 URI 查找
+          const tempImage = allImages.find(img => img.uri === resultToAdd.originalUri);
+          if (tempImage?.id) {
+            originalImage = await UnifiedDataService.readImageDetailsById(tempImage.id);
+            logger.debug('✅ 通过URI找到ID，从数据库获取完整原图信息');
+          }
         }
+      } catch (error) {
+        logger.warn('⚠️ 从数据库查询原图详细信息失败:', error);
+        // 降级到使用精简信息
+        originalImage = allImages.find(img => 
+          img.id === resultToAdd.originalImageId || 
+          img.uri === resultToAdd.originalUri
+        );
+      }
+      
+      logger.debug('🔍 查找原图:', { 
+        originalImageId: resultToAdd.originalImageId, 
+        originalUri: resultToAdd.originalUri,
+        found: !!originalImage,
+        hasMessage: !!originalImage?.message,
+        message: originalImage?.message,
+        hasIdCardDetections: !!originalImage?.idCardDetections?.length,
+        idCardDetectionsCount: originalImage?.idCardDetections?.length || 0,
+        hasGeneralDetections: !!originalImage?.generalDetections?.length,
+        generalDetectionsCount: originalImage?.generalDetections?.length || 0,
+        hasMobileNetV3Detections: !!originalImage?.mobileNetV3Detections,
+        mobileNetV3Detections: originalImage?.mobileNetV3Detections ? 'present' : 'null'
+      });
+      
+      // 4. 使用writeImageDetailedInfo一次性保存完整数据（包括基础信息和详细信息）
+      // 注意：不传入id，让系统根据uri自动生成，与扫描服务保持一致
+      const timestamp = Date.now();
+      const newImageUri = `file:///${saveResult.filePath.replace(/\\/g, '/')}`;
+      
+      // 准备完整的图片数据，包含所有必要字段（参考扫描服务的格式）
+      const completeImageData = {
+        uri: newImageUri, // 必须有uri，系统会根据uri生成id
+        fileName: saveResult.fileName,
+        category: 'tobecleaned', // 分类信息（必须）
+        confidence: 1.0, // 默认置信度
+        timestamp: timestamp, // 时间戳（必须）
+        takenAt: timestamp || null, // 拍摄时间
+        size: imageBlob.size || 0, // 文件大小
+        // 复制原图的检测结果和描述信息
+        idCardDetections: originalImage?.idCardDetections || [],
+        generalDetections: originalImage?.generalDetections || [],
+        mobileNetV3Detections: originalImage?.mobileNetV3Detections || null,
+        message: originalImage?.message || null,
+        // 如果有imageDimensions也复制
+        ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions })
       };
       
-      // 4. 添加到数据库
-      await UnifiedDataService.addImage(imageData);
-      logger.debug('✅ 图片已添加到数据库:', newImageId);
+      // 验证必要字段
+      if (!completeImageData.category) {
+        logger.warn('⚠️ 图片数据缺少category，自动设置为tobecleaned');
+        completeImageData.category = 'tobecleaned';
+      }
+      if (!completeImageData.timestamp) {
+        logger.warn('⚠️ 图片数据缺少timestamp，使用当前时间');
+        completeImageData.timestamp = Date.now();
+      }
+      
+      // 保存数据并更新缓存（updateCache=true 会重建缓存）
+      logger.debug('💾 准备保存图片数据:', {
+        uri: newImageUri,
+        fileName: completeImageData.fileName,
+        category: completeImageData.category,
+        timestamp: completeImageData.timestamp,
+        size: completeImageData.size,
+        hasMessage: !!completeImageData.message,
+        message: completeImageData.message,
+        hasIdCardDetections: !!completeImageData.idCardDetections?.length,
+        idCardDetectionsCount: completeImageData.idCardDetections?.length || 0,
+        hasGeneralDetections: !!completeImageData.generalDetections?.length,
+        generalDetectionsCount: completeImageData.generalDetections?.length || 0,
+        hasMobileNetV3Detections: !!completeImageData.mobileNetV3Detections,
+        mobileNetV3Detections: completeImageData.mobileNetV3Detections ? 'present' : 'null'
+      });
+      
+      // 生成预期ID以便后续验证（使用与存储服务相同的算法）
+      let expectedImageId;
+      try {
+        const storageService = UnifiedDataService.imageStorageService;
+        if (storageService?.storage?.generateStableId) {
+          expectedImageId = storageService.storage.generateStableId(newImageUri);
+        } else {
+          // 备用算法（与generateStableId相同的逻辑）
+          let hash = 0;
+          for (let i = 0; i < newImageUri.length; i++) {
+            const char = newImageUri.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+          }
+          expectedImageId = `img_${Math.abs(hash).toString(36)}`;
+        }
+      } catch (e) {
+        logger.warn('⚠️ 生成预期ID失败:', e);
+        expectedImageId = null;
+      }
+      
+      await UnifiedDataService.writeImageDetailedInfo([completeImageData], false); // 传入 false，不使用自动缓存更新
+      
+      // 🔧 强制刷新缓存（确保新图片能立即显示）
+      await UnifiedDataService.imageCache.refreshCache();
+      
+      logger.debug('✅ 图片完整信息已保存并重建缓存:', { 
+        uri: newImageUri,
+        fileName: completeImageData.fileName,
+        category: completeImageData.category,
+        expectedId: expectedImageId,
+        hasMessage: !!completeImageData.message,
+        hasDetections: !!(completeImageData.idCardDetections?.length || completeImageData.generalDetections?.length || completeImageData.mobileNetV3Detections)
+      });
+      
+      // 验证：直接从数据库查询
+      try {
+        const directImage = await UnifiedDataService.imageStorageService?.getImageById?.(expectedImageId);
+        logger.debug('🔍 直接从数据库查询验证:', {
+          expectedId: expectedImageId,
+          foundInDB: !!directImage,
+          dbImageCategory: directImage?.category,
+          dbImageUri: directImage?.uri
+        });
+      } catch (dbError) {
+        logger.warn('⚠️ 数据库直接查询失败:', dbError);
+      }
       
       // 5. 标记该图片为已保存
       setEnhanceResults(prevResults => 
@@ -1162,9 +1280,56 @@ const CategoryScreen = ({
         )
       );
       
-      // 6. 刷新列表（如果在暂存箱，可以立即看到新图片）
+      // 6. 验证保存结果（调试用）
+      try {
+        // 从缓存中查找刚保存的图片
+        const allTobecleanedImages = await UnifiedDataService.readImagesByCategory('tobecleaned');
+        const savedImage = allTobecleanedImages.find(img => img.uri === newImageUri);
+        
+        // 列出所有缓存中的URI，便于对比
+        const cachedUris = allTobecleanedImages.map(img => img.uri);
+        logger.debug('🔍 保存后验证:', {
+          savedUri: newImageUri,
+          savedUriLength: newImageUri.length,
+          foundInCache: !!savedImage,
+          totalTobecleaned: allTobecleanedImages.length,
+          savedImageCategory: savedImage?.category,
+          savedImageId: savedImage?.id,
+          cachedUris: cachedUris.slice(0, 5) // 只显示前5个URI
+        });
+        
+        // 尝试模糊匹配（去掉file://前缀或者比较文件名）
+        const savedFileName = newImageUri.split('/').pop();
+        const matchByFileName = allTobecleanedImages.find(img => {
+          const imgFileName = img.uri?.split('/').pop();
+          return imgFileName === savedFileName;
+        });
+        
+        if (!savedImage && matchByFileName) {
+          logger.warn('⚠️ URI不匹配，但文件名匹配:', {
+            savedUri: newImageUri,
+            cachedUri: matchByFileName.uri,
+            savedFileName,
+            cachedFileName: matchByFileName.uri.split('/').pop()
+          });
+        }
+        
+        if (!savedImage && !matchByFileName) {
+          logger.error('❌ 新保存的图片不在缓存中！', {
+            savedUri: newImageUri,
+            cachedCount: allTobecleanedImages.length,
+            allCachedUris: cachedUris
+          });
+        }
+      } catch (verifyError) {
+        logger.warn('⚠️ 验证保存结果失败:', verifyError);
+      }
+      
+      // 7. 刷新列表（等待缓存更新完成后再刷新，如果在暂存箱，可以立即看到新图片）
       if (category === 'tobecleaned') {
+        // writeImageDetailedInfo 已经重建了缓存，现在只需要从缓存重新读取
         await loadImages();
+        logger.debug('✅ 已刷新图片列表');
       }
       
       Alert.alert('成功', '已保存到暂存箱，可继续查看其他图片');
@@ -1311,7 +1476,7 @@ const CategoryScreen = ({
               // 打印状态更新（仅在有变化时）
               if (imageStatuses.length > 0) {
                 logger.debug(`📷 后端返回状态（${imageStatuses.length}张）:`, imageStatuses.map(img => 
-                  `[index=${img.index}, status=${img.status}, filename=${img.filename || 'N/A'}]`
+                  `[index=${img.index}, status=${img.status}, filename=${img.filename || 'N/A'}, hasUrl=${!!img.result_url}]`
                 ).join(', '));
               }
               
@@ -1321,6 +1486,58 @@ const CategoryScreen = ({
                 status: status.status === 'completed' ? 'completed' : 'processing',
                 progress: progressPercent,
                 imageStatuses: imageStatuses
+              });
+              
+              // 实时更新已完成图片的URI到enhanceResults（支持过程中显示）
+              setEnhanceResults(prevResults => {
+                const newResults = [...prevResults];
+                let hasUpdate = false;
+                
+                imageStatuses.forEach((imgStatus) => {
+                  if (imgStatus.status === 'completed' && imgStatus.result_url) {
+                    const index = imgStatus.index;
+                    const originalImage = preparedImages[index]?.originalImage;
+                    
+                    if (originalImage) {
+                      const enhancedUrl = imgStatus.result_url || imgStatus.url || imgStatus.enhanced_url;
+                      
+                      // 检查是否已经存在这个索引的结果
+                      const existingIndex = newResults.findIndex(r => {
+                        // 通过originalUri或index匹配
+                        return r.originalUri === originalImage.uri || 
+                               (r.originalImageId === originalImage.id);
+                      });
+                      
+                      if (existingIndex >= 0) {
+                        // 更新现有结果（如果URI还没设置或者状态是pending）
+                        if (!newResults[existingIndex].enhancedUri || newResults[existingIndex].status !== 'success') {
+                          newResults[existingIndex] = {
+                            ...newResults[existingIndex],
+                            enhancedUri: enhancedUrl,
+                            status: 'success'
+                          };
+                          hasUpdate = true;
+                          logger.debug(`🔄 更新已完成的图片URI [索引${index}]: ${originalImage.fileName}`);
+                        }
+                      } else {
+                        // 创建新结果（如果还没创建）
+                        newResults[index] = {
+                          originalImageId: originalImage.id,
+                          originalUri: originalImage.uri,
+                          originalFileName: originalImage.fileName,
+                          enhancedUri: enhancedUrl,
+                          taskId: taskResult.task_id,
+                          preset: preset,
+                          status: 'success'
+                        };
+                        hasUpdate = true;
+                        logger.debug(`➕ 添加已完成的图片URI [索引${index}]: ${originalImage.fileName}`);
+                      }
+                    }
+                  }
+                });
+                
+                return hasUpdate ? newResults : prevResults;
               });
               
               logger.debug(`📊 进度更新 [轮询${pollCount}次]: ${completedImages}/${taskResult.total_images} (${progressPercent.toFixed(1)}%) - 状态: ${status.status}`);
@@ -1334,17 +1551,25 @@ const CategoryScreen = ({
           let failedCount = 0;
           
           if (enhanceResult.results && enhanceResult.results.length > 0) {
+            logger.debug(`📊 详细解析结果数组 (${enhanceResult.results.length}项):`, JSON.stringify(enhanceResult.results, null, 2));
             enhanceResult.results.forEach((result, index) => {
               const originalImage = preparedImages[index]?.originalImage;
+              logger.debug(`🔍 处理第${index + 1}个结果: status=${result.status}, result_url=${result.result_url || 'N/A'}, hasUrl=${!!result.result_url}`);
+              logger.debug(`🔍 结果完整字段:`, Object.keys(result));
+              logger.debug(`🔍 结果所有值:`, result);
               
-              if (result.status === 'completed' && result.result_url) {
+              // 尝试多种可能的字段名
+              const enhancedUrl = result.result_url || result.url || result.enhanced_url || result.image_url || result.output_url;
+              logger.debug(`🔍 尝试解析URL字段: enhancedUrl=${enhancedUrl || 'N/A'}`);
+              
+              if (result.status === 'completed' && enhancedUrl) {
                 // ✅ 成功的图片
                 if (originalImage) {
                   results.push({
                     originalImageId: originalImage.id,
                     originalUri: originalImage.uri,
                     originalFileName: originalImage.fileName,
-                    enhancedUri: result.result_url,
+                    enhancedUri: enhancedUrl,
                     taskId: taskResult.task_id,
                     preset: preset,
                     status: 'success'  // 标记为成功
@@ -2372,6 +2597,13 @@ const EnhanceModal = ({
   const isFailed = currentResult.status === 'failed';
   const isSaved = currentResult.saved === true;
   
+  // 调试日志
+  logger.debug(`🔍 EnhanceModal当前图片: index=${currentIndex}, results.length=${results.length}, currentResult=`, {
+    status: currentResult.status,
+    hasEnhancedUri: !!currentResult.enhancedUri,
+    enhancedUri: currentResult.enhancedUri || 'N/A'
+  });
+  
   // 获取当前预设名称（从可用预设列表中查找）
   const getPresetName = () => {
     const found = availablePresets.find(p => p.id === preset);
@@ -2506,6 +2738,8 @@ const EnhanceModal = ({
               source={{ uri: currentResult.enhancedUri }}
               style={styles.enhanceComparisonImage}
               resizeMode="contain"
+              onError={(error) => logger.error('❌ Image加载失败:', currentResult.enhancedUri, error)}
+              onLoad={() => logger.debug('✅ Image加载成功:', currentResult.enhancedUri)}
             />
           </View>
         );
@@ -2598,7 +2832,7 @@ const EnhanceModal = ({
             <View style={styles.enhanceModalTitleContainer}>
               <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
               <Text style={styles.enhanceModalCounter}>
-                {progress.current}/{progress.total}
+                {results.filter(r => r.status === 'success' && r.enhancedUri).length}/{progress.total || results.length || selectedImages.length}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
