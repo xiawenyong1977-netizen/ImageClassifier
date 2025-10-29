@@ -516,7 +516,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* 智能分类 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>智能分类</Text>
+          <Text style={styles.sectionTitle}>🤖 智能分类</Text>
           
           <TouchableOpacity
             style={styles.actionButton}
@@ -632,7 +632,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* 会员服务 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>会员服务</Text>
+          <Text style={styles.sectionTitle}>💎 会员服务</Text>
           
           {/* 免费会员 */}
           <View style={styles.membershipCard}>
@@ -716,7 +716,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* App Info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>应用信息</Text>
+          <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
           
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>版本</Text>

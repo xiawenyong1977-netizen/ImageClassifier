@@ -1015,7 +1015,7 @@ const CategoryScreen = ({
   // ==================== AI图像增强处理函数 ====================
   // 事件处理函数：接收preset参数，直接开始处理
   const handleAIEnhance = async (preset) => {
-    logger.debug('🎨 开始AI图像增强, 方案:', preset);
+    logger.debug('🎨 开始照片创玩, 方案:', preset);
     
     // 捕获当前选中的图片（快照）
     const selectedCount = selectedImages.length;
@@ -2001,16 +2001,16 @@ const CategoryScreen = ({
                       style={styles.actionMenuItem}
                       activeOpacity={1}
                       onMouseEnter={() => {
-                        logger.debug('🖱️ 鼠标进入AI图像增强菜单项');
+                        logger.debug('🖱️ 鼠标进入照片创玩菜单项');
                         setShowEnhanceSubmenu(true);
                       }}
                       onMouseLeave={() => {
-                        logger.debug('🖱️ 鼠标离开AI图像增强菜单项');
+                        logger.debug('🖱️ 鼠标离开照片创玩菜单项');
                         setShowEnhanceSubmenu(false);
                       }}
                     >
                       <View style={styles.actionMenuItemWithSubmenu}>
-                        <Text style={styles.actionMenuItemText}>✨ AI图像增强 ›</Text>
+                        <Text style={styles.actionMenuItemText}>✨ 照片创玩 ›</Text>
                         
                         {/* 二级菜单：增强方案列表 */}
                         {showEnhanceSubmenu && availableEnhancePresets.length > 0 && (
@@ -2697,7 +2697,7 @@ const EnhanceModal = ({
               {status === 'processing' ? (
                 <>
                   <ActivityIndicator size="large" color="#2196F3" />
-                  <Text style={styles.enhanceComparisonPlaceholderText}>AI增强处理中...</Text>
+                  <Text style={styles.enhanceComparisonPlaceholderText}>照片创玩中...</Text>
                 </>
               ) : (
                 <>
