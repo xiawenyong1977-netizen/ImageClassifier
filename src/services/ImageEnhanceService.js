@@ -97,6 +97,7 @@ class ImageEnhanceService {
       const formData = new FormData();
       
       // 添加所有图片文件（API要求用 'images' 复数，多次append同一个key）
+      const filesSummary = [];
       preparedImages.forEach((prepared, index) => {
         // PC 端也兼容 RN 的文件对象格式；在浏览器/Electron 中，服务端同样可解析
         const fileObj = prepared.localUri ? {
@@ -105,6 +106,12 @@ class ImageEnhanceService {
           name: prepared.originalFileName || `image_${index + 1}.jpg`,
         } : prepared.file;
         formData.append('images', fileObj);
+        filesSummary.push({
+          index: index,
+          name: prepared.originalFileName || `image_${index + 1}.jpg`,
+          uri: prepared.localUri || '[blob]',
+          type: 'image/jpeg'
+        });
         logger.debug(`  - 图片${index + 1}: ${(prepared.originalFileName || `image_${index + 1}.jpg`)}`);
       });
       
@@ -117,35 +124,53 @@ class ImageEnhanceService {
       logger.debug(`⏱️ 设置超时时间: ${dynamicTimeout}ms (${imageCount}张图片)`);
       const timeoutId = setTimeout(() => controller.abort(), dynamicTimeout);
 
-      // 获取客户端ID和OpenID
+      // 获取客户端ID
       const clientId = await this.getClientId();
-      const openId = await WeChatAuthService.getOpenId();
-      
-      // 构建请求头
-      const headers = { 'X-User-ID': clientId };
-      if (openId) {
-        headers['X-WeChat-OpenID'] = openId;
+      // 必填校验：无 client_id 直接失败
+      if (!clientId) {
+        logger.error('❌ 提交任务失败：缺少 client_id');
+        throw new Error('缺少 client_id，无法提交增强任务');
       }
+      // 按需求：将 client_id 作为表单字段提交
+      formData.append('client_id', clientId);
+      // 构建请求头（不再附带 openid）
+      const headers = { 'X-User-ID': clientId };
       
-      const response = await fetch(
-        `${this.apiConfig.baseURL}${this.apiConfig.endpoints.submit}`, 
-        {
-          method: 'POST',
-          headers: headers,
-          body: formData,
-          signal: controller.signal
-        }
-      );
+      const submitUrl = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.submit}`;
+      // 打印原始请求信息（不打印文件二进制，仅打印概要）
+      logger.debug('🛰️ 提交增强任务请求', {
+        url: submitUrl,
+        method: 'POST',
+        headers,
+        edit_type: 'enhance',
+        edit_params: { prompt },
+        client_id: clientId || null,
+        files: filesSummary
+      });
+
+      const response = await fetch(submitUrl, {
+        method: 'POST',
+        headers: headers,
+        body: formData,
+        signal: controller.signal
+      });
 
       clearTimeout(timeoutId);
 
+      const rawText = await response.text();
+      // 打印后端原始响应包
+      logger.debug('📦 提交增强任务响应', { status: response.status, ok: response.ok, body: rawText });
       if (!response.ok) {
-        const errorText = await response.text();
-        logger.error('❌ API返回错误:', errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        logger.error('❌ API返回错误:', rawText);
+        throw new Error(`HTTP ${response.status}: ${rawText || response.statusText}`);
       }
 
-      const result = await response.json();
+      let result;
+      try {
+        result = JSON.parse(rawText);
+      } catch (e) {
+        throw new Error(`响应解析失败: 非JSON: ${rawText?.slice?.(0, 256)}`);
+      }
       logger.debug('✅ 批量任务已提交:', {
         task_id: result.task_id,
         total_images: result.total_images,
@@ -187,22 +212,24 @@ class ImageEnhanceService {
       
       clearTimeout(timeoutId);
       
+      const rawText = await response.text();
+      logger.debug('📦 查询任务状态响应', { status: response.status, ok: response.ok, body: rawText });
       if (!response.ok) {
-        const errorText = await response.text();
         logger.error(`❌ 查询任务状态失败: HTTP ${response.status}`);
-        logger.error(`错误详情: ${errorText}`);
-        
+        logger.error(`错误详情: ${rawText}`);
         // 404 通常表示任务不存在或API未实现，不应该继续重试
         if (response.status === 404) {
           throw new Error(`TASK_NOT_FOUND: 任务不存在或API未实现 (${taskId})`);
         }
-        
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        throw new Error(`HTTP ${response.status}: ${rawText || response.statusText}`);
       }
-      
-      const result = await response.json();
+      let result;
+      try {
+        result = JSON.parse(rawText);
+      } catch (e) {
+        throw new Error(`任务状态解析失败: 非JSON: ${rawText?.slice?.(0, 256)}`);
+      }
       logger.debug(`📊 任务状态: ${result.status}, 进度: ${result.progress || 0}%`);
-      
       return result;
       
     } catch (error) {
