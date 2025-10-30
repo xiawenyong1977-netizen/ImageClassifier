@@ -24,7 +24,10 @@ import {
   NativeModules,
 } from 'react-native';
 import { SafeAreaView, useFocusEffect, Alert } from '../../adapters/WebAdapters';
+import { DeviceEventEmitter } from 'react-native';
+import ImageEnhanceService from '../../services/ImageEnhanceService';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import { logger } from '../../adapters/WebAdapters';
@@ -79,6 +82,10 @@ const CategoryScreen = ({ route, navigation }) => {
   const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : null;
   const isStaging = category === 'tobecleaned';
 
+  // 照片创玩（增强方案）
+  const [showEnhancePresets, setShowEnhancePresets] = useState(false);
+  const [enhancePresets, setEnhancePresets] = useState({});
+
   /**
    * 获取页面标题（与 PC 端格式一致）
    */
@@ -104,10 +111,11 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const getActionButtons = () => {
     if (isStaging) {
-      // 暂存箱（tobecleaned）：删除 + 修改分类 + 分享
+      // 暂存箱（tobecleaned）：删除 + 修改分类 + 照片创玩 + 分享
       return [
         { id: 'delete', label: '永久删除', icon: '🗑️', color: '#FF3B30' },
         { id: 'changeCategory', label: '修改分类', icon: '📁', color: '#007AFF' },
+        { id: 'enhance', label: '照片创玩', icon: '✨', color: '#9C27B0' },
         { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
       ];
     }
@@ -638,6 +646,10 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const handleBatchAction = async (actionId) => {
     try {
+      // 点击任意底部按钮时，自动收起“照片创玩”面板
+      if (showEnhancePresets) {
+        setShowEnhancePresets(false);
+      }
       const selectedIds = getSelectedImageIds();
       
       if (selectedIds.length === 0) {
@@ -655,6 +667,9 @@ const CategoryScreen = ({ route, navigation }) => {
         case 'delete':
           await batchDelete(selectedIds);
           break;
+        case 'enhance':
+          await openEnhancePanel();
+          break;
         case 'share':
           await batchShare(selectedIds);
           break;
@@ -668,6 +683,168 @@ const CategoryScreen = ({ route, navigation }) => {
     } catch (error) {
       logger.error('❌ 批量操作失败:', error);
       Alert.alert('操作失败', error.message);
+    }
+  };
+
+  // 打开照片创玩面板并加载增强方案
+  const openEnhancePanel = async () => {
+    try {
+      // 切换展开/收起
+      if (showEnhancePresets) {
+        setShowEnhancePresets(false);
+        return;
+      }
+      const settings = await UnifiedDataService.readSettings();
+      const presets = settings?.aiEnhancePresets || {};
+      setEnhancePresets(presets);
+      setShowEnhancePresets(true);
+    } catch (error) {
+      logger.error('加载增强方案失败:', error);
+      Alert.alert('错误', '加载增强方案失败，请稍后重试');
+    }
+  };
+
+  const closeEnhancePanel = () => {
+    setShowEnhancePresets(false);
+  };
+
+  // 点击增强方案：数量与额度检查
+  const handleEnhancePresetPress = async (presetId) => {
+    try {
+      const selectedIds = getSelectedImageIds();
+      const count = selectedIds.length;
+      if (count === 0 || count > 9) {
+        Alert.alert('提示', '请先选择1-9张照片再使用“照片创玩”。');
+        return;
+      }
+
+      // 会员状态检查
+      const { isMember } = await WeChatAuthService.getMembershipStatus();
+      if (!isMember) {
+        Alert.alert('提示', '该功能仅对会员开放，请在设置页面开通终身会员后再试。');
+        return;
+      }
+
+      // 额度检查
+      const credits = await WeChatAuthService.getCredits();
+      if (!credits || typeof credits.remaining !== 'number') {
+        Alert.alert('错误', '获取额度失败，请稍后重试');
+        return;
+      }
+      if (credits.remaining < count) {
+        Alert.alert('提示', '剩余额度不足，请去“芯图相册”服务号购买额度');
+        return;
+      }
+
+      // 弹出二次确认：显示剩余额度与本次消耗额度
+      Alert.alert(
+        '使用额度确认',
+        `本次将消耗：${count}\n剩余额度：${credits.remaining}\n\n是否继续？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确认',
+            style: 'default',
+            onPress: async () => {
+              try {
+                setShowEnhancePresets(false);
+                const presetName = (enhancePresets && enhancePresets[presetId] && enhancePresets[presetId].name) ? enhancePresets[presetId].name : presetId;
+                await performEnhance(presetId, presetName, selectedIds);
+              } catch (e) {
+                logger.error('提交增强失败:', e);
+                Alert.alert('错误', e.message || '提交失败，请稍后重试');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      logger.error('增强检查失败:', error);
+      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+    }
+  };
+
+  // 执行增强（占位函数：后续可接入真正的提交逻辑）
+  const performEnhance = async (presetId, presetDisplayName, imageIds) => {
+    try {
+      logger.debug('准备提交增强任务', { presetId, count: imageIds.length });
+      // 读取选中图片的最新URI（优先缓存，否则从存储读取）
+      const selectedItems = [];
+      for (const id of imageIds) {
+        const img = await UnifiedDataService.readImageById(id);
+        if (img && img.uri) selectedItems.push({ id: img.id, uri: img.uri });
+      }
+      const uris = selectedItems.map((img) => img.uri);
+
+      // 1) 先打开结果页（初始全部processing），避免长时间无反馈
+      const initialResults = {};
+      imageIds.forEach((id) => { initialResults[id] = { status: 'processing' }; });
+      if (typeof navigation !== 'undefined') {
+        navigation.navigate('EnhanceResult', {
+          presetName: presetDisplayName,
+          selected: selectedItems,
+          results: initialResults,
+          initialIndex: 0,
+        });
+      }
+
+      // 2) 在后台执行预处理与提交
+      const prepared = await ImageEnhanceService.prepareImagesForEnhance(uris);
+      const validPrepared = prepared.filter(p => !p.error);
+      if (validPrepared.length === 0) {
+        Alert.alert('错误', '图片预处理失败');
+        return;
+      }
+      const submit = await ImageEnhanceService.submitEnhanceTask(validPrepared, presetId);
+      const taskId = submit.task_id;
+
+      // 3) 开始轮询；过程中若后端返回已完成的部分结果，则即时发事件更新对应图片
+      const onProgress = (status) => {
+        try {
+          if (status && Array.isArray(status.results)) {
+            // 后端返回的结果项: { index, result_url, ... }
+            status.results.forEach((r) => {
+              const idx = typeof r.index === 'number' ? r.index : null;
+              const url = r?.result_url || '';
+              const img = idx != null ? selectedItems[idx] : null;
+              if (!img) return;
+              if (r.status === 'completed' && url) {
+                DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'done', enhancedUri: url });
+              } else if (r.status === 'failed') {
+                DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'failed', error: r.error });
+              }
+            });
+          }
+        } catch (e) {}
+      };
+      const finalStatus = await ImageEnhanceService.pollTaskStatus(taskId, onProgress);
+      // 打印后端返回的完整数据包（结果状态）
+      try {
+        logger.debug('🧾 增强任务完成，后端原始返回:', JSON.stringify(finalStatus));
+      } catch (e) {
+        logger.debug('🧾 增强任务完成，后端返回（非JSON可序列化）:', finalStatus);
+      }
+      // 按每一项结果精确更新：完成/失败/仍在处理中
+      if (finalStatus && Array.isArray(finalStatus.results)) {
+        selectedItems.forEach((img, idx) => {
+          const r = finalStatus.results.find((it) => it.index === idx);
+          if (r) {
+            if (r.status === 'completed' && r.result_url) {
+              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'done', enhancedUri: r.result_url });
+            } else if (r.status === 'failed') {
+              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'failed', error: r.error });
+            } else {
+              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'processing' });
+            }
+          } else {
+            // 未返回该索引，维持 processing
+            DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'processing' });
+          }
+        });
+      }
+    } catch (error) {
+      logger.error('提交/轮询增强任务失败:', error);
+      Alert.alert('错误', error.message || '提交失败，请稍后重试');
     }
   };
 
@@ -1116,6 +1293,33 @@ const CategoryScreen = ({ route, navigation }) => {
 
     return (
       <View style={styles.actionBar}>
+        {isStaging && showEnhancePresets && (
+          <View style={styles.enhancePanel}>
+            <ScrollView
+              style={styles.enhanceList}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={false}
+              contentContainerStyle={styles.enhanceListContent}
+            >
+              {Object.entries(enhancePresets)
+                .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
+                .map(([presetId, preset], index) => (
+                  <TouchableOpacity
+                    key={presetId}
+                    style={[
+                      styles.enhancePresetItem,
+                      ((index + 1) % 4 !== 0) && { marginRight: 6 },
+                    ]}
+                    onPress={() => handleEnhancePresetPress(presetId)}
+                  >
+                    <Text style={styles.presetName} numberOfLines={1}>
+                      {preset.name || presetId}
+                    </Text>
+                  </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
         {actions.map(action => (
           <TouchableOpacity
             key={action.id}
@@ -1613,6 +1817,72 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  // 照片创玩面板
+  enhancePanel: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 88, // 与底部按钮保持合理间距
+    backgroundColor: 'rgba(28,28,30,0.96)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3A3A3C',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  enhanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
+  },
+  enhanceTitle: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  enhanceClose: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  enhanceList: {
+    maxHeight: 96, // 两行高度（按钮高度44 * 2 + 行间距8）
+    marginTop: 6,
+  },
+  enhanceListContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 0,
+  },
+  enhancePresetItem: {
+    width: (SCREEN_WIDTH - 36 - 6 * 3) / 4, // 额外预留2px(面板描边)，保证四列不换行
+    height: 44,
+    marginBottom: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2C2C2E',
+    backgroundColor: 'rgba(44,44,46,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  presetInfo: {
+    flex: 1,
+  },
+  presetName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  presetPrompt: {
+    fontSize: 12,
+    color: '#8E8E93',
+    lineHeight: 16,
+  },
   
   // 底部加载
   footer: {
@@ -1829,3 +2099,4 @@ const styles = StyleSheet.create({
 });
 
 export default CategoryScreen;
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput, Image } from 'react-native';
 import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -25,6 +25,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
   const [checkingFollow, setCheckingFollow] = useState(false);
 
+  const activationAlertShownRef = useRef(false);
+
 
   useEffect(() => {
     loadSettings();
@@ -41,12 +43,20 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         setWechatStatus('member'); // 复用现有UI分支但用更语义的值
         await loadCredits();
       } else {
-        logger.debug('❌ 用户非会员');
+        logger.debug('🔍 用户非会员（正常情况）');
         setWechatStatus('not_member');
         await generateQrCode();
       }
     } catch (error) {
-      logger.error('检查会员状态失败:', error);
+      // 检查是否是HTTP错误（包含状态码）
+      const isHttpError = error.message && /失败:\s*\d+/.test(error.message);
+      if (isHttpError) {
+        // 后端返回了非200状态码，使用error日志
+        logger.error('❌ 查询会员状态失败（后端错误）:', error);
+      } else {
+        // 网络错误等其他情况，也使用error日志
+        logger.error('❌ 查询会员状态失败（网络错误）:', error);
+      }
       setWechatStatus('not_member');
       await generateQrCode();
     }
@@ -66,7 +76,10 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           if (isMember) {
             setWechatStatus('member');
             await loadCredits();
-            Alert.alert('成功', '会员已激活！');
+            if (!activationAlertShownRef.current) {
+              activationAlertShownRef.current = true;
+              Alert.alert('成功', '会员已激活！');
+            }
             clearInterval(poll);
             setCheckingFollow(false);
           }
@@ -527,9 +540,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             </Text>
           </TouchableOpacity>
 
-          {/* 目录设置 - 作为智能分类的子区域 */}
-          <View style={styles.subSection}>
-            <Text style={styles.subSectionTitle}>目录设置</Text>
+          {/* 目录设置 - 与“清空相册信息”区域对齐 */}
+          <View style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>目录设置</Text>
             
             {/* 添加新目录 */}
             <View style={styles.addPathContainer}>
@@ -634,7 +647,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>💎 会员服务</Text>
           
-          {/* 免费会员 */}
+          {/* 免费会员（仅在非会员时显示） */}
+          {wechatStatus !== 'member' && (
           <View style={styles.membershipCard}>
             <View style={styles.membershipHeader}>
               <Text style={styles.membershipIcon}>🆓</Text>
@@ -654,6 +668,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               </View>
             </View>
           </View>
+          )}
 
           {/* 付费会员 */}
           <View style={styles.membershipCardPremium}>
@@ -980,7 +995,7 @@ const styles = StyleSheet.create({
   addPathContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
@@ -1025,7 +1040,7 @@ const styles = StyleSheet.create({
   pathItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },

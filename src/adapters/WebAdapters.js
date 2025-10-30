@@ -630,6 +630,43 @@ export const RNFS = {
   MainBundlePath: Platform.OS === 'web' ? '/mock/bundle' : (eval('require("react-native-fs")') || {}).MainBundlePath,
   LibraryDirectoryPath: Platform.OS === 'web' ? '/mock/library' : (eval('require("react-native-fs")') || {}).LibraryDirectoryPath,
   ExternalStorageDirectoryPath: Platform.OS === 'web' ? '/mock/external_storage' : (eval('require("react-native-fs")') || {}).ExternalStorageDirectoryPath,
+  /**
+   * 保存图片到相册（Android 专用）
+   * @param {string} imageUrl - 图片URL或base64数据
+   * @param {string} fileName - 文件名（可选）
+   * @returns {Promise<{uri: string, path?: string, fileName: string}>}
+   */
+  saveImageToGallery: async (imageUrl, fileName) => {
+    if (Platform.OS === 'web') {
+      logger.debug(`[Web] RNFS.saveImageToGallery: 模拟保存图片`);
+      // PC端：返回模拟结果
+      return {
+        uri: `content://media/external/images/media/${Date.now()}`,
+        fileName: fileName || `saved_image_${Date.now()}.png`,
+      };
+    } else if (Platform.OS === 'android') {
+      try {
+        // Android：使用原生MediaStore模块
+        const { NativeModules } = eval('require("react-native")');
+        const { MediaStoreModule } = NativeModules;
+        
+        if (!MediaStoreModule || typeof MediaStoreModule.saveImageToGallery !== 'function') {
+          throw new Error('MediaStoreModule.saveImageToGallery 方法不可用');
+        }
+        
+        logger.debug(`[Android] RNFS.saveImageToGallery: ${imageUrl}`);
+        const result = await MediaStoreModule.saveImageToGallery(imageUrl, fileName || null);
+        logger.debug(`[Android] 图片保存成功:`, result);
+        return result;
+      } catch (error) {
+        logger.error(`[Android] 保存图片到相册失败:`, error);
+        throw error;
+      }
+    } else {
+      // iOS或其他平台：暂不支持
+      throw new Error(`当前平台 ${Platform.OS} 不支持保存图片到相册`);
+    }
+  },
 };
 
 // 4. SafeAreaView 适配

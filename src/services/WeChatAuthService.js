@@ -65,8 +65,19 @@ class WeChatAuthService {
       clearTimeout(timeoutId);
       if (!response.ok) {
         const text = await response.text();
-        logger.error(`❌ 查询会员状态失败 (${response.status}):`, text);
-        throw new Error(`查询会员状态失败: ${response.status}`);
+        // 404且返回"用户未关注公众号"，属于正常情况，使用debug日志
+        const isUserNotFollowed = response.status === 404 && 
+          (text.includes('未关注') || text.includes('not_followed') || text.includes('未关注公众号'));
+        
+        if (isUserNotFollowed) {
+          logger.debug(`🔍 用户未关注公众号 (${response.status}):`, text);
+          // 未关注按非会员处理，不抛出错误
+          return { isMember: false };
+        } else {
+          // 其他错误情况，使用error日志
+          logger.error(`❌ 查询会员状态失败 (${response.status}):`, text);
+          throw new Error(`查询会员状态失败: ${response.status}`);
+        }
       }
 
       const result = await response.json();
@@ -133,7 +144,7 @@ class WeChatAuthService {
   
   /**
    * 生成二维码
-   * @returns {Promise<{qrcode: string, ticket: string}>}
+   * @returns {Promise<{qrcode: string, qrContent?: string}>} qrContent为二维码内容（URL），如果后端提供的话
    */
   async generateQrCode() {
     try {
@@ -285,7 +296,6 @@ class WeChatAuthService {
   async getCredits() {
     try {
       const clientId = await this.getClientId();
-      const openId = await this.getOpenId();
       
       if (!clientId) {
         throw new Error('客户端ID未找到');
@@ -293,18 +303,14 @@ class WeChatAuthService {
 
       logger.debug('💰 正在查询额度...');
 
-      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.credits}`;
+      // 仅使用 client_id，不再使用 openid
+      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.credits}?client_id=${encodeURIComponent(clientId)}`;
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
 
-      const headers = { 'X-Client-Id': clientId };
-      if (openId) {
-        headers['X-WeChat-OpenID'] = openId;
-      }
-
       const response = await fetch(url, {
         method: 'GET',
-        headers,
         signal: controller.signal
       });
 
@@ -358,14 +364,14 @@ class WeChatAuthService {
       if (!isPolling) return;
       
       try {
-        const { followed, openId } = await this.checkFollowStatus();
+        const { followed } = await this.checkFollowStatus();
         
-        if (followed && openId) {
+        if (followed) {
           clearInterval(checkInterval);
           isPolling = false;
           
           if (onFollowed) {
-            onFollowed({ followed: true, openId });
+            onFollowed({ followed: true });
           }
         }
       } catch (error) {

@@ -2,6 +2,7 @@ package com.imageclassifier;
 
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -25,6 +26,7 @@ import com.facebook.react.bridge.WritableMap;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
@@ -786,6 +788,178 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
         }
         
         return result;
+    }
+
+    /**
+     * 保存图片到相册
+     * @param imageUrl 图片URL或base64数据
+     * @param fileName 文件名（可选，默认自动生成）
+     * @param promise Promise对象
+     */
+    @ReactMethod
+    public void saveImageToGallery(String imageUrl, String fileName, Promise promise) {
+        try {
+            Log.d(TAG, "开始保存图片到相册: " + imageUrl);
+            
+            // 检查权限
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
+                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                    != PackageManager.PERMISSION_GRANTED) {
+                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
+                    promise.reject("PERMISSION_DENIED", "需要 WRITE_MEDIA_IMAGES 权限");
+                    return;
+                }
+            } else {
+                // Android 12 及以下需要 WRITE_EXTERNAL_STORAGE 权限
+                if (reactContext.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                    Log.w(TAG, "缺少 WRITE_EXTERNAL_STORAGE 权限");
+                    promise.reject("PERMISSION_DENIED", "需要 WRITE_EXTERNAL_STORAGE 权限");
+                    return;
+                }
+            }
+            
+            ContentResolver contentResolver = reactContext.getContentResolver();
+            ContentValues contentValues = new ContentValues();
+            
+            // 生成文件名
+            if (fileName == null || fileName.isEmpty()) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
+                fileName = "IMG_" + sdf.format(new Date()) + ".png";
+            }
+            
+            // 设置ContentValues
+            contentValues.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            contentValues.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            
+            // Android 10+ 使用相对路径
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.put(MediaStore.Images.Media.RELATIVE_PATH, 
+                    android.os.Environment.DIRECTORY_PICTURES + "/芯图相册");
+                contentValues.put(MediaStore.Images.Media.IS_PENDING, 1);
+            } else {
+                // Android 9及以下使用DATA字段
+                File picturesDir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_PICTURES);
+                File appDir = new File(picturesDir, "芯图相册");
+                if (!appDir.exists()) {
+                    appDir.mkdirs();
+                }
+                File imageFile = new File(appDir, fileName);
+                contentValues.put(MediaStore.Images.Media.DATA, imageFile.getAbsolutePath());
+            }
+            
+            // 插入MediaStore
+            Uri imageUri = contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            );
+            
+            if (imageUri == null) {
+                promise.reject("SAVE_FAILED", "无法创建MediaStore记录");
+                return;
+            }
+            
+            // 下载并写入图片
+            InputStream inputStream = null;
+            OutputStream outputStream = null;
+            
+            try {
+                // 判断是URL还是base64
+                if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+                    // URL：使用java.net.URL下载
+                    java.net.URL url = new java.net.URL(imageUrl);
+                    inputStream = url.openStream();
+                } else if (imageUrl.startsWith("data:image")) {
+                    // Base64数据URL：解析base64部分
+                    String base64Data = imageUrl.substring(imageUrl.indexOf(",") + 1);
+                    byte[] imageBytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                    inputStream = new java.io.ByteArrayInputStream(imageBytes);
+                } else {
+                    // 假设是base64字符串（没有data:前缀）
+                    byte[] imageBytes = android.util.Base64.decode(imageUrl, android.util.Base64.DEFAULT);
+                    inputStream = new java.io.ByteArrayInputStream(imageBytes);
+                }
+                
+                // 写入到MediaStore
+                outputStream = contentResolver.openOutputStream(imageUri);
+                if (outputStream == null) {
+                    promise.reject("SAVE_FAILED", "无法打开输出流");
+                    return;
+                }
+                
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                outputStream.flush();
+                
+                // Android 10+ 需要设置IS_PENDING为0
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentValues updateValues = new ContentValues();
+                    updateValues.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    contentResolver.update(imageUri, updateValues, null, null);
+                }
+                
+                // 获取保存的文件路径
+                String filePath = null;
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    // Android 9及以下，从ContentValues获取
+                    filePath = contentValues.getAsString(MediaStore.Images.Media.DATA);
+                } else {
+                    // Android 10+，查询MediaStore获取路径
+                    Cursor cursor = contentResolver.query(
+                        imageUri,
+                        new String[]{MediaStore.Images.Media.DATA},
+                        null, null, null
+                    );
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int dataColumn = cursor.getColumnIndex(MediaStore.Images.Media.DATA);
+                        if (dataColumn >= 0) {
+                            filePath = cursor.getString(dataColumn);
+                        }
+                        cursor.close();
+                    }
+                }
+                
+                WritableMap result = Arguments.createMap();
+                result.putString("uri", imageUri.toString());
+                if (filePath != null) {
+                    result.putString("path", filePath);
+                }
+                result.putString("fileName", fileName);
+                
+                Log.d(TAG, "图片保存成功: " + imageUri.toString());
+                promise.resolve(result);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "保存图片失败: " + e.getMessage(), e);
+                // 删除已创建的MediaStore记录
+                contentResolver.delete(imageUri, null, null);
+                promise.reject("SAVE_FAILED", "保存图片失败: " + e.getMessage());
+            } finally {
+                if (inputStream != null) {
+                    try {
+                        inputStream.close();
+                    } catch (IOException e) {
+                        // 忽略关闭错误
+                    }
+                }
+                if (outputStream != null) {
+                    try {
+                        outputStream.close();
+                    } catch (IOException e) {
+                        // 忽略关闭错误
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "保存图片到相册失败: " + e.getMessage(), e);
+            promise.reject("SAVE_ERROR", e.getMessage());
+        }
     }
 
     /**

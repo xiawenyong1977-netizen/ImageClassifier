@@ -23,6 +23,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, Platform, PermissionsAndroid, Alert } from '../../adapters/WebAdapters';
+import WeChatAuthService from '../../services/WeChatAuthService';
 import { useFocusEffect } from '@react-navigation/native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GlobalImageCache from '../../services/GlobalImageCache';
@@ -440,6 +441,9 @@ const HomeScreen = ({ navigation }) => {
     }
   }, [isScanning]);
 
+  // 扫描按钮浮窗提示（非会员限制说明）
+  const [showScanTip, setShowScanTip] = useState(false);
+
   /**
    * 检查并请求相册权限和位置权限
    */
@@ -535,6 +539,22 @@ const HomeScreen = ({ navigation }) => {
         return;
       }
 
+      // 查询会员状态，非会员提示并限制比较数量
+      let compareLimitOption = null;
+      try {
+        const { isMember } = await WeChatAuthService.getMembershipStatus();
+        if (!isMember) {
+          setShowScanTip(true);
+          setTimeout(() => setShowScanTip(false), 4000);
+          compareLimitOption = { compareLimit: 100 };
+        }
+      } catch (e) {
+        logger.debug('会员状态查询失败，按非会员处理:', e?.message || e);
+        setShowScanTip(true);
+        setTimeout(() => setShowScanTip(false), 4000);
+        compareLimitOption = { compareLimit: 100 };
+      }
+
       setIsScanning(true);
       setGlobalMessage('正在初始化...');
       logger.debug('🔍 开始扫描相册...');
@@ -576,7 +596,7 @@ const HomeScreen = ({ navigation }) => {
             }, 0);
           }
         }
-      });
+      }, compareLimitOption);
       
       logger.debug('✅ 扫描完成');
       setGlobalMessage('扫描完成，正在刷新数据...');
@@ -877,6 +897,11 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.fabIcon}>🔄</Text>
         )}
       </TouchableOpacity>
+      {showScanTip && (
+        <View style={styles.scanTipContainer}>
+          <Text style={styles.scanTipText}>为相册智能分类100张，在设置页面开通终身会员后，无限制</Text>
+        </View>
+      )}
     </>
   );
 
@@ -1194,6 +1219,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#333',
     lineHeight: 18,
+  },
+
+  // 扫描浮窗提示样式（贴近扫描按钮）
+  scanTipContainer: {
+    position: 'absolute',
+    right: 16,
+    bottom: 144, // 比按钮高出一些
+    maxWidth: SCREEN_WIDTH - 80,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  scanTipText: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 16,
   },
   
   // FAB按钮

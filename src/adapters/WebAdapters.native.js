@@ -261,6 +261,68 @@ export const RNFS = {
   readFile: async (filePath, encoding) => {
     return await RNFS_Native.readFile(filePath, encoding);
   },
+  /**
+   * 保存图片到相册（Android 专用）- 使用原生 MediaStoreModule
+   * @param {string} imageUrl - 图片URL或base64数据
+   * @param {string} fileName - 文件名（可选）
+   * @returns {Promise<{uri: string, path?: string, fileName: string}>}
+   */
+  saveImageToGallery: async (imageUrl, fileName) => {
+    if (Platform.OS === 'android') {
+      try {
+        // 先检查并请求所需权限
+        const apiLevel = Platform.Version;
+        let hasPermission = true;
+
+        if (apiLevel >= 33) {
+          // Android 13+ 需要 READ_MEDIA_IMAGES 和（在部分设备/ROM上）WRITE_MEDIA_IMAGES
+          const needs = [];
+          const readGranted = await RN_PermissionsAndroid.check('android.permission.READ_MEDIA_IMAGES');
+          if (!readGranted) needs.push('android.permission.READ_MEDIA_IMAGES');
+          // WRITE_MEDIA_IMAGES 并非所有ROM都实现，但如果在清单中声明了，尝试请求
+          const writeGranted = await RN_PermissionsAndroid.check('android.permission.WRITE_MEDIA_IMAGES').catch(() => false);
+          if (!writeGranted) needs.push('android.permission.WRITE_MEDIA_IMAGES');
+          
+          for (const p of needs) {
+            const res = await RN_PermissionsAndroid.request(p);
+            if (res !== RN_PermissionsAndroid.RESULTS.GRANTED && res !== 'granted') {
+              hasPermission = false;
+            }
+          }
+        } else {
+          // Android 12 及以下需要 WRITE_EXTERNAL_STORAGE
+          const writeGrantedOld = await RN_PermissionsAndroid.check('android.permission.WRITE_EXTERNAL_STORAGE');
+          if (!writeGrantedOld) {
+            const res = await RN_PermissionsAndroid.request('android.permission.WRITE_EXTERNAL_STORAGE');
+            if (res !== RN_PermissionsAndroid.RESULTS.GRANTED && res !== 'granted') {
+              hasPermission = false;
+            }
+          }
+        }
+
+        if (!hasPermission) {
+          throw new Error('需要相册写入权限，请在系统设置中授予后重试');
+        }
+
+        const { MediaStoreModule } = NativeModules;
+        
+        if (!MediaStoreModule || typeof MediaStoreModule.saveImageToGallery !== 'function') {
+          throw new Error('MediaStoreModule.saveImageToGallery 方法不可用');
+        }
+        
+        logger.debug(`[Android] RNFS.saveImageToGallery: ${imageUrl}`);
+        const result = await MediaStoreModule.saveImageToGallery(imageUrl, fileName || null);
+        logger.debug(`[Android] 图片保存成功:`, result);
+        return result;
+      } catch (error) {
+        logger.error(`[Android] 保存图片到相册失败:`, error);
+        throw error;
+      }
+    } else {
+      // iOS或其他平台：暂不支持
+      throw new Error(`当前平台 ${Platform.OS} 不支持保存图片到相册`);
+    }
+  },
   DocumentDirectoryPath: RNFS_Native.DocumentDirectoryPath,
   ExternalDirectoryPath: RNFS_Native.ExternalDirectoryPath,
   PicturesDirectoryPath: RNFS_Native.PicturesDirectoryPath,

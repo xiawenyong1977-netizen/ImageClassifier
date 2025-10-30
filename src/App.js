@@ -21,6 +21,7 @@ import ImagePreviewScreen from './screens/mobile/ImagePreviewScreen.mobile';
 console.log('📦 App.js: ImagePreviewScreen 导入成功');
 import SettingsScreen from './screens/mobile/SettingsScreen.mobile';
 console.log('📦 App.js: SettingsScreen 导入成功');
+import EnhanceResultScreen from './screens/mobile/EnhanceResultScreen.mobile';
 
 console.log('📦 App.js: 创建 Navigator...');
 const Stack = createStackNavigator();
@@ -208,6 +209,7 @@ export default function App() {
           <Stack.Screen name="MainTabs" component={MainTabNavigator} />
           <Stack.Screen name="Category" component={CategoryScreen} />
           <Stack.Screen name="ImagePreview" component={ImagePreviewScreen} />
+          <Stack.Screen name="EnhanceResult" component={EnhanceResultScreen} options={{ presentation: 'modal' }} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

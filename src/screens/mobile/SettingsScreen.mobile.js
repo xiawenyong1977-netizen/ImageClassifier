@@ -6,7 +6,7 @@
  * 2. 应用信息（版本、构建版本、平台、存储类型、存储大小）
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,11 +16,16 @@ import {
   Switch,
   ActivityIndicator,
   TextInput,
+  Image,
+  Modal,
+  Linking,
+  Platform,
 } from 'react-native';
-import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert, RNFS } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
 
@@ -37,11 +42,24 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   
   // 目录选择器状态
   const [showDirectoryPicker, setShowDirectoryPicker] = useState(false);
+  
+  // AI增强预设相关状态
+  const [aiEnhancePresets, setAiEnhancePresets] = useState({});
+  const [editingPreset, setEditingPreset] = useState(null); // 当前编辑的预设
+  const [showEditModal, setShowEditModal] = useState(false);
+  
+  // 微信授权相关状态
+  const [wechatStatus, setWechatStatus] = useState('checking'); // checking, member, not_member
+  const [qrCode, setQrCode] = useState('');
+  const [qrContent, setQrContent] = useState(''); // 二维码内容（URL）
+  const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
+  const [checkingFollow, setCheckingFollow] = useState(false);
 
   // ==================== 初始化 ====================
   useEffect(() => {
     loadSettings();
     detectStorageInfo();
+    checkMembershipStatus();
   }, []);
 
   /**
@@ -64,6 +82,11 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       
       // 设置其他设置项
       setSettings(savedSettings);
+      
+      // 加载AI增强预设
+      if (savedSettings.aiEnhancePresets) {
+        setAiEnhancePresets(savedSettings.aiEnhancePresets);
+      }
       
       logger.debug('设置加载完成:', savedSettings);
     } catch (error) {
@@ -171,6 +194,288 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     }
   };
 
+  // ==================== 会员服务相关 ====================
+  
+  /**
+   * 检查会员状态
+   */
+  const checkMembershipStatus = async () => {
+    try {
+      logger.debug('🔍 开始检查会员状态...');
+      const { isMember } = await WeChatAuthService.getMembershipStatus();
+      if (isMember) {
+        logger.debug('✅ 用户为会员');
+        setWechatStatus('member');
+        await loadCredits();
+      } else {
+        logger.debug('🔍 用户非会员（正常情况）');
+        setWechatStatus('not_member');
+        await generateQrCode();
+      }
+    } catch (error) {
+      // 检查是否是HTTP错误（包含状态码）
+      const isHttpError = error.message && /失败:\s*\d+/.test(error.message);
+      if (isHttpError) {
+        // 后端返回了非200状态码，使用error日志
+        logger.error('❌ 查询会员状态失败（后端错误）:', error);
+      } else {
+        // 网络错误等其他情况，也使用error日志
+        logger.error('❌ 查询会员状态失败（网络错误）:', error);
+      }
+      setWechatStatus('not_member');
+      await generateQrCode();
+    }
+  };
+  
+  /**
+   * 生成二维码
+   */
+  const generateQrCode = async () => {
+    try {
+      setCheckingFollow(true);
+      const { qrcode } = await WeChatAuthService.generateQrCode();
+      setQrCode(qrcode);
+      
+      // 轮询会员状态
+      const poll = setInterval(async () => {
+        try {
+          const { isMember } = await WeChatAuthService.getMembershipStatus();
+          if (isMember) {
+            setWechatStatus('member');
+            await loadCredits();
+            // 防止重复弹窗
+            if (!activationAlertShownRef.current) {
+              activationAlertShownRef.current = true;
+              Alert.alert('成功', '会员已激活！');
+            }
+            clearInterval(poll);
+            setCheckingFollow(false);
+          }
+        } catch (e) {
+          logger.debug('⏳ 轮询会员状态中...');
+        }
+      }, 2000);
+    } catch (error) {
+      logger.error('生成二维码失败:', error);
+      Alert.alert('错误', '生成二维码失败，请重试');
+      setCheckingFollow(false);
+    }
+  };
+  
+  const activationAlertShownRef = useRef(false);
+
+  /**
+   * 加载额度信息
+   */
+  const loadCredits = async () => {
+    try {
+      const creditsData = await WeChatAuthService.getCredits();
+      setCredits(creditsData);
+    } catch (error) {
+      logger.error('加载额度失败:', error);
+    }
+  };
+  
+  /**
+   * 点击二维码：保存到相册并调起微信
+   */
+  const openWeChatScan = async () => {
+    if (!qrCode) {
+      Alert.alert('提示', '二维码未生成，请先生成二维码');
+      return;
+    }
+
+    try {
+      logger.debug('🖼️ 开始保存二维码到相册...');
+      
+      // 使用 WebAdapters 封装的 RNFS 接口保存图片到相册
+      let saveResult = null;
+      if (RNFS && typeof RNFS.saveImageToGallery === 'function') {
+        try {
+          // 保存二维码图片到相册
+          const fileName = `微信二维码_${Date.now()}.png`;
+          saveResult = await RNFS.saveImageToGallery(qrCode, fileName);
+          logger.debug('✅ 二维码已保存到相册:', saveResult);
+        } catch (saveError) {
+          logger.error('❌ 保存二维码到相册失败:', saveError);
+          // 继续尝试调起微信
+        }
+      } else {
+        logger.warn('⚠️ RNFS.saveImageToGallery 方法不可用');
+      }
+
+      // 调起微信（无论保存是否成功）
+      await openWeChatDirectly(saveResult);
+
+      // 如果没有保存成功，提示用户
+      if (!saveResult) {
+        Alert.alert(
+          '提示',
+          '请手动打开微信，在右上角"+"菜单中选择"扫一扫"，然后扫描上方二维码',
+          [{ text: '知道了', style: 'default' }]
+        );
+      }
+
+    } catch (error) {
+      logger.error('❌ 操作失败:', error);
+      // 即使保存失败，也尝试调起微信
+      await openWeChatDirectly();
+      Alert.alert(
+        '提示',
+        '操作时出现问题，请手动打开微信扫描上方的二维码',
+        [{ text: '知道了', style: 'default' }]
+      );
+    }
+  };
+
+  /**
+   * 调起微信扫一扫
+   */
+  const openWeChatDirectly = async (saveResult = null) => {
+    try {
+      logger.debug('📱 正在调起微信主界面...');
+      const weixinMain = 'weixin://';
+      const supportedMain = await Linking.canOpenURL(weixinMain);
+      if (supportedMain) {
+        await Linking.openURL(weixinMain);
+        logger.debug('✅ 已调起微信主界面');
+        if (saveResult) {
+          Alert.alert(
+            '成功',
+            '二维码已保存到相册\n\n请在微信中打开“扫一扫”，扫描刚才保存的二维码',
+            [{ text: '知道了', style: 'default' }]
+          );
+        }
+      } else {
+        logger.warn('⚠️ 无法调起微信');
+        if (saveResult) {
+          Alert.alert(
+            '提示',
+            '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
+            [{ text: '知道了', style: 'default' }]
+          );
+        } else {
+          Alert.alert(
+            '提示',
+            '请手动打开微信，在“扫一扫”中扫描上方二维码',
+            [{ text: '知道了', style: 'default' }]
+          );
+        }
+      }
+    } catch (error) {
+      logger.error('❌ 调起微信失败:', error);
+      if (saveResult) {
+        Alert.alert(
+          '提示',
+          '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
+          [{ text: '知道了', style: 'default' }]
+        );
+      }
+    }
+  };
+
+  /**
+   * 扫描二维码并打开链接（移动端暂不支持自动解析，直接使用保存和调起微信的方式）
+   * 此函数保留用于兼容性，但移动端应该使用 openWeChatScan
+   */
+  const scanQrCodeAndOpen = async () => {
+    // 移动端直接调用保存和调起微信的方法
+    await openWeChatScan();
+  };
+  
+  // ==================== AI增强预设管理 ====================
+  
+  /**
+   * 打开编辑预设模态框
+   */
+  const openEditPreset = (presetId) => {
+    const preset = aiEnhancePresets[presetId];
+    if (preset) {
+      setEditingPreset({
+        id: presetId,
+        name: preset.name,
+        icon: preset.icon,
+        prompt: preset.prompt,
+        description: preset.description,
+        enabled: preset.enabled,
+        sortOrder: preset.sortOrder
+      });
+      setShowEditModal(true);
+    }
+  };
+  
+  /**
+   * 保存编辑的预设
+   */
+  const saveEditedPreset = async () => {
+    if (!editingPreset) return;
+    
+    try {
+      const updatedPresets = {
+        ...aiEnhancePresets,
+        [editingPreset.id]: {
+          name: editingPreset.name,
+          icon: editingPreset.icon,
+          prompt: editingPreset.prompt,
+          description: editingPreset.description,
+          enabled: editingPreset.enabled,
+          sortOrder: editingPreset.sortOrder
+        }
+      };
+      
+      const newSettings = { ...settings, aiEnhancePresets: updatedPresets };
+      await UnifiedDataService.writeSettings(newSettings);
+      
+      setAiEnhancePresets(updatedPresets);
+      setSettings(newSettings);
+      setShowEditModal(false);
+      setEditingPreset(null);
+      
+      // 通知其他页面设置已更新
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+          detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
+        }));
+      }
+      
+      Alert.alert('成功', '预设已保存');
+    } catch (error) {
+      logger.error('保存AI增强预设失败:', error);
+      Alert.alert('错误', '保存预设失败，请重试');
+    }
+  };
+  
+  /**
+   * 切换预设启用状态
+   */
+  const togglePresetEnabled = async (presetId) => {
+    try {
+      const updatedPresets = {
+        ...aiEnhancePresets,
+        [presetId]: {
+          ...aiEnhancePresets[presetId],
+          enabled: !aiEnhancePresets[presetId].enabled
+        }
+      };
+      
+      const newSettings = { ...settings, aiEnhancePresets: updatedPresets };
+      await UnifiedDataService.writeSettings(newSettings);
+      
+      setAiEnhancePresets(updatedPresets);
+      setSettings(newSettings);
+      
+      // 通知其他页面设置已更新
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+          detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
+        }));
+      }
+    } catch (error) {
+      logger.error('切换预设状态失败:', error);
+      Alert.alert('错误', '操作失败，请重试');
+    }
+  };
+  
   // ==================== 分类操作 ====================
 
   /**
@@ -271,13 +576,14 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
       {/* 设置列表 */}
       <ScrollView style={styles.scrollView}>
-        {/* 分类操作 */}
+        {/* 智能分类 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>分类操作</Text>
+              <Text style={styles.sectionTitle}>🤖 智能分类</Text>
             </View>
           </View>
+          
           {renderActionButton(
             '🗑️',
             '清空相册信息',
@@ -285,46 +591,188 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             handleClearData,
             true
           )}
+          
+          {/* 目录设置 - 与“清空相册信息”区域对齐 */}
+          <View style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>目录设置</Text>
+            <Text style={styles.actionButtonDescription}>
+              设置后扫描指定目录照片，无指定目录则扫描设备所有照片
+            </Text>
+            
+            {/* 目录选择器按钮 */}
+            <TouchableOpacity
+              style={styles.directoryPickerButton}
+              onPress={openDirectoryPicker}
+            >
+              <Text style={styles.directoryPickerButtonText}>📁 浏览选择目录</Text>
+            </TouchableOpacity>
+
+            {/* 路径列表 */}
+            {galleryPaths.map((path, index) => (
+              <View key={index} style={styles.pathItem}>
+                <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
+                  {path}
+                </Text>
+                <TouchableOpacity
+                  style={styles.removeButton}
+                  onPress={() => removeGalleryPath(path)}
+                >
+                  <Text style={styles.removeButtonText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
         </View>
 
-        {/* 目录设置 */}
+        {/* 照片创玩 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>目录设置</Text>
-              <Text style={styles.sectionSubtitle}>
-                设置后扫描指定目录照片，无指定目录则扫描设备所有照片
+              <Text style={styles.sectionTitle}>✨ 照片创玩</Text>
+            </View>
+          </View>
+          <Text style={styles.sectionDescription}>
+            配置照片创玩的预设方案，可自定义提示词
+          </Text>
+          
+          {Object.entries(aiEnhancePresets)
+            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+            .map(([presetId, preset]) => (
+              <View key={presetId} style={styles.presetItem}>
+                <View style={styles.presetLeft}>
+                  <Text style={styles.presetIcon}>{preset.icon}</Text>
+                  <View style={styles.presetInfo}>
+                    <Text style={styles.presetName}>{preset.name}</Text>
+                    <Text style={styles.presetPrompt} numberOfLines={2}>
+                      {preset.prompt || '（未设置提示词）'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.presetRight}>
+                  <TouchableOpacity
+                    style={styles.editPresetButton}
+                    onPress={() => openEditPreset(presetId)}>
+                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
+                  </TouchableOpacity>
+                  <Switch
+                    value={preset.enabled}
+                    onValueChange={() => togglePresetEnabled(presetId)}
+                    trackColor={{ false: '#ccc', true: '#4CAF50' }}
+                  />
+                </View>
+              </View>
+            ))}
+          
+          {/* 如果已关注，显示额度 */}
+          {wechatStatus === 'member' && (
+            <View style={styles.creditsContainer}>
+              <Text style={styles.creditsTitle}>💰 使用额度</Text>
+              <View style={styles.creditsInfo}>
+                <Text style={styles.creditsLabel}>剩余额度：</Text>
+                <Text style={styles.creditsValue}>
+                  {credits.remaining} / {credits.total}
+                </Text>
+              </View>
+              <Text style={styles.creditsDescription}>
+                已使用 {credits.used} 次，建议合理使用额度
               </Text>
+            </View>
+          )}
+        </View>
+
+        {/* 会员服务 */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.titleRow}>
+              <Text style={styles.sectionTitle}>💎 会员服务</Text>
             </View>
           </View>
           
-          {/* 目录选择器按钮 */}
-          <TouchableOpacity
-            style={styles.directoryPickerButton}
-            onPress={openDirectoryPicker}
-          >
-            <Text style={styles.directoryPickerButtonText}>📁 浏览选择目录</Text>
-          </TouchableOpacity>
-
-          {/* 路径列表 */}
-          {galleryPaths.map((path, index) => (
-            <View key={index} style={styles.pathItem}>
-              <Text style={styles.pathText}>{path}</Text>
-              <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => removeGalleryPath(path)}
-              >
-                <Text style={styles.removeButtonText}>×</Text>
-              </TouchableOpacity>
+          {/* 免费会员（仅在非会员时显示） */}
+          {wechatStatus !== 'member' && (
+          <View style={styles.membershipCard}>
+            <View style={styles.membershipHeader}>
+              <Text style={styles.membershipIcon}>🆓</Text>
+              <View>
+                <Text style={styles.membershipName}>免费会员</Text>
+                <Text style={styles.membershipTag}>当前状态</Text>
+              </View>
             </View>
-          ))}
+            <View style={styles.membershipFeatures}>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✓</Text>
+                <Text style={styles.membershipFeatureText}>智能分类：100张照片</Text>
+              </View>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✗</Text>
+                <Text style={styles.membershipFeatureText}>照片创玩：0张</Text>
+              </View>
+            </View>
+          </View>
+          )}
+
+          {/* 付费会员 */}
+          <View style={styles.membershipCardPremium}>
+            <View style={styles.membershipHeader}>
+              <Text style={styles.membershipIcon}>💎</Text>
+              <View>
+                <Text style={styles.membershipName}>终身会员</Text>
+                <Text style={styles.membershipTagPremium}>
+                  {wechatStatus === 'member' ? '已激活' : '未激活'}
+                </Text>
+              </View>
+            </View>
+
+            {/* 权益列表 */}
+            <View style={styles.membershipFeaturesColumn}>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✓</Text>
+                <Text style={styles.membershipFeatureText}>智能分类：照片数不限</Text>
+              </View>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✓</Text>
+                <Text style={styles.membershipFeatureText}>照片创玩：免费10张</Text>
+              </View>
+              <View style={styles.membershipFeatureItem}>
+                <Text style={styles.membershipFeatureIcon}>✓</Text>
+                <Text style={styles.membershipFeatureText}>更多配额需购买算力</Text>
+              </View>
+            </View>
+
+            {/* 二维码区域（未关注时显示） */}
+            {wechatStatus !== 'member' && (
+              <View style={styles.membershipQrColumn}>
+                {qrCode ? (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={openWeChatScan}>
+                    <Image
+                      source={{ uri: qrCode }}
+                      style={styles.membershipQrCode}
+                    />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.membershipQrButton}
+                    onPress={generateQrCode}>
+                    <Text style={styles.membershipQrButtonText}>
+                      {checkingFollow ? '生成中...' : '🔲 生成二维码'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={styles.membershipQrHint}>
+                  {qrCode ? '点击二维码打开微信扫一扫' : '微信扫码关注"芯图相册"，开通会员'}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* 应用信息 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>应用信息</Text>
+              <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
             </View>
           </View>
           {renderInfoItem('版本', '1.0.0')}
@@ -344,6 +792,112 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         onClose={closeDirectoryPicker}
         onSelectDirectory={handleDirectorySelected}
       />
+
+      {/* 编辑预设模态框 */}
+      <Modal
+        visible={showEditModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowEditModal(false);
+          setEditingPreset(null);
+        }}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editingPreset?.name || '编辑预设'}</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingPreset(null);
+                }}>
+                <Text style={styles.modalCloseButtonText}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              {editingPreset && (
+                <>
+                  <View style={styles.presetInfoDisplay}>
+                    <Text style={styles.presetIconLarge}>{editingPreset.icon}</Text>
+                    <View>
+                      <Text style={styles.presetNameLarge}>{editingPreset.name}</Text>
+                      <Text style={styles.presetDescriptionSmall}>
+                        {editingPreset.description}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.modalField}>
+                    <Text style={styles.modalLabel}>提示词</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.modalTextArea]}
+                      value={editingPreset.prompt}
+                      onChangeText={(text) =>
+                        setEditingPreset({ ...editingPreset, prompt: text })
+                      }
+                      placeholder="输入AI增强的提示词，例如：修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变"
+                      multiline
+                      numberOfLines={6}
+                      textAlignVertical="top"
+                    />
+
+                    {/* 证件类型快捷按钮（仅限证件处理预设） */}
+                    {editingPreset.id === 'document' && (
+                      <View style={styles.documentButtonsContainer}>
+                        <TouchableOpacity
+                          style={styles.documentButton}
+                          onPress={() => {
+                            const idCardPrompt =
+                              '增强身份证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做身份证证件照，白色背景，深色有领上衣，面部光线均匀';
+                            setEditingPreset({ ...editingPreset, prompt: idCardPrompt });
+                          }}>
+                          <Text style={styles.documentButtonText}>🆔 身份证</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.documentButton}
+                          onPress={() => {
+                            const passportPrompt =
+                              '增强护照照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做护照证件照，白色背景，深色有领上衣，面部光线均匀，眼神平视前方';
+                            setEditingPreset({ ...editingPreset, prompt: passportPrompt });
+                          }}>
+                          <Text style={styles.documentButtonText}>📘 护照</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.documentButton}
+                          onPress={() => {
+                            const hkMacauPrompt =
+                              '增强港澳通行证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做港澳通行证证件照，白色或淡蓝色背景，深色有领上衣，面部光线均匀';
+                            setEditingPreset({ ...editingPreset, prompt: hkMacauPrompt });
+                          }}>
+                          <Text style={styles.documentButtonText}>🏝️ 港澳通行证</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setShowEditModal(false);
+                  setEditingPreset(null);
+                }}>
+                <Text style={styles.modalCancelButtonText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveButton} onPress={saveEditedPreset}>
+                <Text style={styles.modalSaveButtonText}>保存</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -385,7 +939,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   directoryPickerButton: {
-    margin: 16,
     marginTop: 8,
     marginBottom: 8,
     padding: 16,
@@ -401,7 +954,7 @@ const styles = StyleSheet.create({
   pathItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -504,6 +1057,350 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     flex: 1,
     marginLeft: 16,
+  },
+  // 子区域样式
+  subSection: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  subSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  subSectionDescription: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 12,
+  },
+  // AI增强预设样式
+  sectionDescription: {
+    fontSize: 14,
+    color: '#8E8E93',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  presetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  presetLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+    marginRight: 12,
+  },
+  presetIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  presetInfo: {
+    flex: 1,
+  },
+  presetName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 6,
+  },
+  presetPrompt: {
+    fontSize: 13,
+    color: '#8E8E93',
+    lineHeight: 18,
+  },
+  presetRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  editPresetButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#007AFF',
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  editPresetButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // 额度显示样式
+  creditsContainer: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  creditsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 12,
+  },
+  creditsInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  creditsLabel: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  creditsValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+    marginLeft: 8,
+  },
+  creditsDescription: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  // 会员服务样式
+  membershipCard: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  membershipCardPremium: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#FFF7E6',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+  },
+  membershipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  membershipIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  membershipName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  membershipTag: {
+    fontSize: 13,
+    color: '#4CAF50',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  membershipTagPremium: {
+    fontSize: 13,
+    color: '#FF9800',
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  membershipFeaturesColumn: {
+    marginTop: 16,
+  },
+  membershipFeatures: {
+    marginTop: 8,
+  },
+  membershipQrColumn: {
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: 16,
+  },
+  membershipFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  membershipFeatureIcon: {
+    fontSize: 16,
+    color: '#4CAF50',
+    minWidth: 20,
+    marginRight: 8,
+  },
+  membershipFeatureText: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  membershipQrCode: {
+    width: 200,
+    height: 200,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 12,
+  },
+  membershipQrHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  membershipQrButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  membershipQrButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // 模态框样式
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  modalCloseButton: {
+    padding: 4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseButtonText: {
+    fontSize: 24,
+    color: '#8E8E93',
+    lineHeight: 24,
+  },
+  modalBody: {
+    padding: 20,
+    maxHeight: 500,
+  },
+  presetInfoDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  presetIconLarge: {
+    fontSize: 36,
+    marginRight: 12,
+  },
+  presetNameLarge: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  presetDescriptionSmall: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  modalField: {
+    marginBottom: 0,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#000000',
+    backgroundColor: '#F8F9FA',
+  },
+  modalTextArea: {
+    height: 150,
+    paddingTop: 10,
+  },
+  documentButtonsContainer: {
+    flexDirection: 'row',
+    marginTop: 12,
+  },
+  documentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  documentButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#000000',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  modalCancelButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  modalSaveButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+  },
+  modalSaveButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
 

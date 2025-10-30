@@ -1,5 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 查询其他应用的权限 - Android 11+ (API 30+) 用于调用微信扫码 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="weixin" />
+        </intent>
+        <package android:name="com.tencent.mm" />
+    </queries>
+
     <!-- 基础网络权限 - 用于远程推理API -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

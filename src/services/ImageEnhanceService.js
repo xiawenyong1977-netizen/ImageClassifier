@@ -45,51 +45,26 @@ class ImageEnhanceService {
   // ========== 图片预处理（复用 ImageProcessor）==========
   
   /**
-   * 准备图片用于增强（resize + hash）
-   * @param {string} imageUri - 图片URI (file:///)
-   * @returns {Promise<{file: Blob, hash: string, originalFileName: string}>}
+   * 准备图片用于增强（直接使用原图，不缩放不计算哈希）
+   * @param {string} imageUri - 图片URI (file:/// 或 content://)
+   * @returns {Promise<{originalFileName: string, localUri: string}>}
    */
   async prepareImageForEnhance(imageUri) {
     try {
-      logger.debug('🖼️ 准备图片进行增强:', imageUri);
-      
-      // 1. 获取原图尺寸
-      const dimensions = await ImageProcessor.getImageDimensions(imageUri);
-      logger.debug(`📐 原始尺寸: ${dimensions.width}x${dimensions.height}`);
-      
-      // 2. 计算缩放尺寸（长边1024px）
-      const maxSize = 1024;
-      const scale = Math.min(maxSize / dimensions.width, maxSize / dimensions.height, 1);
-      const targetWidth = Math.round(dimensions.width * scale);
-      const targetHeight = Math.round(dimensions.height * scale);
-      
-      logger.debug(`📐 缩放后: ${targetWidth}x${targetHeight}`);
-      
-      // 3. 使用 ImageProcessor 缩放图片并获取 Blob（80%质量，JPEG格式）
-      const resizeResult = await ImageProcessor.resizeImageAndGetBlob(
-        imageUri,
-        targetWidth,
-        targetHeight,
-        {
-          maintainAspectRatio: true,
-          outputFormat: 'jpeg',
-          quality: 0.8  // 80% 质量
+      logger.debug('🖼️ 准备图片进行增强(原图直传):', imageUri);
+      const originalFileName = (() => {
+        try {
+          const clean = (imageUri || '').replace(/^file:\/\//, '');
+          const noQuery = clean.split('?')[0].split('#')[0];
+          const segments = noQuery.split(/[\\\/]/);
+          const name = segments[segments.length - 1];
+          return name && name.trim() ? name : `image_${Date.now()}.jpg`;
+        } catch (e) {
+          return `image_${Date.now()}.jpg`;
         }
-      );
-      
-      const resizedBlob = resizeResult.blob;
-      logger.debug('✅ 图片已缩放:', resizedBlob.size, 'bytes');
-      
-      // 4. 使用 ImageProcessor 计算 Blob 的 SHA-256 哈希
-      const hash = await ImageProcessor.calculateBlobHash(resizedBlob);
-      logger.debug('✅ 哈希已计算:', hash.substring(0, 16) + '...');
-      
-      // 5. 提取文件名
-      const path = window.require('path');
-      const originalFileName = path.basename(imageUri.replace('file:///', ''));
-      
-      return { file: resizedBlob, hash, originalFileName };
-      
+      })();
+      // 直接返回本地URI与文件名
+      return { originalFileName, localUri: imageUri };
     } catch (error) {
       logger.error('❌ 图片预处理失败:', error);
       throw new Error(`图片预处理失败: ${error.message}`);
@@ -123,8 +98,14 @@ class ImageEnhanceService {
       
       // 添加所有图片文件（API要求用 'images' 复数，多次append同一个key）
       preparedImages.forEach((prepared, index) => {
-        formData.append('images', prepared.file);
-        logger.debug(`  - 图片${index + 1}: ${prepared.fileName}, hash: ${prepared.hash.substring(0, 16)}...`);
+        // PC 端也兼容 RN 的文件对象格式；在浏览器/Electron 中，服务端同样可解析
+        const fileObj = prepared.localUri ? {
+          uri: prepared.localUri,
+          type: 'image/jpeg',
+          name: prepared.originalFileName || `image_${index + 1}.jpg`,
+        } : prepared.file;
+        formData.append('images', fileObj);
+        logger.debug(`  - 图片${index + 1}: ${(prepared.originalFileName || `image_${index + 1}.jpg`)}`);
       });
       
       formData.append('edit_type', 'enhance');
