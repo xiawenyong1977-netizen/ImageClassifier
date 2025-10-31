@@ -690,7 +690,7 @@ const handleBackgroundRun = useCallback(() => {
 // 4. 添加浮动进度组件
 {showFloatingProgress && (
   <View style={styles.floatingProgress}>
-    <Text>AI增强处理中...</Text>
+    <Text>照片创玩中...</Text>
     <Text>{enhanceProgress.completed}/{enhanceProgress.total}</Text>
     <TouchableOpacity onPress={() => {
       setShowFloatingProgress(false);

@@ -7,7 +7,7 @@
  * 3. 文件操作（下载、保存到xualbum目录）
  */
 
-import { logger } from '../adapters/WebAdapters';
+import { logger, normalizeFilePath } from '../adapters/WebAdapters';
 import ImageProcessor from './ImageProcessor';
 import ImageStorageService from './ImageStorageService';
 import WeChatAuthService from './WeChatAuthService';
@@ -84,7 +84,7 @@ class ImageEnhanceService {
       const imageCount = preparedImages.length;
       logger.debug(`📤 提交批量增强任务: ${imageCount}张图片, 方案: ${preset}`);
       
-      // 根据预设方案生成提示词
+      // 根据预设方案生成提示词（可被外部传入的 prompt 覆盖）
       const promptMap = {
         'portrait': '修复面部瑕疵和皱纹，提亮肤色，美化五官，保持人物原貌不变',
         'scenery': '提升色彩饱和度和对比度，增强细节和清晰度，优化光线和层次感',
@@ -92,28 +92,68 @@ class ImageEnhanceService {
         'auto': '智能识别图片内容并进行全面优化，提升整体质量'
       };
       
-      const prompt = promptMap[preset] || preset; // 如果是自定义，直接使用preset作为prompt
+      // 支持两种调用：
+      // 1) submitEnhanceTask(images, 'portrait')
+      // 2) submitEnhanceTask(images, { presetId: 'portrait', prompt: '覆盖文案' })
+      const presetOpts = (preset && typeof preset === 'object') ? preset : { presetId: preset };
+      const presetId = presetOpts.presetId || presetOpts.id || presetOpts.key || 'auto';
+      const prompt = (typeof presetOpts.prompt === 'string' && presetOpts.prompt.trim())
+        ? presetOpts.prompt.trim()
+        : (promptMap[presetId] || (typeof preset === 'string' ? preset : 'auto'));
       
       const formData = new FormData();
-      
+
       // 添加所有图片文件（API要求用 'images' 复数，多次append同一个key）
       const filesSummary = [];
-      preparedImages.forEach((prepared, index) => {
-        // PC 端也兼容 RN 的文件对象格式；在浏览器/Electron 中，服务端同样可解析
-        const fileObj = prepared.localUri ? {
-          uri: prepared.localUri,
-          type: 'image/jpeg',
-          name: prepared.originalFileName || `image_${index + 1}.jpg`,
-        } : prepared.file;
-        formData.append('images', fileObj);
-        filesSummary.push({
-          index: index,
-          name: prepared.originalFileName || `image_${index + 1}.jpg`,
-          uri: prepared.localUri || '[blob]',
-          type: 'image/jpeg'
-        });
-        logger.debug(`  - 图片${index + 1}: ${(prepared.originalFileName || `image_${index + 1}.jpg`)}`);
-      });
+      const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
+      const isBrowserLike = typeof window !== 'undefined' && !isReactNative;
+
+      // 在浏览器/Electron 渲染进程中，必须传入 Blob/File；在 React Native 中传 { uri, type, name }
+      for (let index = 0; index < preparedImages.length; index++) {
+        const prepared = preparedImages[index];
+        const fileName = prepared.originalFileName || `image_${index + 1}.jpg`;
+
+        if (isBrowserLike) {
+          let fileToAppend;
+          try {
+            const uri = prepared.localUri || '';
+            if (/^https?:\/\//i.test(uri)) {
+              // http(s) 链接，直接拉取为 Blob
+              const res = await fetch(uri);
+              const blob = await res.blob();
+              // 使用 File，携带文件名
+              fileToAppend = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+            } else {
+              // 本地文件：file:/// 或 绝对路径，使用 fs 读取（复用适配层标准化）
+              const fs = window.require && window.require('fs');
+              if (!fs) {
+                throw new Error('Electron fs 不可用');
+              }
+              const candidate = uri || prepared.filePath || '';
+              const absPath = normalizeFilePath ? normalizeFilePath(candidate) : candidate.replace(/^file:\/\/*/i, '');
+              const buffer = await fs.promises.readFile(absPath);
+              const blob2 = new Blob([buffer], { type: 'image/jpeg' });
+              fileToAppend = new File([blob2], fileName, { type: 'image/jpeg' });
+            }
+          } catch (e) {
+            logger.error(`❌ 加载图片为Blob失败 (${fileName})`, e);
+            throw new Error(`加载图片失败: ${fileName}`);
+          }
+          formData.append('images', fileToAppend, fileName);
+          filesSummary.push({ index, name: fileName, uri: prepared.localUri || '[blob]', type: 'image/jpeg' });
+        } else {
+          // React Native
+          const rnFileObj = {
+            uri: prepared.localUri,
+            type: 'image/jpeg',
+            name: fileName,
+          };
+          formData.append('images', rnFileObj);
+          filesSummary.push({ index, name: fileName, uri: prepared.localUri, type: 'image/jpeg' });
+        }
+
+        logger.debug(`  - 图片${index + 1}: ${fileName}`);
+      }
       
       formData.append('edit_type', 'enhance');
       formData.append('edit_params', JSON.stringify({ prompt }));

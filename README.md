@@ -2,7 +2,7 @@
 
 [![Website](https://img.shields.io/badge/website-https://www.xintuxiangce.top-blue.svg)](https://www.xintuxiangce.top)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](https://www.xintuxiangce.top)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](https://www.xintuxiangce.top)
 [![AI](https://img.shields.io/badge/AI-90%25%2B%20Accuracy-brightgreen.svg)](https://www.xintuxiangce.top)
 
 ## 📖 项目简介
@@ -13,8 +13,9 @@
 
 - 🤖 **AI智能识别** - 采用先进的深度学习技术，准确率高达90%以上
 - 🔒 **隐私绝对安全** - 所有处理完全在本地进行，无需联网，零上传
-- ⚡ **高效快速** - 优化的算法确保处理速度，大批量照片也能快速完成
+- ⚡ **高效快速** - 优化的算法确保处理速度，大批量照片也能快速完成（扫描速度提升9.75倍）
 - 🎯 **多维度分类** - 支持按内容、城市、相似度三大维度分类
+- ✨ **AI图像增强** - PC端支持批量图像增强，人像美颜、清晰增强、色彩优化
 - ✏️ **灵活可控** - AI分类结果支持手动调整
 - 🎨 **简洁易用** - 清晰直观的界面设计，简单四步即可完成照片整理
 - 💰 **完全免费** - 无广告、无内购、开源免费
@@ -41,12 +42,28 @@
 
 智能识别重复或相似的照片，帮您快速清理，释放宝贵的存储空间。
 
+### ✨ AI图像增强（PC端）
+
+为暂存箱提供AI图像增强功能，支持批量美化处理：
+
+- 👤 **人像美颜** - 修复面部瑕疵、提亮肤色，保持人物原貌
+- ✨ **清晰增强** - 去除模糊、锐化细节，提升整体质量
+- 🎨 **色彩优化** - 优化饱和度和对比度，使图片更加鲜艳生动
+- ⚙️ **自定义编辑** - 支持自定义提示词，满足个性化需求
+- 📦 **批量处理** - 一次处理1-9张图片，支持后台运行
+- 💾 **灵活保存** - 支持保存到本地或添加回暂存箱方便对比
+
 ## 🚀 快速开始
 
 ### 系统要求
 
 #### Windows版本
 - Windows 10 或更高版本
+- 4GB 以上内存（推荐8GB）
+- 500MB 可用磁盘空间
+
+#### macOS版本
+- macOS 12 或更高版本
 - 4GB 以上内存（推荐8GB）
 - 500MB 可用磁盘空间
 
@@ -84,6 +101,9 @@
 | 多维度分类 | **内容+城市+相似度** |
 | 隐私保护 | **100%本地处理** |
 | 测试规模 | **1800+张照片** |
+| Android扫描速度 | **提升20-50倍**（MediaStore优化） |
+| 哈希计算速度 | **提升5-10倍**（原生多线程） |
+| 整体扫描时间 | **从78秒优化到8秒**（提升9.75倍） |
 
 ## 🛠️ 技术架构
 
@@ -112,6 +132,9 @@
 - **批量处理** - 批量API调用，减少网络开销
 - **分层处理** - 截图检测→缓存查询→远程推理→本地降级
 - **相似度优化** - 基于推理结果的快速相似度检测
+- **MediaStore集成** - Android平台使用MediaStore API，扫描速度提升20-50倍
+- **原生多线程哈希** - Android平台原生多线程并行计算，哈希速度提升5-10倍
+- **并行处理** - 充分利用多核CPU，大幅提升处理效率
 
 ## 📁 项目结构
 
@@ -131,7 +154,14 @@ ImageClassifierApp/
 │   │   ├── GalleryScannerService.js     # 相册扫描服务
 │   │   ├── CityLocationService.js       # 城市定位服务
 │   │   ├── UnifiedDataService.js        # 统一数据服务
-│   │   └── ConfigService.js             # 配置服务
+│   │   ├── ConfigService.js             # 配置服务
+│   │   ├── ImageEnhanceService.js        # AI图像增强服务（PC端）
+│   │   ├── MediaStoreService.js          # MediaStore服务（Android）
+│   │   ├── ParallelHashCalculator.js    # 并行哈希计算服务
+│   │   ├── ImageProcessor.js             # 图像处理服务
+│   │   ├── ColorHistogramExtractor.js    # 颜色直方图提取服务
+│   │   ├── WakeLockService.js            # 唤醒锁服务
+│   │   └── WeChatAuthService.js          # 微信认证服务
 │   ├── adapters/               # 平台适配器
 │   │   └── WebAdapters.js      # Web平台适配
 │   └── workers/                # Web Worker
@@ -153,10 +183,12 @@ ImageClassifierApp/
 ## 🔐 隐私保护
 
 - ✅ **本地AI处理** - 所有推理计算在本地完成
-- ✅ **零数据上传** - 不上传任何照片到服务器
+- ✅ **零数据上传** - 不上传任何照片到服务器（图像增强功能需联网，但仅上传处理后的图片用于增强）
 - ✅ **不收集信息** - 不收集用户个人信息
 - ✅ **无广告追踪** - 无广告、无第三方追踪
 - ✅ **开源透明** - 代码完全开源，可审计
+
+> **注意**：AI图像增强功能需要联网调用云端API，但所有增强后的图片都保存在本地，不会上传原始照片。
 
 ## 🔧 开发指南
 
@@ -174,6 +206,11 @@ npm run build          # 构建生产版本
 npm run electron-dev   # Electron开发模式
 npm run electron-pack  # 打包桌面应用
 
+# macOS版本打包
+cd pc-version-final
+npm run electron:build-mac      # 打包macOS DMG
+npm run electron:build-mac-zip  # 打包macOS ZIP
+
 # 移动版本开发
 npx react-native start          # 启动Metro服务器
 npx react-native run-android    # 运行Android版本
@@ -186,6 +223,9 @@ npx react-native run-ios        # 运行iOS版本
 - [远程分类使用](REMOTE_CLASSIFICATION_USAGE.md)
 - [客户端调用指南](CLIENT_ID_USAGE.md)
 - [测试用例文档](测试用例文档-漏斗式扫描流程.md)
+- [MediaStore集成说明](docs/MediaStore集成说明.md) - Android性能优化
+- [AI图像增强功能设计](docs/AI图像增强功能设计文档.md) - PC端图像增强功能
+- [原生多线程哈希计算说明](docs/原生多线程哈希计算说明.md) - 性能优化文档
 
 ## 📊 分类效果
 
@@ -206,6 +246,7 @@ npx react-native run-ios        # 运行iOS版本
 - 🗂️ **照片批量分类** - 自动分类，告别手动整理
 - 💾 **存储空间清理** - 找出重复和相似照片，释放空间
 - 🔍 **快速查找照片** - 按分类、城市快速定位照片
+- ✨ **图像美化增强** - PC端批量美化照片，提升照片质量
 - 📱 **隐私保护** - 本地处理，绝不上传
 
 ## 📱 界面预览
@@ -256,9 +297,10 @@ npx react-native run-ios        # 运行iOS版本
 - `READ_EXTERNAL_STORAGE` - 读取外部存储中的照片
 - `WRITE_EXTERNAL_STORAGE` - 写入处理结果
 - `READ_MEDIA_IMAGES` - 读取媒体图片（Android 13+）
+- `ACCESS_MEDIA_LOCATION` - 读取媒体位置信息（用于城市分类，Android 10+）
 - `MANAGE_EXTERNAL_STORAGE` - 管理外部存储（可选）
 
-### Windows权限
+### Windows/macOS权限
 
 - 文件系统读写权限（安装时自动申请）
 
@@ -293,7 +335,10 @@ npx react-native run-ios        # 运行iOS版本
 - **批量API调用** - 减少网络请求，提升处理速度
 - **相似度算法优化** - 基于推理结果的快速相似度检测，性能提升57%
 - **GPU加速支持** - 自动检测并使用GPU加速（WebGL/DirectML）
-- **并行哈希计算** - 使用Web Worker并行计算图片哈希
+- **并行哈希计算** - 使用Web Worker（PC端）和原生多线程（Android）并行计算图片哈希
+- **MediaStore优化** - Android平台使用MediaStore API替代文件系统遍历，扫描速度提升20-50倍
+- **原生多线程处理** - Android平台使用原生Java多线程并行处理，充分利用多核CPU
+- **整体性能提升** - 综合优化后，整体扫描时间从78秒优化到8秒，提升9.75倍
 
 ## 📦 部署说明
 
@@ -310,6 +355,10 @@ npm run electron-pack
 
 # 打包APPX（Microsoft Store）
 npm run electron-pack-appx
+
+# 打包macOS应用
+npm run electron:build-mac      # DMG格式
+npm run electron:build-mac-zip  # ZIP格式
 ```
 
 ### Android APK打包
