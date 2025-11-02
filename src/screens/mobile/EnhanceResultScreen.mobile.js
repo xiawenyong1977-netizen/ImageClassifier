@@ -12,8 +12,9 @@ import {
   PanResponder,
   Animated,
 } from 'react-native';
-import { Alert, RNFS } from '../../adapters/WebAdapters';
+import { Alert, RNFS, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import ImageEnhanceService from '../../services/ImageEnhanceService';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -21,13 +22,15 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
  * EnhanceResultScreen - 导航模态页（展示增强结果）
  * route.params:
  * - presetName: string
+ * - presetId: string - 预设方案ID（用于提交任务）
  * - selected: Array<{ id: string, uri: string }>
- * - results: Record<string, { status: 'pending'|'processing'|'done'|'failed', enhancedUri?: string }>
+ * - results: Record<string, { status: 'pending'|'processing'|'done'|'failed', enhancedUri?: string }> (可选，用于已存在的结果)
  * - initialIndex?: number
  */
 export default function EnhanceResultScreen({ route, navigation }) {
   const {
     presetName = '照片创玩',
+    presetId, // 预设方案ID（必须）
     selected = [],
     results = {},
     initialIndex = 0,
@@ -37,6 +40,14 @@ export default function EnhanceResultScreen({ route, navigation }) {
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [localResults, setLocalResults] = useState(results || {});
   const [savingById, setSavingById] = useState({});
+  const [taskProcessing, setTaskProcessing] = useState(false); // 任务处理状态
+  const abortControllerRef = useRef(null); // 用于取消轮询的 AbortController
+  
+  // 计算任务键，用于防止重复提交
+  const taskKey = useMemo(() => {
+    if (!presetId || selected.length === 0) return null;
+    return `${presetId}_${selected.length}_${selected[0]?.id}`;
+  }, [presetId, selected]);
 
   const total = selected.length;
   const completed = useMemo(() => {
@@ -139,21 +150,233 @@ export default function EnhanceResultScreen({ route, navigation }) {
     setShowEnhanced((v) => !v);
   };
 
-  // 订阅增强进度更新事件：{ id, status, enhancedUri? }
+  // 提交任务并开始轮询（如果传递了 presetId 且结果为空，说明需要提交新任务）
   useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('enhance:update', (payload) => {
-      if (!payload || !payload.id) return;
-      setLocalResults((prev) => ({
-        ...prev,
-        [payload.id]: {
-          ...(prev[payload.id] || {}),
-          status: payload.status || prev[payload.id]?.status || 'processing',
-          enhancedUri: payload.enhancedUri || prev[payload.id]?.enhancedUri,
+    // 如果已经有结果或者没有 taskKey，不执行任务提交
+    // 检查初始的 results（从路由参数传入），如果已经有结果就不提交
+    if (!taskKey || Object.keys(results).length > 0) {
+      return;
+    }
+
+    const submitAndPoll = async () => {
+      try {
+        logger.debug('开始提交增强任务', { presetId, count: selected.length });
+        
+        // 初始化所有图片为 processing 状态
+        const initialResults = {};
+        selected.forEach((item) => {
+          initialResults[item.id] = { status: 'processing' };
+        });
+        setLocalResults(initialResults);
+        setTaskProcessing(true);
+        
+        // 创建 AbortController 用于取消轮询
+        abortControllerRef.current = new AbortController();
+        
+        // 读取图片URI
+        const uris = selected.map((img) => img.uri).filter(Boolean);
+        
+        if (uris.length === 0) {
+          Alert.alert('错误', '没有有效的图片');
+          setTaskProcessing(false);
+          return;
         }
-      }));
+
+        // 1) 预处理图片
+        const prepared = await ImageEnhanceService.prepareImagesForEnhance(uris);
+        const validPrepared = prepared.filter(p => !p.error);
+        
+        if (validPrepared.length === 0) {
+          Alert.alert('错误', '图片预处理失败');
+          setTaskProcessing(false);
+          if (abortControllerRef.current) {
+            abortControllerRef.current = null;
+          }
+          return;
+        }
+
+        // 2) 提交任务
+        const submit = await ImageEnhanceService.submitEnhanceTask(validPrepared, presetId);
+        const taskId = submit.task_id;
+
+        // 3) 轮询任务状态
+        const onProgress = (status) => {
+          try {
+            if (status && Array.isArray(status.results)) {
+              // 更新每个图片的状态（过滤掉 null 值）
+              status.results
+                .filter(r => r != null) // 过滤掉 null 值
+                .forEach((r) => {
+                  const idx = typeof r.index === 'number' ? r.index : null;
+                  const img = idx != null && idx < selected.length ? selected[idx] : null;
+                  if (!img) {
+                    logger.warn('⚠️ 进度更新：找不到对应的图片', { index: idx, total: selected.length });
+                    return;
+                  }
+
+                  setLocalResults((prev) => {
+                    const newStatus = r.status === 'completed' ? 'done' : 
+                                     r.status === 'failed' ? 'failed' : 'processing';
+                    return {
+                      ...prev,
+                      [img.id]: {
+                        status: newStatus,
+                        enhancedUri: r.result_url || prev[img.id]?.enhancedUri,
+                        error: r.error || prev[img.id]?.error,
+                      }
+                    };
+                  });
+                });
+            }
+          } catch (e) {
+            logger.error('处理进度更新失败:', e);
+          }
+        };
+
+        const finalStatus = await ImageEnhanceService.pollTaskStatus(
+          taskId,
+          onProgress,
+          abortControllerRef.current?.signal
+        );
+
+        // 处理最终状态
+        if (finalStatus && Array.isArray(finalStatus.results)) {
+          // 过滤掉 null 值，只处理有效的结果
+          const validResults = finalStatus.results.filter(r => r != null);
+          
+          selected.forEach((img, idx) => {
+            const r = validResults.find((it) => it.index === idx);
+            if (r) {
+              const newStatus = r.status === 'completed' ? 'done' : 
+                               r.status === 'failed' ? 'failed' : 'processing';
+              setLocalResults((prev) => ({
+                ...prev,
+                [img.id]: {
+                  status: newStatus,
+                  enhancedUri: r.result_url || prev[img.id]?.enhancedUri,
+                  error: r.error || prev[img.id]?.error,
+                }
+              }));
+            } else {
+              // 如果没有找到对应的结果，检查是否还在处理中
+              setLocalResults((prev) => ({
+                ...prev,
+                [img.id]: {
+                  ...(prev[img.id] || {}),
+                  status: prev[img.id]?.status || 'processing',
+                }
+              }));
+            }
+          });
+        }
+
+        // 检查是否所有任务都完成了（过滤掉 null 值）
+        const validResultsForCheck = finalStatus?.results?.filter(r => r != null) || [];
+        const allCompleted = selected.every((s, idx) => {
+          const result = validResultsForCheck.find((r) => r.index === idx);
+          return result && (result.status === 'completed' || result.status === 'failed');
+        });
+
+        if (allCompleted) {
+          setTaskProcessing(false);
+        }
+
+        // 清理 AbortController
+        if (abortControllerRef.current) {
+          abortControllerRef.current = null;
+        }
+
+      } catch (error) {
+        // 清理 AbortController
+        if (abortControllerRef.current) {
+          abortControllerRef.current = null;
+        }
+        setTaskProcessing(false);
+
+        // 如果是用户取消操作，不显示错误提示
+        if (error.message && error.message.includes('轮询已被用户取消')) {
+          logger.debug('🛑 用户取消了增强任务');
+          return;
+        }
+
+        logger.error('提交/轮询增强任务失败:', error);
+        Alert.alert('错误', error.message || '提交失败，请稍后重试');
+        
+        // 将所有图片标记为失败
+        setLocalResults((prev) => {
+          const updated = { ...prev };
+          selected.forEach((img) => {
+            updated[img.id] = {
+              ...(updated[img.id] || {}),
+              status: 'failed',
+              error: error.message || '任务失败',
+            };
+          });
+          return updated;
+        });
+      }
+    };
+
+    submitAndPoll();
+
+    // 清理函数：组件卸载时取消任务
+    return () => {
+      if (abortControllerRef.current) {
+        logger.debug('🛑 组件卸载，取消轮询任务');
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskKey]); // 只依赖 taskKey，避免重复执行。taskKey 只在 presetId 或 selected 变化时变化
+  
+  // 拦截返回操作：如果任务还在处理中，显示确认提示并取消任务
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // 如果任务还在处理中，阻止返回并显示提示
+      if (taskProcessing && abortControllerRef.current) {
+        // 阻止默认返回行为
+        e.preventDefault();
+        
+        Alert.alert(
+          '确认返回',
+          '照片增强任务还在处理中，返回后照片的处理结果将会临时保存在服务器。\n\n再次提交同一照片的相同处理将会直接从服务器中返回，不扣减额度。',
+          [
+            {
+              text: '继续等待',
+              style: 'cancel',
+              onPress: () => {
+                // 用户选择继续等待，不返回（已经通过 preventDefault 阻止了）
+              }
+            },
+            {
+              text: '确认返回',
+              style: 'destructive',
+              onPress: () => {
+                // 用户确认返回，取消轮询任务
+                if (abortControllerRef.current) {
+                  logger.debug('🛑 用户确认返回，取消轮询任务');
+                  abortControllerRef.current.abort();
+                  abortControllerRef.current = null;
+                }
+                setTaskProcessing(false);
+                // 移除监听器后执行返回操作
+                unsubscribe();
+                navigation.dispatch(e.data.action);
+              }
+            }
+          ]
+        );
+      } else if (abortControllerRef.current) {
+        // 即使没有 taskProcessing 标记，如果有 abortController，也取消它（防止遗漏）
+        logger.debug('🛑 检测到返回操作，取消可能的轮询任务');
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
     });
-    return () => sub.remove();
-  }, []);
+
+    return unsubscribe;
+  }, [navigation, taskProcessing]);
 
   // 当切换到新的图片或该图片增强完成时：默认展示增强图
   useEffect(() => {

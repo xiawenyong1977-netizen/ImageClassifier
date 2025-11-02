@@ -996,7 +996,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -1035,7 +1034,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   pathsList: {
-    backgroundColor: '#fff',
+    // 移除白色背景，使用透明背景
   },
   pathItem: {
     flexDirection: 'row',

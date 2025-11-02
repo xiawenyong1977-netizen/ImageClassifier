@@ -25,7 +25,6 @@ import {
 } from 'react-native';
 import { SafeAreaView, useFocusEffect, Alert } from '../../adapters/WebAdapters';
 import { DeviceEventEmitter } from 'react-native';
-import ImageEnhanceService from '../../services/ImageEnhanceService';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import GlobalImageCache from '../../services/GlobalImageCache';
@@ -75,6 +74,8 @@ const CategoryScreen = ({ route, navigation }) => {
   // 高亮图片（从 ImagePreview 返回时使用）
   const [highlightedImageId, setHighlightedImageId] = useState(null);
   const flatListRef = useRef(null);
+  
+  // 照片创玩任务相关（任务提交已移到结果页，不再需要状态跟踪）
   
   const ITEMS_PER_PAGE = 50;
 
@@ -347,6 +348,7 @@ const CategoryScreen = ({ route, navigation }) => {
       const initData = async () => {
         // 每次获得焦点时都刷新数据，确保数据同步
         logger.debug('🔄 页面获得焦点，刷新数据...');
+        
         await loadImages(); // 等待数据加载和状态更新完成
         
         // 重新计算选中数量 - 现在可以安全地使用最新的数据
@@ -705,6 +707,7 @@ const CategoryScreen = ({ route, navigation }) => {
   };
 
   const closeEnhancePanel = () => {
+    // 直接关闭面板（任务提交已在结果页处理，这里不需要额外逻辑）
     setShowEnhancePresets(false);
   };
 
@@ -768,6 +771,7 @@ const CategoryScreen = ({ route, navigation }) => {
   const performEnhance = async (presetId, presetDisplayName, imageIds) => {
     try {
       logger.debug('准备提交增强任务', { presetId, count: imageIds.length });
+      
       // 读取选中图片的最新URI（优先缓存，否则从存储读取）
       const selectedItems = [];
       for (const id of imageIds) {
@@ -776,75 +780,19 @@ const CategoryScreen = ({ route, navigation }) => {
       }
       const uris = selectedItems.map((img) => img.uri);
 
-      // 1) 先打开结果页（初始全部processing），避免长时间无反馈
-      const initialResults = {};
-      imageIds.forEach((id) => { initialResults[id] = { status: 'processing' }; });
+      // 直接导航到结果页，任务提交和轮询在结果页中处理
       if (typeof navigation !== 'undefined') {
         navigation.navigate('EnhanceResult', {
           presetName: presetDisplayName,
+          presetId: presetId, // 传递预设ID，结果页会自动提交任务
           selected: selectedItems,
-          results: initialResults,
+          results: {}, // 不传结果，让结果页自动提交
           initialIndex: 0,
         });
       }
-
-      // 2) 在后台执行预处理与提交
-      const prepared = await ImageEnhanceService.prepareImagesForEnhance(uris);
-      const validPrepared = prepared.filter(p => !p.error);
-      if (validPrepared.length === 0) {
-        Alert.alert('错误', '图片预处理失败');
-        return;
-      }
-      const submit = await ImageEnhanceService.submitEnhanceTask(validPrepared, presetId);
-      const taskId = submit.task_id;
-
-      // 3) 开始轮询；过程中若后端返回已完成的部分结果，则即时发事件更新对应图片
-      const onProgress = (status) => {
-        try {
-          if (status && Array.isArray(status.results)) {
-            // 后端返回的结果项: { index, result_url, ... }
-            status.results.forEach((r) => {
-              const idx = typeof r.index === 'number' ? r.index : null;
-              const url = r?.result_url || '';
-              const img = idx != null ? selectedItems[idx] : null;
-              if (!img) return;
-              if (r.status === 'completed' && url) {
-                DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'done', enhancedUri: url });
-              } else if (r.status === 'failed') {
-                DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'failed', error: r.error });
-              }
-            });
-          }
-        } catch (e) {}
-      };
-      const finalStatus = await ImageEnhanceService.pollTaskStatus(taskId, onProgress);
-      // 打印后端返回的完整数据包（结果状态）
-      try {
-        logger.debug('🧾 增强任务完成，后端原始返回:', JSON.stringify(finalStatus));
-      } catch (e) {
-        logger.debug('🧾 增强任务完成，后端返回（非JSON可序列化）:', finalStatus);
-      }
-      // 按每一项结果精确更新：完成/失败/仍在处理中
-      if (finalStatus && Array.isArray(finalStatus.results)) {
-        selectedItems.forEach((img, idx) => {
-          const r = finalStatus.results.find((it) => it.index === idx);
-          if (r) {
-            if (r.status === 'completed' && r.result_url) {
-              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'done', enhancedUri: r.result_url });
-            } else if (r.status === 'failed') {
-              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'failed', error: r.error });
-            } else {
-              DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'processing' });
-            }
-          } else {
-            // 未返回该索引，维持 processing
-            DeviceEventEmitter.emit('enhance:update', { id: img.id, status: 'processing' });
-          }
-        });
-      }
     } catch (error) {
-      logger.error('提交/轮询增强任务失败:', error);
-      Alert.alert('错误', error.message || '提交失败，请稍后重试');
+      logger.error('导航到结果页失败:', error);
+      Alert.alert('错误', error.message || '操作失败，请稍后重试');
     }
   };
 
@@ -941,74 +889,52 @@ const CategoryScreen = ({ route, navigation }) => {
       }
 
       try {
-        if (selectedImages.length === 1) {
-          // 单张图片：使用url参数
-          const result = await Share.share({
-            url: selectedImages[0].uri,
-            message: '分享图片',
+        const urls = selectedImages.map(img => img.uri);
+        
+        // 调试：打印图片URI信息
+        logger.debug('准备分享的图片URIs:', urls);
+        selectedImages.forEach((img, index) => {
+          logger.debug(`图片${index + 1}:`, {
+            id: img.id,
+            uri: img.uri,
+            path: img.path,
+            filename: img.filename
           });
-          
-          if (result.action === Share.sharedAction) {
-            logger.debug('✅ 分享成功');
-          } else if (result.action === Share.dismissedAction) {
-            logger.debug('用户取消分享');
+        });
+        
+        // 优先尝试使用原生模块分享（支持单张和多张）
+        const { MultiImageShareModule } = NativeModules;
+        if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
+          // 使用原生模块分享（支持单张和多张）
+          await MultiImageShareModule.shareMultipleImages(urls);
+          logger.debug(`✅ 原生模块分享 ${selectedImages.length} 张图片成功`);
+          if (selectedImages.length > 1) {
+            Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
           }
         } else {
-          // 多张图片：使用urls参数
-          const urls = selectedImages.map(img => img.uri);
-          
-          // 调试：打印图片URI信息
-          logger.debug('准备分享的图片URIs:', urls);
-          selectedImages.forEach((img, index) => {
-            logger.debug(`图片${index + 1}:`, {
-              id: img.id,
-              uri: img.uri,
-              path: img.path,
-              filename: img.filename
+          // 原生模块不可用，使用React Native Share
+          if (selectedImages.length === 1) {
+            // 单张图片：只传url，不传message（避免被当作文本分享）
+            const result = await Share.share({
+              url: selectedImages[0].uri,
             });
-          });
-          
-          // 尝试使用原生模块分享多张图片
-          try {
-            const { MultiImageShareModule } = NativeModules;
-            if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
-              // 使用原生模块分享
-              await MultiImageShareModule.shareMultipleImages(urls);
-              logger.debug(`✅ 原生模块分享 ${selectedImages.length} 张图片成功`);
-              Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
-            } else {
-              // 回退到React Native Share
-              const result = await Share.share({
-                urls: urls,
-                message: `分享 ${selectedImages.length} 张图片`,
-              });
-              
-              if (result.action === Share.sharedAction) {
-                logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
-                Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
-              } else if (result.action === Share.dismissedAction) {
-                logger.debug('用户取消分享');
-              }
-            }
-          } catch (nativeError) {
-            logger.error('❌ 原生模块分享失败:', nativeError);
             
-            // 回退到React Native Share
-            try {
-              const result = await Share.share({
-                urls: urls,
-                message: `分享 ${selectedImages.length} 张图片`,
-              });
-              
-              if (result.action === Share.sharedAction) {
-                logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
-                Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
-              } else if (result.action === Share.dismissedAction) {
-                logger.debug('用户取消分享');
-              }
-            } catch (shareError) {
-              logger.error('❌ React Native分享也失败:', shareError);
-              Alert.alert('分享失败', '分享失败，请重试');
+            if (result.action === Share.sharedAction) {
+              logger.debug('✅ 分享成功');
+            } else if (result.action === Share.dismissedAction) {
+              logger.debug('用户取消分享');
+            }
+          } else {
+            // 多张图片：使用urls参数（不传message）
+            const result = await Share.share({
+              urls: urls,
+            });
+            
+            if (result.action === Share.sharedAction) {
+              logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
+              Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+            } else if (result.action === Share.dismissedAction) {
+              logger.debug('用户取消分享');
             }
           }
         }
