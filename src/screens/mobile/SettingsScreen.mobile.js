@@ -431,8 +431,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       setShowEditModal(false);
       setEditingPreset(null);
       
-      // 通知其他页面设置已更新
-      if (typeof window !== 'undefined') {
+      // 通知其他页面设置已更新（仅在 Web 环境支持 CustomEvent 时）
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { 
           detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
         }));
@@ -464,8 +464,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       setAiEnhancePresets(updatedPresets);
       setSettings(newSettings);
       
-      // 通知其他页面设置已更新
-      if (typeof window !== 'undefined') {
+      // 通知其他页面设置已更新（仅在 Web 环境支持 CustomEvent 时）
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { 
           detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
         }));

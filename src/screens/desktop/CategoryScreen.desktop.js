@@ -410,6 +410,7 @@ const CategoryScreen = ({
   const [availableEnhancePresets, setAvailableEnhancePresets] = useState([]); // AI增强预设方案列表
   const snapshotImagesRef = useRef([]); // 模态框打开时的图片快照，使用 ref 而非 state（不需要触发渲染）
   const backgroundTaskRef = useRef(null); // 后台任务处理的Promise
+  const abortControllerRef = useRef(null); // 用于取消轮询的 AbortController
   
   // 分页相关状态 - 优先使用从prop传递的值（返回时恢复）
   const [currentPage, setCurrentPage] = useState(propCurrentPage || initialPage);
@@ -1099,11 +1100,69 @@ const CategoryScreen = ({
 
   // 关闭增强模态框
   const handleCloseEnhanceModal = () => {
+    // 如果任务还在进行中（processing状态），显示确认提示
+    if (isProcessing && enhanceProgress.status === 'processing') {
+      Alert.alert(
+        '确认关闭',
+        '照片增强任务已经提交，关闭后照片的处理结果将会临时保存在服务器。\n\n再次提交同一照片的相同处理将会直接从服务器中返回，不扣减额度。',
+        [
+          {
+            text: '取消',
+            style: 'cancel'
+          },
+          {
+            text: '确认关闭',
+            onPress: () => {
+              // 用户确认关闭，取消轮询任务
+              if (abortControllerRef.current) {
+                logger.debug('🛑 用户确认关闭模态框，取消轮询任务');
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+              }
+              
+              // 关闭模态框
+              setShowEnhanceModal(false);
+              
+              // 清空快照数据
+              snapshotImagesRef.current = [];
+              
+              // 重置处理状态
+              setIsProcessing(false);
+              setEnhanceProgress({
+                current: 0,
+                total: 0,
+                status: 'idle',
+                imageStatuses: []
+              });
+            }
+          }
+        ]
+      );
+      return;
+    }
+    
+    // 任务已完成或未开始，直接关闭
+    // 如果有正在进行的轮询任务，取消它（防止遗漏）
+    if (abortControllerRef.current) {
+      logger.debug('🛑 用户关闭模态框，取消轮询任务');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
     // 关闭模态框
     setShowEnhanceModal(false);
     
     // 清空快照数据
     snapshotImagesRef.current = [];
+    
+    // 重置处理状态
+    setIsProcessing(false);
+    setEnhanceProgress({
+      current: 0,
+      total: 0,
+      status: 'idle',
+      imageStatuses: []
+    });
   };
 
   // 保存并添加到暂存箱（合并原有的"保存到本地"和"添加为新图"）
@@ -1448,7 +1507,10 @@ const CategoryScreen = ({
             imageStatuses: []
           });
           
-          // 3. 轮询任务状态（带进度回调）
+          // 3. 创建 AbortController 用于取消轮询
+          abortControllerRef.current = new AbortController();
+          
+          // 轮询任务状态（带进度回调和取消信号）
           let pollCount = 0;
           const enhanceResult = await ImageEnhanceService.pollTaskStatus(
             taskResult.task_id,
@@ -1471,12 +1533,12 @@ const CategoryScreen = ({
               
               // 解析每张图片的实时状态（从 status.results 数组）
               // 后端现在会实时返回每张图片的处理状态
-              const imageStatuses = status.results || [];
+              const imageStatuses = (status.results || []).filter(img => img != null); // 过滤掉 null 值
               
               // 打印状态更新（仅在有变化时）
               if (imageStatuses.length > 0) {
                 logger.debug(`📷 后端返回状态（${imageStatuses.length}张）:`, imageStatuses.map(img => 
-                  `[index=${img.index}, status=${img.status}, filename=${img.filename || 'N/A'}, hasUrl=${!!img.result_url}]`
+                  `[index=${img?.index ?? 'N/A'}, status=${img?.status ?? 'N/A'}, filename=${img?.filename || 'N/A'}, hasUrl=${!!img?.result_url}]`
                 ).join(', '));
               }
               
@@ -1494,8 +1556,14 @@ const CategoryScreen = ({
                 let hasUpdate = false;
                 
                 imageStatuses.forEach((imgStatus) => {
+                  if (!imgStatus) return; // 跳过 null 值
                   if (imgStatus.status === 'completed' && imgStatus.result_url) {
                     const index = imgStatus.index;
+                    // 确保 index 是有效数字
+                    if (index == null || typeof index !== 'number' || index < 0 || index >= preparedImages.length) {
+                      logger.warn(`⚠️ 无效的图片索引: ${index}, 跳过该状态更新`);
+                      return;
+                    }
                     const originalImage = preparedImages[index]?.originalImage;
                     
                     if (originalImage) {
@@ -1541,10 +1609,16 @@ const CategoryScreen = ({
               });
               
               logger.debug(`📊 进度更新 [轮询${pollCount}次]: ${completedImages}/${taskResult.total_images} (${progressPercent.toFixed(1)}%) - 状态: ${status.status}`);
-            }
+            },
+            abortControllerRef.current?.signal // 传递取消信号
           );
           
           logger.debug(`✅ 任务完成，收到 ${enhanceResult.results?.length || 0} 个结果`);
+          
+          // 清理 AbortController（任务完成）
+          if (abortControllerRef.current) {
+            abortControllerRef.current = null;
+          }
           
           // 4. 处理结果（API 返回格式: { status: 'completed', results: [{result_url, ...}, ...] }）
           let successCount = 0;
@@ -1614,8 +1688,22 @@ const CategoryScreen = ({
           }
           
         } catch (error) {
+          // 清理 AbortController（无论成功还是失败）
+          if (abortControllerRef.current) {
+            abortControllerRef.current = null;
+          }
+          
+          // 如果是用户取消操作，不显示错误提示
+          if (error.message && error.message.includes('轮询已被用户取消')) {
+            logger.debug('🛑 用户取消了增强任务');
+            return; // 静默退出，不显示错误
+          }
+          
           logger.error('❌ 批量增强失败:', error);
-          Alert.alert('错误', `处理失败: ${error.message}`);
+          // 只有在模态框仍然显示时才提示错误
+          if (showEnhanceModal) {
+            Alert.alert('错误', `处理失败: ${error.message}`);
+          }
         }
         
         // 处理完成

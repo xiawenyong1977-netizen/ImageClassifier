@@ -76,30 +76,40 @@ class ImageEnhanceService {
   /**
    * 提交增强任务（支持批量：1-9张）
    * @param {Array<{file: Blob, hash: string, fileName: string}>} preparedImages - 预处理后的图片数组
-   * @param {string} preset - 增强方案 (portrait/scenery/food/auto/自定义提示词)
+   * @param {string} presetId - 增强方案ID（如 'portrait', 'custom' 等），提示词从配置中获取
    * @returns {Promise<{task_id: string, total_images: number, estimated_time_ms: number}>}
    */
-  async submitEnhanceTask(preparedImages, preset) {
+  async submitEnhanceTask(preparedImages, presetId) {
     try {
       const imageCount = preparedImages.length;
-      logger.debug(`📤 提交批量增强任务: ${imageCount}张图片, 方案: ${preset}`);
+      logger.debug(`📤 提交批量增强任务: ${imageCount}张图片, 方案: ${presetId}`);
       
-      // 根据预设方案生成提示词（可被外部传入的 prompt 覆盖）
-      const promptMap = {
-        'portrait': '修复面部瑕疵和皱纹，提亮肤色，美化五官，保持人物原貌不变',
-        'scenery': '提升色彩饱和度和对比度，增强细节和清晰度，优化光线和层次感',
-        'food': '增强食物色彩和质感，提升食欲感，优化光线和细节',
-        'auto': '智能识别图片内容并进行全面优化，提升整体质量'
-      };
+      // 从配置获取预设方案对应的提示词
+      let prompt = '';
+      const normalizedPresetId = (presetId && typeof presetId === 'string') ? presetId.trim() : 'portrait';
       
-      // 支持两种调用：
-      // 1) submitEnhanceTask(images, 'portrait')
-      // 2) submitEnhanceTask(images, { presetId: 'portrait', prompt: '覆盖文案' })
-      const presetOpts = (preset && typeof preset === 'object') ? preset : { presetId: preset };
-      const presetId = presetOpts.presetId || presetOpts.id || presetOpts.key || 'auto';
-      const prompt = (typeof presetOpts.prompt === 'string' && presetOpts.prompt.trim())
-        ? presetOpts.prompt.trim()
-        : (promptMap[presetId] || (typeof preset === 'string' ? preset : 'auto'));
+      try {
+        const settings = await this.imageStorageService.getSettings();
+        const enhancePresets = settings?.aiEnhancePresets || {};
+        const presetConfig = enhancePresets[normalizedPresetId];
+        
+        if (presetConfig && presetConfig.prompt && typeof presetConfig.prompt === 'string' && presetConfig.prompt.trim()) {
+          prompt = presetConfig.prompt.trim();
+          logger.debug(`✅ 从配置获取预设方案提示词: ${normalizedPresetId} -> ${prompt}`);
+        } else {
+          // 配置中找不到，抛出错误提示用户配置缺失
+          logger.error(`❌ 配置中未找到预设方案 ${normalizedPresetId} 的提示词`);
+          throw new Error(`预设方案 ${normalizedPresetId} 未配置提示词，请在设置中配置该预设方案`);
+        }
+      } catch (error) {
+        // 如果是我们自己抛出的错误，直接抛出
+        if (error.message && error.message.includes('预设方案')) {
+          throw error;
+        }
+        // 其他错误（如获取配置失败）
+        logger.error('❌ 获取配置失败:', error);
+        throw new Error(`获取增强预设配置失败: ${error.message}`);
+      }
       
       const formData = new FormData();
 
@@ -285,29 +295,48 @@ class ImageEnhanceService {
    * 轮询任务直到完成
    * @param {string} taskId - 任务ID
    * @param {Function} onProgress - 进度回调函数 (status) => void
+   * @param {AbortSignal} signal - 可选的取消信号，用于取消轮询
    * @returns {Promise<Object>} - 完成后的任务信息
    */
-  async pollTaskStatus(taskId, onProgress) {
-    const maxRetries = 60;  // 最多60次（2分钟）
+  async pollTaskStatus(taskId, onProgress, signal = null) {
     const interval = 2000;  // 2秒一次
-    let retries = 0;
+    let pollCount = 0;
+    let consecutiveErrors = 0;  // 连续错误次数
+    const maxConsecutiveErrors = 5;  // 最多连续5次网络错误后停止
 
     logger.debug('🔄 开始轮询任务状态:', taskId);
 
-    while (retries < maxRetries) {
+    while (true) {
+      // 检查是否已取消
+      if (signal && signal.aborted) {
+        logger.debug('🛑 轮询已取消:', taskId);
+        throw new Error('轮询已被用户取消');
+      }
+
       try {
-        retries++;
+        pollCount++;
         
         const status = await this.queryTaskStatus(taskId);
         
-        // 详细日志：显示后端返回的所有字段
-        logger.debug(`📊 第${retries}次轮询:`, {
-          status: status.status,
-          progress: status.progress,
-          completed_images: status.completed_images,
-          total_images: status.total_images,
-          current_image_index: status.current_image_index
-        });
+        // 再次检查是否已取消（在查询完成后）
+        if (signal && signal.aborted) {
+          logger.debug('🛑 轮询已取消:', taskId);
+          throw new Error('轮询已被用户取消');
+        }
+        
+        // 重置连续错误计数
+        consecutiveErrors = 0;
+        
+        // 详细日志：显示后端返回的所有字段（每10次轮询记录一次详细日志，避免日志过多）
+        if (pollCount % 10 === 0 || status.status !== 'processing') {
+          logger.debug(`📊 第${pollCount}次轮询:`, {
+            status: status.status,
+            progress: status.progress,
+            completed_images: status.completed_images,
+            total_images: status.total_images,
+            current_image_index: status.current_image_index
+          });
+        }
         
         // 调用进度回调
         if (onProgress) {
@@ -316,33 +345,72 @@ class ImageEnhanceService {
 
         // 检查任务状态
         if (status.status === 'completed') {
-          logger.debug('✅ 任务已完成:', taskId);
+          logger.debug(`✅ 任务已完成: ${taskId} (共轮询${pollCount}次)`);
           return status;
         } else if (status.status === 'failed') {
           throw new Error(status.error || '任务处理失败');
         }
         
-        // 等待后继续轮询
-        await new Promise(resolve => setTimeout(resolve, interval));
+        // 任务仍在处理中，等待后继续轮询（支持取消）
+        await this.delayWithCancel(interval, signal);
         
       } catch (error) {
+        // 检查是否是取消操作
+        if (error.message && error.message.includes('轮询已被用户取消')) {
+          throw error;
+        }
+        
+        consecutiveErrors++;
+        
         // 如果是 404 (任务不存在)，立即停止轮询
         if (error.message && error.message.includes('TASK_NOT_FOUND')) {
           logger.error('❌ 任务不存在，停止轮询');
           throw new Error('服务器未找到该任务，可能图像编辑功能暂未部署或任务ID无效');
         }
         
-        // 其他网络错误，继续重试（但只重试几次）
-        if (retries < Math.min(maxRetries, 5)) {
-          logger.warn(`⚠️ 轮询失败（${retries}/${maxRetries}），继续重试...`);
-          await new Promise(resolve => setTimeout(resolve, interval));
-          continue;
+        // 如果是任务失败状态，立即抛出错误
+        if (error.message && error.message.includes('任务处理失败')) {
+          throw error;
         }
-        throw error;
+        
+        // 网络错误：如果连续错误次数过多，停止轮询
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          logger.error(`❌ 连续${consecutiveErrors}次轮询失败，停止轮询`);
+          throw new Error(`轮询任务状态失败（连续${consecutiveErrors}次错误），请检查网络连接`);
+        }
+        
+        // 其他网络错误，等待后继续重试（支持取消）
+        logger.warn(`⚠️ 轮询失败（第${pollCount}次，连续错误${consecutiveErrors}次），${interval}ms后重试...`);
+        await this.delayWithCancel(interval, signal);
       }
     }
+  }
 
-    throw new Error('任务超时（超过2分钟）');
+  /**
+   * 支持取消的延迟函数
+   * @param {number} ms - 延迟毫秒数
+   * @param {AbortSignal} signal - 可选的取消信号
+   * @returns {Promise<void>}
+   */
+  delayWithCancel(ms, signal = null) {
+    return new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        reject(new Error('轮询已被用户取消'));
+        return;
+      }
+      
+      const timeoutId = setTimeout(() => {
+        resolve();
+      }, ms);
+      
+      // 如果提供了取消信号，监听取消事件
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          clearTimeout(timeoutId);
+          reject(new Error('轮询已被用户取消'));
+        });
+      }
+    });
   }
 
   // ========== 文件操作 ==========
