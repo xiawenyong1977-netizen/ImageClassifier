@@ -356,10 +356,15 @@ const CategoryScreen = ({ route, navigation }) => {
         
         // 检查是否从 ImagePreview 返回，并初始化高亮图片ID
         const returnedImageId = route.params?.returnedImageId;
-        logger.debug('🎯 检查返回图片ID:', returnedImageId);
         if (returnedImageId) {
           logger.debug('🎯 从 ImagePreview 返回，初始化高亮图片ID:', returnedImageId);
-          setHighlightedImageId(returnedImageId);
+          // 验证图片是否在当前列表中
+          const imageExists = images.some(img => img.id === returnedImageId);
+          if (imageExists) {
+            setHighlightedImageId(returnedImageId);
+          } else {
+            logger.debug('🎯 返回的图片ID不在当前列表中，跳过滚动:', returnedImageId);
+          }
           
           // 清除 navigation 参数，避免重复触发
           navigation.setParams({ returnedImageId: undefined });
@@ -398,10 +403,15 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // 滚动到高亮图片所在的日期组
   const scrollToHighlightedImage = (imageId) => {
+    if (!imageId) {
+      // 如果没有图片ID，直接返回，不输出日志
+      return;
+    }
+    
     logger.debug('📜 开始滚动到图片:', imageId);
     
     if (!flatListRef.current || Object.keys(groupedImages).length === 0) {
-      logger.warn('📜 滚动条件不满足:', { 
+      logger.debug('📜 滚动条件不满足:', { 
         hasRef: !!flatListRef.current, 
         groupedImagesLength: Object.keys(groupedImages).length,
         imageId
@@ -415,7 +425,9 @@ const CategoryScreen = ({ route, navigation }) => {
     // 根据图片ID获取图片数据，然后根据时间找到日期组索引
     const targetImage = images.find(img => img.id === imageId);
     if (!targetImage) {
-      logger.warn('📜 未找到目标图片:', imageId);
+      logger.debug('📜 未找到目标图片，可能已从列表中移除:', imageId);
+      // 清除无效的高亮ID
+      setHighlightedImageId(null);
       return;
     }
     

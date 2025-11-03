@@ -113,11 +113,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         setGalleryPaths(savedSettings.scanPaths);
         setOriginalPaths([...savedSettings.scanPaths]); // 记录原始路径用于比较变更
       } else {
-        // 如果没有保存的路径，使用默认路径
-        const imageStorageService = new ImageStorageService();
-        const defaultPaths = imageStorageService.getDefaultScanPaths();
-        setGalleryPaths(defaultPaths);
-        setOriginalPaths([...defaultPaths]);
+        // 如果没有保存的路径，设置为空数组，用户需要手动添加路径
+        setGalleryPaths([]);
+        setOriginalPaths([]);
       }
       
       

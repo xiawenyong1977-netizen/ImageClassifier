@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import com.facebook.react.ReactActivity;
 import com.facebook.react.ReactActivityDelegate;

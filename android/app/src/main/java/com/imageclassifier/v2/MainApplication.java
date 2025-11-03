@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import android.app.Application;
 import com.facebook.react.ReactApplication;
@@ -22,6 +22,8 @@ import com.swmansion.reanimated.ReanimatedPackage;
 import com.oblador.vectoricons.VectorIconsPackage;
 import org.pgsqlite.SQLitePluginPackage;
 import ai.onnxruntime.reactnative.OnnxruntimePackage;
+import com.imageclassifier.v2.MediaStorePackage;
+import com.imageclassifier.v2.SharePackage;
 
 public class MainApplication extends Application implements ReactApplication {
 

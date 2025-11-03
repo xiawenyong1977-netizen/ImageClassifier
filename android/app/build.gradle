@@ -46,13 +46,13 @@ android {
 
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "com.imageclassifier"
+    namespace "com.imageclassifier.v2"
     defaultConfig {
         applicationId "com.imageclassifier.v2"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "2.0"
+        versionCode 1
+        versionName "1.0.0"
     }
 
     splits {

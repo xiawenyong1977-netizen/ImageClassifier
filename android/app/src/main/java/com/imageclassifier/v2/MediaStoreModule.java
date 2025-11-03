@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import android.content.ContentResolver;
 import android.content.ContentUris;

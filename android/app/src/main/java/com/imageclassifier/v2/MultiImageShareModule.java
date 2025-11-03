@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -62,6 +62,7 @@ public class MultiImageShareModule extends ReactContextBaseJavaModule {
             shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, imageUris);
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             
+            // 创建分享选择器
             Intent chooserIntent = Intent.createChooser(shareIntent, "分享图片到");
             chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             

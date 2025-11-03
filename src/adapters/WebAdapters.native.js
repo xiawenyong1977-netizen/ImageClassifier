@@ -193,7 +193,8 @@ export const RNFS = {
             // 删除失败，继续尝试RNFS
           } catch (error) {
             // MediaStore 删除失败，降级到 RNFS
-            logger.warn('⚠️ MediaStore删除失败:', error.message);
+            const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
+            logger.warn('⚠️ MediaStore删除失败:', errorMessage);
           }
         }
       } catch (error) {
@@ -220,7 +221,8 @@ export const RNFS = {
         
         logger.debug('🗑️ RNFS删除成功:', cleanPath);
       } catch (error) {
-        logger.error('❌ RNFS删除失败:', error.message);
+        const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
+        logger.error('❌ RNFS删除失败:', errorMessage);
         throw error;
       }
     } else {
@@ -244,7 +246,8 @@ export const RNFS = {
         
         logger.debug('🗑️ RNFS删除成功:', cleanPath);
       } catch (error) {
-        logger.error('❌ RNFS删除失败:', error.message);
+        const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
+        logger.error('❌ RNFS删除失败:', errorMessage);
         throw error;
       }
     }
@@ -399,7 +402,11 @@ export const SQLite = {
               resolve([results]);
             },
             (error) => {
-              logger.error('SQLite PRAGMA error:', { sql, error });
+              // 安全地处理错误对象，避免传递 undefined 给 logger
+              const safeError = error && typeof error === 'object' 
+                ? (error.message || JSON.stringify(error)) 
+                : String(error || 'Unknown error');
+              logger.error('SQLite PRAGMA error:', { sql, error: safeError });
               reject(error);
             }
           );
@@ -418,14 +425,22 @@ export const SQLite = {
                 resolve([results]);
               },
               (tx, error) => {
-                logger.error('SQLite executeSql error:', { sql, error });
+                // 安全地处理错误对象，避免传递 undefined 给 logger
+                const safeError = error && typeof error === 'object' 
+                  ? (error.message || JSON.stringify(error)) 
+                  : String(error || 'Unknown error');
+                logger.error('SQLite executeSql error:', { sql, error: safeError });
                 reject(error);
               }
             );
           },
           (error) => {
             // Transaction error callback
-            logger.error('SQLite transaction error:', { sql, error });
+            // 安全地处理错误对象，避免传递 undefined 给 logger
+            const safeError = error && typeof error === 'object' 
+              ? (error.message || JSON.stringify(error)) 
+              : String(error || 'Unknown error');
+            logger.error('SQLite transaction error:', { sql, error: safeError });
             reject(error);
           }
         );
@@ -635,7 +650,8 @@ export const ModelPathAdapter = {
       await RNFS_Native.copyFileAssets(sourcePath, destPath);
       logger.debug(`✅ 模型复制完成: ${modelRelativePath}`);
     } catch (error) {
-      logger.error(`❌ 模型复制失败 (${modelRelativePath}): ${error.message}`);
+      const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
+      logger.error(`❌ 模型复制失败 (${modelRelativePath}): ${errorMessage}`);
       throw error;
     }
   },

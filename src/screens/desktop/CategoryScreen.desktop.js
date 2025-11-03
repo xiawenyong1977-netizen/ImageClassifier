@@ -6,6 +6,7 @@ import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapter
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
 import WeChatAuthService from '../../services/WeChatAuthService';
+import EnhanceResultScreen from './EnhanceResultScreen.desktop';
 
 // 使用统一数据服务
 
@@ -1571,6 +1572,8 @@ const CategoryScreen = ({
                       
                       // 检查是否已经存在这个索引的结果
                       const existingIndex = newResults.findIndex(r => {
+                        // 确保 r 存在后再访问其属性
+                        if (!r) return false;
                         // 通过originalUri或index匹配
                         return r.originalUri === originalImage.uri || 
                                (r.originalImageId === originalImage.id);
@@ -1730,6 +1733,19 @@ const CategoryScreen = ({
       await backgroundTaskRef.current;
       
     } catch (error) {
+      // 检查是否是用户取消操作（正常操作，不记录为错误）
+      if (error.message && error.message.includes('轮询已被用户取消')) {
+        logger.debug('🛑 用户取消增强处理');
+        setEnhanceProgress(prev => ({
+          ...prev,
+          status: 'cancelled'
+        }));
+        setIsProcessing(false);
+        // 用户取消不需要显示错误提示
+        return;
+      }
+      
+      // 其他错误才记录为错误
       logger.error('❌ 增强处理失败:', error);
       setEnhanceProgress(prev => ({
         ...prev,
@@ -2646,7 +2662,7 @@ const CategoryScreen = ({
 
       {/* AI 图像增强模态框 */}
       {showEnhanceModal && (
-        <EnhanceModal
+        <EnhanceResultScreen
           visible={showEnhanceModal}
           onClose={handleCloseEnhanceModal}
           preset={enhancePreset}
@@ -2665,276 +2681,7 @@ const CategoryScreen = ({
   );
 };
 
-// ==================== EnhanceModal 组件 ====================
-const EnhanceModal = ({
-  visible,
-  onClose,
-  preset,
-  availablePresets = [],
-  progress,
-  selectedImages = [],
-  results = [],
-  currentIndex,
-  isProcessing,
-  onIndexChange,
-  onSave
-}) => {
-  // 获取当前图片的信息
-  const currentImage = selectedImages[currentIndex] || selectedImages[0] || {};
-  const currentResult = results[currentIndex] || {};
-  const isFailed = currentResult.status === 'failed';
-  const isSaved = currentResult.saved === true;
-  
-  // 调试日志
-  logger.debug(`🔍 EnhanceModal当前图片: index=${currentIndex}, results.length=${results.length}, currentResult=`, {
-    status: currentResult.status,
-    hasEnhancedUri: !!currentResult.enhancedUri,
-    enhancedUri: currentResult.enhancedUri || 'N/A'
-  });
-  
-  // 获取当前预设名称（从可用预设列表中查找）
-  const getPresetName = () => {
-    const found = availablePresets.find(p => p.id === preset);
-    return found ? found.name : 'AI增强';
-  };
-  
-  // 获取图片状态（从后端实时返回或results）
-  const getImageStatus = (index) => {
-    // 优先使用results（处理完成后的最终结果）
-    if (results.length > 0 && results[index]) {
-      return results[index].status === 'failed' ? 'failed' : 'completed';
-    }
-    
-    // 其次使用后端实时状态
-    if (progress.imageStatuses && progress.imageStatuses.length > 0) {
-      const imageStatus = progress.imageStatuses.find(img => img.index === index);
-      if (imageStatus) {
-        return imageStatus.status;
-      }
-    }
-    
-    // 如果正在处理，根据进度估算
-    if (isProcessing) {
-      if (index < progress.current) return 'completed';
-      if (index === progress.current) return 'processing';
-      return 'pending';
-    }
-    
-    return 'pending';
-  };
-
-  // 导航按钮处理
-  const goToPrevious = () => {
-    if (currentIndex > 0) {
-      onIndexChange(currentIndex - 1);
-    }
-  };
-
-  const goToNext = () => {
-    if (currentIndex < selectedImages.length - 1) {
-      onIndexChange(currentIndex + 1);
-    }
-  };
-
-  // 大图对比视图
-  const renderComparisonView = () => {
-    const status = getImageStatus(currentIndex);
-    
-    // 显示原图
-    const renderOriginalImage = () => (
-      <View style={styles.enhanceComparisonImageContainer}>
-        <View style={styles.enhanceComparisonImageLabelContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
-          {selectedImages.length > 1 && (
-            <Text style={styles.enhanceComparisonImageCounter}>
-              {currentIndex + 1}/{selectedImages.length}
-            </Text>
-          )}
-        </View>
-        <Image
-          source={{ uri: currentImage.uri }}
-          style={styles.enhanceComparisonImage}
-          resizeMode="contain"
-        />
-      </View>
-    );
-
-    // 显示增强图或状态
-    const renderEnhancedImage = () => {
-      // 未开始处理
-      if (!isProcessing && results.length === 0) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-              <Text style={styles.enhanceComparisonPlaceholderIcon}>🎨</Text>
-              <Text style={styles.enhanceComparisonPlaceholderText}>选择方案开始处理</Text>
-            </View>
-          </View>
-        );
-      }
-
-      // 处理中 - 显示状态
-      if (status === 'pending' || status === 'processing') {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>
-              {status === 'processing' ? '处理中' : '等待处理'}
-            </Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-              {status === 'processing' ? (
-                <>
-                  <ActivityIndicator size="large" color="#2196F3" />
-                  <Text style={styles.enhanceComparisonPlaceholderText}>照片创玩中...</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.enhanceComparisonPlaceholderIcon}>⏳</Text>
-                  <Text style={styles.enhanceComparisonPlaceholderText}>等待处理</Text>
-                </>
-              )}
-            </View>
-          </View>
-        );
-      }
-
-      // 处理失败
-      if (status === 'failed' || isFailed) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>处理失败</Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonFailedContainer]}>
-              <Text style={styles.enhanceComparisonFailedIcon}>⚠️</Text>
-              <Text style={styles.enhanceComparisonFailedTitle}>处理失败</Text>
-              <Text style={styles.enhanceComparisonFailedMessage}>
-                {currentResult.errorMessage || '未知错误'}
-              </Text>
-              <Text style={styles.enhanceComparisonFailedHint}>
-                请尝试单独处理此图片，或稍后重试
-              </Text>
-            </View>
-          </View>
-        );
-      }
-
-      // 处理成功 - 显示增强后的图片
-      if (status === 'completed' && currentResult.enhancedUri) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-            <Image
-              source={{ uri: currentResult.enhancedUri }}
-              style={styles.enhanceComparisonImage}
-              resizeMode="contain"
-              onError={(error) => logger.error('❌ Image加载失败:', currentResult.enhancedUri, error)}
-              onLoad={() => logger.debug('✅ Image加载成功:', currentResult.enhancedUri)}
-            />
-          </View>
-        );
-      }
-
-      // 默认占位
-      return (
-        <View style={styles.enhanceComparisonImageContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-          <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-            <Text style={styles.enhanceComparisonPlaceholderText}>暂无结果</Text>
-          </View>
-        </View>
-      );
-    };
-
-    return (
-      <View style={styles.enhanceComparisonSection}>
-        <View style={styles.enhanceComparisonContainer}>
-          {/* 左侧：原图和增强图 */}
-          <View style={styles.enhanceComparisonImages}>
-            {renderOriginalImage()}
-            {renderEnhancedImage()}
-          </View>
-
-          {/* 右侧：操作按钮区 */}
-          <View style={styles.enhanceComparisonRightButtons}>
-            {/* 上一张按钮 */}
-            {selectedImages.length > 1 && (
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === 0 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToPrevious}
-                disabled={currentIndex === 0}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↑</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 下一张按钮 */}
-            {selectedImages.length > 1 && (
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === selectedImages.length - 1 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToNext}
-                disabled={currentIndex === selectedImages.length - 1}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↓</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 保存按钮 */}
-            <TouchableOpacity
-              style={[
-                styles.enhanceComparisonSaveButtonVertical,
-                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonDisabled
-              ]}
-              onPress={onSave}
-              disabled={status !== 'completed' || !currentResult.enhancedUri || isSaved}
-            >
-              <Text style={[
-                styles.enhanceComparisonSaveButtonText,
-                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonTextDisabled
-              ]}>
-                {isSaved ? '✅' : '💾'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-      style={{ zIndex: 999999 }}
-    >
-      <View style={styles.enhanceModalOverlay}>
-        <View style={styles.enhanceModalContent}>
-          {/* 标题栏 */}
-          <View style={styles.enhanceModalHeader}>
-            <View style={styles.enhanceModalTitleContainer}>
-              <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
-              <Text style={styles.enhanceModalCounter}>
-                {results.filter(r => r.status === 'success' && r.enhancedUri).length}/{progress.total || results.length || selectedImages.length}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
-              <Text style={styles.enhanceModalCloseButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 大图对比视图 */}
-          {renderComparisonView()}
-        </View>
-      </View>
-    </Modal>
-  );
-};
+// EnhanceModal 已移至 EnhanceResultScreen.desktop.js
 
 const styles = StyleSheet.create({
   container: {

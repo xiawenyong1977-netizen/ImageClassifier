@@ -56,9 +56,12 @@ export default function EnhanceResultScreen({ route, navigation }) {
 
   const current = selected[index] || null;
   const currentResult = current ? localResults[current.id] : null;
-  const enhancedReady = !!(currentResult && currentResult.status === 'done');
+  // enhancedReady 需要同时满足状态为 'done' 且存在 enhancedUri
+  const enhancedReady = !!(currentResult && currentResult.status === 'done' && currentResult.enhancedUri);
   const processing = !!(currentResult && (currentResult.status === 'pending' || currentResult.status === 'processing'));
   const failed = !!(currentResult && currentResult.status === 'failed');
+  // 状态为 'done' 但没有 enhancedUri，显示加载中提示
+  const loadingEnhanced = !!(currentResult && currentResult.status === 'done' && !currentResult.enhancedUri);
   const isSaving = current ? !!savingById[current.id] : false;
   const canSave = enhancedReady && !failed && !isSaving && !(currentResult && currentResult.saved);
   const translateX = useRef(new Animated.Value(0)).current;
@@ -378,10 +381,12 @@ export default function EnhanceResultScreen({ route, navigation }) {
     return unsubscribe;
   }, [navigation, taskProcessing]);
 
-  // 当切换到新的图片或该图片增强完成时：默认展示增强图
+  // 当切换到新的图片或该图片增强完成时：默认展示增强图（仅当有 enhancedUri 时）
   useEffect(() => {
     if (!current) return;
-    if (localResults[current.id]?.status === 'done') {
+    const result = localResults[current.id];
+    // 只有当状态为 'done' 且存在 enhancedUri 时才默认显示增强图
+    if (result?.status === 'done' && result?.enhancedUri) {
       setShowEnhanced(true);
     } else {
       setShowEnhanced(false);
@@ -438,10 +443,12 @@ export default function EnhanceResultScreen({ route, navigation }) {
           <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>暂无图片</Text></View>
         )}
 
-        {/* 处理中蒙层 */}
-        {(processing || failed) && (
+        {/* 处理中/加载中/失败蒙层 */}
+        {(processing || loadingEnhanced || failed) && (
           <View style={styles.processingOverlay}>
-            <Text style={styles.processingText}>{failed ? '处理失败' : '处理中…'}</Text>
+            <Text style={styles.processingText}>
+              {failed ? '处理失败' : loadingEnhanced ? '加载增强结果中…' : '处理中…'}
+            </Text>
           </View>
         )}
 

@@ -9,6 +9,42 @@ class SQLiteAdapter {
     this.isInitialized = false;
   }
 
+  // 辅助函数：将 tx.executeSql 包装成 Promise（移动端兼容性处理）
+  // 注意：在事务中，所有操作必须在事务函数返回前完成，不能有异步操作在事务外执行
+  _executeSqlPromise(tx, sql, params = []) {
+    return new Promise((resolve, reject) => {
+      try {
+        // 检查事务状态（某些情况下可能已经 finalized）
+        tx.executeSql(
+          sql,
+          params || [],
+          (tx, result) => {
+            // 确保返回的是 result 对象，而不是数组
+            // 在事务回调中立即 resolve，不要有额外延迟
+            try {
+              resolve(result);
+            } catch (resolveError) {
+              // 如果 resolve 时出错，reject
+              reject(resolveError);
+            }
+          },
+          (tx, error) => {
+            // 错误回调中也要正确处理
+            try {
+              reject(error);
+            } catch (rejectError) {
+              // 如果 reject 时出错，记录但不要再次抛出
+              logger.error('❌ _executeSqlPromise reject 失败:', rejectError);
+            }
+          }
+        );
+      } catch (executeError) {
+        // 如果 executeSql 本身抛出异常（比如事务已 finalized）
+        reject(executeError);
+      }
+    });
+  }
+
   async init() {
     if (this.isInitialized && this.db) {
       return this.db;
@@ -36,19 +72,55 @@ class SQLiteAdapter {
           });
         };
       }
+
+      // 创建专门用于执行 PRAGMA 的方法（不能在事务中执行）
+      this._executePragma = (sql) => {
+        return new Promise((resolve, reject) => {
+          // PRAGMA 必须直接在数据库对象上执行，不能通过 transaction
+          // 使用 readTransaction 或者直接执行
+          this.db.readTransaction((tx) => {
+            tx.executeSql(sql, [], (tx, result) => {
+              resolve(result);
+            }, (tx, error) => {
+              reject(error);
+            });
+          });
+        });
+      };
       
       // 创建表结构
       await this.createTables();
       
-      // 数据库优化配置
+      // 数据库优化配置（PRAGMA 必须在事务外执行，使用特殊方法）
       try {
         logger.debug('📋 设置 SQLite PRAGMA...');
-        await this.db.executeSql('PRAGMA journal_mode = WAL;');  // 写前日志模式
-        await this.db.executeSql('PRAGMA synchronous = NORMAL;');
-        await this.db.executeSql('PRAGMA cache_size = 10000;');
-        logger.debug('✅ SQLite PRAGMA 设置成功');
+        // 注意：某些 PRAGMA 在 React Native SQLite 中可能不支持或有限制
+        // 尝试设置，但失败不影响主要功能
+        try {
+          await this._executePragma('PRAGMA journal_mode = WAL;');  // 写前日志模式
+        } catch (e) {
+          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
+          logger.debug('⚠️ PRAGMA journal_mode 设置跳过:', errorMessage);
+        }
+        try {
+          await this._executePragma('PRAGMA synchronous = NORMAL;');
+        } catch (e) {
+          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
+          logger.debug('⚠️ PRAGMA synchronous 设置跳过:', errorMessage);
+        }
+        try {
+          await this._executePragma('PRAGMA cache_size = 10000;');
+        } catch (e) {
+          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
+          logger.debug('⚠️ PRAGMA cache_size 设置跳过:', errorMessage);
+        }
+        logger.debug('✅ SQLite PRAGMA 设置完成');
       } catch (pragmaError) {
-        logger.warn('⚠️ SQLite PRAGMA 设置失败（非致命错误）:', pragmaError);
+        // 安全地处理错误对象，避免访问 undefined 的属性
+        const errorMessage = pragmaError && typeof pragmaError === 'object' 
+          ? (pragmaError.message || JSON.stringify(pragmaError)) 
+          : String(pragmaError || 'Unknown PRAGMA error');
+        logger.warn('⚠️ SQLite PRAGMA 设置失败（非致命错误）:', errorMessage);
         // PRAGMA 失败不影响主要功能，继续初始化
       }
       
@@ -252,101 +324,229 @@ class SQLiteAdapter {
       }
       
       // 使用事务批量操作
-      await this.db.transaction(async (tx) => {
-        for (const image of value) {
-          const sql = `
-            INSERT OR REPLACE INTO images (
-              id, uri, fileName, category, confidence, timestamp, takenAt,
-              size, mimeType, width, height, createdAt, updatedAt,
-              latitude, longitude, altitude, accuracy,
-              address, city, country, province, district, street, locationSource, cityDistance,
-              idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `;
-          
-          await tx.executeSql(sql, [
-            image.id,
-            image.uri,
-            image.fileName,
-            image.category,
-            image.confidence,
-            image.timestamp,
-            image.takenAt,
-            image.size,
-            image.mimeType,
-            image.width,
-            image.height,
-            image.createdAt,
-            image.updatedAt,
-            image.latitude,
-            image.longitude,
-            image.altitude,
-            image.accuracy,
-            image.address,
-            image.city,
-            image.country,
-            image.province,
-            image.district,
-            image.street,
-            image.locationSource,
-            image.cityDistance,
-            image.idCardDetections ? JSON.stringify(image.idCardDetections) : null,
-            image.generalDetections ? JSON.stringify(image.generalDetections) : null,
-            image.mobileNetV3Detections ? JSON.stringify(image.mobileNetV3Detections) : null,
-            image.imageDimensions ? JSON.stringify(image.imageDimensions) : null,
-            image.message
-          ]);
-        }
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          let completed = 0;
+          let hasError = false;
+          const totalImages = value.length;
+
+          if (totalImages === 0) {
+            resolve(true);
+            return;
+          }
+
+          for (const image of value) {
+            const sql = `
+              INSERT OR REPLACE INTO images (
+                id, uri, fileName, category, confidence, timestamp, takenAt,
+                size, mimeType, width, height, createdAt, updatedAt,
+                latitude, longitude, altitude, accuracy,
+                address, city, country, province, district, street, locationSource, cityDistance,
+                idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            
+            tx.executeSql(
+              sql,
+              [
+                image.id,
+                image.uri,
+                image.fileName,
+                image.category,
+                image.confidence,
+                image.timestamp,
+                image.takenAt,
+                image.size,
+                image.mimeType,
+                image.width,
+                image.height,
+                image.createdAt,
+                image.updatedAt,
+                image.latitude,
+                image.longitude,
+                image.altitude,
+                image.accuracy,
+                image.address,
+                image.city,
+                image.country,
+                image.province,
+                image.district,
+                image.street,
+                image.locationSource,
+                image.cityDistance,
+                image.idCardDetections ? JSON.stringify(image.idCardDetections) : null,
+                image.generalDetections ? JSON.stringify(image.generalDetections) : null,
+                image.mobileNetV3Detections ? JSON.stringify(image.mobileNetV3Detections) : null,
+                image.imageDimensions ? JSON.stringify(image.imageDimensions) : null,
+                image.message
+              ],
+              (tx, result) => {
+                completed++;
+                if (completed === totalImages && !hasError) {
+                  resolve(true);
+                }
+              },
+              (tx, error) => {
+                if (!hasError) {
+                  hasError = true;
+                  reject(error);
+                }
+              }
+            );
+          }
+        }, (error) => {
+          if (error) {
+            reject(error);
+          }
+        });
       });
       
       logger.debug(`✅ SQLite批量保存${value.length}张图片`);
       return true;
     } else if (key === 'settings') {
       // 保存设置
-      await this.db.transaction(async (tx) => {
-        for (const [settingKey, settingValue] of Object.entries(value)) {
-          await tx.executeSql(
-            'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-            [settingKey, JSON.stringify(settingValue)]
-          );
-        }
+      // 注意：React Native SQLite 的 transaction 不支持 async/await 在循环中使用
+      // 必须在事务回调中同步执行所有操作，或使用 Promise 包装整个事务
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          const settingsEntries = Object.entries(value);
+          let completed = 0;
+          let hasError = false;
+
+          if (settingsEntries.length === 0) {
+            // 如果没有设置项，直接完成
+            resolve(true);
+            return;
+          }
+
+          for (const [settingKey, settingValue] of settingsEntries) {
+            tx.executeSql(
+              'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+              [settingKey, JSON.stringify(settingValue)],
+              (tx, result) => {
+                completed++;
+                if (completed === settingsEntries.length && !hasError) {
+                  // 所有操作完成，事务会自动提交
+                  resolve(true);
+                }
+              },
+              (tx, error) => {
+                if (!hasError) {
+                  hasError = true;
+                  reject(error);
+                }
+              }
+            );
+          }
+        }, (error) => {
+          // 事务错误回调（如果事务本身失败）
+          if (error) {
+            reject(error);
+          }
+        });
       });
       
       return true;
     } else if (key === 'similarityData') {
       // 保存相似度数据
-      await this.db.transaction(async (tx) => {
-        for (const [imageId, data] of Object.entries(value)) {
-          await tx.executeSql(
-            `INSERT OR REPLACE INTO similarity_data 
-             (imageId, similarity_group_id, similarity_group_type, similarity_score, is_similarity_processed, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              imageId,
-              data.similarity_group_id,
-              data.similarity_group_type,
-              data.similarity_score,
-              data.is_similarity_processed ? 1 : 0,
-              data.updatedAt
-            ]
-          );
-        }
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          const entries = Object.entries(value);
+          let completed = 0;
+          let hasError = false;
+
+          if (entries.length === 0) {
+            resolve(true);
+            return;
+          }
+
+          for (const [imageId, data] of entries) {
+            tx.executeSql(
+              `INSERT OR REPLACE INTO similarity_data 
+               (imageId, similarity_group_id, similarity_group_type, similarity_score, is_similarity_processed, updatedAt)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [
+                imageId,
+                data.similarity_group_id,
+                data.similarity_group_type,
+                data.similarity_score,
+                data.is_similarity_processed ? 1 : 0,
+                data.updatedAt
+              ],
+              (tx, result) => {
+                completed++;
+                if (completed === entries.length && !hasError) {
+                  resolve(true);
+                }
+              },
+              (tx, error) => {
+                if (!hasError) {
+                  hasError = true;
+                  reject(error);
+                }
+              }
+            );
+          }
+        }, (error) => {
+          if (error) {
+            reject(error);
+          }
+        });
       });
       
       return true;
     } else if (key === 'similarityGroupIndex') {
       // 保存相似组索引
-      await this.db.transaction(async (tx) => {
-        // 清空旧数据
-        await tx.executeSql('DELETE FROM similarity_group_index');
-        
-        // 插入新数据
-        for (const [groupId, imageIds] of Object.entries(value)) {
-          await tx.executeSql(
-            'INSERT INTO similarity_group_index (groupId, imageIds, created_at) VALUES (?, ?, ?)',
-            [groupId, JSON.stringify(imageIds), new Date().toISOString()]
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          const entries = Object.entries(value);
+          let deleteCompleted = false;
+          let insertCompleted = 0;
+          let hasError = false;
+
+          // 清空旧数据
+          tx.executeSql(
+            'DELETE FROM similarity_group_index',
+            [],
+            (tx, result) => {
+              deleteCompleted = true;
+              // 如果没有新数据，直接完成
+              if (entries.length === 0) {
+                resolve(true);
+                return;
+              }
+              // 开始插入新数据
+              for (const [groupId, imageIds] of entries) {
+                tx.executeSql(
+                  'INSERT INTO similarity_group_index (groupId, imageIds, created_at) VALUES (?, ?, ?)',
+                  [groupId, JSON.stringify(imageIds), new Date().toISOString()],
+                  (tx, result) => {
+                    insertCompleted++;
+                    if (insertCompleted === entries.length && !hasError) {
+                      resolve(true);
+                    }
+                  },
+                  (tx, error) => {
+                    if (!hasError) {
+                      hasError = true;
+                      reject(error);
+                    }
+                  }
+                );
+              }
+            },
+            (tx, error) => {
+              if (!hasError) {
+                hasError = true;
+                reject(error);
+              }
+            }
           );
-        }
+        }, (error) => {
+          if (error) {
+            reject(error);
+          }
+        });
       });
       
       return true;
@@ -424,11 +624,62 @@ class SQLiteAdapter {
   async clear() {
     await this.init();
     
-    await this.db.transaction(async (tx) => {
-      await tx.executeSql('DELETE FROM images');
-      await tx.executeSql('DELETE FROM settings');
-      await tx.executeSql('DELETE FROM similarity_data');
-      await tx.executeSql('DELETE FROM similarity_group_index');
+    await new Promise((resolve, reject) => {
+      this.db.transaction((tx) => {
+        let completed = 0;
+        let hasError = false;
+        const totalOperations = 4;
+
+        const checkComplete = () => {
+          if (completed === totalOperations && !hasError) {
+            resolve(true);
+          }
+        };
+
+        tx.executeSql('DELETE FROM images', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+
+        tx.executeSql('DELETE FROM settings', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+
+        tx.executeSql('DELETE FROM similarity_data', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+
+        tx.executeSql('DELETE FROM similarity_group_index', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+      }, (error) => {
+        if (error) {
+          reject(error);
+        }
+      });
     });
     
     logger.debug('✅ SQLite数据库已清空');
@@ -541,24 +792,47 @@ class SQLiteAdapter {
     let removedCount = 0;
     let failedCount = 0;
     
-    await this.db.transaction(async (tx) => {
-      for (const imageId of imageIds) {
-        try {
-          const [result] = await tx.executeSql(
-            'DELETE FROM images WHERE id = ?',
-            [imageId]
-          );
-          
-          if (result.rowsAffected > 0) {
-            removedCount++;
-          } else {
-            failedCount++;
-  }
-} catch (error) {
-          logger.error(`❌ SQLite删除失败: ${imageId}`, error);
-          failedCount++;
+    await new Promise((resolve, reject) => {
+      this.db.transaction((tx) => {
+        let completed = 0;
+        let hasError = false;
+        const totalIds = imageIds.length;
+
+        if (totalIds === 0) {
+          resolve(true);
+          return;
         }
-      }
+
+        for (const imageId of imageIds) {
+          tx.executeSql(
+            'DELETE FROM images WHERE id = ?',
+            [imageId],
+            (tx, result) => {
+              completed++;
+              if (result && result.rowsAffected > 0) {
+                removedCount++;
+              } else {
+                failedCount++;
+              }
+              if (completed === totalIds) {
+                resolve(true);
+              }
+            },
+            (tx, error) => {
+              completed++;
+              logger.error(`❌ SQLite删除失败: ${imageId}`, error);
+              failedCount++;
+              if (completed === totalIds) {
+                resolve(true);
+              }
+            }
+          );
+        }
+      }, (error) => {
+        if (error) {
+          reject(error);
+        }
+      });
     });
     
     logger.debug(`✅ SQLite批量删除: 成功${removedCount}, 失败${failedCount}`);
@@ -1928,43 +2202,6 @@ class ImageStorageService {
     }
   }
 
-  // 获取默认扫描路径（平台相关）
-  getDefaultScanPaths() {
-    if (Platform.OS === 'web') {
-      // PC端：使用Electron API获取用户目录
-      try {
-        // 只在Electron环境中运行时动态加载os模块
-        if (typeof window !== 'undefined' && window.require) {
-          try {
-            const os = window.require('os');
-            const homeDir = os.homedir();
-            return [
-              `${homeDir}\\Pictures`,
-              `${homeDir}\\Documents`,
-              `${homeDir}\\Desktop`,
-              `${homeDir}\\Downloads`
-            ];
-          } catch (requireError) {
-            console.warn('Failed to require os module:', requireError);
-            return ['C:\\Users\\Public\\Pictures'];
-          }
-        } else {
-          // 如果Electron不可用，使用默认路径
-          return ['C:\\Users\\Public\\Pictures'];
-        }
-      } catch (error) {
-        console.warn('Failed to get user home directory:', error);
-        return ['C:\\Users\\Public\\Pictures'];
-      }
-    } else {
-      // 移动端：返回默认相册目录，避免全设备扫描
-      return [
-        '/storage/emulated/0/DCIM/Camera',
-        '/storage/emulated/0/DCIM/Screenshots',
-        '/storage/emulated/0/Pictures'
-      ];
-    }
-  }
 
   /**
    * 生成UUID（通用唯一标识符）
@@ -2031,10 +2268,7 @@ class ImageStorageService {
         // 确保必要的设置项存在，但不要覆盖用户已有的配置
         const result = { ...parsed };
         
-        // 只有在用户配置中完全没有这些项时才使用默认值
-        if (result.scanPaths === undefined || result.scanPaths === null) {
-          result.scanPaths = this.getDefaultScanPaths();
-        }
+        // scanPaths 不再自动初始化，保持用户设置或 undefined/null
         // 如果用户明确设置了空数组，保持空数组（移动端扫描整个设备）
         if (result.scanPaths && result.scanPaths.length === 0 && Platform.OS !== 'web') {
           // 移动端空数组是有效的，表示扫描整个设备
@@ -2119,7 +2353,7 @@ class ImageStorageService {
       
       // 如果没有设置数据，返回默认设置
       const defaultSettings = {
-        scanPaths: this.getDefaultScanPaths(),
+        scanPaths: Platform.OS === 'web' ? [] : [], // 不自动初始化路径，由用户手动设置
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
         
@@ -2169,7 +2403,7 @@ class ImageStorageService {
       console.error('Failed to get settings:', error);
       // 错误情况下也返回默认设置
       return {
-        scanPaths: this.getDefaultScanPaths(),
+        scanPaths: [], // 不自动初始化路径，由用户手动设置
         hideEmptyCategories: false,
         scanInterval: 5,
         

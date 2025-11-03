@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, clipboard, nativeImage } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const fs = require('fs');
@@ -388,6 +388,32 @@ function setupIpcHandlers() {
       return { success: false, error: error.message };
     }
   });
+
+  // ========== 分享功能相关 IPC handlers ==========
+  
+  /**
+   * 复制图片文件到剪贴板（作为图片对象）
+   */
+  ipcMain.handle('shell-copy-image-to-clipboard', async (event, imagePath) => {
+    try {
+      // 使用nativeImage加载图片
+      const image = nativeImage.createFromPath(imagePath);
+      
+      if (image.isEmpty()) {
+        logger.error('❌ 图片为空或加载失败:', imagePath);
+        return { success: false, error: '图片加载失败' };
+      }
+      
+      // 将图片写入剪贴板
+      clipboard.writeImage(image);
+      logger.debug('✅ 图片已复制到剪贴板:', imagePath);
+      return { success: true };
+    } catch (error) {
+      logger.error('❌ 复制图片失败:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
 }
 
 // 在应用启动前设置 GPU 相关参数，解决 GPU 状态错误

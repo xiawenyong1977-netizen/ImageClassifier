@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;
