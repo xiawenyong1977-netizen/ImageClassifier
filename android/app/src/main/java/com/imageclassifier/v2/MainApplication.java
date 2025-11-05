@@ -24,6 +24,7 @@ import org.pgsqlite.SQLitePluginPackage;
 import ai.onnxruntime.reactnative.OnnxruntimePackage;
 import com.imageclassifier.v2.MediaStorePackage;
 import com.imageclassifier.v2.SharePackage;
+import com.imageclassifier.v2.ScanServicePackage;
 
 public class MainApplication extends Application implements ReactApplication {
 
@@ -52,7 +53,8 @@ public class MainApplication extends Application implements ReactApplication {
             new SQLitePluginPackage(),
             new OnnxruntimePackage(),
             new MediaStorePackage(),  // 添加MediaStore原生模块
-            new SharePackage()  // 添加Share原生模块
+            new SharePackage(),  // 添加Share原生模块
+            new ScanServicePackage()  // 添加扫描服务原生模块
           );
         }
 

@@ -100,6 +100,27 @@ export const Platform = {
   select: (obj) => obj.web || obj.default
 };
 
+// AppState（Web环境模拟，移动端会使用WebAdapters.native.js中的实现）
+export const AppState = {
+  currentState: 'active',
+  addEventListener: (event, handler) => {
+    // Web环境：监听窗口焦点变化
+    if (event === 'change') {
+      const handleFocus = () => handler('active');
+      const handleBlur = () => handler('background');
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('blur', handleBlur);
+      return {
+        remove: () => {
+          window.removeEventListener('focus', handleFocus);
+          window.removeEventListener('blur', handleBlur);
+        }
+      };
+    }
+    return { remove: () => {} };
+  }
+};
+
 // URI转换函数 - 将文件URI转换为Web可访问的格式
 export const getWebAccessibleUri = (uri) => {
   if (!uri) return null;

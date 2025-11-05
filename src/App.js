@@ -1,3 +1,6 @@
+// 🔧 确保 polyfill 已加载
+import './polyfills';
+
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, Platform } from 'react-native';
 

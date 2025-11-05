@@ -1,7 +1,41 @@
+// 🔧 必须在所有 import 之前设置 polyfill，防止依赖库使用未定义的函数
+// 设置 setImmediate polyfill (React Native 不支持 setImmediate)
+if (typeof global.setImmediate === 'undefined') {
+  global.setImmediate = (fn, ...args) => {
+    return setTimeout(() => {
+      if (typeof fn === 'function') {
+        fn(...args);
+      }
+    }, 0);
+  };
+  global.clearImmediate = (id) => {
+    return clearTimeout(id);
+  };
+}
+
+// 设置 performance polyfill (React Native 不支持 performance API)
+if (typeof global.performance === 'undefined') {
+  const startTime = Date.now();
+  global.performance = {
+    now: () => {
+      return Date.now() - startTime;
+    },
+    timing: {
+      navigationStart: startTime,
+    },
+    mark: () => {},
+    measure: () => {},
+    clearMarks: () => {},
+    clearMeasures: () => {},
+    getEntriesByType: () => [],
+    getEntriesByName: () => [],
+  };
+}
+
 // 共享适配层 - 移动端专用版本
 // 使用静态导入避免Metro的动态require问题
 import React from 'react';
-import { View, Text, Alert as RNAlert, Platform, PermissionsAndroid as RN_PermissionsAndroid, NativeModules } from 'react-native';
+import { View, Text, Alert as RNAlert, Platform, PermissionsAndroid as RN_PermissionsAndroid, NativeModules, AppState as RNAppState } from 'react-native';
 import { Buffer } from 'buffer';
 
 // React Native 专用模块 - 静态导入
@@ -66,6 +100,9 @@ const logger = new Logger();
 
 // Platform（直接重新导出）
 export { Platform };
+
+// AppState（用于监听应用状态变化）
+export const AppState = RNAppState;
 
 // logger
 export { logger };

@@ -28,8 +28,9 @@ class ImageClassifierService {
     this.BATCH_CONFIG = {
       CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
       UPLOAD_BATCH_SIZE: 20,       // 批量上传大小（移动端会在每批次后清理临时文件）
-      REMOTE_TIMEOUT: 120000,     // 远程请求超时（毫秒）- 增加到120秒（移动端网络较慢）
-      HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
+      REMOTE_TIMEOUT: 180000,     // 远程请求超时（毫秒）- 增加到180秒（后台网络可能更慢）
+      CACHE_TIMEOUT: 60000,       // 缓存查询超时（毫秒）- 60秒
+      HEALTH_CHECK_TIMEOUT: 10000  // 健康检查超时（毫秒）- 增加到10秒
     };
     
     // 注意：已移除 Web Worker 池，使用主线程并行推理
@@ -1643,21 +1644,41 @@ class ImageClassifierService {
           headers['X-User-ID'] = userId;
         }
         
-        const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ image_hashes: batchHashes })
-        });
+        // 添加超时控制，防止后台请求挂起
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          logger.warn(`⚠️ 缓存查询超时 (${this.BATCH_CONFIG.CACHE_TIMEOUT}ms)，中止请求...`);
+          controller.abort();
+        }, this.BATCH_CONFIG.CACHE_TIMEOUT);
         
-        if (!response.ok) {
-          throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+        try {
+          const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ image_hashes: batchHashes }),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId); // 成功后清除超时器
+          
+          if (!response.ok) {
+            throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+          }
+          
+          const result = await response.json();
+          allItems.push(...result.items);
+          totalCached += result.cached_count;
+          
+          logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
+        } catch (fetchError) {
+          clearTimeout(timeoutId); // 失败后也要清除超时器
+          if (fetchError.name === 'AbortError') {
+            logger.warn(`⚠️ 批次 ${Math.floor(i / batchSize) + 1} 缓存查询超时，跳过该批次`);
+            // 继续处理下一批次，不抛出错误
+            continue;
+          }
+          throw fetchError;
         }
-        
-        const result = await response.json();
-        allItems.push(...result.items);
-        totalCached += result.cached_count;
-        
-        logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
       }
       
       logger.debug(`✅ 批量缓存查询完成：总命中 ${totalCached}/${imageHashes.length}`);

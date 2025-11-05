@@ -567,13 +567,13 @@ const HomeScreen = () => {
         if (progress.shouldRefresh) {
           logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
           // 异步刷新，不阻塞扫描进度
-          setImmediate(async () => {
+          setTimeout(async () => {
             try {
               await loadData();
             } catch (error) {
               logger.error('❌ 定期刷新失败:', error);
             }
-          });
+          }, 0);
         }
       }, compareLimitOption);
       

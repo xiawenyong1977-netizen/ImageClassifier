@@ -614,6 +614,8 @@ import ParallelHashCalculator from './ParallelHashCalculator.js';
 import configService from './ConfigService.js';
 import ImageSimilarityService from './ImageSimilarityService.js';
 import MediaStoreService from './MediaStoreService.js';
+const { ScanService } = require('../adapters/ScanServiceAdapter');
+import { AppState } from '../adapters/WebAdapters';
 
 
 class GalleryScannerService {
@@ -642,6 +644,45 @@ class GalleryScannerService {
     this.lastRefreshCount = 0; // 上次刷新时的分类成功数
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
     this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
+    
+    // AppState 监听器，用于保持后台执行
+    this.appStateSubscription = null;
+    this.isScanning = false;
+    
+    // Android平台：监听应用状态，确保后台时继续执行
+    if (Platform.OS === 'android') {
+      this.setupAppStateListener();
+    }
+  }
+  
+  /**
+   * 设置 AppState 监听器，确保在后台时任务继续执行
+   */
+  setupAppStateListener() {
+    if (!AppState || !AppState.addEventListener) {
+      logger.warn('⚠️ AppState 不可用，无法监听应用状态');
+      return;
+    }
+    
+    this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (this.isScanning) {
+        if (nextAppState === 'background' || nextAppState === 'inactive') {
+          logger.debug('📱 应用进入后台，但扫描任务将继续执行（前台服务 + WakeLock）');
+        } else if (nextAppState === 'active') {
+          logger.debug('📱 应用回到前台');
+        }
+      }
+    });
+  }
+  
+  /**
+   * 清理 AppState 监听器
+   */
+  cleanupAppStateListener() {
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
   }
 
 
@@ -1358,6 +1399,12 @@ class GalleryScannerService {
       filesProcessed
     });
     
+    // Android平台：更新前台服务通知
+    if (Platform.OS === 'android') {
+      const progressMessage = progressData.message || `${stage}: ${filesProcessed}/${filesFound}`;
+      ScanService.updateProgress(progressMessage, filesProcessed, filesFound);
+    }
+    
     this.onProgress(progressData);
   }
 
@@ -1369,6 +1416,14 @@ class GalleryScannerService {
     try {
       // 保存onProgress为实例变量
       this.onProgress = onProgress;
+      
+      // 标记正在扫描
+      this.isScanning = true;
+      
+      // Android平台：启动前台服务，支持后台扫描
+      if (Platform.OS === 'android') {
+        ScanService.start();
+      }
       
       // 发送初始化进度消息，设置扫描开始时间
       this.sendProgressMessage('initializing', 0, 0);
@@ -1437,6 +1492,14 @@ class GalleryScannerService {
       this.imageClassifier.unloadAllModels();
       }
       
+      // 标记扫描完成
+      this.isScanning = false;
+      
+      // Android平台：停止前台服务
+      if (Platform.OS === 'android') {
+        ScanService.stop();
+      }
+      
       return {
         success: true,
         deleted: deletedUris.length,
@@ -1447,6 +1510,14 @@ class GalleryScannerService {
       
     } catch (error) {
       console.error('❌ 独立扫描线程方案失败:', error);
+      
+      // 标记扫描完成（即使出错）
+      this.isScanning = false;
+      
+      // Android平台：出错时也要停止前台服务
+      if (Platform.OS === 'android') {
+        ScanService.stop();
+      }
       
       // 如果加载了模型，即使出现错误也要卸载
       if (this.imageClassifier.isInitialized) {
