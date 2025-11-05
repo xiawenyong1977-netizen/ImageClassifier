@@ -1013,6 +1013,7 @@ class IndexedDBAdapter {
 
   async getItem(key) {
     await this.init();
+    logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 开始读取 key="${key}"`);
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction([key], 'readonly');
       const store = transaction.objectStore(key);
@@ -1020,10 +1021,21 @@ class IndexedDBAdapter {
       
       request.onsuccess = () => {
         const results = request.result;
+        logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: getAll 成功, key="${key}", 结果数量=${results.length}`);
         if (results.length === 0) {
+          logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 结果为空，返回 null`);
           resolve(null);
         } else if (key === 'images') {
           // 对于图片数据，返回数组
+          logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回图片数组，数量=${results.length}`);
+          // 🔍 诊断：检查第一条记录的 category
+          if (results.length > 0) {
+            const firstItem = results[0];
+            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 第一条记录 category="${firstItem.category}", id="${firstItem.id}"`);
+            const naCount = results.filter(img => img.category === 'NA').length;
+            const screenshotCount = results.filter(img => img.category === 'screenshot').length;
+            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: NA=${naCount}, screenshot=${screenshotCount}`);
+          }
           resolve(results);
         } else {
           // 对于其他数据，返回第一个结果的值
@@ -1191,25 +1203,76 @@ class IndexedDBAdapter {
     });
   }
 
+  /**
+   * 清空 IndexedDB 所有数据（模拟全新启动）
+   * 清空所有 objectStore：images, stats, settings, classificationRules, similarityData, similarityGroupIndex
+   */
   async clear() {
     await this.init();
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['images', 'stats', 'settings'], 'readwrite');
+      // 获取所有 objectStore 名称
+      const storeNames = Array.from(this.db.objectStoreNames);
+      logger.debug(`🗑️ 开始清空 IndexedDB，包含 ${storeNames.length} 个表:`, storeNames);
+      
+      const transaction = this.db.transaction(storeNames, 'readwrite');
       
       transaction.oncomplete = () => {
-        logger.debug(' IndexedDB 清空成功');
+        logger.debug('✅ IndexedDB 所有数据清空成功');
         resolve(true);
       };
       
       transaction.onerror = () => {
-        logger.error(' IndexedDB 清空失败:', transaction.error);
+        logger.error('❌ IndexedDB 清空失败:', transaction.error);
         reject(transaction.error);
       };
       
       // 清空所有表
-      transaction.objectStore('images').clear();
-      transaction.objectStore('stats').clear();
-      transaction.objectStore('settings').clear();
+      for (const storeName of storeNames) {
+        try {
+          transaction.objectStore(storeName).clear();
+          logger.debug(`  ✅ 已清空表: ${storeName}`);
+        } catch (error) {
+          logger.warn(`  ⚠️ 清空表失败: ${storeName}`, error);
+        }
+      }
+    });
+  }
+
+  /**
+   * 完全删除 IndexedDB 数据库（模拟全新启动）
+   * 这会删除整个数据库，下次访问时会自动重新创建
+   */
+  async deleteDatabase() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error('IndexedDB 不可用'));
+        return;
+      }
+
+      // 关闭现有连接
+      if (this.db) {
+        this.db.close();
+        this.db = null;
+        this.isInitialized = false;
+      }
+
+      const deleteRequest = indexedDB.deleteDatabase(this.dbName);
+      
+      deleteRequest.onsuccess = () => {
+        logger.debug('✅ IndexedDB 数据库删除成功:', this.dbName);
+        resolve(true);
+      };
+      
+      deleteRequest.onerror = () => {
+        logger.error('❌ IndexedDB 数据库删除失败:', deleteRequest.error);
+        reject(deleteRequest.error);
+      };
+      
+      deleteRequest.onblocked = () => {
+        logger.warn('⚠️ IndexedDB 数据库删除被阻塞，可能有其他连接正在使用');
+        // 即使被阻塞，也继续删除
+        resolve(true);
+      };
     });
   }
 
@@ -1374,6 +1437,201 @@ class ImageStorageService {
     }
   }
   
+  /**
+   * 批量更新分类信息（只更新分类相关字段，不更新其他字段）
+   * @param {Array} classificationDataArray - 分类数据数组，每个元素包含：
+   *   - uri: 图片 URI（必需）
+   *   - category: 分类ID（必需）
+   *   - confidence: 置信度（可选）
+   *   - idCardDetections: 身份证检测结果（可选）
+   *   - generalDetections: 通用检测结果（可选）
+   *   - mobileNetV3Detections: MobileNetV3检测结果（可选）
+   *   - message: 大模型推理描述（可选）
+   * @returns {Promise<Object>} 更新结果统计 { success: boolean, updatedCount: number, failedCount: number }
+   */
+  async batchUpdateClassification(classificationDataArray) {
+    try {
+      await this.ensureInitialized();
+      
+      if (!classificationDataArray || classificationDataArray.length === 0) {
+        return { success: true, updatedCount: 0, failedCount: 0 };
+      }
+      
+      if (Platform.OS === 'web') {
+        // PC端：使用IndexedDB
+        return await this._batchUpdateClassificationIndexedDB(classificationDataArray);
+      } else {
+        // 移动端：使用SQLite
+        return await this._batchUpdateClassificationSQLite(classificationDataArray);
+      }
+    } catch (error) {
+      logger.error('❌ 批量更新分类信息失败:', error);
+      return { success: false, updatedCount: 0, failedCount: classificationDataArray.length, error };
+    }
+  }
+
+  /**
+   * PC端：IndexedDB批量更新分类信息
+   */
+  async _batchUpdateClassificationIndexedDB(classificationDataArray) {
+    await this.storage.init();
+    
+    let updatedCount = 0;
+    let failedCount = 0;
+    
+    return new Promise((resolve, reject) => {
+      const transaction = this.storage.db.transaction(['images'], 'readwrite');
+      const store = transaction.objectStore('images');
+      let completed = 0;
+      const total = classificationDataArray.length;
+      
+      if (total === 0) {
+        resolve({ success: true, updatedCount: 0, failedCount: 0 });
+        return;
+      }
+      
+      for (const classificationData of classificationDataArray) {
+        const imageId = classificationData.id || this.storage.generateStableId(classificationData.uri);
+        const getRequest = store.get(imageId);
+        
+        getRequest.onsuccess = () => {
+          const existingImage = getRequest.result;
+          
+          if (existingImage) {
+            // 只更新分类相关字段，保留其他字段
+            const updatedImage = {
+              ...existingImage,
+              category: classificationData.category,
+              confidence: classificationData.confidence !== undefined ? classificationData.confidence : existingImage.confidence,
+              idCardDetections: classificationData.idCardDetections !== undefined ? classificationData.idCardDetections : existingImage.idCardDetections,
+              generalDetections: classificationData.generalDetections !== undefined ? classificationData.generalDetections : existingImage.generalDetections,
+              mobileNetV3Detections: classificationData.mobileNetV3Detections !== undefined ? classificationData.mobileNetV3Detections : existingImage.mobileNetV3Detections,
+              message: classificationData.message !== undefined ? classificationData.message : existingImage.message,
+              updatedAt: new Date().toISOString()
+            };
+            
+            store.put(updatedImage);
+            updatedCount++;
+          } else {
+            logger.warn(`⚠️ IndexedDB 未找到图片: ${imageId}, uri: ${classificationData.uri}`);
+            failedCount++;
+          }
+          
+          completed++;
+          if (completed === total) {
+            resolve({ success: true, updatedCount, failedCount });
+          }
+        };
+        
+        getRequest.onerror = () => {
+          logger.error(`❌ IndexedDB 查找图片失败: ${imageId}`, getRequest.error);
+          failedCount++;
+          completed++;
+          if (completed === total) {
+            resolve({ success: true, updatedCount, failedCount });
+          }
+        };
+      }
+      
+      transaction.onerror = () => {
+        logger.error('❌ IndexedDB 批量更新分类失败:', transaction.error);
+        reject(transaction.error);
+      };
+    });
+  }
+
+  /**
+   * 移动端：SQLite批量更新分类信息
+   */
+  async _batchUpdateClassificationSQLite(classificationDataArray) {
+    await this.ensureInitialized();
+    
+    let updatedCount = 0;
+    let failedCount = 0;
+    
+    // 批量处理，每批100条
+    const batchSize = 100;
+    for (let i = 0; i < classificationDataArray.length; i += batchSize) {
+      const batch = classificationDataArray.slice(i, i + batchSize);
+      
+      // 为每条记录构建 UPDATE 语句
+      const updatePromises = batch.map(async (classificationData) => {
+        try {
+          const imageId = classificationData.id || this.generateStableId(classificationData.uri);
+          
+          // 构建动态 SET 子句，只更新提供的字段
+          const setParts = [];
+          const params = [];
+          
+          setParts.push('category = ?');
+          params.push(classificationData.category);
+          
+          if (classificationData.confidence !== undefined) {
+            setParts.push('confidence = ?');
+            params.push(classificationData.confidence);
+          }
+          
+          if (classificationData.idCardDetections !== undefined) {
+            setParts.push('idCardDetections = ?');
+            params.push(classificationData.idCardDetections ? JSON.stringify(classificationData.idCardDetections) : null);
+          }
+          
+          if (classificationData.generalDetections !== undefined) {
+            setParts.push('generalDetections = ?');
+            params.push(classificationData.generalDetections ? JSON.stringify(classificationData.generalDetections) : null);
+          }
+          
+          if (classificationData.mobileNetV3Detections !== undefined) {
+            setParts.push('mobileNetV3Detections = ?');
+            params.push(classificationData.mobileNetV3Detections ? JSON.stringify(classificationData.mobileNetV3Detections) : null);
+          }
+          
+          if (classificationData.message !== undefined) {
+            setParts.push('message = ?');
+            params.push(classificationData.message);
+          }
+          
+          // 始终更新 updatedAt
+          setParts.push('updatedAt = ?');
+          params.push(new Date().toISOString());
+          
+          // 添加 WHERE 条件
+          params.push(imageId);
+          
+          const sql = `
+            UPDATE images 
+            SET ${setParts.join(', ')}
+            WHERE id = ?
+          `;
+          
+          const [result] = await this.storage.db.executeSql(sql, params);
+          
+          if (result.rowsAffected > 0) {
+            return { success: true };
+          } else {
+            logger.warn(`⚠️ SQLite 未找到图片: ${imageId}, uri: ${classificationData.uri}`);
+            return { success: false };
+          }
+        } catch (error) {
+          logger.error(`❌ SQLite 更新分类失败: ${classificationData.uri}`, error);
+          return { success: false, error };
+        }
+      });
+      
+      const results = await Promise.all(updatePromises);
+      
+      for (const result of results) {
+        if (result.success) {
+          updatedCount++;
+        } else {
+          failedCount++;
+        }
+      }
+    }
+    
+    return { success: true, updatedCount, failedCount };
+  }
+
   // 实际执行保存操作的方法
   async _performSaveOptimized(imageDataArray) {
     // 优化的保存方法：使用真正的批量插入
@@ -1420,10 +1678,19 @@ class ImageStorageService {
     
     let newCount = 0;
     let updatedCount = 0;
+    let naCount = 0;
+    let screenshotCount = 0;
+    
+    logger.debug(`🔍 [诊断] IndexedDB批量插入开始: ${imageDataArray.length} 条记录`);
     
     // 逐个处理图片数据（IndexedDB没有真正的批量插入，但我们可以优化）
-    for (const imageData of imageDataArray) {
+    for (let i = 0; i < imageDataArray.length; i++) {
+      const imageData = imageDataArray[i];
       try {
+        // 🔍 诊断：记录分类信息
+        if (imageData.category === 'NA') naCount++;
+        if (imageData.category === 'screenshot') screenshotCount++;
+        
         const imageRecord = {
           id: imageData.id || this.storage.generateStableId(imageData.uri),
           uri: imageData.uri,
@@ -1454,13 +1721,30 @@ class ImageStorageService {
           updatedAt: new Date().toISOString(),
         };
 
+        // 🔍 诊断：检查关键字段
+        if (!imageRecord.category) {
+          logger.warn(`⚠️ [诊断] 图片缺少category字段: ${imageRecord.uri}`);
+        }
+
         // 使用IndexedDB的单条插入方法
         await this.storage.addOrUpdateSingleImage(imageRecord);
         newCount++; // IndexedDB的addOrUpdateSingleImage会处理新增/更新逻辑
       } catch (error) {
-        logger.error('❌ IndexedDB批量插入单条记录失败:', error);
+        logger.error(`❌ IndexedDB批量插入单条记录失败 (${i + 1}/${imageDataArray.length}):`, error);
         // 继续处理下一条记录
       }
+    }
+    
+    logger.debug(`🔍 [诊断] IndexedDB批量插入完成: 成功=${newCount}, NA=${naCount}, screenshot=${screenshotCount}`);
+    
+    // 🔍 诊断：写入后立即验证
+    try {
+      const allImages = await this.getImages();
+      const naInDb = allImages.filter(img => img.category === 'NA').length;
+      const screenshotInDb = allImages.filter(img => img.category === 'screenshot').length;
+      logger.debug(`🔍 [诊断] IndexedDB写入后验证: 总数=${allImages.length}, NA=${naInDb}, screenshot=${screenshotInDb}`);
+    } catch (verifyError) {
+      logger.warn('⚠️ [诊断] IndexedDB写入后验证失败:', verifyError);
     }
     
     return { newCount, updatedCount };
@@ -1912,10 +2196,16 @@ class ImageStorageService {
   // Get all images (精简结构)
   async getImages() {
     try {
+      logger.debug(`🔍 [诊断] getImages: 开始执行...`);
       await this.ensureInitialized();
+      logger.debug(`🔍 [诊断] getImages: 初始化完成`);
       
+      logger.debug(`🔍 [诊断] getImages: 准备调用 storage.getItem('images')...`);
       const fullImages = await this.storage.getItem(this.storageKeys.images);
+      logger.debug(`🔍 [诊断] getImages: storage.getItem 返回结果, 类型: ${typeof fullImages}, 是否为数组: ${Array.isArray(fullImages)}, 长度: ${Array.isArray(fullImages) ? fullImages.length : 'N/A'}`);
+      
       if (!fullImages) {
+        logger.debug(`🔍 [诊断] getImages: fullImages 为 null/undefined，返回空数组`);
         return [];
       }
       
@@ -2228,7 +2518,8 @@ class ImageStorageService {
         settings.clientId = clientId;
         settings.clientIdCreatedAt = new Date().toISOString();
         
-        await this.saveSettings(settings);
+        // 初始化阶段跳过验证，允许未设置扫描目录
+        await this.saveSettings(settings, true);
         
         logger.debug('🆔 客户端ID已生成:', clientId);
         logger.debug('🆔 新客户端ID:', clientId);
@@ -2256,6 +2547,38 @@ class ImageStorageService {
     }
   }
 
+  /**
+   * 获取用户 Pictures 目录路径（PC端默认扫描目录）
+   * @returns {string|null} 用户 Pictures 目录路径，如果无法获取则返回 null
+   */
+  getUserPicturesDirectory() {
+    try {
+      // 检查是否是 Electron 环境
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const os = window.require('os');
+          const path = window.require('path');
+          
+          // 直接获取用户主目录下的 Pictures 目录
+          const homeDir = os.homedir();
+          const picturesDir = path.join(homeDir, 'Pictures');
+          
+          logger.debug(`📁 获取用户 Pictures 目录: ${picturesDir}`);
+          return picturesDir;
+        } catch (error) {
+          logger.warn('⚠️ 无法获取用户 Pictures 目录:', error);
+          return null;
+        }
+      }
+      
+      // 非 Electron 环境，返回 null
+      return null;
+    } catch (error) {
+      logger.warn('⚠️ 获取用户 Pictures 目录失败:', error);
+      return null;
+    }
+  }
+
   // Get settings
   async getSettings() {
     try {
@@ -2273,6 +2596,16 @@ class ImageStorageService {
         if (result.scanPaths && result.scanPaths.length === 0 && Platform.OS !== 'web') {
           // 移动端空数组是有效的，表示扫描整个设备
           result.scanPaths = [];
+        }
+        
+        // PC端：如果 scanPaths 完全未设置（undefined/null），尝试设置默认的用户 Pictures 目录
+        // 如果用户已经设置了空数组，不覆盖（用户可能故意清空）
+        if (Platform.OS === 'web' && (result.scanPaths === undefined || result.scanPaths === null)) {
+          const defaultPicturesDir = this.getUserPicturesDirectory();
+          if (defaultPicturesDir) {
+            result.scanPaths = [defaultPicturesDir];
+            logger.debug(`📁 PC端设置默认扫描目录: ${defaultPicturesDir}`);
+          }
         }
         if (result.hideEmptyCategories === undefined || result.hideEmptyCategories === null) {
           result.hideEmptyCategories = false;
@@ -2352,8 +2685,20 @@ class ImageStorageService {
       }
       
       // 如果没有设置数据，返回默认设置
+      // PC端：尝试获取用户 Pictures 目录作为默认扫描目录
+      let defaultScanPaths = Platform.OS === 'web' ? undefined : [];
+      if (Platform.OS === 'web') {
+        const defaultPicturesDir = this.getUserPicturesDirectory();
+        if (defaultPicturesDir) {
+          defaultScanPaths = [defaultPicturesDir];
+          logger.debug(`📁 PC端默认扫描目录: ${defaultPicturesDir}`);
+        }
+      }
+      
       const defaultSettings = {
-        scanPaths: Platform.OS === 'web' ? [] : [], // 不自动初始化路径，由用户手动设置
+        // PC端：尝试设置用户 Pictures 目录，如果无法获取则为 undefined
+        // 移动端：scanPaths 可以是空数组（表示扫描整个设备）
+        scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
         
@@ -2402,8 +2747,23 @@ class ImageStorageService {
     } catch (error) {
       console.error('Failed to get settings:', error);
       // 错误情况下也返回默认设置
+      // PC端：尝试获取用户 Pictures 目录作为默认扫描目录
+      let defaultScanPaths = Platform.OS === 'web' ? undefined : [];
+      if (Platform.OS === 'web') {
+        try {
+          const defaultPicturesDir = this.getUserPicturesDirectory();
+          if (defaultPicturesDir) {
+            defaultScanPaths = [defaultPicturesDir];
+          }
+        } catch (dirError) {
+          logger.warn('⚠️ 获取默认 Pictures 目录失败:', dirError);
+        }
+      }
+      
       return {
-        scanPaths: [], // 不自动初始化路径，由用户手动设置
+        // PC端：尝试设置用户 Pictures 目录，如果无法获取则为 undefined
+        // 移动端：scanPaths 可以是空数组（表示扫描整个设备）
+        scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5,
         
@@ -2449,19 +2809,23 @@ class ImageStorageService {
   }
 
   // Save settings
-  async saveSettings(settings) {
+  async saveSettings(settings, skipValidation = false) {
     try {
       await this.ensureInitialized();
       
-      // 根据平台进行不同的验证
-      if (Platform.OS === 'web') {
-        // PC端：必须至少有一个目录
-        if (settings.scanPaths && settings.scanPaths.length === 0) {
-          throw new Error('PC端必须至少设置一个扫描目录。');
+      // 根据平台进行不同的验证（初始化阶段可以跳过验证）
+      if (!skipValidation) {
+        if (Platform.OS === 'web') {
+          // PC端：如果用户设置了 scanPaths，必须至少有一个目录
+          // 如果 scanPaths 是 undefined/null，表示未设置，允许（用户稍后设置）
+          // 如果 scanPaths 是空数组，不允许（用户必须设置至少一个目录）
+          if (settings.scanPaths !== undefined && settings.scanPaths !== null && settings.scanPaths.length === 0) {
+            throw new Error('PC端必须至少设置一个扫描目录。');
+          }
+        } else {
+          // 移动端：允许空数组，表示扫描整个设备（使用MediaStore）
+          // 空数组是有效的，表示使用MediaStore扫描整个设备
         }
-      } else {
-        // 移动端：允许空数组，表示扫描整个设备（使用MediaStore）
-        // 空数组是有效的，表示使用MediaStore扫描整个设备
       }
       
       await this.storage.setItem(this.storageKeys.settings, settings);

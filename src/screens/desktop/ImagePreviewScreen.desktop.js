@@ -10,6 +10,15 @@ import EnhanceResultScreen from './EnhanceResultScreen.desktop';
 
 // Helper function to get category information
 const getCategoryInfo = (categoryId) => {
+  // 处理特殊分类 'NA'（未分类）
+  if (categoryId === 'NA' || categoryId === null || categoryId === undefined) {
+    return {
+      name: '未分类',
+      icon: '📷',
+      color: '#607D8B'
+    };
+  }
+  
   // 确保配置服务已加载
   if (!configService || !configService.isConfigLoaded()) {
     throw new Error('ConfigService未初始化或配置未加载');
@@ -17,7 +26,13 @@ const getCategoryInfo = (categoryId) => {
   
   const category = configService.getCategoryByKey(categoryId);
   if (!category) {
-    throw new Error(`未找到分类: ${categoryId}`);
+    // 如果找不到分类，返回默认值而不是抛出错误
+    logger.warn(`⚠️ 未找到分类配置: ${categoryId}，使用默认值`);
+    return {
+      name: categoryId || '未知分类',
+      icon: '📷',
+      color: '#607D8B'
+    };
   }
   
   return {

@@ -88,9 +88,28 @@ class GlobalImageCache {
       const storageService = this.getStorageService();
       logger.debug('使用共享的存储服务实例');
       
+      // 🔍 诊断：准备调用 getImages
+      logger.debug(`🔍 [诊断] buildCache: 准备调用 storageService.getImages()...`);
+      
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
       const allImages = await storageService.getImages();
-      logger.debug(`获取到 ${allImages.length} 张图片`);
+      logger.debug(`🔍 [诊断] buildCache: 从数据库获取到 ${allImages.length} 张图片`);
+      
+      // 🔍 诊断：检查返回的数据类型
+      if (!Array.isArray(allImages)) {
+        logger.error(`🔍 [诊断] buildCache: getImages() 返回的不是数组! 类型: ${typeof allImages}, 值:`, allImages);
+      }
+      
+      // 🔍 诊断：检查分类分布
+      if (allImages.length > 0) {
+        const categoryCounts = {};
+        allImages.forEach(img => {
+          const cat = img.category || 'unknown';
+          categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        });
+        logger.debug(`🔍 [诊断] buildCache: 分类分布:`, categoryCounts);
+        logger.debug(`🔍 [诊断] buildCache: NA分类数量: ${categoryCounts['NA'] || 0}`);
+      }
       
       // 确保 allImages 是数组
       if (!Array.isArray(allImages)) {
@@ -372,8 +391,8 @@ class GlobalImageCache {
       }
     }
     
-    // 如果都没找到，抛出错误
-    throw new Error(`未找到分类: ${categoryInput}`);
+    // 如果都没找到，返回原值（支持 'NA' 等未配置的分类）
+    return categoryInput;
   }
 
   // 更新选中统计 - 添加图片
@@ -710,6 +729,17 @@ class GlobalImageCache {
   getImagesByCategory(category) {
     const normalizedCategory = this._normalizeCategoryId(category);
     
+    // 调试：统计分类分布
+    if (category === 'NA') {
+      const categoryStats = {};
+      this.cache.allImages.forEach(img => {
+        const cat = img?.category || 'null';
+        categoryStats[cat] = (categoryStats[cat] || 0) + 1;
+      });
+      logger.debug(`🔍 [NA查询] 缓存中图片分类统计:`, categoryStats);
+      logger.debug(`🔍 [NA查询] 标准化后的分类ID: ${normalizedCategory}, 缓存总数: ${this.cache.allImages.length}`);
+    }
+    
     const result = this.cache.allImages.filter(img => {
       // 🆕 添加空值检查
       if (!img || typeof img !== 'object') {
@@ -725,6 +755,10 @@ class GlobalImageCache {
       const imgCategory = this._normalizeCategoryId(img.category);
       return imgCategory === normalizedCategory;
     });
+    
+    if (category === 'NA') {
+      logger.debug(`🔍 [NA查询] 找到 ${result.length} 张NA分类图片`);
+    }
     
     return result;
   }

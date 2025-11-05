@@ -153,8 +153,9 @@ class UnifiedDataService {
       
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
+      logger.debug(`🔍 [readImagesByCategory] 原始分类: ${category}, 标准化后: ${normalizedCategory}`);
       
-      // 直接从缓存获取分类图片
+      // 先从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
       
       // 🆕 检查返回的数据
@@ -498,7 +499,7 @@ class UnifiedDataService {
                 logger.debug(`🗑️ RNFS删除成功（文件已不存在）: ${filePath}`);
                 deleteSuccess = true;
               } else {
-                logger.warn(`⚠️ RNFS删除失败: ${filePath}`, rnfsError);
+                logger.debug(`🔍 RNFS删除失败: ${filePath}`, rnfsError);
                 deleteSuccess = false;
               }
             }
@@ -511,7 +512,7 @@ class UnifiedDataService {
             }
           } catch (fileError) {
             filesFailed++;
-            logger.warn(`❌ 删除物理文件失败: ${imageUris[i]}`, fileError);
+            logger.debug(`🔍 删除物理文件失败: ${imageUris[i]}`, fileError);
           }
           
           // Update progress for physical file deletion
@@ -1129,6 +1130,39 @@ class UnifiedDataService {
     }
   }
 
+  /**
+   * 批量更新分类信息（只更新分类相关字段，不更新其他字段）
+   * @param {Array} classificationDataArray - 分类数据数组，每个元素包含：
+   *   - uri: 图片 URI（必需）
+   *   - id: 图片 ID（可选，如果有则使用，否则根据 URI 生成）
+   *   - category: 分类ID（必需）
+   *   - confidence: 置信度（可选）
+   *   - idCardDetections: 身份证检测结果（可选）
+   *   - generalDetections: 通用检测结果（可选）
+   *   - mobileNetV3Detections: MobileNetV3检测结果（可选）
+   *   - message: 大模型推理描述（可选）
+   * @param {boolean} updateCache - 是否立即更新缓存，默认false
+   * @returns {Promise<Object>} 更新结果统计 { success: boolean, updatedCount: number, failedCount: number }
+   */
+  async batchUpdateClassification(classificationDataArray, updateCache = false) {
+    try {
+      const result = await this.imageStorageService.batchUpdateClassification(classificationDataArray);
+      
+      // 根据参数决定是否立即更新缓存
+      if (updateCache && result.success) {
+        // 更新缓存
+        await this.imageCache.buildCache();
+        // 通知监听器
+        this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
+      }
+      
+      return result;
+    } catch (error) {
+      logger.error('❌ 批量更新分类信息失败:', error);
+      throw error;
+    }
+  }
+
   // 获取分类规则
   async getClassificationRules() {
     try {
@@ -1209,6 +1243,46 @@ class UnifiedDataService {
       logger.debug('相似度数据清空完成');
     } catch (error) {
       logger.error('清空相似度数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 完全重置数据库（模拟全新启动）
+   * 删除整个 IndexedDB 数据库，包括所有数据：图片、统计、设置、分类规则、相似度数据等
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async resetDatabase() {
+    try {
+      logger.info('🗑️ 开始重置数据库（模拟全新启动）...');
+      
+      // 如果使用的是 IndexedDB，直接删除数据库
+      if (Platform.OS === 'web') {
+        // 先清空缓存
+        this.imageCache.clearCache();
+        
+        // 删除整个数据库
+        await this.imageStorageService.storage.deleteDatabase();
+        
+        // 重置初始化状态
+        this.imageStorageService.isInitialized = false;
+        this.imageStorageService.storage.isInitialized = false;
+        this.imageStorageService.storage.db = null;
+        
+        logger.info('✅ 数据库已完全删除，下次访问时会自动重新创建');
+        return true;
+      }
+      
+      // 移动端：清空所有数据
+      await this.imageStorageService.clear();
+      
+      // 重建缓存
+      await this.imageCache.buildCache();
+      
+      logger.info('✅ 数据库已重置完成');
+      return true;
+    } catch (error) {
+      logger.error('❌ 重置数据库失败:', error);
       throw error;
     }
   }

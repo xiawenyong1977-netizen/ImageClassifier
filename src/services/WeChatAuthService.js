@@ -65,16 +65,13 @@ class WeChatAuthService {
       clearTimeout(timeoutId);
       if (!response.ok) {
         const text = await response.text();
-        // 404且返回"用户未关注公众号"，属于正常情况，使用debug日志
-        const isUserNotFollowed = response.status === 404 && 
-          (text.includes('未关注') || text.includes('not_followed') || text.includes('未关注公众号'));
-        
-        if (isUserNotFollowed) {
-          logger.debug(`🔍 用户未关注公众号 (${response.status}):`, text);
-          // 未关注按非会员处理，不抛出错误
+        // 404属于正常情况（可能是用户未关注公众号或其他原因），使用debug日志
+        if (response.status === 404) {
+          logger.debug(`🔍 查询会员状态返回404 (${response.status}):`, text);
+          // 404按非会员处理，不抛出错误
           return { isMember: false };
         } else {
-          // 其他错误情况，使用error日志
+          // 其他非404错误情况，使用error日志
           logger.error(`❌ 查询会员状态失败 (${response.status}):`, text);
           throw new Error(`查询会员状态失败: ${response.status}`);
         }

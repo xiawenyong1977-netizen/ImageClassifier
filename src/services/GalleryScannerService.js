@@ -66,45 +66,32 @@ const isValidExifTimestamp = (timestamp) => {
 
 const extractGPSFromExifParser = async (exifData, fileName = '', useRemoteApi = true) => {
   if (!exifData?.tags) {
-    logger.debug(`🌍 EXIF GPS提取失败: 没有tags数据, 文件: ${fileName}`);
     return null;
   }
 
   const { GPSLatitude, GPSLongitude, GPSAltitude, GPSHPositioningError } = exifData.tags;
 
-  // 调试：检查GPS字段是否存在
-  logger.debug(`🌍 EXIF GPS字段检查:`, {
-    fileName: fileName,
-    hasGPSLatitude: !!GPSLatitude,
-    hasGPSLongitude: !!GPSLongitude,
-    hasGPSAltitude: !!GPSAltitude,
-    GPSLatitude: GPSLatitude,
-    GPSLongitude: GPSLongitude,
-    GPSAltitude: GPSAltitude
-  });
-
   if (!GPSLatitude || !GPSLongitude) {
-    logger.debug(`🌍 EXIF GPS提取失败: 缺少GPS坐标数据, 文件: ${fileName}`);
     return null;
   }
 
   // 查找最近的城市信息（根据远程服务状态决定是否使用远程API）
-  logger.debug(`🌍 开始查找城市信息: GPS(${GPSLatitude}, ${GPSLongitude}), useRemoteApi=${useRemoteApi}`);
+  // logger.debug(`🌍 开始查找城市信息: GPS(${GPSLatitude}, ${GPSLongitude}), useRemoteApi=${useRemoteApi}`);
   
   let nearestCity = null;
   try {
     nearestCity = await cityLocationService.findNearestCityAsync(GPSLatitude, GPSLongitude, 200, useRemoteApi);
-    logger.debug(`🌍 城市信息查找完成:`, nearestCity);
+    // logger.debug(`🌍 城市信息查找完成:`, nearestCity);
   } catch (error) {
     logger.error(`🌍 城市信息查找失败:`, error);
   }
 
-  // 调试：记录城市信息提取结果
-  if (nearestCity) {
-    logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
-  } else {
-    logger.debug(`🌍 未找到城市信息: GPS(${GPSLatitude}, ${GPSLongitude})`);
-  }
+  // 调试：记录城市信息提取结果（已注释以减少日志输出）
+  // if (nearestCity) {
+  //   logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
+  // } else {
+  //   logger.debug(`🌍 未找到城市信息: GPS(${GPSLatitude}, ${GPSLongitude})`);
+  // }
 
   return {
 
@@ -149,12 +136,12 @@ const extractGPSFromNativeExif = async (exifData, fileName = '', useRemoteApi = 
   // 查找最近的城市信息（根据远程服务状态决定是否使用远程API）
   const nearestCity = await cityLocationService.findNearestCityAsync(latitude, longitude, 200, useRemoteApi);
 
-  // 调试：记录城市信息提取结果
-  if (nearestCity) {
-    logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
-  } else {
-    logger.debug(`🌍 未找到城市信息: GPS(${latitude}, ${longitude})`);
-  }
+  // 调试：记录城市信息提取结果（已注释以减少日志输出）
+  // if (nearestCity) {
+  //   logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
+  // } else {
+  //   logger.debug(`🌍 未找到城市信息: GPS(${latitude}, ${longitude})`);
+  // }
 
   return {
 
@@ -241,6 +228,16 @@ const tryNativeExif = async (normalizedPath) => {
 const extractExifData = async (filePath, useRemoteApi = true) => {
 
   try {
+    // 检查 filePath 是否有效
+    if (!filePath || typeof filePath !== 'string') {
+      logger.warn(`⚠️ extractExifData: filePath 无效: ${filePath}`);
+      return {
+        takenTime: null,
+        locationInfo: createDefaultLocationInfo('none'),
+        imageDimensions: { width: null, height: null }
+      };
+    }
+    
     // 提取文件名用于日志显示
     const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath;
     
@@ -342,22 +339,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
       const exifData = parser.parse();
       
-      // 调试日志：检查EXIF解析结果
-      logger.debug(`🔍 EXIF解析结果:`, {
-        fileName: fileName,
-        hasTags: !!exifData.tags,
-        hasDateTimeOriginal: !!exifData.tags?.DateTimeOriginal,
-        hasDateTime: !!exifData.tags?.DateTime,
-        hasGPSLatitude: !!exifData.tags?.GPSLatitude,
-        hasGPSLongitude: !!exifData.tags?.GPSLongitude,
-        hasGPSAltitude: !!exifData.tags?.GPSAltitude,
-        DateTimeOriginal: exifData.tags?.DateTimeOriginal,
-        DateTime: exifData.tags?.DateTime,
-        GPSLatitude: exifData.tags?.GPSLatitude,
-        GPSLongitude: exifData.tags?.GPSLongitude,
-        GPSAltitude: exifData.tags?.GPSAltitude
-      });
-
       // 提取拍照时间
 
       let takenTime = null;
@@ -366,9 +347,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // EXIF DateTimeOriginal 是秒级时间戳，需要转换为毫秒
         let exifTime = exifData.tags.DateTimeOriginal;
         
-        // 调试日志：检查EXIF时间戳的值
-        logger.debug(`🔍 EXIF DateTimeOriginal 原始值: ${exifTime}, 文件: ${fileName}`);
-        
         // 验证时间戳是否合理（避免文件名数字被误用）
         if (isValidExifTimestamp(exifTime)) {
           // 检查是否是微秒级时间戳（大于 13 位数字）
@@ -376,7 +354,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
           }
           takenTime = new Date(exifTime * 1000).getTime();
-          logger.debug(`🔍 EXIF DateTimeOriginal 处理后的时间: ${new Date(takenTime).toISOString()}`);
         } else {
           logger.warn(`⚠️ EXIF DateTimeOriginal 无效: ${exifTime}, 文件: ${fileName}`);
         }
@@ -385,9 +362,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // EXIF DateTime 是秒级时间戳，需要转换为毫秒
         let exifTime = exifData.tags.DateTime;
         
-        // 调试日志：检查EXIF时间戳的值
-        logger.debug(`🔍 EXIF DateTime 原始值: ${exifTime}, 文件: ${fileName}`);
-        
         // 验证时间戳是否合理（避免文件名数字被误用）
         if (isValidExifTimestamp(exifTime)) {
           // 检查是否是微秒级时间戳（大于 13 位数字）
@@ -395,7 +369,6 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
           }
           takenTime = new Date(exifTime * 1000).getTime();
-          logger.debug(`🔍 EXIF DateTime 处理后的时间: ${new Date(takenTime).toISOString()}`);
         } else {
           logger.warn(`⚠️ EXIF DateTime 无效: ${exifTime}, 文件: ${fileName}`);
         }
@@ -409,10 +382,10 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
       try {
         gpsInfo = await extractGPSFromExifParser(exifData, fileName, useRemoteApi);
         
-        // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
-        if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
-          logger.debug(`🌍 EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
-        }
+        // 调试：记录GPS信息提取结果（已注释以减少日志输出）
+        // if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
+        //   logger.debug(`🌍 EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
+        // }
       } catch (gpsError) {
         logger.warn(`⚠️ GPS信息提取失败: ${gpsError.message}, 文件: ${fileName}`);
         gpsInfo = null;
@@ -526,10 +499,10 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // 提取GPS信息
         const gpsInfo = await extractGPSFromNativeExif(exifData, fileName, useRemoteApi);
 
-        // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
-        if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
-          logger.debug(`🌍 Native EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
-        }
+        // 调试：记录GPS信息提取结果（已注释以减少日志输出）
+        // if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
+        //   logger.debug(`🌍 Native EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
+        // }
 
         const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
 
@@ -668,6 +641,7 @@ class GalleryScannerService {
     this.totalClassifiedSuccessfully = 0; // 累计分类成功的图片数
     this.lastRefreshCount = 0; // 上次刷新时的分类成功数
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
+    this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
   }
 
 
@@ -741,7 +715,7 @@ class GalleryScannerService {
         break;
         
       case 'screenshot_detection':
-        simpleMessage = `截图检测: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = `照片扫描: ${filesProcessed || 0}/${filesFound || 0}`;
         break;
       
       case 'cache_checking':
@@ -800,10 +774,7 @@ class GalleryScannerService {
     // 添加全局统计信息到消息中
     let finalMessage = simpleMessage;
     
-    // 更新全局统计 - 文件总数在截图检测阶段设置，之后不再改变
-    if (filesFound && filesFound > 0 && this.totalImagesToProcess === 0 && stage === 'screenshot_detection') {
-      this.totalImagesToProcess = filesFound;
-    }
+    // totalImagesToProcess 在缓存检查阶段（cache_checking）设置为 NA 图片数量，不再在截图检测阶段设置
     
     // 分类成功数现在在各个阶段的保存成功时直接累加，不再在这里处理
     
@@ -817,6 +788,14 @@ class GalleryScannerService {
         shouldRefresh = true;
         this.lastSimilarityRefreshCount = groupsCount;
         logger.debug(`🔄 相似度检测刷新: 发现${groupsCount}个相似组, 上次刷新${this.lastSimilarityRefreshCount}个`);
+      }
+    } else if (stage === 'screenshot_detection' && filesProcessed && filesProcessed > 0) {
+      // 截图检测阶段：每处理完100张图片刷新一次（比较差值）
+      const lastRefresh = this.lastScreenshotRefreshCount;
+      if (filesProcessed - lastRefresh >= 100) {
+        shouldRefresh = true;
+        this.lastScreenshotRefreshCount = filesProcessed;
+        logger.debug(`🔄 截图检测刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
     } else if (this.totalClassifiedSuccessfully > 0 && this.totalClassifiedSuccessfully - this.lastRefreshCount >= 50) {
       // 其他阶段：每50张成功分类的图片刷新一次
@@ -844,8 +823,15 @@ class GalleryScannerService {
     }
     
     // 显示统计信息（除了相似度检测阶段，其他阶段都显示总进度统计）
-    if (this.totalImagesToProcess > 0 && stage !== 'similarity_detection') {
-      finalMessage += ` | 分类成功: ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`;
+    if (stage !== 'similarity_detection') {
+      // 确定显示的总数：如果 totalImagesToProcess 已设置则用它，否则在截图检测阶段使用 filesFound
+      const totalCount = this.totalImagesToProcess > 0 
+        ? this.totalImagesToProcess 
+        : (stage === 'screenshot_detection' && filesFound ? filesFound : 0);
+      
+      if (totalCount > 0) {
+        finalMessage += ` | 分类成功: ${this.totalClassifiedSuccessfully}/${totalCount}`;
+      }
     }
     
     return {
@@ -888,6 +874,7 @@ class GalleryScannerService {
       this.totalClassifiedSuccessfully = 0;
       this.lastRefreshCount = 0;
       this.lastSimilarityRefreshCount = 0;
+      this.lastScreenshotRefreshCount = 0;
 
       // 使用独立扫描线程方案，避免阻塞UI
       return await this.scanWithIndependentThread(this.galleryPaths, onProgress, scanStartTime);
@@ -1419,31 +1406,14 @@ class GalleryScannerService {
       // 阶段2: 文件比对
       const { deletedUris, newImages } = await this.compareFilesPhase(allImages, scanStartTime);
       
-      // 检查是否有新增或移除的文件
+      // 🔧 修复：即使没有新增文件，也要继续处理数据库中已有的未分类图片（NA）
+      // 因为 processImagesPhase 会从数据库中读取 NA 分类的图片进行后续处理
       if (deletedUris.length === 0 && newImages.length === 0) {
-        logger.info('✅ 文件比对完成：没有新增也没有移除的文件，扫描结束');
-        this.sendProgressMessage('file_comparison', allImages.length, allImages.length, '没有新增也没有移除的文件，扫描结束');
-        
-        // 发送完成消息
-        this.sendProgressMessage('completed', allImages.length, allImages.length);
-        
-        // 如果加载了模型，才需要卸载
-        if (this.imageClassifier.isInitialized) {
-          logger.debug('🔄 卸载本地模型，释放内存...');
-          this.imageClassifier.unloadAllModels();
-        }
-        
-        return {
-          success: true,
-          deleted: 0,
-          newImages: 0,
-          processed: 0,
-          failed: 0,
-          skipped: true // 标记为跳过后续处理
-        };
+        logger.info('✅ 文件比对完成：没有新增也没有移除的文件，但将继续处理数据库中未分类的图片');
       }
       
       // 阶段3-4: 漏斗式处理（内部会按需加载模型）
+      // 注意：即使 newImages 为空，processImagesPhase 也会从数据库中读取 NA 分类的图片进行处理
       const { processedCount, failedCount } = await this.processImagesPhase(newImages, scanStartTime);
       
       // 阶段5: 移除文件处理
@@ -1650,15 +1620,22 @@ class GalleryScannerService {
     await new Promise(resolve => setTimeout(resolve, 0));
     
     // 找出差异
-    let deletedUris = []; // 数据库中有，但文件系统中没有（非会员限制时跳过计算）
+    let deletedUris = []; // 数据库中有，但文件系统中没有
     const newUris = []; // 文件系统中有，但数据库中没有
     
-    // 找出被删除的文件（仅会员或未限制时计算，避免误判）
-    if (!this.compareLimit) {
-      for (const uri of existingUris) {
-        if (!currentFileUris.has(uri)) {
-          deletedUris.push(uri);
-        }
+    // 找出被删除的文件
+    // 注意：即使是非会员，也要检测已删除的文件，但需要基于完整的扫描结果（allImages）来判断
+    // 而不是限制后的 effectiveAllImages，避免将"不在限制范围内"误判为"已删除"
+    const fullFileUris = new Set();
+    allImages.forEach(img => {
+      fullFileUris.add(img.uri);
+    });
+    
+    // 检查数据库中所有URI，看它们是否在完整扫描结果中存在
+    for (const uri of existingUris) {
+      if (!fullFileUris.has(uri)) {
+        // 文件在完整扫描结果中不存在，说明确实被删除了
+        deletedUris.push(uri);
       }
     }
     
@@ -1727,35 +1704,55 @@ class GalleryScannerService {
 
   async saveImageResult(imageData, classification, exifData) {
     try {
-      const saveData = {
-        uri: imageData.uri,
-        category: classification.categoryId || classification.category,
-        confidence: classification.confidence || 1.0,
-        timestamp: imageData.timestamp,
-        takenAt: this.validateTakenTime(exifData.takenTime), // 只验证EXIF时间，不填充其他时间
-        fileName: imageData.fileName,
-        size: imageData.size,
-        latitude: exifData.locationInfo?.latitude,
-        longitude: exifData.locationInfo?.longitude,
-        altitude: exifData.locationInfo?.altitude,
-        accuracy: exifData.locationInfo?.accuracy,
-        address: exifData.locationInfo?.address,
-        city: exifData.locationInfo?.city,
-        country: exifData.locationInfo?.country,
-        province: exifData.locationInfo?.province,
-        district: exifData.locationInfo?.district,
-        street: exifData.locationInfo?.street,
-        width: exifData.imageDimensions?.width,
-        height: exifData.imageDimensions?.height,
-        // 保存检测结果字段
-        idCardDetections: classification.idCardDetections || [],
-        generalDetections: classification.generalDetections || [],
-        mobileNetV3Detections: classification.mobileNetV3Detections || null,
-        // 保存图像尺寸信息
-        imageDimensions: exifData.imageDimensions || null,
-        // 保存大模型推理描述
-        message: classification.message || null
-      };
+      // 如果 exifData 为 null，说明是缓存检查/远程推理/本地推理阶段，只更新分类相关字段
+      const isPartialUpdate = exifData === null;
+      
+      let saveData;
+      if (isPartialUpdate) {
+        // 部分更新：只更新分类相关字段
+        saveData = {
+          uri: imageData.uri,
+          category: classification.categoryId || classification.category,
+          confidence: classification.confidence || 1.0,
+          // 保存检测结果字段
+          idCardDetections: classification.idCardDetections || [],
+          generalDetections: classification.generalDetections || [],
+          mobileNetV3Detections: classification.mobileNetV3Detections || null,
+          // 保存大模型推理描述
+          message: classification.message || null
+        };
+      } else {
+        // 完整保存：保存所有信息（包括 EXIF 数据）
+        saveData = {
+          uri: imageData.uri,
+          category: classification.categoryId || classification.category,
+          confidence: classification.confidence || 1.0,
+          timestamp: imageData.timestamp,
+          takenAt: this.validateTakenTime(exifData.takenTime), // 只验证EXIF时间，不填充其他时间
+          fileName: imageData.fileName,
+          size: imageData.size,
+          latitude: exifData.locationInfo?.latitude,
+          longitude: exifData.locationInfo?.longitude,
+          altitude: exifData.locationInfo?.altitude,
+          accuracy: exifData.locationInfo?.accuracy,
+          address: exifData.locationInfo?.address,
+          city: exifData.locationInfo?.city,
+          country: exifData.locationInfo?.country,
+          province: exifData.locationInfo?.province,
+          district: exifData.locationInfo?.district,
+          street: exifData.locationInfo?.street,
+          width: exifData.imageDimensions?.width,
+          height: exifData.imageDimensions?.height,
+          // 保存检测结果字段
+          idCardDetections: classification.idCardDetections || [],
+          generalDetections: classification.generalDetections || [],
+          mobileNetV3Detections: classification.mobileNetV3Detections || null,
+          // 保存图像尺寸信息
+          imageDimensions: exifData.imageDimensions || null,
+          // 保存大模型推理描述
+          message: classification.message || null
+        };
+      }
       
       // 使用 writeImageDetailedInfo，传入单元素数组
       // updateCache = false：不立即更新缓存，避免频繁重建缓存，扫描结束后统一更新
@@ -1796,35 +1793,55 @@ class GalleryScannerService {
             continue;
           }
 
-          const saveData = {
-            uri: imageData.uri,
-            category: classification.categoryId || classification.category,
-            confidence: classification.confidence || 1.0,
-            timestamp: imageData.timestamp,
-            takenAt: this.validateTakenTime(exifData?.takenTime),
-            fileName: imageData.fileName,
-            size: imageData.size,
-            latitude: exifData?.locationInfo?.latitude,
-            longitude: exifData?.locationInfo?.longitude,
-            altitude: exifData?.locationInfo?.altitude,
-            accuracy: exifData?.locationInfo?.accuracy,
-            address: exifData?.locationInfo?.address,
-            city: exifData?.locationInfo?.city,
-            country: exifData?.locationInfo?.country,
-            province: exifData?.locationInfo?.province,
-            district: exifData?.locationInfo?.district,
-            street: exifData?.locationInfo?.street,
-            width: exifData?.imageDimensions?.width,
-            height: exifData?.imageDimensions?.height,
-            // 保存检测结果字段
-            idCardDetections: classification.idCardDetections || [],
-            generalDetections: classification.generalDetections || [],
-            mobileNetV3Detections: classification.mobileNetV3Detections || null,
-            // 保存图像尺寸信息
-            imageDimensions: exifData?.imageDimensions || null,
-            // 保存大模型推理描述
-            message: classification.message || null
-          };
+          // 如果 exifData 为 null，说明是缓存检查阶段，只更新分类相关字段
+          const isCacheCheckUpdate = exifData === null;
+          
+          let saveData;
+          if (isCacheCheckUpdate) {
+            // 缓存检查阶段：只更新分类相关字段
+            saveData = {
+              uri: imageData.uri,
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence || 1.0,
+              // 保存检测结果字段
+              idCardDetections: classification.idCardDetections || [],
+              generalDetections: classification.generalDetections || [],
+              mobileNetV3Detections: classification.mobileNetV3Detections || null,
+              // 保存大模型推理描述
+              message: classification.message || null
+            };
+          } else {
+            // 其他阶段：保存完整信息（包括 EXIF 数据）
+            saveData = {
+              uri: imageData.uri,
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence || 1.0,
+              timestamp: imageData.timestamp,
+              takenAt: this.validateTakenTime(exifData?.takenTime),
+              fileName: imageData.fileName,
+              size: imageData.size,
+              latitude: exifData?.locationInfo?.latitude,
+              longitude: exifData?.locationInfo?.longitude,
+              altitude: exifData?.locationInfo?.altitude,
+              accuracy: exifData?.locationInfo?.accuracy,
+              address: exifData?.locationInfo?.address,
+              city: exifData?.locationInfo?.city,
+              country: exifData?.locationInfo?.country,
+              province: exifData?.locationInfo?.province,
+              district: exifData?.locationInfo?.district,
+              street: exifData?.locationInfo?.street,
+              width: exifData?.imageDimensions?.width,
+              height: exifData?.imageDimensions?.height,
+              // 保存检测结果字段
+              idCardDetections: classification.idCardDetections || [],
+              generalDetections: classification.generalDetections || [],
+              mobileNetV3Detections: classification.mobileNetV3Detections || null,
+              // 保存图像尺寸信息
+              imageDimensions: exifData?.imageDimensions || null,
+              // 保存大模型推理描述
+              message: classification.message || null
+            };
+          }
           
           saveDataArray.push(saveData);
           processedCount++;
@@ -1873,7 +1890,7 @@ class GalleryScannerService {
     
     let processedCount = 0;
     let failedCount = 0;
-    const remainingImages = [];
+    let totalScreenshotCount = 0; // 统计实际截图数量
     
     // 并行检测截图
     const batchSize = 100; // 并行处理100张图片（大幅提升速度）
@@ -1912,51 +1929,34 @@ class GalleryScannerService {
             logger.debug(`📱 截图检测: ${image.fileName} - AI检测: ${isScreenshot}, GPS: ${hasGPS ? '有' : '无'}`);
           }
           
+          // 无论是否为截图，都保存图片信息
+          let classification;
           if (isScreenshot && !hasGPS) {
-            // 构建分类结果
-            const classification = {
+            // 截图：设置为 screenshot
+            classification = {
               categoryId: 'screenshot',
               confidence: 1.0
             };
-            
-            // 立即保存
-            const saved = await this.saveImageResult(image, classification, exifData);
-            if (saved.success) {
-              // 保存成功时累加分类成功数
-              this.totalClassifiedSuccessfully++;
-            }
-            return {
-              success: saved.success,
-              isScreenshot: true,
-              image: image,
-              exifData: exifData
-            };
           } else {
-            // 保存EXIF数据，供后续使用
-            // 确保GPS信息被正确传递
-            const imageWithExif = {
-              ...image,
-              exifData: exifData
-            };
-            
-            // 调试：记录GPS信息传递情况
-            if (exifData.locationInfo?.latitude && exifData.locationInfo?.longitude) {
-              // logger.debug(`🌍 GPS信息传递: ${image.fileName} - GPS(${exifData.locationInfo.latitude}, ${exifData.locationInfo.longitude})`); // 注释掉以减少日志输出
-            }
-            
-            return {
-              success: true,
-              isScreenshot: false,
-              image: imageWithExif,
-              exifData: exifData
+            // 非截图：暂时设置为 NA
+            classification = {
+              categoryId: 'NA',
+              confidence: 0.0
             };
           }
+          
+          // 收集数据，准备批量保存
+          return {
+            success: true,
+            isScreenshot: isScreenshot && !hasGPS,  // 用于统计截图数量
+            imageData: image,
+            classification: classification,
+            exifData: exifData
+          };
         } catch (error) {
           logger.error(`❌ 截图检测失败:`, error);
           return {
             success: false,
-            isScreenshot: false,
-            image: image,
             error: error
           };
         }
@@ -1965,57 +1965,111 @@ class GalleryScannerService {
       // 等待当前批次完成
       const batchResults = await Promise.all(batchPromises);
       
-      // 处理批次结果
-      for (const result of batchResults) {
-        if (result.success) {
-          if (result.isScreenshot) {
-            processedCount++;
-          } else {
-            remainingImages.push(result.image);
+          // 收集批量保存的数据
+          const batchSaveResults = [];
+          let naCount = 0;
+          let screenshotCount = 0;
+          for (const result of batchResults) {
+            if (result.success) {
+              const categoryId = result.classification?.categoryId || result.classification?.category;
+              if (categoryId === 'NA') naCount++;
+              if (categoryId === 'screenshot') screenshotCount++;
+              
+              batchSaveResults.push({
+                imageData: result.imageData,
+                classification: result.classification,
+                exifData: result.exifData
+              });
+            } else {
+              failedCount++;
+            }
           }
+          
+          // 批量保存
+          if (batchSaveResults.length > 0) {
+            logger.debug(`🔄 准备批量保存 ${batchSaveResults.length} 张图片到数据库 (NA: ${naCount}, screenshot: ${screenshotCount})...`);
+            const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
+            if (batchSaveResult.success) {
+              logger.debug(`✅ 批量保存成功: ${batchSaveResults.length} 张图片`);
+              
+              // 🔍 诊断：立即验证数据库写入
+              try {
+                const dbImages = await UnifiedDataService.imageStorageService.getImages();
+                const naInDb = dbImages.filter(img => img.category === 'NA').length;
+                const screenshotInDb = dbImages.filter(img => img.category === 'screenshot').length;
+                logger.debug(`📊 [诊断] 数据库验证: 总数=${dbImages.length}, NA=${naInDb}, screenshot=${screenshotInDb}`);
+              } catch (verifyError) {
+                logger.warn('⚠️ [诊断] 数据库验证失败:', verifyError);
+              }
+          // processedCount：所有保存成功的图片（截图+非截图）
+          processedCount += batchSaveResults.length;
+          
+          // 统计截图数量（只有截图才计入分类成功数）
+          let screenshotCount = 0;
+          for (const result of batchResults) {
+            if (result.success && result.isScreenshot) {
+              screenshotCount++;
+            }
+          }
+          
+          // 只有截图才累加到分类成功数（非截图保存为NA，等待后续分类）
+          this.totalClassifiedSuccessfully += screenshotCount;
+          totalScreenshotCount += screenshotCount; // 累加实际截图数量
         } else {
-          failedCount++;
-          remainingImages.push(result.image);
+          // 批量保存失败，累加到失败数
+          logger.error(`❌ 批量保存失败: ${batchSaveResults.length} 张图片`);
+          failedCount += batchSaveResults.length;
         }
       }
       
       // 发送进度更新（每处理一个批次就更新一次）
-      const totalProcessed = processedCount + remainingImages.length;
+      const currentProcessed = Math.min((i + batchSize), newImages.length);
       this.sendProgressMessage(
         'screenshot_detection',
-        totalProcessed,
+        currentProcessed,
         newImages.length
       );
     }
     
     // 循环结束，统一处理逻辑会自动处理阶段完成时的刷新
     
-    logger.info(`✅ 第1层完成：检测到 ${processedCount} 张截图，${remainingImages.length} 张继续处理`);
+    logger.info(`✅ 第1层完成：检测到 ${totalScreenshotCount} 张截图，已保存所有 ${processedCount} 张图片信息`);
     
-    return { remainingImages, processedCount, failedCount };
+    // 不再返回 remainingImages，后续阶段会从数据库读取NA分类的图片
+    return { processedCount, failedCount };
   }
 
   /**
    * 阶段3b: 批量缓存查询
-   * 查询缓存并立即保存命中的结果
+   * 处理传入的NA分类图片，查询缓存并立即保存命中的结果
+   * @param {Array} naImages - NA分类的图片列表（从外部传入）
+   * @param {Date} scanStartTime - 扫描开始时间
    */
-  async batchCacheCheckPhase(remainingImages, scanStartTime) {
-    if (remainingImages.length === 0) {
+  async batchCacheCheckPhase(naImages, scanStartTime) {
+    if (!naImages || naImages.length === 0) {
+      logger.info('✅ 第2层：没有未分类图片，跳过缓存查询');
       return { remainingImages: [], processedCount: 0, failedCount: 0 };
     }
     
-    logger.info(`🔍 第2层：智能分类查询，处理 ${remainingImages.length} 张图片`);
-    this.sendProgressMessage('cache_checking', 0, remainingImages.length);
+    // 更新全局统计 - 在缓存检查阶段锁定需要处理的图片总数（NA图片数量）
+    if (this.totalImagesToProcess === 0) {
+      this.totalImagesToProcess = naImages.length;
+      logger.info(`📊 设置总处理数量: ${this.totalImagesToProcess} 张图片（NA分类）`);
+    }
+    
+    logger.info(`🔍 第2层：智能分类查询，处理 ${naImages.length} 张未分类图片（NA）`);
+    this.sendProgressMessage('cache_checking', 0, naImages.length);
     
     let processedCount = 0;
+    let failedCount = 0;
     const uncachedImages = [];
     
     try {
-      // 使用并行哈希计算器计算所有图片哈希
-      logger.info(`🚀 开始并行计算 ${remainingImages.length} 张图片的哈希值...`);
+      // 并行计算所有图片的哈希值
+      logger.info(`🚀 开始并行计算 ${naImages.length} 张图片的哈希值...`);
       
       const hashResults = await this.parallelHashCalculator.calculateHashesParallel(
-        remainingImages,
+        naImages,
         (processed, total) => {
           // Hash计算阶段不发送进度更新，因为时间很短且不是分类操作
         }
@@ -2042,7 +2096,7 @@ class GalleryScannerService {
           // 哈希计算失败
           hashCalculationFailures++;
           if (hashCalculationFailures <= 10) {
-            logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${remainingImages.length}):`, {
+            logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${naImages.length}):`, {
               fileName: result.fileName,
               uri: result.uri,
               error: result.hashError || '未知错误'
@@ -2058,7 +2112,7 @@ class GalleryScannerService {
       const hashes = imageEntries.map(([key, data]) => data.hash);
       
       if (hashCalculationFailures > 0) {
-        logger.warn(`⚠️ 哈希计算失败统计: ${hashCalculationFailures}/${remainingImages.length} 张图片哈希计算失败，将直接进入远程推理`);
+        logger.warn(`⚠️ 哈希计算失败统计: ${hashCalculationFailures}/${naImages.length} 张图片哈希计算失败，将直接进入远程推理`);
       }
       
       if (duplicateHashes.size > 0) {
@@ -2089,6 +2143,7 @@ class GalleryScannerService {
         
         if (cacheItem && cacheItem.cached && cacheItem.data) {
           // 缓存命中，收集数据准备批量保存
+          // 只更新分类相关的字段，不需要重新提取 EXIF 数据（图片已在数据库中存在）
           const classification = {
             categoryId: cacheItem.data.category,
             confidence: cacheItem.data.confidence || 0.9,
@@ -2100,11 +2155,11 @@ class GalleryScannerService {
             message: cacheItem.data.description || cacheItem.data.message || null
           };
           
-          const exifData = imageData.exifData || await extractExifData(imageData.path, this.useRemoteInference);
+          // 缓存检查阶段：只更新分类信息，不提取 EXIF 数据
           batchSaveResults.push({
             imageData,
             classification,
-            exifData
+            exifData: null // 不提取 EXIF，使用数据库中已有的数据
           });
           
         } else {
@@ -2119,21 +2174,35 @@ class GalleryScannerService {
         // 批量保存逻辑：最后一张图片或批次大小达到50时保存
         if (i === imageEntries.length - 1 || batchSaveResults.length >= 50) {
           if (batchSaveResults.length > 0) {
-            // 批量保存缓存命中的结果
-            const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
-            if (batchSaveResult.success) {
-              processedCount += batchSaveResult.processedCount;
-              this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
+            // 转换为批量更新分类信息的格式
+            const classificationDataArray = batchSaveResults.map(result => ({
+              uri: result.imageData.uri,
+              id: result.imageData.id,
+              category: result.classification.categoryId || result.classification.category,
+              confidence: result.classification.confidence,
+              idCardDetections: result.classification.idCardDetections,
+              generalDetections: result.classification.generalDetections,
+              mobileNetV3Detections: result.classification.mobileNetV3Detections,
+              message: result.classification.message
+            }));
+            
+            // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+            const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+            if (updateResult.success) {
+              processedCount += updateResult.updatedCount;
+              this.totalClassifiedSuccessfully += updateResult.updatedCount;
+            } else {
+              failedCount += batchSaveResults.length;
             }
             batchSaveResults.length = 0; // 清空批次数据
           }
           
           const totalProcessed = processedCount + uncachedImages.length;
-          logger.debug(`🔄 批次处理完成: 已处理 ${totalProcessed}/${remainingImages.length}，分类成功 ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`);
+          logger.debug(`🔄 批次处理完成: 已处理 ${totalProcessed}/${naImages.length}，分类成功 ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`);
           this.sendProgressMessage(
             'cache_checking',
             totalProcessed,
-            remainingImages.length
+            naImages.length
           );
         }
       }
@@ -2141,12 +2210,28 @@ class GalleryScannerService {
       // 处理剩余的批量保存数据（只有在主循环没有处理完的情况下）
       if (batchSaveResults.length > 0) {
         logger.debug(`🔄 处理最后剩余的 ${batchSaveResults.length} 个图片结果`);
-        const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
-        if (batchSaveResult.success) {
-          processedCount += batchSaveResult.processedCount;
-          this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
-          logger.debug(`✅ 最后批次处理完成: 成功${batchSaveResult.processedCount}个`);
+        
+        // 转换为批量更新分类信息的格式
+        const classificationDataArray = batchSaveResults.map(result => ({
+          uri: result.imageData.uri,
+          id: result.imageData.id,
+          category: result.classification.categoryId || result.classification.category,
+          confidence: result.classification.confidence,
+          idCardDetections: result.classification.idCardDetections,
+          generalDetections: result.classification.generalDetections,
+          mobileNetV3Detections: result.classification.mobileNetV3Detections,
+          message: result.classification.message
+        }));
+        
+        // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+        const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+        if (updateResult.success) {
+          processedCount += updateResult.updatedCount;
+          this.totalClassifiedSuccessfully += updateResult.updatedCount;
+          logger.debug(`✅ 最后批次处理完成: 成功${updateResult.updatedCount}个`);
           logger.debug(`🔍 当前统计: processedCount=${processedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
+        } else {
+          failedCount += batchSaveResults.length;
         }
       } else {
         logger.debug(`🔍 没有剩余的批量保存数据，batchSaveResults.length=${batchSaveResults.length}`);
@@ -2174,13 +2259,13 @@ class GalleryScannerService {
       this.sendProgressMessage(
         'cache_checking',
         processedCount,
-        remainingImages.length
+        naImages.length
       );
       
     } catch (error) {
       logger.error('❌ 智能分类查询失败:', error);
-      // 失败时，所有图片都需要继续处理
-      return { remainingImages, processedCount: 0, failedCount: 0 };
+      // 失败时，所有图片都需要继续处理（返回从数据库读取的所有NA图片）
+      return { remainingImages: naImages, processedCount: 0, failedCount: 0 };
     }
     
     logger.info(`✅ 第2层完成：缓存命中 ${processedCount} 张，${uncachedImages.length} 张继续处理`);
@@ -2357,11 +2442,11 @@ class GalleryScannerService {
             }
             
             // 收集保存数据
-            const exifData = imageData.exifData || (imageData.path ? await extractExifData(imageData.path, this.useRemoteInference) : null);
+            // 远程推理阶段：只更新分类信息，不提取 EXIF 数据（图片已在数据库中存在）
             uploadData.push({
               imageData,
               classification,
-              exifData
+              exifData: null // 不提取 EXIF，使用数据库中已有的数据
             });
           } else {
             logger.warn('❌ 远程推理失败，原因:', {
@@ -2380,13 +2465,27 @@ class GalleryScannerService {
         // 每批次立即保存结果
         if (uploadData.length > 0) {
           logger.debug(`🔄 远程推理批次保存: ${uploadData.length} 个结果`);
-          const batchSaveResult = await this.saveImageResults(uploadData, false);
-          processedCount += batchSaveResult.processedCount;
-          failedCount += batchSaveResult.failedCount;
+          
+          // 转换为批量更新分类信息的格式
+          const classificationDataArray = uploadData.map(result => ({
+            uri: result.imageData.uri,
+            id: result.imageData.id,
+            category: result.classification.categoryId || result.classification.category,
+            confidence: result.classification.confidence,
+            idCardDetections: result.classification.idCardDetections,
+            generalDetections: result.classification.generalDetections,
+            mobileNetV3Detections: result.classification.mobileNetV3Detections,
+            message: result.classification.message
+          }));
+          
+          // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+          const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+          processedCount += updateResult.updatedCount;
+          failedCount += updateResult.failedCount;
           
           // 更新全局分类成功数
-          this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
-          logger.debug(`✅ 远程推理批次保存完成: processedCount=${batchSaveResult.processedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
+          this.totalClassifiedSuccessfully += updateResult.updatedCount;
+          logger.debug(`✅ 远程推理批次保存完成: updatedCount=${updateResult.updatedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
           
           // 清空uploadData，准备下一批次
           uploadData.length = 0;
@@ -2451,16 +2550,26 @@ class GalleryScannerService {
       // 并行处理当前批次
       const batchPromises = batch.map(async (imageData) => {
         try {
-          // 提取EXIF（如果还没提取）
-          const exifData = imageData.exifData || (imageData.path ? await extractExifData(imageData.path, this.useRemoteInference) : null);
+          // 本地推理阶段：只更新分类信息，不提取 EXIF 数据（图片已在数据库中存在）
           
           // 本地推理（纯本地推理，前3层已完成截图检测、缓存查询、远程推理）
           const classification = await this.imageClassifier.classifyImage(imageData.uri);
           
           if (classification.success) {
-            // 立即保存
-            const saved = await this.saveImageResult(imageData, classification, exifData);
-            if (saved.success) {
+            // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+            const classificationDataArray = [{
+              uri: imageData.uri,
+              id: imageData.id,
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence,
+              idCardDetections: classification.idCardDetections,
+              generalDetections: classification.generalDetections,
+              mobileNetV3Detections: classification.mobileNetV3Detections,
+              message: classification.message
+            }];
+            
+            const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+            if (updateResult.success && updateResult.updatedCount > 0) {
               // 直接累加到全局分类成功数
               this.totalClassifiedSuccessfully++;
               return { success: true };
@@ -2607,30 +2716,56 @@ class GalleryScannerService {
    * 使用多线程处理新增文件的EXIF提取和分类
    */
   async processImagesPhase(newImages, scanStartTime) {
-    if (newImages.length === 0) {
-      return { processedCount: 0, failedCount: 0 };
-    }
-    
     let totalProcessed = 0;
     let totalFailed = 0;
     
-    // 第1层：截图检测
-    logger.info(`🔄 开始漏斗式处理：共 ${newImages.length} 张图片`);
-    const { remainingImages: afterScreenshot, processedCount: screenshotCount, failedCount: screenshotFailed } = 
-      await this.screenshotDetectionPhase(newImages, scanStartTime);
-    totalProcessed += screenshotCount;
-    totalFailed += screenshotFailed;
+    // 🔧 修复：即使没有新图片，也要处理数据库中已有的未分类图片
+    if (newImages.length > 0) {
+      // 第1层：截图检测（保存所有图片信息）
+      logger.info(`🔄 开始漏斗式处理：共 ${newImages.length} 张图片`);
+      const { processedCount: screenshotCount, failedCount: screenshotFailed } = 
+        await this.screenshotDetectionPhase(newImages, scanStartTime);
+      totalProcessed += screenshotCount;
+      totalFailed += screenshotFailed;
+    } else {
+      logger.info('🔄 没有新图片，跳过截图检测阶段，直接处理数据库中未分类的图片');
+    }
     
-    if (afterScreenshot.length === 0) {
-      logger.info(`✅ 漏斗处理完成：全部为截图，已处理 ${totalProcessed} 张`);
+    // 🔧 修复竞态条件：确保缓存刷新完成后再读取
+    // processProgressData 中的 refreshCache() 是异步的，但可能还没完成
+    // 需要等待缓存构建完成后再读取 NA 分类图片
+    logger.debug('🔄 等待缓存刷新完成...');
+    try {
+      // 强制等待缓存构建完成（如果正在构建则等待，如果已构建则直接返回）
+      await UnifiedDataService.imageCache.buildCache();
+      logger.debug('✅ 缓存刷新完成');
+    } catch (error) {
+      logger.error('❌ 等待缓存刷新失败:', error);
+      // 不阻断流程，继续尝试读取
+    }
+    
+    // 提取NA分类的图片作为后续所有阶段的输入数据源
+    let naImages = [];
+    try {
+      naImages = await UnifiedDataService.readImagesByCategory('NA');
+      logger.info(`📊 提取到 ${naImages.length} 张未分类图片（NA），作为后续漏斗处理的输入数据源`);
+    } catch (error) {
+      logger.error('❌ 读取 NA 分类图片失败:', error);
       return { processedCount: totalProcessed, failedCount: totalFailed };
     }
     
-    // 如果远程服务可用，执行缓存查询和远程推理
+    if (naImages.length === 0) {
+      logger.info('✅ 没有未分类图片，跳过后续处理');
+      return { processedCount: totalProcessed, failedCount: totalFailed };
+    }
+    
+    // 第2层和第3层：根据远程服务是否可用，决定执行缓存查询和远程推理
+    let remainingImages = naImages; // 初始剩余图片为所有NA分类图片
+    
     if (this.useRemoteInference) {
-      // 第2层：智能分类查询
+      // 第2层：远程缓存查询（处理NA分类图片，查询远程缓存）
       const { remainingImages: afterCache, processedCount: cacheCount, failedCount: cacheFailed } = 
-        await this.batchCacheCheckPhase(afterScreenshot, scanStartTime);
+        await this.batchCacheCheckPhase(naImages, scanStartTime);
       totalProcessed += cacheCount;
       totalFailed += cacheFailed;
       
@@ -2639,11 +2774,14 @@ class GalleryScannerService {
         return { processedCount: totalProcessed, failedCount: totalFailed };
       }
       
-      // 第3层：批量远程推理
+      // 第3层：批量远程推理（处理缓存未命中的图片）
       const { remainingImages: afterRemote, processedCount: remoteCount, failedCount: remoteFailed } = 
         await this.batchRemoteInferencePhase(afterCache, scanStartTime);
       totalProcessed += remoteCount;
       totalFailed += remoteFailed;
+      
+      // 更新剩余图片列表，用于后续本地推理降级
+      remainingImages = afterRemote;
       
       if (afterRemote.length === 0) {
         logger.info(`✅ 漏斗处理完成：远程推理已覆盖，已处理 ${totalProcessed} 张`);
@@ -2651,17 +2789,14 @@ class GalleryScannerService {
         this.sendProgressMessage('remote_inference', totalProcessed, totalProcessed);
         return { processedCount: totalProcessed, failedCount: totalFailed };
       }
-      
-      // 第4层：本地推理降级
-      const { processedCount: localCount, failedCount: localFailed } = 
-        await this.localInferenceFallbackPhase(afterRemote, scanStartTime);
-      totalProcessed += localCount;
-      totalFailed += localFailed;
     } else {
-      // 远程服务不可用，直接使用本地推理
-      logger.info('⚠️ 远程服务不可用，跳过缓存查询和远程推理，直接使用本地推理处理所有剩余图片');
+      logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将直接进入本地推理`);
+    }
+    
+    // 第4层：本地推理降级（处理远程推理失败或跳过的图片）
+    if (remainingImages.length > 0) {
       const { processedCount: localCount, failedCount: localFailed } = 
-        await this.localInferenceFallbackPhase(afterScreenshot, scanStartTime);
+        await this.localInferenceFallbackPhase(remainingImages, scanStartTime);
       totalProcessed += localCount;
       totalFailed += localFailed;
     }

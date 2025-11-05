@@ -221,7 +221,7 @@ class MediaStoreService {
       const result = await MediaStoreModule.deleteFile(filePath);
       return result;
     } catch (error) {
-      logger.error(`❌ MediaStore: 删除文件失败 (path=${filePath})`, error);
+      logger.debug(`🔍 MediaStore: 删除文件失败 (path=${filePath})`, error);
       // 抛出错误而不是静默返回false
       throw new Error(`删除文件失败: ${error.message}`);
     }

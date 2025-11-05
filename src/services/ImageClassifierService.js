@@ -1247,7 +1247,13 @@ class ImageClassifierService {
                               fileNameLower.includes('截图') || 
                               fileNameLower.includes('screen');
       
-      const isScreenshot = isMobileResolution || isScreenshotFile;
+      // 特征3：URI判定 - 包含截图关键词
+      const uriLower = (imageUri || '').toLowerCase();
+      const isScreenshotUri = uriLower.includes('screenshot') || 
+                              uriLower.includes('截图') || 
+                              uriLower.includes('screen');
+      
+      const isScreenshot = isMobileResolution || isScreenshotFile || isScreenshotUri;
       
       // 只在检测到手机截图时输出调试信息
       if (isScreenshot) {
@@ -1606,35 +1612,6 @@ class ImageClassifierService {
       logger.error('❌ 计算图片哈希失败:', error);
       throw error;
     }
-  }
-
-  /**
-   * 批量检测手机截图
-   * @param {Array} imageDataList - [{ uri, fileName, width, height }]
-   * @returns {Promise<{screenshots: Array, nonScreenshots: Array}>}
-   */
-  async batchDetectScreenshots(imageDataList) {
-    const screenshots = [];
-    const nonScreenshots = [];
-    
-    for (const imageData of imageDataList) {
-      const isScreenshot = await this.identifyMobileScreenshot(
-        imageData.uri, 
-        imageData.fileName, 
-        imageData.width, 
-        imageData.height
-      );
-      
-      if (isScreenshot) {
-        screenshots.push(imageData);
-      } else {
-        nonScreenshots.push(imageData);
-      }
-    }
-    
-    logger.debug(`📱 批量截图检测完成：${screenshots.length} 张截图，${nonScreenshots.length} 张非截图`);
-    
-    return { screenshots, nonScreenshots };
   }
 
   /**
