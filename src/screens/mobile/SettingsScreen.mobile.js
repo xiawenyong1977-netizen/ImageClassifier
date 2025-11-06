@@ -442,15 +442,37 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         logger.warn('⚠️ RNFS.saveImageToGallery 方法不可用');
       }
 
-      // 调起微信（无论保存是否成功）
-      await openWeChatDirectly(saveResult);
-
-      // 如果没有保存成功，提示用户
-      if (!saveResult) {
+      // 先显示提示，用户确认后再调起微信
+      if (saveResult) {
+        Alert.alert(
+          '保存成功',
+          '二维码已保存到相册，现在打开微信扫一扫？',
+          [
+            { text: '取消', style: 'cancel' },
+            { 
+              text: '打开微信', 
+              style: 'default',
+              onPress: async () => {
+                // 用户确认后调起微信（不传 saveResult，避免重复提示）
+                await openWeChatDirectly();
+              }
+            }
+          ]
+        );
+      } else {
         Alert.alert(
           '提示',
           '请手动打开微信，在右上角"+"菜单中选择"扫一扫"，然后扫描上方二维码',
-          [{ text: '知道了', style: 'default' }]
+          [
+            { text: '知道了', style: 'default' },
+            {
+              text: '打开微信',
+              style: 'default',
+              onPress: async () => {
+                await openWeChatDirectly();
+              }
+            }
+          ]
         );
       }
 
@@ -469,7 +491,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   /**
    * 调起微信扫一扫
    */
-  const openWeChatDirectly = async (saveResult = null) => {
+  const openWeChatDirectly = async () => {
     try {
       logger.debug('📱 正在调起微信主界面...');
       const weixinMain = 'weixin://';
@@ -477,38 +499,21 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       if (supportedMain) {
         await Linking.openURL(weixinMain);
         logger.debug('✅ 已调起微信主界面');
-        if (saveResult) {
-          Alert.alert(
-            '成功',
-            '二维码已保存到相册\n\n请在微信中打开“扫一扫”，扫描刚才保存的二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        }
       } else {
         logger.warn('⚠️ 无法调起微信');
-        if (saveResult) {
-          Alert.alert(
-            '提示',
-            '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        } else {
-          Alert.alert(
-            '提示',
-            '请手动打开微信，在“扫一扫”中扫描上方二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        }
-      }
-    } catch (error) {
-      logger.error('❌ 调起微信失败:', error);
-      if (saveResult) {
         Alert.alert(
           '提示',
-          '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
+          '无法自动打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
           [{ text: '知道了', style: 'default' }]
         );
       }
+    } catch (error) {
+      logger.error('❌ 调起微信失败:', error);
+      Alert.alert(
+        '提示',
+        '无法打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
+        [{ text: '知道了', style: 'default' }]
+      );
     }
   };
 

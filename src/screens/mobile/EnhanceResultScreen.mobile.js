@@ -83,10 +83,8 @@ export default function EnhanceResultScreen({ route, navigation }) {
     }
     try {
       setSavingById((prev) => ({ ...prev, [current.id]: true }));
-      // 1) 保存到相册（由适配层处理落盘与权限）
-      const res = await RNFS.saveImageToGallery(currentResult.enhancedUri, undefined);
-
-      // 2) 读取原图完整信息（用于复制描述/检测结果）
+      
+      // 2) 先读取原图完整信息（用于获取文件名和复制描述/检测结果）
       let originalImage = null;
       try {
         if (current.id) {
@@ -95,6 +93,34 @@ export default function EnhanceResultScreen({ route, navigation }) {
       } catch (e) {
         originalImage = null;
       }
+      
+      // 1) 保存到相册（由适配层处理落盘与权限）
+      // 生成文件名：与PC端保持一致，格式为 原文件名_xt_时间戳.扩展名
+      let fileName = `enhanced_${Date.now()}.jpg`; // 默认文件名
+      try {
+        // 优先从原图信息获取文件名
+        const originalFileName = originalImage?.fileName || current?.fileName || '';
+        if (originalFileName) {
+          // 解析文件名（去除扩展名，获取名称部分）
+          const lastDotIndex = originalFileName.lastIndexOf('.');
+          const nameWithoutExt = lastDotIndex > 0 
+            ? originalFileName.substring(0, lastDotIndex) 
+            : originalFileName;
+          const ext = lastDotIndex > 0 
+            ? originalFileName.substring(lastDotIndex) 
+            : '.jpg';
+          
+          // 清理文件名中的特殊字符（避免保存失败）
+          const cleanName = nameWithoutExt.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').substring(0, 100); // 限制长度
+          
+          const timestamp = Date.now();
+          fileName = `${cleanName}_xt_${timestamp}${ext}`;
+        }
+      } catch (e) {
+        logger.warn('⚠️ 生成文件名失败，使用默认文件名:', e);
+      }
+      
+      const res = await RNFS.saveImageToGallery(currentResult.enhancedUri, fileName);
 
       // 3) 组装完整数据并写入数据库（对齐PC：writeImageDetailedInfo + 刷新缓存）
       const now = Date.now();
@@ -110,7 +136,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
 
       const completeImageData = {
         uri: newImageUri,
-        fileName: res.fileName || 'enhanced.jpg',
+        fileName: res.fileName || fileName || 'enhanced.jpg', // 优先使用返回的文件名，否则使用我们生成的
         category: 'tobecleaned',
         confidence: 1.0,
         timestamp: now,
@@ -223,6 +249,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
                     return {
                       ...prev,
                       [img.id]: {
+                        ...prev[img.id], // 保留所有原有属性，包括 saved 状态
                         status: newStatus,
                         enhancedUri: r.result_url || prev[img.id]?.enhancedUri,
                         error: r.error || prev[img.id]?.error,
@@ -255,6 +282,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
               setLocalResults((prev) => ({
                 ...prev,
                 [img.id]: {
+                  ...prev[img.id], // 保留所有原有属性，包括 saved 状态
                   status: newStatus,
                   enhancedUri: r.result_url || prev[img.id]?.enhancedUri,
                   error: r.error || prev[img.id]?.error,

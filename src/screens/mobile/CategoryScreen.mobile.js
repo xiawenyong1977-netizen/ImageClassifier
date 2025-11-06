@@ -927,8 +927,10 @@ const CategoryScreen = ({ route, navigation }) => {
           // 原生模块不可用，使用React Native Share
           if (selectedImages.length === 1) {
             // 单张图片：只传url，不传message（避免被当作文本分享）
+            // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
             const result = await Share.share({
               url: selectedImages[0].uri,
+              title: '芯图相册',
             });
             
             if (result.action === Share.sharedAction) {
@@ -938,8 +940,10 @@ const CategoryScreen = ({ route, navigation }) => {
             }
           } else {
             // 多张图片：使用urls参数（不传message）
+            // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
             const result = await Share.share({
               urls: urls,
+              title: '芯图相册',
             });
             
             if (result.action === Share.sharedAction) {

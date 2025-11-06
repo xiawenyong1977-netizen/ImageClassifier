@@ -489,8 +489,10 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         logger.debug('✅ 原生模块分享成功');
       } else {
         // 原生模块不可用，使用React Native Share
+        // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
         const result = await Share.share({
           url: currentImage.uri,
+          title: '芯图相册',
         });
         
         if (result.action === Share.sharedAction) {

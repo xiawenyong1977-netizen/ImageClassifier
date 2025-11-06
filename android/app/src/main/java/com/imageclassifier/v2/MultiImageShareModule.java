@@ -63,8 +63,13 @@ public class MultiImageShareModule extends ReactContextBaseJavaModule {
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             
             // 创建分享选择器
+            // 使用 createChooser 确保 Android 系统在分享完成后显示"完成"对话框
+            // 对话框会显示"返回[应用名称]"选项，让用户选择返回芯图相册或留在微信
             Intent chooserIntent = Intent.createChooser(shareIntent, "分享图片到");
+            // 必须添加 FLAG_ACTIVITY_NEW_TASK，因为是从后台启动
             chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // 不要添加 FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS，这不会影响返回提示
+            // createChooser 会自动处理返回提示的显示
             
             reactContext.startActivity(chooserIntent);
             promise.resolve("分享成功");
