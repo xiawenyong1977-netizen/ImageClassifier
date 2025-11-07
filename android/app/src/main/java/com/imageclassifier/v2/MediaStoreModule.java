@@ -89,11 +89,14 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     private boolean deleteFileViaMediaStore(String filePath) {
         try {
             // 检查权限
+            // 注意：使用 MediaStore API 删除图片时，对于应用自己创建的图片通常不需要额外权限
+            // 但为了兼容性，我们仍然检查基本权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
-                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                // Android 13+ 只需要 READ_MEDIA_IMAGES 权限即可删除自己创建的图片
+                // 删除其他应用的图片可能需要 WRITE_MEDIA_IMAGES，但我们的应用通常只删除自己创建的图片
+                if (reactContext.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") 
                     != PackageManager.PERMISSION_GRANTED) {
-                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
+                    Log.w(TAG, "缺少 READ_MEDIA_IMAGES 权限");
                     return false;
                 }
             } else {
@@ -803,11 +806,12 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             
             // 检查权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
-                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                // Android 13+ 只需要 READ_MEDIA_IMAGES 权限
+                // 使用 MediaStore API 保存图片时，系统会自动处理写入权限，不需要 WRITE_MEDIA_IMAGES
+                if (reactContext.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") 
                     != PackageManager.PERMISSION_GRANTED) {
-                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
-                    promise.reject("PERMISSION_DENIED", "需要 WRITE_MEDIA_IMAGES 权限");
+                    Log.w(TAG, "缺少 READ_MEDIA_IMAGES 权限");
+                    promise.reject("PERMISSION_DENIED", "需要相册读取权限（READ_MEDIA_IMAGES），请在系统设置中授予后重试");
                     return;
                 }
             } else {

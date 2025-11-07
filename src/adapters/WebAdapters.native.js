@@ -315,16 +315,11 @@ export const RNFS = {
         let hasPermission = true;
 
         if (apiLevel >= 33) {
-          // Android 13+ 需要 READ_MEDIA_IMAGES 和（在部分设备/ROM上）WRITE_MEDIA_IMAGES
-          const needs = [];
+          // Android 13+ 只需要 READ_MEDIA_IMAGES 权限
+          // 使用 MediaStore API 保存图片时，系统会自动处理写入权限，不需要 WRITE_MEDIA_IMAGES
           const readGranted = await RN_PermissionsAndroid.check('android.permission.READ_MEDIA_IMAGES');
-          if (!readGranted) needs.push('android.permission.READ_MEDIA_IMAGES');
-          // WRITE_MEDIA_IMAGES 并非所有ROM都实现，但如果在清单中声明了，尝试请求
-          const writeGranted = await RN_PermissionsAndroid.check('android.permission.WRITE_MEDIA_IMAGES').catch(() => false);
-          if (!writeGranted) needs.push('android.permission.WRITE_MEDIA_IMAGES');
-          
-          for (const p of needs) {
-            const res = await RN_PermissionsAndroid.request(p);
+          if (!readGranted) {
+            const res = await RN_PermissionsAndroid.request('android.permission.READ_MEDIA_IMAGES');
             if (res !== RN_PermissionsAndroid.RESULTS.GRANTED && res !== 'granted') {
               hasPermission = false;
             }

@@ -3,6 +3,7 @@ import {
   logger, 
   readImageFileAsBlob, 
   normalizeFilePath, 
+  pathToFileUri,  // 🆕 用于正确处理路径中的特殊字符（包括冒号）
   readFileForExif, 
   getFileStats,
   RNFS,
@@ -402,8 +403,8 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
       // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
       if (!imageDimensions.width || !imageDimensions.height) {
         try {
-          // 确保使用 file:// 格式的 URI
-          const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+          // 确保使用 file:// 格式的 URI，正确处理路径中的特殊字符
+          const imageUri = pathToFileUri(filePath);
           const dimensions = await ImageProcessor.getImageDimensions(imageUri);
           if (dimensions) {
             imageDimensions = {
@@ -515,8 +516,8 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
         // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
         if (!imageDimensions.width || !imageDimensions.height) {
           try {
-            // 确保使用 file:// 格式的 URI
-            const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+            // 确保使用 file:// 格式的 URI，正确处理路径中的特殊字符
+            const imageUri = pathToFileUri(filePath);
             const dimensions = await ImageProcessor.getImageDimensions(imageUri);
             if (dimensions) {
               imageDimensions = {
@@ -968,16 +969,20 @@ class GalleryScannerService {
 
   async scanDirectoryForUris(dirPath, onProgress = null, totalFoundSoFar = 0) {
     try {
-      const exists = await RNFS.exists(dirPath);
+      // 规范化路径：移除 file:// 前缀等，确保路径格式正确
+      const normalizedDirPath = normalizeFilePath(dirPath);
+      
+      const exists = await RNFS.exists(normalizedDirPath);
 
       if (!exists) {
+        logger.warn(`⚠️ 目录不存在: ${normalizedDirPath}`);
         return [];
 
       }
 
       
 
-      const items = await RNFS.readDir(dirPath);
+      const items = await RNFS.readDir(normalizedDirPath);
 
       const images = [];
 
@@ -1043,13 +1048,8 @@ class GalleryScannerService {
         } else if (this.isImageFile(item.name)) {
 
           // 规范化路径：将反斜杠转换为正斜杠（Windows路径兼容）
-          const normalizedPath = item.path.replace(/\\/g, '/');
-
-          const fileUri = Platform.OS === 'web' 
-
-            ? `file:///${normalizedPath}` 
-
-            : `file://${normalizedPath}`;
+          // 使用 pathToFileUri 正确处理路径中的特殊字符（包括冒号）
+          const fileUri = pathToFileUri(item.path);
 
           
 

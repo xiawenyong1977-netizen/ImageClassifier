@@ -169,6 +169,47 @@ export const normalizeFilePath = (filePath) => {
   return normalizedPath;
 };
 
+// 将文件路径转换为 file:// URI，正确处理路径中的特殊字符（包括冒号）
+// Windows路径中的冒号（除了盘符）需要被编码为 %3A
+export const pathToFileUri = (filePath) => {
+  if (!filePath) return filePath;
+  
+  // 如果已经是 file:// URI，直接返回
+  if (filePath.startsWith('file://')) {
+    return filePath;
+  }
+  
+  // 规范化路径：将反斜杠转换为正斜杠
+  let normalizedPath = filePath.replace(/\\/g, '/');
+  
+  // Windows路径处理：保留盘符后的冒号，但编码路径中其他位置的冒号
+  // 例如：C:/test:image/photo.jpg -> C:/test%3Aimage/photo.jpg
+  if (Platform.OS === 'web' && normalizedPath.match(/^[A-Za-z]:/)) {
+    // Windows路径：分离盘符和路径部分
+    const driveMatch = normalizedPath.match(/^([A-Za-z]:)(.*)$/);
+    if (driveMatch) {
+      const drive = driveMatch[1]; // 例如 "C:"
+      const pathPart = driveMatch[2]; // 例如 "/test:image/photo.jpg"
+      
+      // 对路径部分进行编码，但保留斜杠
+      const encodedPath = pathPart.split('/').map(segment => {
+        // 对每个路径段进行编码，处理冒号等特殊字符
+        return encodeURIComponent(segment).replace(/%2F/g, '/'); // 保留斜杠
+      }).join('/');
+      
+      // PC端使用 file:/// 格式（三个斜杠）
+      return `file:///${drive}${encodedPath}`;
+    }
+  }
+  
+  // 非Windows路径或无法识别的格式：直接编码整个路径
+  // 但要注意：对于已经包含 file:// 的路径，不应该再次处理
+  const encodedPath = encodeURI(normalizedPath);
+  
+  // PC端使用 file:/// 格式，移动端使用 file:// 格式
+  return Platform.OS === 'web' ? `file:///${encodedPath}` : `file://${encodedPath}`;
+};
+
 // 文件信息获取函数 - 统一处理不同平台的文件信息获取
 export const getFileStats = async (filePath) => {
   const normalizedPath = normalizeFilePath(filePath);
@@ -438,14 +479,18 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
+        const path = eval('require("path")');
         
-        const files = fs.readdirSync(dirPath);
+        // 规范化路径：移除 file:// 前缀，确保使用正确的路径格式
+        let normalizedDirPath = normalizeFilePath(dirPath);
+        
+        // 使用 path.join 确保路径正确拼接（处理包含冒号的路径）
+        const files = fs.readdirSync(normalizedDirPath);
         const result = [];
         
         for (const file of files) {
-          // 确保路径正确拼接，避免缺少路径分隔符
-          const normalizedDirPath = dirPath.replace(/\\/g, '/').replace(/\/$/, '');
-          const fullPath = `${normalizedDirPath}/${file}`;
+          // 使用 path.join 确保路径正确拼接，正确处理包含冒号的路径
+          const fullPath = path.join(normalizedDirPath, file);
           const stats = fs.statSync(fullPath);
           
           const item = {
