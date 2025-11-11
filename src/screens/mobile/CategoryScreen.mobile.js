@@ -29,7 +29,7 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_COLUMNS = 3;
@@ -297,6 +297,13 @@ const CategoryScreen = ({ route, navigation }) => {
     }
   };
   
+  const getLocalDateKey = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // 按日期分组图片（与 PC 端字段对齐）
   const groupImagesByDate = (imageList) => {
     const groups = {};
@@ -327,8 +334,8 @@ const CategoryScreen = ({ route, navigation }) => {
         date = new Date();
       }
       
-      // 使用安全的ISO格式，避免本地化问题
-      const dateKey = date.toISOString().split('T')[0];
+      // 使用本地日期键，避免 UTC 时区偏移导致跨天
+      const dateKey = getLocalDateKey(date);
       
       if (!groups[dateKey]) {
         groups[dateKey] = [];
@@ -440,7 +447,7 @@ const CategoryScreen = ({ route, navigation }) => {
     
     // 将时间转换为日期键格式
     const date = new Date(imageTime);
-    const targetDateKey = date.toISOString().split('T')[0];
+    const targetDateKey = getLocalDateKey(date);
     
     // 在日期组中找到对应的索引
     const targetDateIndex = dateKeys.indexOf(targetDateKey);
@@ -784,11 +791,18 @@ const CategoryScreen = ({ route, navigation }) => {
     try {
       logger.debug('准备提交增强任务', { presetId, count: imageIds.length });
       
-      // 读取选中图片的最新URI（优先缓存，否则从存储读取）
+      // 读取选中图片的最新URI（使用 getUri 获取正确的 URI）
       const selectedItems = [];
       for (const id of imageIds) {
         const img = await UnifiedDataService.readImageById(id);
-        if (img && img.uri) selectedItems.push({ id: img.id, uri: img.uri });
+        if (img) {
+          const uri = getUri(img);
+          if (uri) {
+            selectedItems.push({ id: img.id, uri: uri });
+          } else {
+            logger.warn(`⚠️ 无法获取图片 URI: ${id}`);
+          }
+        }
       }
       const uris = selectedItems.map((img) => img.uri);
 
@@ -893,6 +907,14 @@ const CategoryScreen = ({ route, navigation }) => {
         Alert.alert('提示', '请先选择图片');
         return;
       }
+
+      if (imageIds.length > 9) {
+        Alert.alert(
+          '提示',
+          `当前选中了 ${imageIds.length} 张图片。\n一次最多分享 9 张，请重新选择不超过 9 张的图片。`
+        );
+        return;
+      }
       
       const selectedImages = images.filter(img => imageIds.includes(img.id));
       if (selectedImages.length === 0) {
@@ -901,16 +923,28 @@ const CategoryScreen = ({ route, navigation }) => {
       }
 
       try {
-        const urls = selectedImages.map(img => img.uri);
+        // 使用 getUri 获取正确的 URI
+        const urls = selectedImages.map(img => {
+          const uri = getUri(img);
+          if (!uri) {
+            logger.warn(`⚠️ 无法获取图片 URI: ${img.id}`);
+          }
+          return uri;
+        }).filter(uri => uri != null); // 过滤掉无效的 URI
+        
+        if (urls.length === 0) {
+          Alert.alert('错误', '无法获取图片 URI，请重试');
+          return;
+        }
         
         // 调试：打印图片URI信息
         logger.debug('准备分享的图片URIs:', urls);
         selectedImages.forEach((img, index) => {
+          const uri = getUri(img);
           logger.debug(`图片${index + 1}:`, {
             id: img.id,
-            uri: img.uri,
-            path: img.path,
-            filename: img.filename
+            uri: uri,
+            originalUri: img.uri
           });
         });
         
@@ -919,17 +953,17 @@ const CategoryScreen = ({ route, navigation }) => {
         if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
           // 使用原生模块分享（支持单张和多张）
           await MultiImageShareModule.shareMultipleImages(urls);
-          logger.debug(`✅ 原生模块分享 ${selectedImages.length} 张图片成功`);
-          if (selectedImages.length > 1) {
-            Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+          logger.debug(`✅ 原生模块分享 ${urls.length} 张图片成功`);
+          if (urls.length > 1) {
+            Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
           }
         } else {
           // 原生模块不可用，使用React Native Share
-          if (selectedImages.length === 1) {
+          if (urls.length === 1) {
             // 单张图片：只传url，不传message（避免被当作文本分享）
             // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
             const result = await Share.share({
-              url: selectedImages[0].uri,
+              url: urls[0],
               title: '芯图相册',
             });
             
@@ -947,8 +981,8 @@ const CategoryScreen = ({ route, navigation }) => {
             });
             
             if (result.action === Share.sharedAction) {
-              logger.debug(`✅ React Native分享 ${selectedImages.length} 张图片成功`);
-              Alert.alert('分享成功', `已分享 ${selectedImages.length} 张图片`);
+              logger.debug(`✅ React Native分享 ${urls.length} 张图片成功`);
+              Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
             } else if (result.action === Share.dismissedAction) {
               logger.debug('用户取消分享');
             }
@@ -1100,7 +1134,8 @@ const CategoryScreen = ({ route, navigation }) => {
               // 4. 关闭进度提示
               setShowDeleteProgress(false);
             } catch (error) {
-              logger.error('❌ 批量删除失败:', error);
+              // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
+              logger.debug('批量删除失败（可能是权限问题）:', error);
               setShowDeleteProgress(false);
               
               // 检查是否是权限相关的错误
@@ -1167,8 +1202,15 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const renderImageItem = ({ item }) => {
     // 🆕 添加空值检查
-    if (!item || !item.id || !item.uri) {
+    if (!item || !item.id) {
       console.warn('⚠️ renderImageItem 发现无效的图片对象:', item);
+      return null;
+    }
+    
+    // 使用 getUri 获取正确的 URI
+    const imageUri = getUri(item);
+    if (!imageUri) {
+      console.warn('⚠️ renderImageItem 无法获取图片 URI:', item.id);
       return null;
     }
     
@@ -1183,7 +1225,7 @@ const CategoryScreen = ({ route, navigation }) => {
         activeOpacity={0.8}
       >
         <Image
-          source={{ uri: item.uri }}
+          source={{ uri: imageUri }}
           style={styles.gridImage}
           resizeMode="cover"
         />
@@ -1379,8 +1421,15 @@ const CategoryScreen = ({ route, navigation }) => {
             <View style={styles.timelineGrid}>
               {groupedImages[dateKey].map((image, index) => {
                 // 🆕 添加空值检查
-                if (!image || !image.id || !image.uri) {
+                if (!image || !image.id) {
                   console.warn('⚠️ 时间轴渲染中发现无效的图片对象:', image);
+                  return null;
+                }
+                
+                // 使用 getUri 获取正确的 URI
+                const imageUri = getUri(image);
+                if (!imageUri) {
+                  console.warn('⚠️ 时间轴渲染中无法获取图片 URI:', image.id);
                   return null;
                 }
                 
@@ -1417,7 +1466,7 @@ const CategoryScreen = ({ route, navigation }) => {
                     }}
                   >
                     <Image
-                      source={{ uri: image.uri }}
+                      source={{ uri: imageUri }}
                       style={styles.timelineImage}
                       resizeMode="cover"
                     />

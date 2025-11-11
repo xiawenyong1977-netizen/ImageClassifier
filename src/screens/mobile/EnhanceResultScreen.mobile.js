@@ -12,7 +12,7 @@ import {
   PanResponder,
   Animated,
 } from 'react-native';
-import { Alert, RNFS, logger } from '../../adapters/WebAdapters';
+import { Alert, RNFS, logger, getUri } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
 
@@ -42,6 +42,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
   const [savingById, setSavingById] = useState({});
   const [taskProcessing, setTaskProcessing] = useState(false); // 任务处理状态
   const abortControllerRef = useRef(null); // 用于取消轮询的 AbortController
+  const saveSuccessAnim = useRef(new Animated.Value(0)).current;
   
   // 计算任务键，用于防止重复提交
   const taskKey = useMemo(() => {
@@ -65,6 +66,12 @@ export default function EnhanceResultScreen({ route, navigation }) {
   const isSaving = current ? !!savingById[current.id] : false;
   const canSave = enhancedReady && !failed && !isSaving && !(currentResult && currentResult.saved);
   const translateX = useRef(new Animated.Value(0)).current;
+  const userToggleRef = useRef(false);
+  const localResultsRef = useRef(localResults);
+
+  useEffect(() => {
+    localResultsRef.current = localResults;
+  }, [localResults]);
 
   const goPrev = useCallback(() => setIndex((i) => (i > 0 ? i - 1 : i)), []);
   const goNext = useCallback(() => setIndex((i) => (i < total - 1 ? i + 1 : i)), [total]);
@@ -153,6 +160,11 @@ export default function EnhanceResultScreen({ route, navigation }) {
       await UnifiedDataService.imageCache.refreshCache();
 
       // 4) 标记本地结果为已保存
+      Animated.sequence([
+        Animated.timing(saveSuccessAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.timing(saveSuccessAnim, { toValue: 0, duration: 220, delay: 180, useNativeDriver: true }),
+      ]).start();
+
       setLocalResults((prev) => ({
         ...prev,
         [current.id]: { ...(prev[current.id] || {}), saved: true, savedAt: now },
@@ -176,6 +188,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
       const to = !showEnhanced ? (currentResult?.enhancedUri || current?.uri) : current?.uri;
       console.log('🟡 切换原/增强', { from, to });
     } catch (e) {}
+    userToggleRef.current = true;
     setShowEnhanced((v) => !v);
   };
 
@@ -202,8 +215,12 @@ export default function EnhanceResultScreen({ route, navigation }) {
         // 创建 AbortController 用于取消轮询
         abortControllerRef.current = new AbortController();
         
-        // 读取图片URI
-        const uris = selected.map((img) => img.uri).filter(Boolean);
+        // 读取图片URI（使用 getUri 获取正确的 URI）
+        const uris = selected.map((img) => {
+          // 如果 img 是一个对象且有 uri 属性，使用 getUri
+          // 如果 img.uri 已经是完整的 URI 字符串，也尝试使用 getUri 处理
+          return getUri(img) || img.uri;
+        }).filter(Boolean);
         
         if (uris.length === 0) {
           Alert.alert('错误', '没有有效的图片');
@@ -409,19 +426,23 @@ export default function EnhanceResultScreen({ route, navigation }) {
     return unsubscribe;
   }, [navigation, taskProcessing]);
 
-  // 当切换到新的图片或该图片增强完成时：默认展示增强图（仅当有 enhancedUri 时）
+  // 当切换到新的图片时，根据当前结果默认展示增强图（仅在未手动切换前）
   useEffect(() => {
     if (!current) return;
-    const result = localResults[current.id];
-    // 只有当状态为 'done' 且存在 enhancedUri 时才默认显示增强图
-    if (result?.status === 'done' && result?.enhancedUri) {
-      setShowEnhanced(true);
-    } else {
-      setShowEnhanced(false);
-    }
-    // 切换图片时重置位移
+    userToggleRef.current = false;
+    const result = localResultsRef.current[current.id];
+    const shouldShowEnhanced = !!(result?.status === 'done' && result?.enhancedUri);
+    setShowEnhanced(shouldShowEnhanced);
     translateX.setValue(0);
-  }, [index, current?.id, localResults, translateX]);
+  }, [current?.id, translateX]);
+
+  // 当任务轮询带来新的结果时，若用户未手动切换则保持自动切换逻辑
+  useEffect(() => {
+    if (!current || userToggleRef.current) return;
+    const result = localResults[current.id];
+    const shouldShowEnhanced = !!(result?.status === 'done' && result?.enhancedUri);
+    setShowEnhanced(shouldShowEnhanced);
+  }, [localResults, current?.id]);
 
 
   // 手势：左右滑动切换图片（处理中/完成均可）
@@ -461,13 +482,23 @@ export default function EnhanceResultScreen({ route, navigation }) {
 
       {/* 图片区域 */}
       <View style={styles.imageContainer} {...panResponder.panHandlers}>
-        {current?.uri ? (
-          <Animated.Image
-            source={{ uri: enhancedReady && showEnhanced ? (currentResult.enhancedUri || current.uri) : current.uri }}
-            style={[styles.image, { transform: [{ translateX }] }]}
-            resizeMode="contain"
-          />
-        ) : (
+        {current ? (() => {
+          // 使用 getUri 获取原始图片 URI，增强后的 URI 直接使用（来自服务器）
+          const originalUri = getUri(current) || current.uri;
+          const displayUri = enhancedReady && showEnhanced 
+            ? (currentResult.enhancedUri || originalUri)
+            : originalUri;
+          
+          return displayUri ? (
+            <Animated.Image
+              source={{ uri: displayUri }}
+              style={[styles.image, { transform: [{ translateX }] }]}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>暂无图片</Text></View>
+          );
+        })() : (
           <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>暂无图片</Text></View>
         )}
 
@@ -495,15 +526,31 @@ export default function EnhanceResultScreen({ route, navigation }) {
         </View>
         {/* 中：保存到相册 */}
         <View style={styles.footerCenter}>
-          <TouchableOpacity style={[styles.saveButton, (!canSave) && styles.saveButtonDisabled]} onPress={onSave} disabled={!canSave}>
-            <Text style={styles.saveText}>{currentResult?.saved ? '已保存' : (isSaving ? '保存中…' : '保存到相册')}</Text>
-          </TouchableOpacity>
+          <Animated.View style={[
+            styles.saveButtonWrapper,
+            {
+              transform: [{
+                scale: currentResult?.saved ? saveSuccessAnim.interpolate({
+                  inputRange: [0, 0.5, 1],
+                  outputRange: [1, 1.06, 1],
+                }) : 1,
+              }],
+              opacity: currentResult?.saved ? saveSuccessAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0.94],
+              }) : 1,
+            },
+          ]}>
+            <TouchableOpacity style={[styles.saveButton, (!canSave) && styles.saveButtonDisabled]} onPress={onSave} disabled={!canSave}>
+              <Text style={styles.saveText}>{currentResult?.saved ? '已保存' : (isSaving ? '保存中…' : '保存到相册')}</Text>
+            </TouchableOpacity>
+          </Animated.View>
         </View>
         {/* 右：原图/增强 */}
         <View style={styles.footerRight}>
           {enhancedReady && (
             <TouchableOpacity style={styles.toggleFooterButton} onPress={toggleShow}>
-              <Text style={styles.toggleFooterText}>{showEnhanced ? '显示原图' : '显示增强'}</Text>
+              <Text style={styles.toggleFooterText}>{showEnhanced ? '显示原图' : `显示${presetName || '增强'}`}</Text>
             </TouchableOpacity>
           )}
         </View>

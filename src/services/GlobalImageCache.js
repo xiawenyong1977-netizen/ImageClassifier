@@ -212,7 +212,8 @@ class GlobalImageCache {
       // 更新统计信息
       const normalizedCategory = this._normalizeCategoryId(image.category);
       this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
-      if (image.city) {
+      // 城市统计需要排除 tobecleaned 分类的图片
+      if (image.city && image.category !== 'tobecleaned') {
         this.cache.cityCounts[image.city] = (this.cache.cityCounts[image.city] || 0) + 1;
       }
       
@@ -273,8 +274,10 @@ class GlobalImageCache {
       // 重新构建分类索引
       // 不再需要重建索引，直接通过过滤获取数据
       
-      // 重新构建分类统计
+      // 重新构建分类统计和城市统计（城市统计需要排除tobecleaned）
       this._rebuildCategoryCounts();
+      this._rebuildCityCounts();
+    
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
       
@@ -608,13 +611,14 @@ class GlobalImageCache {
     let cityImageCount = 0;
     
     this.cache.allImages.forEach(img => {
-      if (img.city) {
+      // 排除 tobecleaned 分类的图片
+      if (img.city && img.category !== 'tobecleaned') {
         this.cache.cityCounts[img.city] = (this.cache.cityCounts[img.city] || 0) + 1;
         cityImageCount++;
       }
     });
     
-    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片`);
+    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片（已排除tobecleaned）`);
     
     // 调试：显示前5个城市统计
     const cityEntries = Object.entries(this.cache.cityCounts).slice(0, 5);
@@ -771,7 +775,8 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      return img.city === city;
+      // 排除 tobecleaned 分类的图片
+      return img.city === city && img.category !== 'tobecleaned';
     });
   }
 
@@ -783,7 +788,8 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      return img.similarityGroupIndex === groupId;
+      // 排除 tobecleaned 分类的图片
+      return img.similarityGroupIndex === groupId && img.category !== 'tobecleaned';
     });
   }
 

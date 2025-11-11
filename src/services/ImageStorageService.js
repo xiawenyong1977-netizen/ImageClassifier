@@ -723,37 +723,6 @@ class SQLiteAdapter {
     }
   }
 
-  // 批量更新图片分类ID
-  async batchUpdateImageCategory(imageIds, newCategory, newConfidence) {
-    await this.init();
-    
-    if (!imageIds || imageIds.length === 0) {
-      return { success: true, processed: 0 };
-    }
-    
-    const placeholders = imageIds.map(() => '?').join(',');
-    const sql = `
-      UPDATE images 
-      SET category = ?, confidence = ?, updatedAt = ?
-      WHERE id IN (${placeholders})
-    `;
-    
-    const params = [
-      newCategory,
-      newConfidence,
-      new Date().toISOString(),
-      ...imageIds
-    ];
-    
-    const [result] = await this.db.executeSql(sql, params);
-    
-    logger.debug(`✅ SQLite批量更新分类: ${result.rowsAffected}张图片 -> ${newCategory}`);
-    
-    return {
-      success: true,
-      processed: result.rowsAffected
-    };
-  }
 
   // 🆕 专用方法：删除单张图片（单条记录）
   async deleteImageById(imageId) {
@@ -1457,13 +1426,32 @@ class ImageStorageService {
         return { success: true, updatedCount: 0, failedCount: 0 };
       }
       
+      let result;
       if (Platform.OS === 'web') {
         // PC端：使用IndexedDB
-        return await this._batchUpdateClassificationIndexedDB(classificationDataArray);
+        result = await this._batchUpdateClassificationIndexedDB(classificationDataArray);
       } else {
         // 移动端：使用SQLite
-        return await this._batchUpdateClassificationSQLite(classificationDataArray);
+        result = await this._batchUpdateClassificationSQLite(classificationDataArray);
       }
+      
+      // 🆕 如果更新后的分类是 tobecleaned，批量清理相似组信息
+      const tobecleanedUpdates = classificationDataArray.filter(item => item.category === 'tobecleaned');
+      if (tobecleanedUpdates.length > 0) {
+        logger.debug(`🧹 批量清理相似组信息: ${tobecleanedUpdates.length}张图片移动到tobecleaned`);
+        try {
+          const imageIds = tobecleanedUpdates
+            .map(item => item.id || this.generateStableId(item.uri))
+            .filter(id => id);
+          if (imageIds.length > 0) {
+            await this.batchRemoveFromSimilarityGroups(imageIds);
+          }
+        } catch (error) {
+          logger.warn(`批量清理相似组信息失败:`, error);
+        }
+      }
+      
+      return result;
     } catch (error) {
       logger.error('❌ 批量更新分类信息失败:', error);
       return { success: false, updatedCount: 0, failedCount: classificationDataArray.length, error };
@@ -2064,20 +2052,64 @@ class ImageStorageService {
       let processed = 0;
       const errors = [];
       
-      if (Platform.OS !== 'web' && this.storage.batchUpdateImageCategory) {
-        // 移动端：使用SQLite批量更新
-        const result = await this.storage.batchUpdateImageCategory(imageIds, newCategory, newConfidence);
-        processed = result.processed;
+      if (Platform.OS !== 'web' && this.storage.db) {
+        // 移动端：使用SQLite批量更新（直接内联SQLite逻辑）
+        try {
+          await this.storage.init();
+          const placeholders = imageIds.map(() => '?').join(',');
+          const sql = `
+            UPDATE images 
+            SET category = ?, confidence = ?, updatedAt = ?
+            WHERE id IN (${placeholders})
+          `;
+          
+          const params = [
+            newCategory,
+            newConfidence,
+            new Date().toISOString(),
+            ...imageIds
+          ];
+          
+          const [result] = await this.storage.db.executeSql(sql, params);
+          processed = result.rowsAffected;
+          logger.debug(`✅ SQLite批量更新分类: ${processed}张图片 -> ${newCategory}`);
+        } catch (error) {
+          logger.error('批量更新分类（SQLite）失败:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
+        }
       } else {
-        // PC端：逐个更新（IndexedDB没有批量更新API）
-        for (const imageId of imageIds) {
-          try {
-            await this.updateImageCategory(imageId, newCategory, newConfidence);
-            processed++;
-          } catch (error) {
-            logger.error(`更新图片分类失败: ${imageId}`, error);
-            errors.push({ imageId, error: error.message });
+        // PC端：一次读全量 -> 批量修改 -> 一次写回
+        try {
+          const allImages = await this.storage.getItem(this.storageKeys.images) || [];
+          
+          if (!Array.isArray(allImages) || allImages.length === 0) {
+            logger.warn('批量更新分类：当前没有任何图片数据');
           }
+          
+          const imageIdSet = new Set(imageIds);
+          let updatedCount = 0;
+          const updatedImages = allImages.map(image => {
+            if (image && image.id && imageIdSet.has(image.id)) {
+              updatedCount++;
+              return {
+                ...image,
+                category: newCategory,
+                confidence: newConfidence,
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return image;
+          });
+          
+          if (updatedCount > 0) {
+            await this.storage.setItem(this.storageKeys.images, updatedImages);
+            processed = updatedCount;
+          } else {
+            logger.warn('批量更新分类：在数据集中未找到匹配的图片ID');
+          }
+        } catch (error) {
+          logger.error('批量更新分类（IndexedDB）失败:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
         }
       }
       
@@ -2911,6 +2943,17 @@ class ImageStorageService {
         
         if (remainingImages.length <= 1) {
           // 如果删除后只剩0或1张图片，删除整个组
+          if (remainingImages.length === 1) {
+            // 如果组只剩1张图片，需要清除该图片的相似组信息
+            const remainingImageId = remainingImages[0];
+            if (similarityData[remainingImageId]) {
+              delete similarityData[remainingImageId].similarity_group_id;
+              delete similarityData[remainingImageId].similarity_group_type;
+              delete similarityData[remainingImageId].similarity_score;
+              logger.debug(`✅ 清除单图片组，移除图片 ${remainingImageId} 的相似组信息`);
+            }
+          }
+          // 删除该组
           delete groupIndex[groupId];
           logger.debug(`🧹 删除相似组: ${groupId} (剩余${remainingImages.length}张)`);
         } else {

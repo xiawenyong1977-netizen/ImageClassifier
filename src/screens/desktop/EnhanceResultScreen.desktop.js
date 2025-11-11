@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 /**
  * EnhanceResultScreen - 照片创玩结果展示屏幕（桌面端）
@@ -57,6 +57,8 @@ const EnhanceResultScreen = ({
     }
     return 'AI增强';
   };
+
+  const presetDisplayName = getPresetName();
   
   // 获取图片状态（从后端实时返回或results）
   const getImageStatus = (index) => {
@@ -101,23 +103,48 @@ const EnhanceResultScreen = ({
     const status = getImageStatus(currentIndex);
     
     // 显示原图
-    const renderOriginalImage = () => (
-      <View style={styles.enhanceComparisonImageContainer}>
-        <View style={styles.enhanceComparisonImageLabelContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
-          {selectedImages.length > 1 && (
-            <Text style={styles.enhanceComparisonImageCounter}>
-              {currentIndex + 1}/{selectedImages.length}
-            </Text>
-          )}
+    const renderOriginalImage = () => {
+      // 使用 getUri 获取正确的 URI（PC端：file://，移动端：content://）
+      const imageUri = getUri(currentImage);
+      if (!imageUri) {
+        return (
+          <View style={styles.enhanceComparisonImageContainer}>
+            <View style={styles.enhanceComparisonImageLabelContainer}>
+              <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
+              {selectedImages.length > 1 && (
+                <Text style={styles.enhanceComparisonImageCounter}>
+                  {currentIndex + 1}/{selectedImages.length}
+                </Text>
+              )}
+            </View>
+            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
+              <Text style={styles.enhanceComparisonPlaceholderIcon}>📷</Text>
+              <Text style={styles.enhanceComparisonPlaceholderText}>无法加载图片</Text>
+            </View>
+          </View>
+        );
+      }
+      
+      return (
+        <View style={styles.enhanceComparisonImageContainer}>
+          <View style={styles.enhanceComparisonImageLabelContainer}>
+            <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
+            {selectedImages.length > 1 && (
+              <Text style={styles.enhanceComparisonImageCounter}>
+                {currentIndex + 1}/{selectedImages.length}
+              </Text>
+            )}
+          </View>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.enhanceComparisonImage}
+            resizeMode="contain"
+            onError={(error) => logger.error('❌ 原图加载失败:', imageUri, error)}
+            onLoad={() => logger.debug('✅ 原图加载成功:', imageUri)}
+          />
         </View>
-        <Image
-          source={{ uri: currentImage.uri }}
-          style={styles.enhanceComparisonImage}
-          resizeMode="contain"
-        />
-      </View>
-    );
+      );
+    };
 
     // 显示增强图或状态
     const renderEnhancedImage = () => {
@@ -125,7 +152,7 @@ const EnhanceResultScreen = ({
       if (!isProcessing && results.length === 0) {
         return (
           <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+            <Text style={styles.enhanceComparisonImageLabel}>{presetDisplayName}</Text>
             <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
               <Text style={styles.enhanceComparisonPlaceholderIcon}>🎨</Text>
               <Text style={styles.enhanceComparisonPlaceholderText}>选择方案开始处理</Text>
@@ -145,7 +172,7 @@ const EnhanceResultScreen = ({
               {status === 'processing' ? (
                 <>
                   <ActivityIndicator size="large" color="#2196F3" />
-                  <Text style={styles.enhanceComparisonPlaceholderText}>照片创玩中...</Text>
+                  <Text style={styles.enhanceComparisonPlaceholderText}>{`${presetDisplayName}处理中...`}</Text>
                 </>
               ) : (
                 <>
@@ -165,7 +192,7 @@ const EnhanceResultScreen = ({
             <Text style={styles.enhanceComparisonImageLabel}>处理失败</Text>
             <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonFailedContainer]}>
               <Text style={styles.enhanceComparisonFailedIcon}>⚠️</Text>
-              <Text style={styles.enhanceComparisonFailedTitle}>处理失败</Text>
+              <Text style={styles.enhanceComparisonFailedTitle}>{`${presetDisplayName}失败`}</Text>
               <Text style={styles.enhanceComparisonFailedMessage}>
                 {currentResult.errorMessage || '未知错误'}
               </Text>
@@ -181,7 +208,7 @@ const EnhanceResultScreen = ({
       if (status === 'completed' && currentResult.enhancedUri) {
         return (
           <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+            <Text style={styles.enhanceComparisonImageLabel}>{presetDisplayName}</Text>
             <Image
               source={{ uri: currentResult.enhancedUri }}
               style={styles.enhanceComparisonImage}
@@ -200,7 +227,7 @@ const EnhanceResultScreen = ({
             <Text style={styles.enhanceComparisonImageLabel}>加载中</Text>
             <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
               <ActivityIndicator size="large" color="#2196F3" />
-              <Text style={styles.enhanceComparisonPlaceholderText}>正在加载增强结果...</Text>
+              <Text style={styles.enhanceComparisonPlaceholderText}>{`正在加载${presetDisplayName}结果...`}</Text>
             </View>
           </View>
         );
@@ -209,9 +236,9 @@ const EnhanceResultScreen = ({
       // 默认占位（其他未知状态）
       return (
         <View style={styles.enhanceComparisonImageContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
+          <Text style={styles.enhanceComparisonImageLabel}>{presetDisplayName}</Text>
           <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-            <Text style={styles.enhanceComparisonPlaceholderText}>暂无结果</Text>
+            <Text style={styles.enhanceComparisonPlaceholderText}>{`暂无${presetDisplayName}结果`}</Text>
           </View>
         </View>
       );

@@ -154,6 +154,7 @@
       "shortcutName": "芯图相册",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
+      "include": "installer/installer.nsh",
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "language": "2052",
       "warningsAsErrors": false

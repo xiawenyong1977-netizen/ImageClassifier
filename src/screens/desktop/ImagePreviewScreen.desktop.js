@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
-import { SafeAreaView, Alert, logger, normalizeFilePath } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
 import WeChatAuthService from '../../services/WeChatAuthService';
@@ -61,28 +61,8 @@ const getAllCategories = () => {
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Helper function to convert file URI to web-accessible format
-const getWebAccessibleUri = (uri) => {
-  if (!uri) return null;
-  
-  // If it's already a web URL, return as is
-  if (uri.startsWith('http://') || uri.startsWith('https://')) {
-    return uri;
-  }
-  
-  // If it's a file:// URI, convert to web-accessible format
-  if (uri.startsWith('file://')) {
-    // For Electron environment, we can use the file:// protocol
-    if (typeof window !== 'undefined' && window.require) {
-      return uri;
-    }
-    
-    // For web environment, we'll show placeholder
-    return null;
-  }
-  
-  return uri;
-};
+// 注意：已移除 getWebAccessibleUri，直接使用 getUri
+// 由于 Electron 设置了 webSecurity: false，可以直接使用 file:// URI
 
 const ImagePreviewScreen = ({ 
   route = {}, 
@@ -317,23 +297,33 @@ const ImagePreviewScreen = ({
 
   // 获取图片尺寸
   useEffect(() => {
-    if (currentImage && currentImage.uri) {
-      logger.debug('开始获取图片尺寸:', currentImage.uri);
-      Image.getSize(
-        currentImage.uri,
-        (width, height) => {
-          logger.debug('图片尺寸获取成功:', width, '×', height);
-          setImageDimensions({ width, height });
-        },
-        (error) => {
-          logger.error('获取图片尺寸失败:', error);
-          setImageDimensions(null);
-        }
-      );
+    if (currentImage) {
+      // 从缓存/数据库中的 imageDimensions 字段读取
+      if (currentImage.imageDimensions && 
+          typeof currentImage.imageDimensions === 'object' &&
+          currentImage.imageDimensions.width && 
+          currentImage.imageDimensions.height) {
+        logger.debug('从缓存读取图片尺寸:', currentImage.imageDimensions);
+        setImageDimensions({
+          width: currentImage.imageDimensions.width,
+          height: currentImage.imageDimensions.height
+        });
+      } else {
+        // 数据库中没有尺寸数据，记录错误以便发现问题
+        logger.error('⚠️ 数据库缺少图片尺寸数据:', {
+          imageId: currentImage.id,
+          fileName: currentImage.fileName,
+          uri: currentImage.uri,
+          hasImageDimensions: !!currentImage.imageDimensions,
+          imageDimensionsType: typeof currentImage.imageDimensions,
+          imageDimensionsValue: currentImage.imageDimensions
+        });
+        setImageDimensions(null);
+      }
     } else {
-      logger.warn('没有图片URI，无法获取尺寸');
+      setImageDimensions(null);
     }
-  }, [currentImage?.uri]);
+  }, [currentImage]);
 
   // 键盘快捷键支持
   useEffect(() => {
@@ -611,7 +601,7 @@ const ImagePreviewScreen = ({
    * 分享当前图片
    */
   const handleShare = async () => {
-    if (!currentImage || !currentImage.uri) {
+    if (!currentImage) {
       Alert.alert('错误', '图片信息不完整，无法分享');
       return;
     }
@@ -622,8 +612,12 @@ const ImagePreviewScreen = ({
         const { ipcRenderer } = window.require('electron');
         const pathModule = window.require('path');
         
-        // 标准化文件路径
-        const filePath = normalizeFilePath(currentImage.uri);
+        // 获取本地文件路径（getLocalPath内部已经标准化路径）
+        const filePath = getLocalPath(currentImage);
+        if (!filePath) {
+          Alert.alert('错误', '无法获取图片本地路径');
+          return;
+        }
         
         // 复制图片对象到剪贴板
         const result = await ipcRenderer.invoke('shell-copy-image-to-clipboard', filePath);
@@ -636,20 +630,9 @@ const ImagePreviewScreen = ({
           throw new Error(result.error || '复制失败');
         }
       } else {
-        // 非Electron环境，尝试使用Web Share API
-        if (navigator.share) {
-          await navigator.share({
-            title: currentImage.fileName || '照片',
-            files: [await fetch(currentImage.uri).then(res => res.blob())]
-          });
-          logger.debug('✅ 分享成功');
-        } else if (navigator.clipboard) {
-          // 最后降级到复制路径
-          await navigator.clipboard.writeText(currentImage.uri);
-          Alert.alert('已复制', '图片路径已复制到剪贴板');
-        } else {
-          Alert.alert('提示', '当前环境不支持分享功能');
-        }
+        // 非Electron环境，功能开发中
+        Alert.alert('提示', '分享功能目前仅在桌面版（Electron）环境中可用，功能开发中');
+        logger.warn('⚠️ 非Electron环境，分享功能不可用');
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
@@ -702,8 +685,14 @@ const ImagePreviewScreen = ({
    */
   const handleEnhancePresetPress = async (presetId) => {
     try {
-      if (!currentImage || !currentImage.id || !currentImage.uri) {
+      if (!currentImage || !currentImage.id) {
         Alert.alert('错误', '图片信息不完整');
+        return;
+      }
+      
+      const imageUri = getUri(currentImage);
+      if (!imageUri) {
+        Alert.alert('错误', '无法获取图片URI');
         return;
       }
       
@@ -840,7 +829,11 @@ const ImagePreviewScreen = ({
         logger.debug(`  预处理 ${i + 1}/${images.length}: ${image.fileName}`);
         
         try {
-          const preparedImage = await ImageEnhanceService.prepareImageForEnhance(image.uri);
+          const imageUri = getUri(image);
+          if (!imageUri) {
+            throw new Error(`无法获取图片URI: ${image.fileName}`);
+          }
+          const preparedImage = await ImageEnhanceService.prepareImageForEnhance(imageUri);
           preparedImages.push({
             ...preparedImage,
             originalImage: image  // 保存原始图片信息
@@ -923,11 +916,12 @@ const ImagePreviewScreen = ({
                 
                 if (originalImage) {
                   const enhancedUrl = imgStatus.result_url || imgStatus.url || imgStatus.enhanced_url;
+                  const originalImageUri = getUri(originalImage);
                   
                   const existingIndex = newResults.findIndex(r => {
                     // 确保 r 存在后再访问其属性
                     if (!r) return false;
-                    return r.originalUri === originalImage.uri || 
+                    return (r.originalUri && originalImageUri && r.originalUri === originalImageUri) || 
                            (r.originalImageId === originalImage.id);
                   });
                   
@@ -943,7 +937,7 @@ const ImagePreviewScreen = ({
                   } else {
                     newResults[index] = {
                       originalImageId: originalImage.id,
-                      originalUri: originalImage.uri,
+                      originalUri: originalImageUri,
                       originalFileName: originalImage.fileName,
                       enhancedUri: enhancedUrl,
                       taskId: taskResult.task_id,
@@ -983,9 +977,10 @@ const ImagePreviewScreen = ({
           
           if (result.status === 'completed' && enhancedUrl) {
             if (originalImage) {
+              const originalImageUri = getUri(originalImage);
               results.push({
                 originalImageId: originalImage.id,
-                originalUri: originalImage.uri,
+                originalUri: originalImageUri,
                 originalFileName: originalImage.fileName,
                 enhancedUri: enhancedUrl,
                 taskId: taskResult.task_id,
@@ -995,9 +990,10 @@ const ImagePreviewScreen = ({
               successCount++;
             }
           } else {
+            const originalImageUri = originalImage ? getUri(originalImage) : null;
             results.push({
               originalImageId: originalImage?.id,
-              originalUri: originalImage?.uri,
+              originalUri: originalImageUri,
               originalFileName: originalImage?.fileName,
               status: 'failed',
               errorMessage: result.error || '处理失败'
@@ -1176,26 +1172,21 @@ const ImagePreviewScreen = ({
 
   // 获取文件名
   const getDisplayFileName = () => {
-    // 优先使用 fileName 字段
+    // 使用数据库中的 fileName 字段
     if (currentImage.fileName) {
       return currentImage.fileName;
     }
     
-    // 如果没有 fileName，从 URI 中提取
-    if (currentImage.uri) {
-      const uriParts = currentImage.uri.split('/');
-      const lastPart = uriParts[uriParts.length - 1];
-      
-      // 如果最后一部分包含查询参数，去掉查询参数
-      if (lastPart.includes('?')) {
-        return lastPart.split('?')[0];
-      }
-      
-      return lastPart;
-    }
+    // 数据库中没有 fileName 数据，记录错误以便发现问题
+    logger.error('⚠️ 数据库缺少图片文件名数据:', {
+      imageId: currentImage.id,
+      uri: currentImage.uri,
+      hasFileName: !!currentImage.fileName,
+      fileNameValue: currentImage.fileName
+    });
     
-    // 默认值
-    return '图片预览';
+    // 返回默认值，而不是从路径提取（暴露数据问题）
+    return '未知文件名';
   };
 
   // 显示加载状态
@@ -1324,10 +1315,10 @@ const ImagePreviewScreen = ({
               {/* 图片内容 */}
               <View style={styles.imageContent}>
                 {(() => {
-                  const webUri = getWebAccessibleUri(currentImage.uri);
-                  return webUri ? (
+                  const imageUri = getUri(currentImage);
+                  return imageUri ? (
                     <Image
-                      source={{ uri: webUri }}
+                      source={{ uri: imageUri }}
                       style={styles.image}
                       resizeMode="contain"
                       onError={(error) => {
@@ -1344,7 +1335,7 @@ const ImagePreviewScreen = ({
                         {currentImage.fileName || 'Image Preview'}
                       </Text>
                       <Text style={styles.placeholderSubtext}>
-                        {currentImage.uri ? 'Local file' : 'No preview available'}
+                        {getUri(currentImage) ? 'Local file' : 'No preview available'}
                       </Text>
                     </View>
                   );
@@ -1727,7 +1718,18 @@ const ImagePreviewScreen = ({
             <View style={styles.infoSection}>
               <Text style={styles.sectionTitle}>文件路径</Text>
               <Text style={styles.filePath}>
-                {currentImage.uri ? currentImage.uri.replace('file://', '').replace(/^\//, '') : '未知'}
+                {(() => {
+                  const localPath = getLocalPath(currentImage);
+                  if (localPath) {
+                    return localPath;
+                  }
+                  // 降级：从 URI 中提取路径
+                  const imageUri = getUri(currentImage);
+                  if (imageUri && imageUri.startsWith('file://')) {
+                    return imageUri.replace('file:///', '').replace('file://', '');
+                  }
+                  return imageUri || '未知';
+                })()}
               </Text>
             </View>
           </View>

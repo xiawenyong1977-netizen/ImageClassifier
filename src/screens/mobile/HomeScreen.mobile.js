@@ -30,7 +30,7 @@ import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import WakeLockService from '../../services/WakeLockService';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -268,8 +268,9 @@ const HomeScreen = ({ navigation }) => {
       const cityList = Object.keys(cityCounts)
         .map(cityName => {
           // 找到这个城市最近的一张照片（按时间戳降序）
+          // 排除 tobecleaned 分类的图片
           const cityImages = allImages
-            .filter(img => img.city === cityName)
+            .filter(img => img.city === cityName && img.category !== 'tobecleaned')
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           
           const latestImage = cityImages.length > 0 ? cityImages[0] : null;
@@ -277,7 +278,7 @@ const HomeScreen = ({ navigation }) => {
           return {
             name: cityName,
             count: cityCounts[cityName],
-            latestImageUri: latestImage ? latestImage.uri : null,
+            latestImageUri: latestImage ? getUri(latestImage) : null,
           };
         })
         .sort((a, b) => b.count - a.count);
@@ -302,6 +303,13 @@ const HomeScreen = ({ navigation }) => {
       setSimilarityGroups(groups);
       
       logger.debug(`🔍 相似组加载完成: ${groups.length}/${allGroups.length}组`);
+      
+      // 调试：检查相似组的 latestImageUri
+      if (groups.length > 0) {
+        groups.forEach((group, index) => {
+          logger.debug(`🔍 相似组 ${index + 1}: groupId=${group.groupId}, imageCount=${group.imageCount}, latestImageUri=${group.latestImageUri || 'null'}`);
+        });
+      }
       
     } catch (error) {
       logger.error('❌ 加载相似组失败:', error);
@@ -652,7 +660,7 @@ const HomeScreen = ({ navigation }) => {
       {/* 缩略图占满整个卡片 */}
       {category.recentImages && category.recentImages.length > 0 ? (
         <Image
-          source={{ uri: category.recentImages[0].uri }}
+          source={{ uri: getUri(category.recentImages[0]) || category.recentImages[0]?.uri }}
           style={styles.thumbnail}
           resizeMode="cover"
         />
@@ -734,6 +742,13 @@ const HomeScreen = ({ navigation }) => {
           source={{ uri: group.latestImageUri }}
           style={styles.thumbnail}
           resizeMode="cover"
+          onError={(error) => {
+            logger.error(`❌ 相似组缩略图加载失败:`, { 
+              groupId: group.groupId, 
+              latestImageUri: group.latestImageUri,
+              error: error.nativeEvent?.error || error
+            });
+          }}
         />
       ) : (
         <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
@@ -850,8 +865,9 @@ const HomeScreen = ({ navigation }) => {
                 onPress={() => {
                   try {
                     // 🆕 添加空值检查
-                    if (!image || !image.uri || !navigation) {
-                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, navigation: !!navigation });
+                    const imageUri = getUri(image);
+                    if (!image || !imageUri || !navigation) {
+                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, imageUri, navigation: !!navigation });
                       return;
                     }
                     
@@ -868,7 +884,7 @@ const HomeScreen = ({ navigation }) => {
                 }}
               >
                 <Image
-                  source={{ uri: image.uri }}
+                  source={{ uri: getUri(image) || image?.uri }}
                   style={styles.recentGridImage}
                   resizeMode="cover"
                 />

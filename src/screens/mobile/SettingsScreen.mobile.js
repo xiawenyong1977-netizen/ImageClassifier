@@ -28,6 +28,7 @@ import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
+import { BUILD_DATE, BUILD_VERSION } from '../../config/BuildInfo';
 
 const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // ==================== 状态管理 ====================
@@ -351,15 +352,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         await generateQrCode();
       }
     } catch (error) {
-      // 检查是否是HTTP错误（包含状态码）
-      const isHttpError = error.message && /失败:\s*\d+/.test(error.message);
-      if (isHttpError) {
-        // 后端返回了非200状态码，使用error日志
-        logger.error('❌ 查询会员状态失败（后端错误）:', error);
-      } else {
-        // 网络错误等其他情况，也使用error日志
-        logger.error('❌ 查询会员状态失败（网络错误）:', error);
-      }
+      // 查询会员状态失败，使用debug日志（不输出error）
+      logger.debug('查询会员状态失败:', error);
       setWechatStatus('not_member');
       await generateQrCode();
     }
@@ -394,8 +388,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         }
       }, 2000);
     } catch (error) {
-      logger.error('生成二维码失败:', error);
-      Alert.alert('错误', '生成二维码失败，请重试');
+      // 生成二维码失败，使用debug日志（不输出error和弹窗）
+      logger.debug('生成二维码失败:', error);
       setCheckingFollow(false);
     }
   };
@@ -966,8 +960,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
             </View>
           </View>
-          {renderInfoItem('版本', '1.0.0')}
-          {renderInfoItem('构建版本', '2025.01.20')}
+          {renderInfoItem('版本', BUILD_VERSION)}
+          {renderInfoItem('构建版本', BUILD_DATE)}
           {renderInfoItem('平台', '移动端 (React Native)')}
           {renderInfoItem('存储类型', storageType)}
           {renderInfoItem('存储大小', storageSize)}

@@ -1,7 +1,7 @@
 import React, { useState, memo, useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 // 优化的图片组件，避免不必要的重新渲染
 const MemoizedImage = memo(({ uri, imageId, onError, onLoad }) => {
@@ -70,30 +70,42 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
             activeOpacity={0.8}>
             
             {/* 尝试显示实际图片 */}
-            {!hasError && image.uri && (
-              <Image
-                source={{ uri: image.uri }}
-                style={styles.image}
-                onError={() => {
-                  logger.error(`Image load error for: ${image.uri}`);
-                  handleImageError(imageId);
-                }}
-                onLoad={() => {
-                  handleImageLoad(imageId);
-                }}
-                resizeMode="cover"
-              />
-            )}
+            {(() => {
+              const imageUri = getUri(image);
+              if (!hasError && imageUri) {
+                return (
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={styles.image}
+                    onError={() => {
+                      logger.error(`Image load error for: ${imageUri}`);
+                      handleImageError(imageId);
+                    }}
+                    onLoad={() => {
+                      handleImageLoad(imageId);
+                    }}
+                    resizeMode="cover"
+                  />
+                );
+              }
+              return null;
+            })()}
             
             {/* 如果图片加载失败或没有URI，显示占位符 */}
-            {(hasError || !image.uri) && (
-              <View style={styles.imagePlaceholder}>
-                <Text style={styles.placeholderText}>📷</Text>
-                <Text style={styles.placeholderFileName} numberOfLines={1}>
-                  {image.fileName || '图片'}
-                </Text>
-              </View>
-            )}
+            {(() => {
+              const imageUri = getUri(image);
+              if (hasError || !imageUri) {
+                return (
+                  <View style={styles.imagePlaceholder}>
+                    <Text style={styles.placeholderText}>📷</Text>
+                    <Text style={styles.placeholderFileName} numberOfLines={1}>
+                      {image.fileName || '图片'}
+                    </Text>
+                  </View>
+                );
+              }
+              return null;
+            })()}
             
             {/* 分类标签 - 显示中文名称 */}
             {image.category && (

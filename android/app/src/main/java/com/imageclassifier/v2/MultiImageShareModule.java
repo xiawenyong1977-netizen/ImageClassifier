@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
+import android.content.ContentResolver;
 import androidx.core.content.FileProvider;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -11,6 +12,9 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.Promise;
 import java.io.File;
+import java.io.InputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,24 +39,33 @@ public class MultiImageShareModule extends ReactContextBaseJavaModule {
             shareIntent.setType("image/*");
             
             ArrayList<Uri> imageUris = new ArrayList<>();
+            ContentResolver contentResolver = reactContext.getContentResolver();
             
             for (int i = 0; i < imagePaths.size(); i++) {
                 String imagePath = imagePaths.getString(i);
                 if (imagePath != null && !imagePath.isEmpty()) {
-                    // 移除file://前缀
-                    if (imagePath.startsWith("file://")) {
-                        imagePath = imagePath.substring(7);
+                    // 只处理 content:// URI，统一使用 URI 进行文件操作
+                    if (!imagePath.startsWith("content://")) {
+                        // 不是 content:// URI，跳过
+                        continue;
                     }
                     
-                    File imageFile = new File(imagePath);
-                    if (imageFile.exists()) {
-                        // 使用FileProvider生成URI
-                        Uri imageUri = FileProvider.getUriForFile(
-                            reactContext,
-                            reactContext.getPackageName() + ".fileprovider",
-                            imageFile
-                        );
-                        imageUris.add(imageUri);
+                    try {
+                        Uri contentUri = Uri.parse(imagePath);
+                        // 将 content:// URI 复制到缓存目录，确保其他应用可以访问
+                        File cachedFile = copyContentUriToCache(contentUri, contentResolver, i);
+                        if (cachedFile != null && cachedFile.exists()) {
+                            // 使用 FileProvider 生成 URI，确保其他应用可以访问
+                            Uri imageUri = FileProvider.getUriForFile(
+                                reactContext,
+                                reactContext.getPackageName() + ".fileprovider",
+                                cachedFile
+                            );
+                            imageUris.add(imageUri);
+                        }
+                    } catch (Exception e) {
+                        // 复制失败，跳过此文件
+                        continue;
                     }
                 }
             }
@@ -97,6 +110,43 @@ public class MultiImageShareModule extends ReactContextBaseJavaModule {
             
         } catch (Exception e) {
             promise.reject("SHARE_ERROR", e.getMessage());
+        }
+    }
+    
+    /**
+     * 将 content:// URI 复制到应用缓存目录
+     */
+    private File copyContentUriToCache(Uri contentUri, ContentResolver contentResolver, int index) {
+        try {
+            // 创建缓存目录
+            File cacheDir = new File(reactContext.getCacheDir(), "share_images");
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs();
+            }
+            
+            // 生成临时文件名
+            String fileName = "share_image_" + System.currentTimeMillis() + "_" + index + ".jpg";
+            File cachedFile = new File(cacheDir, fileName);
+            
+            // 复制文件
+            InputStream inputStream = contentResolver.openInputStream(contentUri);
+            if (inputStream == null) {
+                return null;
+            }
+            
+            FileOutputStream outputStream = new FileOutputStream(cachedFile);
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+            
+            outputStream.close();
+            inputStream.close();
+            
+            return cachedFile;
+        } catch (IOException e) {
+            return null;
         }
     }
 }

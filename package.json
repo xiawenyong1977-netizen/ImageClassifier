@@ -5,8 +5,9 @@
   "displayName": "芯图相册",
   "main": "index.js",
   "scripts": {
-    "android": "react-native run-android",
-    "ios": "react-native run-ios",
+    "prebuild": "node scripts/generate-build-info.js",
+    "android": "npm run prebuild && react-native run-android",
+    "ios": "npm run prebuild && react-native run-ios",
     "start": "react-native start",
     "test": "jest",
     "lint": "eslint ."

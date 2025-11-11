@@ -1,6 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import { logger, ModelPathAdapter, CanvasAdapter, Platform } from '../adapters/WebAdapters';
+import { logger, ModelPathAdapter, CanvasAdapter, Platform, getUri } from '../adapters/WebAdapters';
 import imageProcessor from './ImageProcessor';
 
 class ImageClassifierService {
@@ -523,10 +523,10 @@ class ImageClassifierService {
    * 图片分类主方法（纯本地推理）
    * 注意：此方法仅用于扫描流程的第4层本地推理降级
    * 截图检测、缓存查询、远程推理已在前3层完成
-   * @param {string} imageUri - 图片URI
+   * @param {Object} imageData - 图片数据对象，包含 uri、imageDimensions 等字段
    * @returns {Promise<Object>} 分类结果
    */
-  async classifyImage(imageUri) {
+  async classifyImage(imageData) {
     const totalStartTime = Date.now();
     
     try {
@@ -535,10 +535,40 @@ class ImageClassifierService {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
-      // 获取图像尺寸（使用ImageProcessor，后续预处理可以复用）
-      const dimensionsStart = Date.now();
-      const imageDimensions = await imageProcessor.getImageDimensions(imageUri);
-      const dimensionsTime = Date.now() - dimensionsStart;
+      // 从 imageData 中获取 URI
+      const imageUri = getUri(imageData);
+      if (!imageUri) {
+        logger.error('⚠️ 本地推理：无法获取图片URI:', {
+          imageId: imageData?.id,
+          fileName: imageData?.fileName,
+          uri: imageData?.uri
+        });
+        throw new Error(`无法获取图片URI: ${imageData?.fileName || 'unknown'}`);
+      }
+
+      // 从 imageData 中提取图像尺寸
+      // 设计：imageDimensions 必须是一个对象，包含 width 和 height 两个数字属性
+      const dims = imageData.imageDimensions;
+
+      if (!dims || 
+          typeof dims !== 'object' || 
+          typeof dims.width !== 'number' || dims.width <= 0 ||
+          typeof dims.height !== 'number' || dims.height <= 0) {
+        logger.error('⚠️ 数据库缺少图片尺寸数据:', {
+          imageId: imageData?.id,
+          fileName: imageData?.fileName,
+          uri: imageData?.uri,
+          hasImageDimensions: !!imageData?.imageDimensions,
+          imageDimensionsType: typeof imageData?.imageDimensions,
+          imageDimensionsValue: imageData?.imageDimensions
+        });
+        throw new Error(`数据库缺少图片尺寸数据: ${imageData?.fileName || 'unknown'}`);
+      }
+      
+      const imageDimensions = {
+        width: dims.width,
+        height: dims.height
+      };
       
       // 执行本地并行推理
       const inferenceStart = Date.now();
@@ -567,7 +597,6 @@ class ImageClassifierService {
       
       // 输出完整的性能分析报告
       logger.info(`🎯 单张图片分类完整性能报告:`);
-      logger.info(`  ├─ 获取图像尺寸: ${dimensionsTime}ms`);
       logger.info(`  ├─ 模型推理总时间: ${inferenceTime}ms`);
       logger.info(`  ├─ 分类映射: ${mappingTime}ms`);
       logger.info(`  └─ 总耗时: ${totalTime}ms`);
@@ -589,7 +618,6 @@ class ImageClassifierService {
         // 返回性能统计
         performanceMetrics: {
           totalTime,
-          dimensionsTime,
           inferenceTime,
           mappingTime
         }
@@ -1230,13 +1258,13 @@ class ImageClassifierService {
 
   /**
    * 识别手机截图
-   * @param {string} imageUri - 图片URI
    * @param {string} fileName - 文件名
    * @param {number} width - 图片宽度
    * @param {number} height - 图片高度
+   * @param {string} path - 文件路径（可选，可能是相对路径或绝对路径）
    * @returns {Promise<boolean>} 如果是手机截图返回true，否则返回false
    */
-  async identifyMobileScreenshot(imageUri, fileName, width, height) {
+  async identifyMobileScreenshot(fileName, width, height, path = null) {
     try {
       // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
       const aspectRatio = width / height;
@@ -1248,20 +1276,26 @@ class ImageClassifierService {
                               fileNameLower.includes('截图') || 
                               fileNameLower.includes('screen');
       
-      // 特征3：URI判定 - 包含截图关键词
-      const uriLower = (imageUri || '').toLowerCase();
-      const isScreenshotUri = uriLower.includes('screenshot') || 
-                              uriLower.includes('截图') || 
-                              uriLower.includes('screen');
+      // 特征3：路径判定 - 检查是否在截图目录中
+      // path可能是相对路径（Android 10+）或绝对路径（Android 9及以下），PC和移动端都兼容
+      let isScreenshotPath = false;
+      const screenshotKeywords = ['screenshots', '截图', 'screen'];
       
-      const isScreenshot = isMobileResolution || isScreenshotFile || isScreenshotUri;
+      if (path) {
+        const pathLower = path.toLowerCase();
+        isScreenshotPath = screenshotKeywords.some(keyword => 
+          pathLower.includes(keyword)
+        );
+      }
+      
+      const isScreenshot = isMobileResolution || isScreenshotFile || isScreenshotPath;
       
       // 只在检测到手机截图时输出调试信息
       if (isScreenshot) {
-        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio.toFixed(3)}, 文件名=${fileName}`);
+        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio.toFixed(3)}, 文件名=${fileName}, 路径=${path || 'N/A'}`);
       }
       
-      // 两个特征中只要有一个满足就判定为手机截图
+      // 特征中只要有一个满足就判定为手机截图
       return isScreenshot;
     } catch (error) {
       logger.warn('⚠️ 手机截图检测失败:', error.message);

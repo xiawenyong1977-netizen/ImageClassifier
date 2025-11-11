@@ -5,7 +5,7 @@
  */
 
 import ColorHistogramExtractor from './ColorHistogramExtractor.js';
-import { logger } from '../adapters/WebAdapters';
+import { logger, getUri } from '../adapters/WebAdapters';
 
 class ImageSimilarityService {
   constructor() {
@@ -74,24 +74,39 @@ class ImageSimilarityService {
       timeWindow = 300, // 5分钟
       similarityThreshold = 0.8,
       onProgress = null, // 进度回调函数
+      images = null,
+      clearExisting = images == null,
     } = options;
 
-    logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}`);
+    logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}, 输入图片=${images ? images.length : '全量'}`);
 
     try {
-      // 获取所有图片数据（精简信息）
-      const allImages = await this.getUnifiedDataService().readAllImages();
+      const unifiedService = this.getUnifiedDataService();
+      // 获取需要处理的图片数据
+      const allImages = images && Array.isArray(images) && images.length > 0
+        ? images
+        : await unifiedService.readAllImages();
       
       if (!allImages || allImages.length === 0) {
         logger.debug('⚠️ 没有找到图片数据');
         return { success: true, groups: [], processed: 0 };
       }
 
-      // 每次检测都清空现有相似度数据，完全重新检测
-      logger.debug('🧹 清空现有相似度数据，开始完全重新检测');
-      await this.getUnifiedDataService().clearSimilarityData();
+      if (clearExisting) {
+        // 每次检测都清空现有相似度数据，完全重新检测
+        logger.debug('🧹 清空所有相似度数据，开始完全重新检测');
+        await unifiedService.clearSimilarityData();
+      } else if (images && images.length > 0) {
+        const idsToClear = images
+          .map(img => img?.id)
+          .filter(id => typeof id === 'string' || typeof id === 'number');
+        if (idsToClear.length > 0) {
+          logger.debug(`🧹 清除 ${idsToClear.length} 张图片的旧相似度数据`);
+          await unifiedService.clearSimilarityData(idsToClear);
+        }
+      }
      
-      logger.debug(`📊 总图片数: ${allImages.length}, 开始重新检测相似度`);
+      logger.debug(`📊 参与相似度检测的图片数: ${allImages.length}`);
 
       // 执行相似度检测
       const detectionResult = await this.detectSimilarityGroups(
@@ -485,11 +500,22 @@ class ImageSimilarityService {
    */
   async _extractColorHistogram(image) {
     try {
+      // 使用 getUri 获取正确的 URI（PC端：file://，移动端：content://）
+      const imageUri = getUri(image);
+      if (!imageUri) {
+        logger.error('⚠️ 无法获取图片URI:', {
+          imageId: image?.id,
+          fileName: image?.fileName,
+          uri: image?.uri
+        });
+        return this._generateDefaultFeatures();
+      }
+      
       // 使用真实的颜色直方图提取器
-      const features = await this.histogramExtractor.extractHistogram(image.uri);
+      const features = await this.histogramExtractor.extractHistogram(imageUri);
       return features;
     } catch (error) {
-      console.error('❌ 提取颜色直方图失败:', error);
+      logger.error('❌ 提取颜色直方图失败:', error);
       // 如果提取失败，返回默认特征
       return this._generateDefaultFeatures();
     }
