@@ -1267,8 +1267,12 @@ class ImageClassifierService {
   async identifyMobileScreenshot(fileName, width, height, path = null) {
     try {
       // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
-      const aspectRatio = width / height;
-      const isMobileResolution = aspectRatio <= 0.5;
+      // 只有当宽高都大于0时才进行宽高比判断，避免除零错误
+      let isMobileResolution = false;
+      if (width > 0 && height > 0) {
+        const aspectRatio = width / height;
+        isMobileResolution = aspectRatio <= 0.5;
+      }
       
       // 特征2：文件名判定 - 包含截图关键词
       const fileNameLower = (fileName || '').toLowerCase();
@@ -1292,7 +1296,8 @@ class ImageClassifierService {
       
       // 只在检测到手机截图时输出调试信息
       if (isScreenshot) {
-        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio.toFixed(3)}, 文件名=${fileName}, 路径=${path || 'N/A'}`);
+        const aspectRatio = width > 0 && height > 0 ? (width / height).toFixed(3) : 'N/A';
+        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio}, 文件名=${fileName}, 路径=${path || 'N/A'}`);
       }
       
       // 特征中只要有一个满足就判定为手机截图

@@ -83,13 +83,25 @@ class ImageSimilarityService {
     try {
       const unifiedService = this.getUnifiedDataService();
       // 获取需要处理的图片数据
-      const allImages = images && Array.isArray(images) && images.length > 0
+      let allImages = images && Array.isArray(images) && images.length > 0
         ? images
         : await unifiedService.readAllImages();
       
       if (!allImages || allImages.length === 0) {
         logger.debug('⚠️ 没有找到图片数据');
         return { success: true, groups: [], processed: 0 };
+      }
+      
+      // 过滤掉暂存箱（tobecleaned）和手机截图（screenshot）分类的图片
+      const beforeFilterCount = allImages.length;
+      const tobecleanedCount = allImages.filter(img => img.category === 'tobecleaned').length;
+      const screenshotCount = allImages.filter(img => img.category === 'screenshot').length;
+      allImages = allImages.filter(image => {
+        return image.category !== 'tobecleaned' && image.category !== 'screenshot';
+      });
+      const filteredCount = beforeFilterCount - allImages.length;
+      if (filteredCount > 0) {
+        logger.debug(`📊 相似度检测：已排除 ${filteredCount} 张图片（tobecleaned: ${tobecleanedCount}, screenshot: ${screenshotCount}）`);
       }
 
       if (clearExisting) {
@@ -227,15 +239,21 @@ class ImageSimilarityService {
   async detectSimilarityGroups(images, options = {}) {
     const opts = { ...this.defaultOptions, ...options };
     
-    // 1. 过滤掉没有takenAt的图片
+    // 1. 过滤掉没有takenAt的图片，以及排除暂存箱（tobecleaned）和手机截图（screenshot）分类
     const imagesWithTime = images.filter(image => {
+      // 排除暂存箱和手机截图分类
+      if (image.category === 'tobecleaned' || image.category === 'screenshot') {
+        return false;
+      }
+      // 必须有takenAt
       if (!image.takenAt) return false;
       // 确保takenAt是字符串类型
       const takenAtStr = String(image.takenAt);
       return takenAtStr.trim() !== '';
     });
     
-    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
+    const excludedCount = images.length - imagesWithTime.length;
+    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 排除${excludedCount}张（tobecleaned/screenshot/无时间）, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
     
     if (imagesWithTime.length === 0) {
       logger.debug('⚠️ 没有有效的图片进行相似度检测');
@@ -642,8 +660,8 @@ class ImageSimilarityService {
     
     // logger.debug(`📊 最大分类: ${dominantCategory.category} (${dominantCategory.count}张, ${dominantCategory.percentage.toFixed(1)}%)`);
     
-    // 特殊分类跳过
-    if (['screenshot', 'idcard'].includes(dominantCategory.category)) {
+    // 特殊分类跳过（暂存箱、手机截图、身份证）
+    if (['tobecleaned', 'screenshot', 'idcard'].includes(dominantCategory.category)) {
       logger.debug(`⏭️ 最大分类为${dominantCategory.category}，跳过相似度检测`);
       return [];
     }

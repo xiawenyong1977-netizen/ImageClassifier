@@ -1099,118 +1099,6 @@ class GalleryScannerService {
 
 
 
- 
-
-
-  // 为现有图片补充城市信息
-
-  async updateExistingImagesWithCityInfo() {
-
-    try {
-
-      // Starting to update existing images with city info
-
-      
-
-      const allImages = await UnifiedDataService.readAllImages();
-      // Found existing images
-
-      
-
-      let updatedCount = 0;
-
-      let skippedCount = 0;
-
-      
-
-      for (const image of allImages) {
-
-        // 只处理有GPS坐标但没有城市信息的图片
-
-        if (image.latitude && image.longitude && !image.city) {
-
-          try {
-
-            // Processing image for city info
-
-            
-
-            // 查找最近的城市（根据远程服务状态决定是否使用远程API）
-
-            const nearestCity = await cityLocationService.findNearestCityAsync(image.latitude, image.longitude, 200, this.useRemoteInference);
-
-            
-
-            if (nearestCity) {
-
-              // 更新图片的城市信息
-
-              const updatedImage = {
-
-                ...image,
-
-                city: nearestCity.name,
-
-                province: nearestCity.province,
-
-                cityDistance: nearestCity.distance
-
-              };
-
-              
-
-              // 保存更新后的图片信息
-
-              await UnifiedDataService.writeImageClassification(updatedImage);
-              
-
-              // Updated image with city info
-
-              updatedCount++;
-
-            } else {
-
-              // No city found for coordinates
-
-              skippedCount++;
-
-            }
-
-          } catch (error) {
-
-            console.error(`❌ Failed to update ${image.fileName}:`, error);
-
-            skippedCount++;
-
-          }
-
-        } else {
-
-          skippedCount++;
-
-        }
-
-      }
-
-      
-
-      // City info update completed
-
-      return { updated: updatedCount, skipped: skippedCount };
-
-      
-
-    } catch (error) {
-
-      console.error('❌ Failed to update existing images with city info:', error);
-
-      throw error;
-
-    }
-
-  }
-
-
 
 
 
@@ -1964,32 +1852,35 @@ class GalleryScannerService {
           const hasTakenTime = exifData?.takenTime != null && exifData.takenTime > 0;
           const hasExifData = hasGPS || hasTakenTime;
           
-          // 检测是否为截图（只有在没有EXIF数据时才进行AI检测）
-          // 如果有GPS信息或拍照时间，直接判断不是截图，跳过AI检测
+          // 检测是否为截图
+          // 如果有GPS信息，直接判断不是截图（截图通常不会有GPS信息）
+          // 但拍照时间不能作为排除条件，因为有些截图可能包含拍照时间
           let isScreenshot = false;
-          if (!hasExifData) {
-            // 获取path（可能是相对路径或绝对路径）
-            const imagePath = getLocalPath(image);
+          if (hasGPS) {
+            // 有GPS信息，直接判断不是截图
+            logger.debug(`📱 截图检测: ${image.fileName} - 跳过检测（有GPS信息，肯定不是截图）`);
+          } else {
+            // 使用已经获取的 localPath（在第1823行已获取），避免重复调用getLocalPath
+            // localPath 可能是相对路径（Android 10+）或绝对路径（Android 9及以下）
             
-            // 没有EXIF数据时才进行AI检测
+            // 进行截图检测（即使有拍照时间也要检测）
             // identifyMobileScreenshot只需要fileName、width、height、path参数
             isScreenshot = await this.imageClassifier.identifyMobileScreenshot(
               image.fileName,
               safeWidth,
               safeHeight,
-              imagePath || null  // path（可能是相对路径或绝对路径）
+              localPath || null  // 使用已获取的路径（可能是相对路径或绝对路径）
             );
             
             // 调试日志
             if (isScreenshot) {
-              logger.debug(`📱 截图检测: ${image.fileName} - AI检测: ${isScreenshot}, EXIF: 无, 路径: ${imagePath || 'N/A'}`);
+              const hasTakenTime = exifData?.takenTime != null && exifData.takenTime > 0;
+              logger.debug(`📱 截图检测: ${image.fileName} - AI检测: ${isScreenshot}, 路径: ${localPath || 'N/A'}, 有拍照时间: ${hasTakenTime}`);
+            } else {
+              // 即使检测失败，也输出调试信息，帮助排查问题
+              const aspectRatio = safeHeight > 0 ? (safeWidth / safeHeight) : 0;
+              logger.debug(`📱 截图检测: ${image.fileName} - 未识别为截图, 尺寸: ${safeWidth}x${safeHeight}, 宽高比=${aspectRatio.toFixed(3)}, 路径: ${localPath || 'N/A'}`);
             }
-          } else {
-            // 有EXIF数据（GPS或拍照时间），直接判断不是截图
-            const exifInfo = [];
-            if (hasGPS) exifInfo.push('GPS');
-            if (hasTakenTime) exifInfo.push('拍照时间');
-            logger.debug(`📱 截图检测: ${image.fileName} - 跳过AI检测（有EXIF数据: ${exifInfo.join(', ')}）`);
           }
           
           // 如果有GPS坐标但没有城市信息，则获取城市信息
@@ -2737,12 +2628,29 @@ class GalleryScannerService {
     try {
       const hasCandidates = Array.isArray(candidateImages) && candidateImages.length > 0;
       
-      const imagesForSimilarity = hasCandidates
+      let imagesForSimilarity = hasCandidates
         ? candidateImages
         : await UnifiedDataService.readAllImages();
       
       if (!imagesForSimilarity || imagesForSimilarity.length === 0) {
         logger.info('📊 第5层：没有图片，跳过相似度检测');
+        return { processedCount: 0, failedCount: 0 };
+      }
+      
+      // 过滤掉暂存箱（tobecleaned）和手机截图（screenshot）分类的图片
+      const beforeFilterCount = imagesForSimilarity.length;
+      const tobecleanedCount = imagesForSimilarity.filter(img => img.category === 'tobecleaned').length;
+      const screenshotCount = imagesForSimilarity.filter(img => img.category === 'screenshot').length;
+      imagesForSimilarity = imagesForSimilarity.filter(image => {
+        return image.category !== 'tobecleaned' && image.category !== 'screenshot';
+      });
+      const filteredCount = beforeFilterCount - imagesForSimilarity.length;
+      if (filteredCount > 0) {
+        logger.info(`📊 第5层：已排除 ${filteredCount} 张图片（tobecleaned: ${tobecleanedCount}, screenshot: ${screenshotCount}）`);
+      }
+      
+      if (imagesForSimilarity.length === 0) {
+        logger.info('📊 第5层：过滤后没有图片，跳过相似度检测');
         return { processedCount: 0, failedCount: 0 };
       }
       
