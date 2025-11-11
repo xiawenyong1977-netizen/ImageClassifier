@@ -1118,22 +1118,69 @@ const ImagePreviewScreen = ({
       // 显示保存进度
       Alert.alert('保存中', '正在保存增强后的图片...');
       
-      // 下载并保存增强后的图片
-      const newImageUri = await ImageEnhanceService.downloadAndSaveEnhancedImage(
-        result.enhancedUri,
+      // 1. 下载增强后的图片
+      const imageBlob = await ImageEnhanceService.downloadEnhancedImage(result.enhancedUri);
+      
+      // 2. 保存到 xualbum 目录
+      const saveResult = await ImageEnhanceService.saveToXualbum(
+        imageBlob,
         result.originalFileName || 'enhanced.jpg'
       );
       
+      // 3. 转换为 file:// URI 格式
+      const newImageUri = `file:///${saveResult.filePath.replace(/\\/g, '/')}`;
+      
       logger.debug('✅ 图片已保存到:', newImageUri);
       
-      // 添加到数据库（tobecleaned分类）
+      // 4. 尝试读取原图完整信息（用于获取检测结果和描述信息）
+      let originalImage = null;
+      try {
+        if (result.originalImageId) {
+          originalImage = await UnifiedDataService.readImageDetailsById(result.originalImageId);
+          logger.debug('✅ 从数据库获取完整原图信息');
+        } else if (result.originalUri) {
+          // 如果没有 ID，尝试从当前图片列表查找
+          const tempImage = categoryImages.find(img => {
+            const imgUri = getUri(img);
+            const targetOriginalUri = getUri(result.originalUri);
+            return imgUri && targetOriginalUri && imgUri === targetOriginalUri;
+          });
+          if (tempImage?.id) {
+            originalImage = await UnifiedDataService.readImageDetailsById(tempImage.id);
+            logger.debug('✅ 通过URI找到ID，从数据库获取完整原图信息');
+          }
+        }
+      } catch (error) {
+        logger.warn('⚠️ 从数据库查询原图详细信息失败:', error);
+        originalImage = null;
+      }
+      
+      // 5. 添加到数据库（tobecleaned分类）
       const timestamp = Date.now();
-      await UnifiedDataService.writeAddImage(
-        newImageUri,
-        'tobecleaned',
-        'enhanced', // source标记为增强
-        timestamp
-      );
+      
+      // 准备完整的图片数据（复制原图的检测结果和描述信息）
+      const completeImageData = {
+        uri: newImageUri,
+        fileName: saveResult.fileName,
+        category: 'tobecleaned',
+        confidence: 1.0,
+        timestamp: timestamp,
+        takenAt: timestamp,
+        size: imageBlob.size || 0,
+        // 复制原图的检测结果和描述信息
+        idCardDetections: originalImage?.idCardDetections || [],
+        generalDetections: originalImage?.generalDetections || [],
+        mobileNetV3Detections: originalImage?.mobileNetV3Detections || null,
+        message: originalImage?.message || null,
+        // 如果有imageDimensions也复制
+        ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions })
+      };
+      
+      // 使用 writeImageDetailedInfo 保存图片数据
+      await UnifiedDataService.writeImageDetailedInfo([completeImageData], false);
+      
+      // 强制刷新缓存（确保新图片能立即显示）
+      await UnifiedDataService.imageCache.refreshCache();
       
       // 标记为已保存
       setEnhanceResults(prevResults => 
