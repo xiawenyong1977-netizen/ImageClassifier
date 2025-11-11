@@ -254,50 +254,53 @@ const EnhanceResultScreen = ({
           </View>
 
           {/* 右侧：操作按钮区 */}
-          {selectedImages.length > 1 && (
-            <View style={styles.enhanceComparisonRightButtons}>
-              {/* 上一张按钮 */}
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === 0 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToPrevious}
-                disabled={currentIndex === 0}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↑</Text>
-              </TouchableOpacity>
+          <View style={styles.enhanceComparisonRightButtons}>
+            {/* 导航按钮：只在有多张图片时显示 */}
+            {selectedImages.length > 1 && (
+              <>
+                {/* 上一张按钮 */}
+                <TouchableOpacity
+                  style={[
+                    styles.enhanceComparisonNavButtonVertical,
+                    currentIndex === 0 && styles.enhanceComparisonNavButtonDisabled
+                  ]}
+                  onPress={goToPrevious}
+                  disabled={currentIndex === 0}
+                >
+                  <Text style={styles.enhanceComparisonNavButtonText}>↑</Text>
+                </TouchableOpacity>
 
-              {/* 下一张按钮 */}
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === selectedImages.length - 1 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToNext}
-                disabled={currentIndex === selectedImages.length - 1}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↓</Text>
-              </TouchableOpacity>
+                {/* 下一张按钮 */}
+                <TouchableOpacity
+                  style={[
+                    styles.enhanceComparisonNavButtonVertical,
+                    currentIndex === selectedImages.length - 1 && styles.enhanceComparisonNavButtonDisabled
+                  ]}
+                  onPress={goToNext}
+                  disabled={currentIndex === selectedImages.length - 1}
+                >
+                  <Text style={styles.enhanceComparisonNavButtonText}>↓</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
-              {/* 保存按钮 */}
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonSaveButtonVertical,
-                  (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonDisabled
-                ]}
-                onPress={onSave}
-                disabled={status !== 'completed' || !currentResult.enhancedUri || isSaved}
-              >
-                <Text style={[
-                  styles.enhanceComparisonSaveButtonText,
-                  (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonTextDisabled
-                ]}>
-                  {isSaved ? '✅' : '💾'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            {/* 保存按钮：始终显示 */}
+            <TouchableOpacity
+              style={[
+                styles.enhanceComparisonSaveButtonVertical,
+                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonDisabled
+              ]}
+              onPress={onSave}
+              disabled={status !== 'completed' || !currentResult.enhancedUri || isSaved}
+            >
+              <Text style={[
+                styles.enhanceComparisonSaveButtonText,
+                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonTextDisabled
+              ]}>
+                {isSaved ? '✅' : '💾'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
