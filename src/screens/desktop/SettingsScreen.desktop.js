@@ -4,7 +4,7 @@ import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAda
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
-import { BUILD_DATE, BUILD_VERSION } from '../../config/BuildInfo';
+import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
 
 const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScanning }) => {
   const [settings, setSettings] = useState({});
@@ -732,7 +732,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>构建版本</Text>
-            <Text style={styles.infoValue}>{BUILD_DATE}</Text>
+            <Text style={styles.infoValue}>{BUILD_VERSION_CODE} ({BUILD_DATE})</Text>
           </View>
           
           <View style={styles.infoItem}>

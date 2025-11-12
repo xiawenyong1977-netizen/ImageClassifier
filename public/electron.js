@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, clipboard, nativeImage } = re
 const path = require('path');
 const { exec } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_IS_DEV === '1' || !app.isPackaged;
 
 // 简单的日志系统
@@ -228,51 +229,123 @@ function createWindow() {
       }
 
       logger.info(`📋 准备复制 ${existingFiles.length} 个文件到剪贴板`);
-      logger.debug(`📋 文件列表:`, existingFiles);
 
-      // 使用PowerShell脚本复制文件到剪贴板（Windows最可靠的方法）
-      // 构建PowerShell命令
-      const filePathsForPS = existingFiles.map(p => `'${p.replace(/'/g, "''")}'`).join(', ');
-      const psCommand = `
-        Add-Type -AssemblyName System.Windows.Forms;
-        $files = New-Object System.Collections.Specialized.StringCollection;
-        $filePaths = @(${filePathsForPS});
-        foreach ($filePath in $filePaths) {
-          if (Test-Path $filePath) {
-            [void]$files.Add($filePath);
-            Write-Host "Added: $filePath";
-          } else {
-            Write-Host "File not found: $filePath";
-          }
+      // 使用临时文件来存储文件路径列表，避免命令行参数长度限制
+      // Windows命令行参数长度限制通常是8191字符，3000+个文件路径很容易超过这个限制
+      const tempFilePath = path.join(os.tmpdir(), `clipboard_files_${Date.now()}.txt`);
+      
+      try {
+        // 将文件路径写入临时文件，每行一个路径
+        // 使用UTF-8编码，并在每行末尾添加换行符
+        const fileContent = existingFiles.map(filePath => {
+          // 转义路径中的特殊字符，使用Base64编码避免路径中的特殊字符问题
+          return Buffer.from(filePath, 'utf8').toString('base64');
+        }).join('\n');
+        
+        fs.writeFileSync(tempFilePath, fileContent, 'utf8');
+        logger.debug(`📋 已创建临时文件: ${tempFilePath}，包含 ${existingFiles.length} 个文件路径`);
+        
+        // 构建PowerShell脚本，从临时文件读取路径
+        // 将文件路径转换为PowerShell中的安全字符串（使用单引号，并转义单引号）
+        const tempFileEscaped = tempFilePath.replace(/'/g, "''");
+        const psScript = `Add-Type -AssemblyName System.Windows.Forms;
+$files = New-Object System.Collections.Specialized.StringCollection;
+$tempFile = '${tempFileEscaped}';
+
+if (Test-Path $tempFile) {
+  $filePaths = Get-Content $tempFile -Encoding UTF8;
+  $count = 0;
+  $errorCount = 0;
+  foreach ($encodedPath in $filePaths) {
+    if ([string]::IsNullOrWhiteSpace($encodedPath)) {
+      continue;
+    }
+    try {
+      $filePath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encodedPath.Trim()));
+      if (Test-Path $filePath) {
+        [void]$files.Add($filePath);
+        $count++;
+        if ($count % 500 -eq 0) {
+          Write-Host "Processed $count files...";
         }
-        [System.Windows.Forms.Clipboard]::SetFileDropList($files);
-        Write-Host "Copied $($files.Count) files to clipboard";
-      `;
-      
-      logger.debug(`📋 PowerShell命令:`, psCommand);
-      
-      exec(`powershell -NoProfile -Command "${psCommand.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (error, stdout, stderr) => {
-        if (error) {
-          logger.error(`❌ PowerShell执行失败:`, error);
-          logger.error(`stderr:`, stderr);
-          event.reply('copy-files-result', { 
-            success: false, 
-            error: `复制失败: ${error.message}` 
-          });
-        } else {
-          logger.info(`✅ PowerShell执行成功`);
-          logger.debug(`stdout:`, stdout);
-          if (stderr) {
-            logger.warn(`stderr:`, stderr);
+      }
+    } catch {
+      $errorCount++;
+      if ($errorCount -le 10) {
+        Write-Host "Error decoding path: $_";
+      }
+    }
+  }
+  if ($files.Count -gt 0) {
+    [System.Windows.Forms.Clipboard]::SetFileDropList($files);
+    Write-Host "Successfully copied $($files.Count) files to clipboard";
+  } else {
+    Write-Host "No valid files found to copy";
+    exit 1;
+  }
+  Remove-Item $tempFile -Force -ErrorAction SilentlyContinue;
+} else {
+  Write-Host "Temp file not found: $tempFile";
+  exit 1;
+}`;
+        
+        // 将PowerShell脚本保存到临时文件，避免命令行参数长度限制
+        const psScriptPath = path.join(os.tmpdir(), `clipboard_script_${Date.now()}.ps1`);
+        fs.writeFileSync(psScriptPath, psScript, 'utf8');
+        logger.debug(`📋 已创建PowerShell脚本: ${psScriptPath}`);
+        
+        // 执行PowerShell脚本
+        const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"`;
+        
+        exec(psCommand, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+          // 清理临时文件
+          try {
+            if (fs.existsSync(psScriptPath)) {
+              fs.unlinkSync(psScriptPath);
+            }
+            if (fs.existsSync(tempFilePath)) {
+              fs.unlinkSync(tempFilePath);
+            }
+          } catch (cleanupError) {
+            logger.warn(`清理临时文件失败:`, cleanupError);
           }
           
-          event.reply('copy-files-result', { 
-            success: true, 
-            copiedCount: existingFiles.length,
-            skippedCount: missingFiles.length
-          });
+          if (error) {
+            logger.error(`❌ PowerShell执行失败:`, error);
+            logger.error(`stderr:`, stderr);
+            event.reply('copy-files-result', { 
+              success: false, 
+              error: `复制失败: ${error.message}` 
+            });
+          } else {
+            logger.info(`✅ PowerShell执行成功`);
+            logger.debug(`stdout:`, stdout);
+            if (stderr) {
+              logger.warn(`stderr:`, stderr);
+            }
+            
+            event.reply('copy-files-result', { 
+              success: true, 
+              copiedCount: existingFiles.length,
+              skippedCount: missingFiles.length
+            });
+          }
+        });
+      } catch (fileError) {
+        logger.error(`❌ 创建临时文件失败:`, fileError);
+        // 清理临时文件
+        try {
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+          }
+        } catch (cleanupError) {
+          // 忽略清理错误
         }
-      });
+        event.reply('copy-files-result', { 
+          success: false, 
+          error: `创建临时文件失败: ${fileError.message}` 
+        });
+      }
     } catch (error) {
       logger.error(`❌ 复制文件到剪贴板失败:`, error);
       event.reply('copy-files-result', { 

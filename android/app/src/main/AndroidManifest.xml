@@ -38,6 +38,9 @@
     <!-- 前台服务权限 - Android 9+ (API 28+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    
+    <!-- 通知权限 - Android 13+ (API 33+) 用于前台服务显示通知 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
       android:name=".MainApplication"

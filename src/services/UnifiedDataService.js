@@ -347,38 +347,7 @@ class UnifiedDataService {
    * 优先从缓存搜索，缓存没有则从数据库搜索
    */
 
-  // ==================== 写接口 ====================
   
-
-  /**
-   * 保存图片分类结果
-   * 先写缓存，再写数据库
-   */
-  async writeImageClassification(imageData) {
-    try {
-      logger.debug('保存图片分类结果:', imageData.fileName);
-      
-      // 1. 先写数据库
-      const savedImage = await this.imageStorageService.saveImageClassification(imageData);
-      logger.debug('数据库写入完成');
-      
-      // 2. 精确更新缓存
-      const updateSuccess = this.imageCache.updateImageClassification(savedImage.id, savedImage.category);
-      if (updateSuccess) {
-        logger.debug('缓存精确更新完成');
-      } else {
-        logger.warn('缓存精确更新失败，将进行全量更新');
-        await this.imageCache.refreshCache();
-        logger.debug('缓存全量更新完成');
-      }
-      
-      return savedImage;
-      
-    } catch (error) {
-      logger.error('保存图片分类失败:', error);
-      throw error;
-    }
-  }
 
   /**
    * 批量保存图片分类结果

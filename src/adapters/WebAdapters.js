@@ -653,6 +653,8 @@ export const PermissionsAndroid = {
     READ_EXTERNAL_STORAGE: 'android.permission.READ_EXTERNAL_STORAGE',
     WRITE_EXTERNAL_STORAGE: 'android.permission.WRITE_EXTERNAL_STORAGE',
     READ_MEDIA_IMAGES: 'android.permission.READ_MEDIA_IMAGES',
+    ACCESS_MEDIA_LOCATION: 'android.permission.ACCESS_MEDIA_LOCATION',
+    POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
     CAMERA: 'android.permission.CAMERA',
   },
   RESULTS: {

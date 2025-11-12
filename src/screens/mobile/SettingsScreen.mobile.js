@@ -28,7 +28,7 @@ import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
-import { BUILD_DATE, BUILD_VERSION } from '../../config/BuildInfo';
+import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
 
 const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // ==================== 状态管理 ====================
@@ -961,7 +961,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             </View>
           </View>
           {renderInfoItem('版本', BUILD_VERSION)}
-          {renderInfoItem('构建版本', BUILD_DATE)}
+          {renderInfoItem('构建版本', `${BUILD_VERSION_CODE} (${BUILD_DATE})`)}
           {renderInfoItem('平台', '移动端 (React Native)')}
           {renderInfoItem('存储类型', storageType)}
           {renderInfoItem('存储大小', storageSize)}
