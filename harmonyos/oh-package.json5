@@ -1,0 +1,12 @@
+{
+  name: xintualbum-harmonyos,
+  version: 1.0.0,
+  description: 芯图相册-鸿蒙版本,
+  main: index.js,
+  author: ,
+  license: Apache-2.0,
+  dependencies: {},
+  devDependencies: {
+    @ohos/hypium: ^1.0.0
+  }
+}

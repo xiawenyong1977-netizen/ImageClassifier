@@ -117,7 +117,6 @@ const checkAppPermissions = async () => {
       const permissions = [
         PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
         PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        PermissionsAndroid.PERMISSIONS.CAMERA,
       ];
       
       // Android 13+ 添加媒体权限

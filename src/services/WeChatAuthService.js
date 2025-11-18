@@ -18,7 +18,7 @@ import ImageStorageService from './ImageStorageService';
 class WeChatAuthService {
   constructor() {
     this.apiConfig = {
-      baseURL: 'https://www.xintuxiangce.top',
+      baseURL: 'https://api.aifuture.net.cn',
       endpoints: {
         qrcode: '/api/v1/auth/wechat/qrcode',
         checkFollow: '/api/v1/auth/wechat/check-follow',

@@ -1600,7 +1600,7 @@ class ImageClassifierService {
    */
   getAPIConfig() {
     return {
-      baseURL: 'https://www.xintuxiangce.top',
+      baseURL: 'https://api.aifuture.net.cn',
       timeout: 30000, // 30秒超时
       categoryMap: {
         "social_activities": "social_activities",
