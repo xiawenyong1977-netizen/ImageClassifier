@@ -3,10 +3,14 @@ import {
   logger, 
   readImageFileAsBlob, 
   normalizeFilePath, 
+  pathToFileUri,  // 🆕 用于正确处理路径中的特殊字符（包括冒号）
   readFileForExif, 
   getFileStats,
   RNFS,
-  Platform  // 🆕 使用统一的Platform对象
+  Platform,  // 🆕 使用统一的Platform对象
+  getLocalPath,
+  getContentUri,
+  getUri
 } from '../adapters/WebAdapters';
 
 import ImageClassifierService from './ImageClassifierService';
@@ -43,6 +47,67 @@ const createDefaultLocationInfo = (source = 'none') => ({
 
 });
 
+/**
+ * 根据GPS坐标丰富位置信息（包括城市信息）
+ * @param {number} latitude - 纬度
+ * @param {number} longitude - 经度
+ * @param {number} altitude - 海拔（可选）
+ * @param {boolean} useRemoteApi - 是否使用远程API
+ * @param {Object} baseLocationInfo - 基础位置信息对象（可选）
+ * @returns {Promise<Object>} 包含城市信息的完整位置信息
+ */
+const enrichLocationInfoWithCity = async (latitude, longitude, altitude = null, useRemoteApi = true, baseLocationInfo = null) => {
+  if (!latitude || !longitude) {
+    return baseLocationInfo || createDefaultLocationInfo('none');
+  }
+
+  // 构建基础位置信息
+  const locationInfo = baseLocationInfo || createDefaultLocationInfo();
+  locationInfo.latitude = latitude;
+  locationInfo.longitude = longitude;
+  if (altitude !== null) {
+    locationInfo.altitude = altitude;
+  }
+
+  // 查找最近的城市信息
+  try {
+    const nearestCity = await cityLocationService.findNearestCityAsync(
+      latitude,
+      longitude,
+      200,
+      useRemoteApi
+    );
+
+    if (nearestCity) {
+      locationInfo.city = nearestCity.name;
+      locationInfo.province = nearestCity.province;
+      locationInfo.country = nearestCity.country || '中国';
+      locationInfo.cityDistance = nearestCity.distance || null;
+    }
+  } catch (error) {
+    logger.warn(`⚠️ 城市信息查找失败: ${error.message}`);
+  }
+
+  return locationInfo;
+};
+
+const extractOriginalUri = (input) => {
+  if (!input) {
+    throw new Error('缺少 uri');
+  }
+  if (typeof input === 'string') {
+    return input;
+  }
+  // 优先使用 uri 字段，如果没有则使用 originalUri（兼容旧数据）
+  if (typeof input.uri === 'string') {
+    return input.uri;
+  }
+  if (typeof input.originalUri === 'string') {
+    return input.originalUri;
+  }
+  throw new Error('对象缺少 uri 字段');
+};
+
 
 
 // 验证EXIF时间戳是否合理（避免文件名数字被误用）
@@ -62,48 +127,17 @@ const isValidExifTimestamp = (timestamp) => {
   return year >= 1970 && year <= 2100;
 };
 
-// 从exif-parser数据中提取GPS信息
+// 从exif-parser数据中提取GPS信息（只提取GPS坐标，不获取城市信息）
 
-const extractGPSFromExifParser = async (exifData, fileName = '', useRemoteApi = true) => {
+const extractGPSFromExifParser = async (exifData, fileName = '') => {
   if (!exifData?.tags) {
-    logger.debug(`🌍 EXIF GPS提取失败: 没有tags数据, 文件: ${fileName}`);
     return null;
   }
 
   const { GPSLatitude, GPSLongitude, GPSAltitude, GPSHPositioningError } = exifData.tags;
 
-  // 调试：检查GPS字段是否存在
-  logger.debug(`🌍 EXIF GPS字段检查:`, {
-    fileName: fileName,
-    hasGPSLatitude: !!GPSLatitude,
-    hasGPSLongitude: !!GPSLongitude,
-    hasGPSAltitude: !!GPSAltitude,
-    GPSLatitude: GPSLatitude,
-    GPSLongitude: GPSLongitude,
-    GPSAltitude: GPSAltitude
-  });
-
   if (!GPSLatitude || !GPSLongitude) {
-    logger.debug(`🌍 EXIF GPS提取失败: 缺少GPS坐标数据, 文件: ${fileName}`);
     return null;
-  }
-
-  // 查找最近的城市信息（根据远程服务状态决定是否使用远程API）
-  logger.debug(`🌍 开始查找城市信息: GPS(${GPSLatitude}, ${GPSLongitude}), useRemoteApi=${useRemoteApi}`);
-  
-  let nearestCity = null;
-  try {
-    nearestCity = await cityLocationService.findNearestCityAsync(GPSLatitude, GPSLongitude, 200, useRemoteApi);
-    logger.debug(`🌍 城市信息查找完成:`, nearestCity);
-  } catch (error) {
-    logger.error(`🌍 城市信息查找失败:`, error);
-  }
-
-  // 调试：记录城市信息提取结果
-  if (nearestCity) {
-    logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
-  } else {
-    logger.debug(`🌍 未找到城市信息: GPS(${GPSLatitude}, ${GPSLongitude})`);
   }
 
   return {
@@ -116,15 +150,7 @@ const extractGPSFromExifParser = async (exifData, fileName = '', useRemoteApi = 
 
     accuracy: GPSHPositioningError || null,
 
-    source: 'exif-parser',
-
-    // 添加城市信息
-
-    city: nearestCity?.name || null,
-
-    province: nearestCity?.province || null,
-
-    cityDistance: nearestCity?.distance || null
+    source: 'exif-parser'
 
   };
 
@@ -132,9 +158,9 @@ const extractGPSFromExifParser = async (exifData, fileName = '', useRemoteApi = 
 
 
 
-// 从react-native-exif数据中提取GPS信息
+// 从react-native-exif数据中提取GPS信息（只提取GPS坐标，不获取城市信息）
 
-const extractGPSFromNativeExif = async (exifData, fileName = '', useRemoteApi = true) => {
+const extractGPSFromNativeExif = async (exifData, fileName = '') => {
 
   if (!exifData?.GPSLatitude || !exifData?.GPSLongitude) return null;
 
@@ -146,16 +172,6 @@ const extractGPSFromNativeExif = async (exifData, fileName = '', useRemoteApi = 
 
   
 
-  // 查找最近的城市信息（根据远程服务状态决定是否使用远程API）
-  const nearestCity = await cityLocationService.findNearestCityAsync(latitude, longitude, 200, useRemoteApi);
-
-  // 调试：记录城市信息提取结果
-  if (nearestCity) {
-    logger.debug(`🌍 城市信息提取成功: ${nearestCity.name} (${nearestCity.province})`);
-  } else {
-    logger.debug(`🌍 未找到城市信息: GPS(${latitude}, ${longitude})`);
-  }
-
   return {
 
     latitude,
@@ -166,15 +182,7 @@ const extractGPSFromNativeExif = async (exifData, fileName = '', useRemoteApi = 
 
     accuracy: exifData.GPSHPositioningError ? parseFloat(exifData.GPSHPositioningError) : null,
 
-    source: 'react-native-exif',
-
-    // 添加城市信息
-
-    city: nearestCity?.name || null,
-
-    province: nearestCity?.province || null,
-
-    cityDistance: nearestCity?.distance || null
+    source: 'react-native-exif'
 
   };
 
@@ -238,183 +246,140 @@ const tryNativeExif = async (normalizedPath) => {
 
 // 合并函数：一次读取文件同时提取拍照时间和GPS信息
 
-const extractExifData = async (filePath, useRemoteApi = true) => {
+const extractExifData = async (filePath, fileName, contentUri) => {
 
   try {
-    // 提取文件名用于日志显示
-    const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath;
+    // 判断平台：移动端使用MediaStore，PC端使用exif-parser
+    const isMobile = Platform.OS === 'android' || Platform.OS === 'ios';
     
-    // 在Android平台上，优先使用MediaStore提取GPS信息
-    if (Platform.OS === 'android' && MediaStoreService.checkAvailability()) {
-      try {
-        // 尝试通过MediaStore获取图片的content URI
-        const contentUri = await MediaStoreService.getUriByPath(filePath);
-        if (contentUri) {
-          // logger.debug(`📱 使用MediaStore提取EXIF: ${fileName}`); // 注释掉以减少日志输出
-          const mediaStoreExif = await MediaStoreService.getImageExif(contentUri);
-          
-          // 构建兼容的返回格式
-          let locationInfo = createDefaultLocationInfo('none');
-          
-          if (mediaStoreExif.hasGPS) {
-            // 使用城市信息转换服务将GPS坐标转换为城市信息
-            const cityLocationService = require('./CityLocationService').default;
-            const nearestCity = await cityLocationService.findNearestCityAsync(
-              mediaStoreExif.gps.latitude, 
-              mediaStoreExif.gps.longitude, 
-              200, 
-              useRemoteApi
-            );
-            
-            if (nearestCity) {
-              // logger.debug(`🌍 MediaStore城市信息提取成功: ${fileName} - ${nearestCity.name} (${nearestCity.province})`); // 注释掉以减少日志输出
-              locationInfo = {
-                ...createDefaultLocationInfo(),
-                latitude: mediaStoreExif.gps.latitude,
-                longitude: mediaStoreExif.gps.longitude,
-                altitude: mediaStoreExif.gps.altitude || 0,
-                city: nearestCity.name,
-                province: nearestCity.province,
-                country: nearestCity.country || '中国'
-              };
-            } else {
-              // logger.debug(`🌍 MediaStore未找到城市信息: ${fileName} - GPS(${mediaStoreExif.gps.latitude}, ${mediaStoreExif.gps.longitude})`); // 注释掉以减少日志输出
-              locationInfo = {
-                ...createDefaultLocationInfo(),
-                latitude: mediaStoreExif.gps.latitude,
-                longitude: mediaStoreExif.gps.longitude,
-                altitude: mediaStoreExif.gps.altitude || 0
-              };
-            }
-            
-            // logger.debug(`🌍 MediaStore GPS提取成功: ${fileName} - GPS(${mediaStoreExif.gps.latitude}, ${mediaStoreExif.gps.longitude})`); // 注释掉以减少日志输出
-          }
-          
-          const result = {
-            takenTime: mediaStoreExif.takenTime,
-            locationInfo: locationInfo,
-            imageDimensions: {
-              width: mediaStoreExif.width || null,
-              height: mediaStoreExif.height || null
-            }
-          };
-          
-          return result;
-        }
-      } catch (error) {
-        logger.debug(`⚠️ MediaStore EXIF提取失败，降级到EXIF parser: ${error.message}`);
+    // 移动端只需要 contentUri，PC端需要 filePath
+    if (isMobile) {
+      // 移动端：contentUri 是必需的
+      if (!contentUri || typeof contentUri !== 'string' || contentUri.trim() === '') {
+        throw new Error(`extractExifData: contentUri 参数无效，必须是非空字符串，实际值: ${contentUri}`);
+      }
+    } else {
+      // PC端：filePath 是必需的
+      if (!filePath || typeof filePath !== 'string' || filePath.trim() === '') {
+        throw new Error(`extractExifData: filePath 参数无效，必须是非空字符串，实际值: ${filePath}`);
       }
     }
-
-    // 1. 环境检测
-
+    
+    // fileName 在所有平台都是必需的
+    if (!fileName || typeof fileName !== 'string' || fileName.trim() === '') {
+      throw new Error(`extractExifData: fileName 参数无效，必须是非空字符串，实际值: ${fileName}`);
+    }
+    
+    // 环境检测：在Web环境下提前返回，避免执行后续不必要的处理
     if (typeof window !== 'undefined' && typeof document !== 'undefined' && !window.require) {
-
       return {
-
         takenTime: null,
-
-        locationInfo: createDefaultLocationInfo('web_unsupported')
-
+        locationInfo: createDefaultLocationInfo('web_unsupported'),
+        imageDimensions: { width: null, height: null }
       };
-
+    }
+    
+    // 使用传入的 fileName
+    const finalFileName = fileName;
+    
+    // ========== 移动端：只使用 MediaStore ==========
+    if (isMobile) {
+      let takenTime = null;
+      let locationInfo = createDefaultLocationInfo('none');
+      let imageDimensions = { width: null, height: null };
+      
+      // 尝试使用MediaStore获取EXIF信息
+      if (Platform.OS === 'android' && MediaStoreService.checkAvailability()) {
+        try {
+          const mediaStoreExif = await MediaStoreService.getImageExif(contentUri);
+          
+          // 构建位置信息
+          if (mediaStoreExif.gps?.latitude != null && mediaStoreExif.gps?.longitude != null) {
+            locationInfo.latitude = mediaStoreExif.gps.latitude;
+            locationInfo.longitude = mediaStoreExif.gps.longitude;
+            locationInfo.altitude = mediaStoreExif.gps.altitude ?? null;
+          }
+          
+          takenTime = mediaStoreExif.takenTime;
+          imageDimensions = {
+            width: mediaStoreExif.width ?? null,
+            height: mediaStoreExif.height ?? null
+          };
+        } catch (error) {
+          logger.warn(`⚠️ MediaStore EXIF提取失败: ${error.message}, 文件: ${finalFileName}`);
+        }
+      }
+      
+      // 如果MediaStore没有获取到尺寸信息，使用ImageProcessor获取
+      if (!imageDimensions.width || !imageDimensions.height) {
+        try {
+          // 移动端使用contentUri
+          const dimensions = await ImageProcessor.getImageDimensions(contentUri);
+          if (dimensions) {
+            imageDimensions = {
+              width: dimensions.width,
+              height: dimensions.height
+            };
+          }
+        } catch (error) {
+          logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}, 文件: ${finalFileName}`);
+        }
+      }
+      
+      return {
+        takenTime,
+        locationInfo,
+        imageDimensions
+      };
+    }
+    
+    // ========== PC端：只使用 exif-parser ==========
+    // 文件验证（桌面端）
+    try {
+      await getFileStats(filePath);
+    } catch (statsError) {
+      logger.warn(`⚠️ 文件验证失败（可能文件不存在）: ${statsError.message}, 文件: ${finalFileName}`);
+      // 继续执行，让后续的readFileForExif来处理文件读取
     }
 
-    
-
-    // 2. 路径标准化和文件验证
-
-    const normalizedPath = normalizeFilePath(filePath);
-
-    await getFileStats(normalizedPath); // 验证文件存在
-
-    
-
-    // 3. 尝试exif-parser库
-
+    // 使用 exif-parser 库提取EXIF信息
     try {
-
       const ExifParser = require('exif-parser');
-
       const arrayBuffer = await readFileForExif(filePath);
-
       const parser = ExifParser.create(arrayBuffer);
-
       const exifData = parser.parse();
       
-      // 调试日志：检查EXIF解析结果
-      logger.debug(`🔍 EXIF解析结果:`, {
-        fileName: fileName,
-        hasTags: !!exifData.tags,
-        hasDateTimeOriginal: !!exifData.tags?.DateTimeOriginal,
-        hasDateTime: !!exifData.tags?.DateTime,
-        hasGPSLatitude: !!exifData.tags?.GPSLatitude,
-        hasGPSLongitude: !!exifData.tags?.GPSLongitude,
-        hasGPSAltitude: !!exifData.tags?.GPSAltitude,
-        DateTimeOriginal: exifData.tags?.DateTimeOriginal,
-        DateTime: exifData.tags?.DateTime,
-        GPSLatitude: exifData.tags?.GPSLatitude,
-        GPSLongitude: exifData.tags?.GPSLongitude,
-        GPSAltitude: exifData.tags?.GPSAltitude
-      });
-
       // 提取拍照时间
-
       let takenTime = null;
 
       if (exifData && exifData.tags && exifData.tags.DateTimeOriginal) {
-        // EXIF DateTimeOriginal 是秒级时间戳，需要转换为毫秒
         let exifTime = exifData.tags.DateTimeOriginal;
-        
-        // 调试日志：检查EXIF时间戳的值
-        logger.debug(`🔍 EXIF DateTimeOriginal 原始值: ${exifTime}, 文件: ${fileName}`);
-        
-        // 验证时间戳是否合理（避免文件名数字被误用）
         if (isValidExifTimestamp(exifTime)) {
-          // 检查是否是微秒级时间戳（大于 13 位数字）
           if (exifTime > 9999999999999) {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
           }
           takenTime = new Date(exifTime * 1000).getTime();
-          logger.debug(`🔍 EXIF DateTimeOriginal 处理后的时间: ${new Date(takenTime).toISOString()}`);
         } else {
-          logger.warn(`⚠️ EXIF DateTimeOriginal 无效: ${exifTime}, 文件: ${fileName}`);
+          logger.warn(`⚠️ EXIF DateTimeOriginal 无效: ${exifTime}, 文件: ${finalFileName}`);
         }
-
       } else if (exifData && exifData.tags && exifData.tags.DateTime) {
-        // EXIF DateTime 是秒级时间戳，需要转换为毫秒
         let exifTime = exifData.tags.DateTime;
-        
-        // 调试日志：检查EXIF时间戳的值
-        logger.debug(`🔍 EXIF DateTime 原始值: ${exifTime}, 文件: ${fileName}`);
-        
-        // 验证时间戳是否合理（避免文件名数字被误用）
         if (isValidExifTimestamp(exifTime)) {
-          // 检查是否是微秒级时间戳（大于 13 位数字）
           if (exifTime > 9999999999999) {
             exifTime = Math.floor(exifTime / 1000); // 转换为秒级
           }
           takenTime = new Date(exifTime * 1000).getTime();
-          logger.debug(`🔍 EXIF DateTime 处理后的时间: ${new Date(takenTime).toISOString()}`);
         } else {
-          logger.warn(`⚠️ EXIF DateTime 无效: ${exifTime}, 文件: ${fileName}`);
+          logger.warn(`⚠️ EXIF DateTime 无效: ${exifTime}, 文件: ${finalFileName}`);
         }
-
       }
-
-      
 
       // 提取GPS信息
       let gpsInfo = null;
       try {
-        gpsInfo = await extractGPSFromExifParser(exifData, fileName, useRemoteApi);
-        
-        // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
-        if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
-          logger.debug(`🌍 EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
-        }
+        gpsInfo = await extractGPSFromExifParser(exifData, finalFileName);
       } catch (gpsError) {
-        logger.warn(`⚠️ GPS信息提取失败: ${gpsError.message}, 文件: ${fileName}`);
+        logger.warn(`⚠️ GPS信息提取失败: ${gpsError.message}, 文件: ${finalFileName}`);
         gpsInfo = null;
       }
 
@@ -429,8 +394,7 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
       // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
       if (!imageDimensions.width || !imageDimensions.height) {
         try {
-          // 确保使用 file:// 格式的 URI
-          const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+          const imageUri = getFileUri(filePath);
           const dimensions = await ImageProcessor.getImageDimensions(imageUri);
           if (dimensions) {
             imageDimensions = {
@@ -445,153 +409,31 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
       return { takenTime, locationInfo, imageDimensions };
 
-      
-
     } catch (parseError) {
-
-      // 4. 尝试react-native-exif库
-
+      logger.warn(`⚠️ exif-parser 提取失败: ${parseError.message}, 文件: ${finalFileName}`);
+      
+      // 即使 EXIF 读取失败，也尝试用 ImageProcessor 获取尺寸
+      let imageDimensions = { width: null, height: null };
       try {
-
-        const RNExif = eval('require("react-native-exif")');
-
-        const exifData = await RNExif.getExif(normalizedPath);
-
-        
-
-        // 提取拍照时间
-
-        let takenTime = null;
-
-        if (exifData && exifData.DateTimeOriginal) {
-
-          const dateTimeStr = exifData.DateTimeOriginal;
-
-          const [datePart, timePart] = dateTimeStr.split(' ');
-
-          const [year, month, day] = datePart.split(':');
-
-          const [hour, minute, second] = timePart.split(':');
-
-          
-
-          takenTime = new Date(
-
-            parseInt(year),
-
-            parseInt(month) - 1, 
-
-            parseInt(day),
-
-            parseInt(hour),
-
-            parseInt(minute),
-
-            parseInt(second)
-
-          ).getTime();
-
-        } else if (exifData && exifData.DateTime) {
-
-          const dateTimeStr = exifData.DateTime;
-
-          const [datePart, timePart] = dateTimeStr.split(' ');
-
-          const [year, month, day] = datePart.split(':');
-
-          const [hour, minute, second] = timePart.split(':');
-
-          
-
-          takenTime = new Date(
-
-            parseInt(year),
-
-            parseInt(month) - 1, 
-
-            parseInt(day),
-
-            parseInt(hour),
-
-            parseInt(minute),
-
-            parseInt(second)
-
-          ).getTime();
-
-        }
-
-        
-
-        // 提取GPS信息
-        const gpsInfo = await extractGPSFromNativeExif(exifData, fileName, useRemoteApi);
-
-        // 调试：记录GPS信息提取结果（只在有GPS信息时输出）
-        if (gpsInfo && gpsInfo.latitude && gpsInfo.longitude) {
-          logger.debug(`🌍 Native EXIF GPS提取成功: ${fileName} - GPS(${gpsInfo.latitude}, ${gpsInfo.longitude})`);
-        }
-
-        const locationInfo = gpsInfo ? { ...createDefaultLocationInfo(), ...gpsInfo } : createDefaultLocationInfo('none');
-
-        // 提取图片尺寸信息
-        let imageDimensions = {
-          width: exifData.PixelXDimension || exifData.ImageWidth || null,
-          height: exifData.PixelYDimension || exifData.ImageLength || null
-        };
-
-        // 如果 EXIF 中没有尺寸信息，使用 ImageProcessor 获取
-        if (!imageDimensions.width || !imageDimensions.height) {
-          try {
-            // 确保使用 file:// 格式的 URI
-            const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
-            const dimensions = await ImageProcessor.getImageDimensions(imageUri);
-            if (dimensions) {
-              imageDimensions = {
-                width: dimensions.width,
-                height: dimensions.height
-              };
-              logger.debug(`✅ 通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
-            }
-          } catch (error) {
-            logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);
-          }
-        }
-
-        return { takenTime, locationInfo, imageDimensions };
-
-        
-
-      } catch (nativeError) {
-
-        // 即使 EXIF 读取失败，也尝试用 ImageProcessor 获取尺寸
-        let imageDimensions = { width: null, height: null };
-        try {
-          // 确保使用 file:// 格式的 URI
-          const imageUri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+        const imageUri = getFileUri(filePath);
+        if (imageUri) {
           const dimensions = await ImageProcessor.getImageDimensions(imageUri);
           if (dimensions) {
             imageDimensions = {
               width: dimensions.width,
               height: dimensions.height
             };
-            logger.debug(`✅ EXIF失败，通过 ImageProcessor 获取图片尺寸: ${dimensions.width}×${dimensions.height}`);
           }
-        } catch (error) {
-          logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);
         }
-
-        return {
-
-          takenTime: null,
-
-          locationInfo: createDefaultLocationInfo('none'),
-
-          imageDimensions
-
-        };
-
+      } catch (error) {
+        // 忽略尺寸获取失败的错误
       }
 
+      return {
+        takenTime: null,
+        locationInfo: createDefaultLocationInfo('none'),
+        imageDimensions
+      };
     }
 
     
@@ -600,11 +442,30 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
     logger.error(`EXIF extraction failed:`, error);
 
+    // 即使所有EXIF提取方法都失败，也尝试获取图片尺寸
+    let imageDimensions = { width: null, height: null };
+    try {
+      const imageUri = getFileUri(filePath);
+      if (imageUri) {
+        const dimensions = await ImageProcessor.getImageDimensions(imageUri);
+        if (dimensions) {
+          imageDimensions = {
+            width: dimensions.width,
+            height: dimensions.height
+          };
+        }
+      }
+    } catch (dimensionError) {
+      // 忽略尺寸获取失败的错误
+    }
+
     return {
 
       takenTime: null,
 
-      locationInfo: null
+      locationInfo: createDefaultLocationInfo('none'),
+
+      imageDimensions
 
     };
 
@@ -614,25 +475,8 @@ const extractExifData = async (filePath, useRemoteApi = true) => {
 
 
 
-// 保持向后兼容的单独函数
-
-const extractLocationInfo = async (filePath, useRemoteApi = true) => {
-
-  const result = await extractExifData(filePath, useRemoteApi);
-
-  return result.locationInfo;
-
-};
 
 
-
-const extractTakenTime = async (filePath, useRemoteApi = true) => {
-
-  const result = await extractExifData(filePath, useRemoteApi);
-
-  return result.takenTime;
-
-};
 
 
 
@@ -641,6 +485,8 @@ import ParallelHashCalculator from './ParallelHashCalculator.js';
 import configService from './ConfigService.js';
 import ImageSimilarityService from './ImageSimilarityService.js';
 import MediaStoreService from './MediaStoreService.js';
+const { ScanService } = require('../adapters/ScanServiceAdapter');
+import { AppState } from '../adapters/WebAdapters';
 
 
 class GalleryScannerService {
@@ -668,6 +514,46 @@ class GalleryScannerService {
     this.totalClassifiedSuccessfully = 0; // 累计分类成功的图片数
     this.lastRefreshCount = 0; // 上次刷新时的分类成功数
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
+    this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
+    
+    // AppState 监听器，用于保持后台执行
+    this.appStateSubscription = null;
+    this.isScanning = false;
+    
+    // Android平台：监听应用状态，确保后台时继续执行
+    if (Platform.OS === 'android') {
+      this.setupAppStateListener();
+    }
+  }
+  
+  /**
+   * 设置 AppState 监听器，确保在后台时任务继续执行
+   */
+  setupAppStateListener() {
+    if (!AppState || !AppState.addEventListener) {
+      logger.warn('⚠️ AppState 不可用，无法监听应用状态');
+      return;
+    }
+    
+    this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (this.isScanning) {
+        if (nextAppState === 'background' || nextAppState === 'inactive') {
+          logger.debug('📱 应用进入后台，但扫描任务将继续执行（前台服务 + WakeLock）');
+        } else if (nextAppState === 'active') {
+          logger.debug('📱 应用回到前台');
+        }
+      }
+    });
+  }
+  
+  /**
+   * 清理 AppState 监听器
+   */
+  cleanupAppStateListener() {
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
   }
 
 
@@ -741,7 +627,7 @@ class GalleryScannerService {
         break;
         
       case 'screenshot_detection':
-        simpleMessage = `截图检测: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = `照片扫描: ${filesProcessed || 0}/${filesFound || 0}`;
         break;
       
       case 'cache_checking':
@@ -800,10 +686,7 @@ class GalleryScannerService {
     // 添加全局统计信息到消息中
     let finalMessage = simpleMessage;
     
-    // 更新全局统计 - 文件总数在截图检测阶段设置，之后不再改变
-    if (filesFound && filesFound > 0 && this.totalImagesToProcess === 0 && stage === 'screenshot_detection') {
-      this.totalImagesToProcess = filesFound;
-    }
+    // totalImagesToProcess 在缓存检查阶段（cache_checking）设置为 NA 图片数量，不再在截图检测阶段设置
     
     // 分类成功数现在在各个阶段的保存成功时直接累加，不再在这里处理
     
@@ -817,6 +700,14 @@ class GalleryScannerService {
         shouldRefresh = true;
         this.lastSimilarityRefreshCount = groupsCount;
         logger.debug(`🔄 相似度检测刷新: 发现${groupsCount}个相似组, 上次刷新${this.lastSimilarityRefreshCount}个`);
+      }
+    } else if (stage === 'screenshot_detection' && filesProcessed && filesProcessed > 0) {
+      // 截图检测阶段：每处理完100张图片刷新一次（比较差值）
+      const lastRefresh = this.lastScreenshotRefreshCount;
+      if (filesProcessed - lastRefresh >= 100) {
+        shouldRefresh = true;
+        this.lastScreenshotRefreshCount = filesProcessed;
+        logger.debug(`🔄 截图检测刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
     } else if (this.totalClassifiedSuccessfully > 0 && this.totalClassifiedSuccessfully - this.lastRefreshCount >= 50) {
       // 其他阶段：每50张成功分类的图片刷新一次
@@ -844,8 +735,15 @@ class GalleryScannerService {
     }
     
     // 显示统计信息（除了相似度检测阶段，其他阶段都显示总进度统计）
-    if (this.totalImagesToProcess > 0 && stage !== 'similarity_detection') {
-      finalMessage += ` | 分类成功: ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`;
+    if (stage !== 'similarity_detection') {
+      // 确定显示的总数：如果 totalImagesToProcess 已设置则用它，否则在截图检测阶段使用 filesFound
+      const totalCount = this.totalImagesToProcess > 0 
+        ? this.totalImagesToProcess 
+        : (stage === 'screenshot_detection' && filesFound ? filesFound : 0);
+      
+      if (totalCount > 0) {
+        finalMessage += ` | 分类成功: ${this.totalClassifiedSuccessfully}/${totalCount}`;
+      }
     }
     
     return {
@@ -888,6 +786,7 @@ class GalleryScannerService {
       this.totalClassifiedSuccessfully = 0;
       this.lastRefreshCount = 0;
       this.lastSimilarityRefreshCount = 0;
+      this.lastScreenshotRefreshCount = 0;
 
       // 使用独立扫描线程方案，避免阻塞UI
       return await this.scanWithIndependentThread(this.galleryPaths, onProgress, scanStartTime);
@@ -940,26 +839,26 @@ class GalleryScannerService {
 
   async scanDirectoryForUris(dirPath, onProgress = null, totalFoundSoFar = 0) {
     try {
-      const exists = await RNFS.exists(dirPath);
+      // 规范化路径：移除 file:// 前缀等，确保路径格式正确
+      const normalizedDirPath = normalizeFilePath(dirPath);
+      
+      const exists = await RNFS.exists(normalizedDirPath);
 
       if (!exists) {
+        logger.warn(`⚠️ 目录不存在: ${normalizedDirPath}`);
         return [];
 
       }
 
       
 
-      const items = await RNFS.readDir(dirPath);
+      const items = await RNFS.readDir(normalizedDirPath);
 
       const images = [];
 
       let imageCount = 0;
 
       let dirCount = 0;
-
-      const processedUris = new Set(); // 跟踪已处理的URI，避免重复
-
-      
 
 
       
@@ -1014,30 +913,9 @@ class GalleryScannerService {
 
         } else if (this.isImageFile(item.name)) {
 
-          // 规范化路径：将反斜杠转换为正斜杠（Windows路径兼容）
-          const normalizedPath = item.path.replace(/\\/g, '/');
+          // 规范化路径：normalizeFilePath 已经返回标准化的 URI 格式（使用正斜杠）
+          const originalUri = normalizeFilePath(item.path);
 
-          const fileUri = Platform.OS === 'web' 
-
-            ? `file:///${normalizedPath}` 
-
-            : `file://${normalizedPath}`;
-
-          
-
-          // 检查是否已经处理过这个URI
-
-          if (processedUris.has(fileUri)) {
-
-            // 发现重复URI，跳过
-
-            continue;
-
-          }
-
-          processedUris.add(fileUri);
-
-          
           imageCount++;
           
 
@@ -1119,19 +997,11 @@ class GalleryScannerService {
             }
 
             const imageData = {
-
-              uri: fileUri,
-
+              uri: originalUri, // 原始uri
               fileName: item.name,
-
               size: stats.size,
-
-              timestamp: fileTime,
-
-              path: item.path
-
+              timestamp: fileTime
               // takenAt, locationInfo 等EXIF数据在后续阶段提取
-
             };
 
            
@@ -1229,118 +1099,6 @@ class GalleryScannerService {
 
 
 
- 
-
-
-  // 为现有图片补充城市信息
-
-  async updateExistingImagesWithCityInfo() {
-
-    try {
-
-      // Starting to update existing images with city info
-
-      
-
-      const allImages = await UnifiedDataService.readAllImages();
-      // Found existing images
-
-      
-
-      let updatedCount = 0;
-
-      let skippedCount = 0;
-
-      
-
-      for (const image of allImages) {
-
-        // 只处理有GPS坐标但没有城市信息的图片
-
-        if (image.latitude && image.longitude && !image.city) {
-
-          try {
-
-            // Processing image for city info
-
-            
-
-            // 查找最近的城市（根据远程服务状态决定是否使用远程API）
-
-            const nearestCity = await cityLocationService.findNearestCityAsync(image.latitude, image.longitude, 200, this.useRemoteInference);
-
-            
-
-            if (nearestCity) {
-
-              // 更新图片的城市信息
-
-              const updatedImage = {
-
-                ...image,
-
-                city: nearestCity.name,
-
-                province: nearestCity.province,
-
-                cityDistance: nearestCity.distance
-
-              };
-
-              
-
-              // 保存更新后的图片信息
-
-              await UnifiedDataService.writeImageClassification(updatedImage);
-              
-
-              // Updated image with city info
-
-              updatedCount++;
-
-            } else {
-
-              // No city found for coordinates
-
-              skippedCount++;
-
-            }
-
-          } catch (error) {
-
-            console.error(`❌ Failed to update ${image.fileName}:`, error);
-
-            skippedCount++;
-
-          }
-
-        } else {
-
-          skippedCount++;
-
-        }
-
-      }
-
-      
-
-      // City info update completed
-
-      return { updated: updatedCount, skipped: skippedCount };
-
-      
-
-    } catch (error) {
-
-      console.error('❌ Failed to update existing images with city info:', error);
-
-      throw error;
-
-    }
-
-  }
-
-
 
 
 
@@ -1371,6 +1129,12 @@ class GalleryScannerService {
       filesProcessed
     });
     
+    // Android平台：更新前台服务通知
+    if (Platform.OS === 'android') {
+      const progressMessage = progressData.message || `${stage}: ${filesProcessed}/${filesFound}`;
+      ScanService.updateProgress(progressMessage, filesProcessed, filesFound);
+    }
+    
     this.onProgress(progressData);
   }
 
@@ -1382,6 +1146,14 @@ class GalleryScannerService {
     try {
       // 保存onProgress为实例变量
       this.onProgress = onProgress;
+      
+      // 标记正在扫描
+      this.isScanning = true;
+      
+      // Android平台：启动前台服务，支持后台扫描
+      if (Platform.OS === 'android') {
+        ScanService.start();
+      }
       
       // 发送初始化进度消息，设置扫描开始时间
       this.sendProgressMessage('initializing', 0, 0);
@@ -1419,32 +1191,15 @@ class GalleryScannerService {
       // 阶段2: 文件比对
       const { deletedUris, newImages } = await this.compareFilesPhase(allImages, scanStartTime);
       
-      // 检查是否有新增或移除的文件
+      // 🔧 修复：即使没有新增文件，也要继续处理数据库中已有的未分类图片（NA）
+      // 因为 processImagesPhase 会从数据库中读取 NA 分类的图片进行后续处理
       if (deletedUris.length === 0 && newImages.length === 0) {
-        logger.info('✅ 文件比对完成：没有新增也没有移除的文件，扫描结束');
-        this.sendProgressMessage('file_comparison', allImages.length, allImages.length, '没有新增也没有移除的文件，扫描结束');
-        
-        // 发送完成消息
-        this.sendProgressMessage('completed', allImages.length, allImages.length);
-        
-        // 如果加载了模型，才需要卸载
-        if (this.imageClassifier.isInitialized) {
-          logger.debug('🔄 卸载本地模型，释放内存...');
-          this.imageClassifier.unloadAllModels();
-        }
-        
-        return {
-          success: true,
-          deleted: 0,
-          newImages: 0,
-          processed: 0,
-          failed: 0,
-          skipped: true // 标记为跳过后续处理
-        };
+        logger.info('✅ 文件比对完成：没有新增也没有移除的文件，但将继续处理数据库中未分类的图片');
       }
       
       // 阶段3-4: 漏斗式处理（内部会按需加载模型）
-      const { processedCount, failedCount } = await this.processImagesPhase(newImages, scanStartTime);
+      // 注意：即使 newImages 为空，processImagesPhase 也会从数据库中读取 NA 分类的图片进行处理
+      const { processedCount, failedCount, similarityCandidates } = await this.processImagesPhase(newImages, scanStartTime);
       
       // 阶段5: 移除文件处理
       await this.removeFilesPhase(deletedUris, scanStartTime);
@@ -1453,7 +1208,7 @@ class GalleryScannerService {
       await this.updateDataPhase(processedCount, failedCount, scanStartTime);
       
       // 阶段7: 相似度检测（在数据更新后执行，确保能获取到所有图片数据）
-      await this.similarityDetectionPhase(scanStartTime);
+      await this.similarityDetectionPhase(scanStartTime, similarityCandidates);
       
       // 扫描完成
       const totalProcessed = processedCount;
@@ -1467,6 +1222,14 @@ class GalleryScannerService {
       this.imageClassifier.unloadAllModels();
       }
       
+      // 标记扫描完成
+      this.isScanning = false;
+      
+      // Android平台：停止前台服务
+      if (Platform.OS === 'android') {
+        ScanService.stop();
+      }
+      
       return {
         success: true,
         deleted: deletedUris.length,
@@ -1477,6 +1240,14 @@ class GalleryScannerService {
       
     } catch (error) {
       console.error('❌ 独立扫描线程方案失败:', error);
+      
+      // 标记扫描完成（即使出错）
+      this.isScanning = false;
+      
+      // Android平台：出错时也要停止前台服务
+      if (Platform.OS === 'android') {
+        ScanService.stop();
+      }
       
       // 如果加载了模型，即使出现错误也要卸载
       if (this.imageClassifier.isInitialized) {
@@ -1500,6 +1271,42 @@ class GalleryScannerService {
    * @param {Array} scanPaths - 扫描路径数组，空数组表示扫描整个设备
    * @param {string} scanStartTime - 扫描开始时间
    */
+  /**
+   * 将绝对路径转换为相对路径（相对于外部存储根目录）
+   * @param {string} absolutePath - 绝对路径，例如：/storage/emulated/0/DCIM/Camera
+   * @param {string} externalStoragePath - 外部存储根目录，例如：/storage/emulated/0
+   * @returns {string|null} 相对路径，例如：DCIM/Camera
+   */
+  convertToRelativePath(absolutePath, externalStoragePath) {
+    if (!absolutePath || !externalStoragePath) {
+      return null;
+    }
+    
+    // 使用WebAdapters的标准化函数规范化路径
+    // normalizeFilePath会处理：file://前缀、Windows路径、URL解码、统一使用正斜杠
+    let normalizedAbsolute = normalizeFilePath(absolutePath);
+    let normalizedStorage = normalizeFilePath(externalStoragePath);
+    
+    // 移除末尾斜杠（用于路径比较）
+    normalizedAbsolute = normalizedAbsolute.replace(/\/+$/, '');
+    normalizedStorage = normalizedStorage.replace(/\/+$/, '');
+    
+    // 检查是否以外部存储根目录开头
+    if (!normalizedAbsolute.startsWith(normalizedStorage)) {
+      return null;
+    }
+    
+    // 移除外部存储根目录前缀
+    let relativePath = normalizedAbsolute.substring(normalizedStorage.length);
+    
+    // 移除开头的斜杠
+    if (relativePath.startsWith('/')) {
+      relativePath = relativePath.substring(1);
+    }
+    
+    return relativePath || null;
+  }
+
   async scanDirectoriesPhaseWithMediaStore(scanPaths, scanStartTime) {
     logger.info('📁 阶段1: 开始Android系统相册扫描');
     
@@ -1531,6 +1338,31 @@ class GalleryScannerService {
       logger.debug('Android系统相册扫描: 使用指定的扫描路径:', scanPaths);
       this.sendProgressMessage('directory_scanning', 0, 0);
       
+      // 获取外部存储根目录（用于路径规范化）
+      let externalStoragePath = null;
+      try {
+        externalStoragePath = await MediaStoreService.getExternalStoragePath();
+        logger.debug(`外部存储根目录: ${externalStoragePath}`);
+      } catch (error) {
+        logger.warn('⚠️ 无法获取外部存储根目录，将直接使用路径过滤:', error);
+      }
+      
+      // 规范化扫描路径：统一转换为相对路径格式（用于比较）
+      // 获取到的图片path可能是绝对路径，也可能是相对路径，都需要统一处理
+      const normalizedScanPaths = scanPaths.map(scanPath => {
+        // 如果是绝对路径，转换为相对路径
+        if (externalStoragePath && scanPath.startsWith(externalStoragePath)) {
+          const relativePath = this.convertToRelativePath(scanPath, externalStoragePath);
+          if (relativePath) {
+            return { original: scanPath, normalized: relativePath, isAbsolute: true };
+          }
+        }
+        // 如果已经是相对路径，直接使用
+        return { original: scanPath, normalized: scanPath, isAbsolute: false };
+      }).filter(item => item.normalized != null);
+      
+      logger.debug(`规范化扫描目录: ${JSON.stringify(normalizedScanPaths.map(item => item.normalized))}`);
+      
       // 分批获取所有图片，然后根据路径过滤
       const allImages = await MediaStoreService.getAllImagesInBatches(
         500,  // 每批500张
@@ -1548,14 +1380,54 @@ class GalleryScannerService {
       const convertedImages = MediaStoreService.convertBatchToCompatibleFormat(allImages);
       
       // 根据扫描路径过滤图片
+      // 获取到的path可能是绝对路径，也可能是相对路径，需要统一处理
       const filteredImages = convertedImages.filter(image => {
-        // 检查图片路径是否在指定的扫描路径中
-        const imagePath = image.path || image.uri?.replace('file://', '');
-        if (!imagePath) return false;
+        // 获取图片的path（优先绝对路径，如果为空则使用相对路径）
+        const imagePath = getLocalPath(image);
         
-        return scanPaths.some(scanPath => {
-          // 检查图片路径是否以扫描路径开头
-          return imagePath.startsWith(scanPath);
+        // 如果图片没有path，跳过
+        if (!imagePath) {
+          logger.debug(`⚠️ 图片没有path，跳过过滤: ${image.fileName}`);
+          return false;
+        }
+        
+        // 如果normalizedScanPaths为空，说明无法进行路径过滤
+        if (normalizedScanPaths.length === 0) {
+          logger.warn('⚠️ 无法规范化扫描路径，跳过路径过滤');
+          return false;
+        }
+        
+        // 规范化图片路径：如果是绝对路径，转换为相对路径；如果已经是相对路径，直接使用
+        let normalizedImagePath = imagePath;
+        if (externalStoragePath && imagePath.startsWith(externalStoragePath)) {
+          // 是绝对路径，转换为相对路径
+          const relativePath = this.convertToRelativePath(imagePath, externalStoragePath);
+          if (relativePath) {
+            normalizedImagePath = relativePath;
+          } else {
+            // 转换失败，使用原始路径
+            logger.debug(`⚠️ 无法将绝对路径转换为相对路径: ${image.fileName}, path: ${imagePath}`);
+          }
+        }
+        
+        // 使用规范化后的路径进行比较
+        return normalizedScanPaths.some(scanPathItem => {
+          const scanPath = scanPathItem.normalized;
+          
+          // 策略1：使用规范化后的相对路径进行比较
+          if (normalizedImagePath.startsWith(scanPath)) {
+            return true;
+          }
+          
+          // 策略2：如果图片路径是绝对路径，且扫描路径也是绝对路径，直接比较
+          if (imagePath.startsWith(scanPathItem.original)) {
+            return true;
+          }
+          
+          // 策略3：如果图片路径是绝对路径，但扫描路径是相对路径，需要转换后比较
+          // 这种情况下，normalizedImagePath 应该已经是相对路径了，所以策略1应该已经处理了
+          
+          return false;
         });
       });
       
@@ -1619,62 +1491,65 @@ class GalleryScannerService {
     // 让出控制权，让UI有机会显示进度提示
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    // 获取现有图片URI集合
-    const existingUris = new Set(await UnifiedDataService.getImageUris());
-    logger.debug(`🔍 增量扫描调试: 数据库中发现 ${existingUris.size} 个现有图片URI`);
+    // 获取现有图片URI集合（数据库中的原始值）
+    const rawExistingUris = await UnifiedDataService.getImageUris();
+    const existingUriSet = new Set(rawExistingUris.filter(Boolean));
+    logger.debug(`🔍 增量扫描调试: 数据库中发现 ${existingUriSet.size} 个现有图片URI`);
     
-    // 调试：显示前5个现有URI
-    if (existingUris.size > 0) {
-      const existingArray = Array.from(existingUris).slice(0, 5);
+    if (existingUriSet.size > 0) {
+      const existingArray = Array.from(existingUriSet).slice(0, 5);
       logger.debug(`🔍 现有URI示例:`, existingArray);
     }
     
-    // 让出控制权，避免阻塞UI
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    // 获取当前文件URI集合
+    // 获取当前文件URI集合（可比较 key）
     const currentFileUris = new Set();
     effectiveAllImages.forEach(img => {
-      currentFileUris.add(img.uri);
+      const uri = extractOriginalUri(img);
+      if (uri) {
+        currentFileUris.add(uri);
+      }
     });
     
-    logger.debug(`🔍 增量扫描调试: 扫描发现 ${currentFileUris.size} 个文件URI`);
-    
-    // 调试：显示前5个扫描到的URI
+    logger.debug(`🔍 增量扫描调试: 扫描发现 ${currentFileUris.size} 个文件URI key`);
     if (currentFileUris.size > 0) {
       const currentArray = Array.from(currentFileUris).slice(0, 5);
       logger.debug(`🔍 扫描URI示例:`, currentArray);
     }
     
-    // 让出控制权，避免阻塞UI
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    // 找出差异
-    let deletedUris = []; // 数据库中有，但文件系统中没有（非会员限制时跳过计算）
-    const newUris = []; // 文件系统中有，但数据库中没有
+    // 找出被删除的文件（数据库有，扫描没有）
+    const fullFileUriSet = new Set();
+    allImages.forEach(img => {
+      const uri = extractOriginalUri(img);
+      if (uri) {
+        fullFileUriSet.add(uri);
+      }
+    });
     
-    // 找出被删除的文件（仅会员或未限制时计算，避免误判）
-    if (!this.compareLimit) {
-      for (const uri of existingUris) {
-        if (!currentFileUris.has(uri)) {
-          deletedUris.push(uri);
-        }
+    const deletedUris = [];
+    for (const uri of existingUriSet.values()) {
+      if (!fullFileUriSet.has(uri)) {
+        deletedUris.push(uri);
       }
     }
     
-    // 找出需要处理的文件
+    // 找出需要处理的新文件（扫描有，数据库没有）
+    const newUriSet = new Set();
     for (const uri of currentFileUris) {
-      if (!existingUris.has(uri)) {
-        newUris.push(uri);
+      if (!existingUriSet.has(uri)) {
+        newUriSet.add(uri);
       }
     }
     
-    // 过滤出需要处理的新图片（基于受限集合）
-    const newImages = effectiveAllImages.filter(img => newUris.includes(img.uri));
+    const newImages = effectiveAllImages.filter(img => {
+      const uri = extractOriginalUri(img);
+      return uri ? newUriSet.has(uri) : false;
+    });
     
-    logger.debug(`🔍 增量扫描结果: 删除 ${deletedUris.length} 个文件，新增 ${newUris.length} 个文件`);
-    
-    // 阶段2完成
+    logger.debug(`🔍 增量扫描结果: 删除 ${deletedUris.length} 个文件，新增 ${newImages.length} 个文件`);
     
     return { deletedUris, newImages };
   }
@@ -1727,35 +1602,56 @@ class GalleryScannerService {
 
   async saveImageResult(imageData, classification, exifData) {
     try {
-      const saveData = {
-        uri: imageData.uri,
-        category: classification.categoryId || classification.category,
-        confidence: classification.confidence || 1.0,
-        timestamp: imageData.timestamp,
-        takenAt: this.validateTakenTime(exifData.takenTime), // 只验证EXIF时间，不填充其他时间
-        fileName: imageData.fileName,
-        size: imageData.size,
-        latitude: exifData.locationInfo?.latitude,
-        longitude: exifData.locationInfo?.longitude,
-        altitude: exifData.locationInfo?.altitude,
-        accuracy: exifData.locationInfo?.accuracy,
-        address: exifData.locationInfo?.address,
-        city: exifData.locationInfo?.city,
-        country: exifData.locationInfo?.country,
-        province: exifData.locationInfo?.province,
-        district: exifData.locationInfo?.district,
-        street: exifData.locationInfo?.street,
-        width: exifData.imageDimensions?.width,
-        height: exifData.imageDimensions?.height,
-        // 保存检测结果字段
-        idCardDetections: classification.idCardDetections || [],
-        generalDetections: classification.generalDetections || [],
-        mobileNetV3Detections: classification.mobileNetV3Detections || null,
-        // 保存图像尺寸信息
-        imageDimensions: exifData.imageDimensions || null,
-        // 保存大模型推理描述
-        message: classification.message || null
-      };
+      const originalUri = extractOriginalUri(imageData);
+      // 如果 exifData 为 null，说明是缓存检查/远程推理/本地推理阶段，只更新分类相关字段
+      const isPartialUpdate = exifData === null;
+      
+      let saveData;
+      if (isPartialUpdate) {
+        // 部分更新：只更新分类相关字段
+        saveData = {
+          uri: originalUri,
+          category: classification.categoryId || classification.category,
+          confidence: classification.confidence || 1.0,
+          // 保存检测结果字段
+          idCardDetections: classification.idCardDetections || [],
+          generalDetections: classification.generalDetections || [],
+          mobileNetV3Detections: classification.mobileNetV3Detections || null,
+          // 保存大模型推理描述
+          message: classification.message || null
+        };
+      } else {
+        // 完整保存：保存所有信息（包括 EXIF 数据）
+        saveData = {
+          uri: originalUri,
+          category: classification.categoryId || classification.category,
+          confidence: classification.confidence || 1.0,
+          timestamp: imageData.timestamp,
+          takenAt: this.validateTakenTime(exifData.takenTime), // 只验证EXIF时间，不填充其他时间
+          fileName: imageData.fileName,
+          size: imageData.size,
+          latitude: exifData.locationInfo?.latitude,
+          longitude: exifData.locationInfo?.longitude,
+          altitude: exifData.locationInfo?.altitude,
+          accuracy: exifData.locationInfo?.accuracy,
+          address: exifData.locationInfo?.address,
+          city: exifData.locationInfo?.city,
+          country: exifData.locationInfo?.country,
+          province: exifData.locationInfo?.province,
+          district: exifData.locationInfo?.district,
+          street: exifData.locationInfo?.street,
+          width: exifData.imageDimensions?.width,
+          height: exifData.imageDimensions?.height,
+          // 保存检测结果字段
+          idCardDetections: classification.idCardDetections || [],
+          generalDetections: classification.generalDetections || [],
+          mobileNetV3Detections: classification.mobileNetV3Detections || null,
+          // 保存图像尺寸信息
+          imageDimensions: exifData.imageDimensions || null,
+          // 保存大模型推理描述
+          message: classification.message || null
+        };
+      }
       
       // 使用 writeImageDetailedInfo，传入单元素数组
       // updateCache = false：不立即更新缓存，避免频繁重建缓存，扫描结束后统一更新
@@ -1796,35 +1692,69 @@ class GalleryScannerService {
             continue;
           }
 
-          const saveData = {
-            uri: imageData.uri,
-            category: classification.categoryId || classification.category,
-            confidence: classification.confidence || 1.0,
-            timestamp: imageData.timestamp,
-            takenAt: this.validateTakenTime(exifData?.takenTime),
-            fileName: imageData.fileName,
-            size: imageData.size,
-            latitude: exifData?.locationInfo?.latitude,
-            longitude: exifData?.locationInfo?.longitude,
-            altitude: exifData?.locationInfo?.altitude,
-            accuracy: exifData?.locationInfo?.accuracy,
-            address: exifData?.locationInfo?.address,
-            city: exifData?.locationInfo?.city,
-            country: exifData?.locationInfo?.country,
-            province: exifData?.locationInfo?.province,
-            district: exifData?.locationInfo?.district,
-            street: exifData?.locationInfo?.street,
-            width: exifData?.imageDimensions?.width,
-            height: exifData?.imageDimensions?.height,
-            // 保存检测结果字段
-            idCardDetections: classification.idCardDetections || [],
-            generalDetections: classification.generalDetections || [],
-            mobileNetV3Detections: classification.mobileNetV3Detections || null,
-            // 保存图像尺寸信息
-            imageDimensions: exifData?.imageDimensions || null,
-            // 保存大模型推理描述
-            message: classification.message || null
-          };
+          // 如果 exifData 为 null，说明是缓存检查阶段，只更新分类相关字段
+          const isCacheCheckUpdate = exifData === null;
+          
+          let saveData;
+          if (isCacheCheckUpdate) {
+            // 缓存检查阶段：只更新分类相关字段
+            saveData = {
+              uri: extractOriginalUri(imageData),
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence || 1.0,
+              // 保存检测结果字段
+              idCardDetections: classification.idCardDetections || [],
+              generalDetections: classification.generalDetections || [],
+              mobileNetV3Detections: classification.mobileNetV3Detections || null,
+              // 保存大模型推理描述
+              message: classification.message || null
+            };
+          } else {
+            // 其他阶段：保存完整信息（包括 EXIF 数据）
+            // 如果有GPS坐标，丰富位置信息（包括城市信息）
+            let enrichedLocationInfo = exifData?.locationInfo || createDefaultLocationInfo('none');
+            if (enrichedLocationInfo.latitude && enrichedLocationInfo.longitude && 
+                !enrichedLocationInfo.city) {
+              // 如果只有GPS坐标但没有城市信息，则获取城市信息
+              enrichedLocationInfo = await enrichLocationInfoWithCity(
+                enrichedLocationInfo.latitude,
+                enrichedLocationInfo.longitude,
+                enrichedLocationInfo.altitude,
+                this.useRemoteInference,
+                enrichedLocationInfo
+              );
+            }
+            
+            saveData = {
+              uri: extractOriginalUri(imageData),
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence || 1.0,
+              timestamp: imageData.timestamp,
+              takenAt: this.validateTakenTime(exifData?.takenTime),
+              fileName: imageData.fileName,
+              size: imageData.size,
+              latitude: enrichedLocationInfo.latitude,
+              longitude: enrichedLocationInfo.longitude,
+              altitude: enrichedLocationInfo.altitude,
+              accuracy: enrichedLocationInfo.accuracy,
+              address: enrichedLocationInfo.address,
+              city: enrichedLocationInfo.city,
+              country: enrichedLocationInfo.country,
+              province: enrichedLocationInfo.province,
+              district: enrichedLocationInfo.district,
+              street: enrichedLocationInfo.street,
+              width: exifData?.imageDimensions?.width,
+              height: exifData?.imageDimensions?.height,
+              // 保存检测结果字段
+              idCardDetections: classification.idCardDetections || [],
+              generalDetections: classification.generalDetections || [],
+              mobileNetV3Detections: classification.mobileNetV3Detections || null,
+              // 保存图像尺寸信息
+              imageDimensions: exifData?.imageDimensions || null,
+              // 保存大模型推理描述
+              message: classification.message || null
+            };
+          }
           
           saveDataArray.push(saveData);
           processedCount++;
@@ -1873,7 +1803,7 @@ class GalleryScannerService {
     
     let processedCount = 0;
     let failedCount = 0;
-    const remainingImages = [];
+    let totalScreenshotCount = 0; // 统计实际截图数量
     
     // 并行检测截图
     const batchSize = 100; // 并行处理100张图片（大幅提升速度）
@@ -1889,74 +1819,116 @@ class GalleryScannerService {
       // 并行处理当前批次
       const batchPromises = batch.map(async (image, batchIndex) => {
         try {
+          const originalUri = extractOriginalUri(image);
+          const localPath = getLocalPath(originalUri);
+          const contentUri = getContentUri(image);
+          
           // 提取图片尺寸
-          const exifData = await extractExifData(image.path, this.useRemoteInference);
-          const width = exifData.imageDimensions?.width || 0;
-          const height = exifData.imageDimensions?.height || 0;
+          // extractExifData 函数内部已处理所有场景：
+          // - 移动端：只需要 contentUri，filePath 可以为 null
+          // - PC端：需要 filePath
+          // - 内部会自动处理尺寸获取（包括降级到 ImageProcessor）
+          let width = null;
+          let height = null;
+          let exifData = null;
           
-          // 检测是否为截图
-          const isScreenshot = await this.imageClassifier.identifyMobileScreenshot(
-            image.uri,
-            image.fileName,
-            width,
-            height
-          );
-          
-          // 🆕 GPS信息判断：如果有GPS信息，肯定不是手机截图
-          const hasGPS = exifData.locationInfo && 
+          if (localPath || contentUri) {
+            // 有 localPath 或 contentUri 都可以调用 extractExifData
+            // 移动端：filePath 可以为 null，只需要 contentUri
+            // PC端：需要 filePath
+            exifData = await extractExifData(localPath || null, image.fileName, contentUri);
+            width = exifData.imageDimensions?.width || null;
+            height = exifData.imageDimensions?.height || null;
+          }
+
+          const safeWidth = width || 0;
+          const safeHeight = height || 0;
+
+          // 🆕 EXIF数据判断：如果有GPS信息或拍照时间等EXIF数据，肯定不是手机截图
+          // 先判断EXIF数据，可以避免不必要的AI检测，大幅提升性能
+          const hasGPS = exifData?.locationInfo && 
                         exifData.locationInfo.latitude && 
                         exifData.locationInfo.longitude;
+          const hasTakenTime = exifData?.takenTime != null && exifData.takenTime > 0;
+          const hasExifData = hasGPS || hasTakenTime;
           
-          // 调试日志
-          if (isScreenshot) {
-            logger.debug(`📱 截图检测: ${image.fileName} - AI检测: ${isScreenshot}, GPS: ${hasGPS ? '有' : '无'}`);
+          // 检测是否为截图
+          // 如果有GPS信息，直接判断不是截图（截图通常不会有GPS信息）
+          // 但拍照时间不能作为排除条件，因为有些截图可能包含拍照时间
+          let isScreenshot = false;
+          if (hasGPS) {
+            // 有GPS信息，直接判断不是截图
+            logger.debug(`📱 截图检测: ${image.fileName} - 跳过检测（有GPS信息，肯定不是截图）`);
+          } else {
+            // 使用已经获取的 localPath（在第1823行已获取），避免重复调用getLocalPath
+            // localPath 可能是相对路径（Android 10+）或绝对路径（Android 9及以下）
+            
+            // 进行截图检测（即使有拍照时间也要检测）
+            // identifyMobileScreenshot只需要fileName、width、height、path参数
+            isScreenshot = await this.imageClassifier.identifyMobileScreenshot(
+              image.fileName,
+              safeWidth,
+              safeHeight,
+              localPath || null  // 使用已获取的路径（可能是相对路径或绝对路径）
+            );
+            
+            // 调试日志
+            if (isScreenshot) {
+              const hasTakenTime = exifData?.takenTime != null && exifData.takenTime > 0;
+              logger.debug(`📱 截图检测: ${image.fileName} - AI检测: ${isScreenshot}, 路径: ${localPath || 'N/A'}, 有拍照时间: ${hasTakenTime}`);
+            } else {
+              // 即使检测失败，也输出调试信息，帮助排查问题
+              const aspectRatio = safeHeight > 0 ? (safeWidth / safeHeight) : 0;
+              logger.debug(`📱 截图检测: ${image.fileName} - 未识别为截图, 尺寸: ${safeWidth}x${safeHeight}, 宽高比=${aspectRatio.toFixed(3)}, 路径: ${localPath || 'N/A'}`);
+            }
           }
           
-          if (isScreenshot && !hasGPS) {
-            // 构建分类结果
-            const classification = {
+          // 如果有GPS坐标但没有城市信息，则获取城市信息
+          if (exifData?.locationInfo && 
+              exifData.locationInfo.latitude && 
+              exifData.locationInfo.longitude && 
+              !exifData.locationInfo.city) {
+            try {
+              exifData.locationInfo = await enrichLocationInfoWithCity(
+                exifData.locationInfo.latitude,
+                exifData.locationInfo.longitude,
+                exifData.locationInfo.altitude,
+                this.useRemoteInference,
+                exifData.locationInfo
+              );
+            } catch (error) {
+              logger.warn(`⚠️ 获取城市信息失败: ${error.message}, 文件: ${image.fileName}`);
+            }
+          }
+          
+          // 无论是否为截图，都保存图片信息
+          let classification;
+          if (isScreenshot) {
+            // 截图：设置为 screenshot（只有没有EXIF数据时 isScreenshot 才为 true）
+            classification = {
               categoryId: 'screenshot',
               confidence: 1.0
             };
-            
-            // 立即保存
-            const saved = await this.saveImageResult(image, classification, exifData);
-            if (saved.success) {
-              // 保存成功时累加分类成功数
-              this.totalClassifiedSuccessfully++;
-            }
-            return {
-              success: saved.success,
-              isScreenshot: true,
-              image: image,
-              exifData: exifData
-            };
           } else {
-            // 保存EXIF数据，供后续使用
-            // 确保GPS信息被正确传递
-            const imageWithExif = {
-              ...image,
-              exifData: exifData
-            };
-            
-            // 调试：记录GPS信息传递情况
-            if (exifData.locationInfo?.latitude && exifData.locationInfo?.longitude) {
-              // logger.debug(`🌍 GPS信息传递: ${image.fileName} - GPS(${exifData.locationInfo.latitude}, ${exifData.locationInfo.longitude})`); // 注释掉以减少日志输出
-            }
-            
-            return {
-              success: true,
-              isScreenshot: false,
-              image: imageWithExif,
-              exifData: exifData
+            // 非截图：暂时设置为 NA
+            classification = {
+              categoryId: 'NA',
+              confidence: 0.0
             };
           }
+          
+          // 收集数据，准备批量保存
+          return {
+            success: true,
+            isScreenshot: isScreenshot,  // 用于统计截图数量（只有没有EXIF数据时才是 true）
+            imageData: image,
+            classification: classification,
+            exifData: exifData
+          };
         } catch (error) {
           logger.error(`❌ 截图检测失败:`, error);
           return {
             success: false,
-            isScreenshot: false,
-            image: image,
             error: error
           };
         }
@@ -1965,57 +1937,111 @@ class GalleryScannerService {
       // 等待当前批次完成
       const batchResults = await Promise.all(batchPromises);
       
-      // 处理批次结果
-      for (const result of batchResults) {
-        if (result.success) {
-          if (result.isScreenshot) {
-            processedCount++;
-          } else {
-            remainingImages.push(result.image);
+          // 收集批量保存的数据
+          const batchSaveResults = [];
+          let naCount = 0;
+          let screenshotCount = 0;
+          for (const result of batchResults) {
+            if (result.success) {
+              const categoryId = result.classification?.categoryId || result.classification?.category;
+              if (categoryId === 'NA') naCount++;
+              if (categoryId === 'screenshot') screenshotCount++;
+              
+              batchSaveResults.push({
+                imageData: result.imageData,
+                classification: result.classification,
+                exifData: result.exifData
+              });
+            } else {
+              failedCount++;
+            }
           }
+          
+          // 批量保存
+          if (batchSaveResults.length > 0) {
+            logger.debug(`🔄 准备批量保存 ${batchSaveResults.length} 张图片到数据库 (NA: ${naCount}, screenshot: ${screenshotCount})...`);
+            const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
+            if (batchSaveResult.success) {
+              logger.debug(`✅ 批量保存成功: ${batchSaveResults.length} 张图片`);
+              
+              // 🔍 诊断：立即验证数据库写入
+              try {
+                const dbImages = await UnifiedDataService.imageStorageService.getImages();
+                const naInDb = dbImages.filter(img => img.category === 'NA').length;
+                const screenshotInDb = dbImages.filter(img => img.category === 'screenshot').length;
+                logger.debug(`📊 [诊断] 数据库验证: 总数=${dbImages.length}, NA=${naInDb}, screenshot=${screenshotInDb}`);
+              } catch (verifyError) {
+                logger.warn('⚠️ [诊断] 数据库验证失败:', verifyError);
+              }
+          // processedCount：所有保存成功的图片（截图+非截图）
+          processedCount += batchSaveResults.length;
+          
+          // 统计截图数量（只有截图才计入分类成功数）
+          let screenshotCount = 0;
+          for (const result of batchResults) {
+            if (result.success && result.isScreenshot) {
+              screenshotCount++;
+            }
+          }
+          
+          // 只有截图才累加到分类成功数（非截图保存为NA，等待后续分类）
+          this.totalClassifiedSuccessfully += screenshotCount;
+          totalScreenshotCount += screenshotCount; // 累加实际截图数量
         } else {
-          failedCount++;
-          remainingImages.push(result.image);
+          // 批量保存失败，累加到失败数
+          logger.error(`❌ 批量保存失败: ${batchSaveResults.length} 张图片`);
+          failedCount += batchSaveResults.length;
         }
       }
       
       // 发送进度更新（每处理一个批次就更新一次）
-      const totalProcessed = processedCount + remainingImages.length;
+      const currentProcessed = Math.min((i + batchSize), newImages.length);
       this.sendProgressMessage(
         'screenshot_detection',
-        totalProcessed,
+        currentProcessed,
         newImages.length
       );
     }
     
     // 循环结束，统一处理逻辑会自动处理阶段完成时的刷新
     
-    logger.info(`✅ 第1层完成：检测到 ${processedCount} 张截图，${remainingImages.length} 张继续处理`);
+    logger.info(`✅ 第1层完成：检测到 ${totalScreenshotCount} 张截图，已保存所有 ${processedCount} 张图片信息`);
     
-    return { remainingImages, processedCount, failedCount };
+    // 不再返回 remainingImages，后续阶段会从数据库读取NA分类的图片
+    return { processedCount, failedCount };
   }
 
   /**
    * 阶段3b: 批量缓存查询
-   * 查询缓存并立即保存命中的结果
+   * 处理传入的NA分类图片，查询缓存并立即保存命中的结果
+   * @param {Array} naImages - NA分类的图片列表（从外部传入）
+   * @param {Date} scanStartTime - 扫描开始时间
    */
-  async batchCacheCheckPhase(remainingImages, scanStartTime) {
-    if (remainingImages.length === 0) {
+  async batchCacheCheckPhase(naImages, scanStartTime) {
+    if (!naImages || naImages.length === 0) {
+      logger.info('✅ 第2层：没有未分类图片，跳过缓存查询');
       return { remainingImages: [], processedCount: 0, failedCount: 0 };
     }
     
-    logger.info(`🔍 第2层：智能分类查询，处理 ${remainingImages.length} 张图片`);
-    this.sendProgressMessage('cache_checking', 0, remainingImages.length);
+    // 更新全局统计 - 在缓存检查阶段锁定需要处理的图片总数（NA图片数量）
+    if (this.totalImagesToProcess === 0) {
+      this.totalImagesToProcess = naImages.length;
+      logger.info(`📊 设置总处理数量: ${this.totalImagesToProcess} 张图片（NA分类）`);
+    }
+    
+    logger.info(`🔍 第2层：智能分类查询，处理 ${naImages.length} 张未分类图片（NA）`);
+    this.sendProgressMessage('cache_checking', 0, naImages.length);
     
     let processedCount = 0;
+    let failedCount = 0;
     const uncachedImages = [];
     
     try {
-      // 使用并行哈希计算器计算所有图片哈希
-      logger.info(`🚀 开始并行计算 ${remainingImages.length} 张图片的哈希值...`);
+      // 并行计算所有图片的哈希值
+      logger.info(`🚀 开始并行计算 ${naImages.length} 张图片的哈希值...`);
       
       const hashResults = await this.parallelHashCalculator.calculateHashesParallel(
-        remainingImages,
+        naImages,
         (processed, total) => {
           // Hash计算阶段不发送进度更新，因为时间很短且不是分类操作
         }
@@ -2042,7 +2068,7 @@ class GalleryScannerService {
           // 哈希计算失败
           hashCalculationFailures++;
           if (hashCalculationFailures <= 10) {
-            logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${remainingImages.length}):`, {
+            logger.warn(`❌ 计算哈希失败 (${hashCalculationFailures}/${naImages.length}):`, {
               fileName: result.fileName,
               uri: result.uri,
               error: result.hashError || '未知错误'
@@ -2058,7 +2084,7 @@ class GalleryScannerService {
       const hashes = imageEntries.map(([key, data]) => data.hash);
       
       if (hashCalculationFailures > 0) {
-        logger.warn(`⚠️ 哈希计算失败统计: ${hashCalculationFailures}/${remainingImages.length} 张图片哈希计算失败，将直接进入远程推理`);
+        logger.warn(`⚠️ 哈希计算失败统计: ${hashCalculationFailures}/${naImages.length} 张图片哈希计算失败，将直接进入远程推理`);
       }
       
       if (duplicateHashes.size > 0) {
@@ -2089,6 +2115,7 @@ class GalleryScannerService {
         
         if (cacheItem && cacheItem.cached && cacheItem.data) {
           // 缓存命中，收集数据准备批量保存
+          // 只更新分类相关的字段，不需要重新提取 EXIF 数据（图片已在数据库中存在）
           const classification = {
             categoryId: cacheItem.data.category,
             confidence: cacheItem.data.confidence || 0.9,
@@ -2100,11 +2127,11 @@ class GalleryScannerService {
             message: cacheItem.data.description || cacheItem.data.message || null
           };
           
-          const exifData = imageData.exifData || await extractExifData(imageData.path, this.useRemoteInference);
+          // 缓存检查阶段：只更新分类信息，不提取 EXIF 数据
           batchSaveResults.push({
             imageData,
             classification,
-            exifData
+            exifData: null // 不提取 EXIF，使用数据库中已有的数据
           });
           
         } else {
@@ -2119,21 +2146,35 @@ class GalleryScannerService {
         // 批量保存逻辑：最后一张图片或批次大小达到50时保存
         if (i === imageEntries.length - 1 || batchSaveResults.length >= 50) {
           if (batchSaveResults.length > 0) {
-            // 批量保存缓存命中的结果
-            const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
-            if (batchSaveResult.success) {
-              processedCount += batchSaveResult.processedCount;
-              this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
+            // 转换为批量更新分类信息的格式
+            const classificationDataArray = batchSaveResults.map(result => ({
+              uri: result.imageData.uri,
+              id: result.imageData.id,
+              category: result.classification.categoryId || result.classification.category,
+              confidence: result.classification.confidence,
+              idCardDetections: result.classification.idCardDetections,
+              generalDetections: result.classification.generalDetections,
+              mobileNetV3Detections: result.classification.mobileNetV3Detections,
+              message: result.classification.message
+            }));
+            
+            // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+            const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+            if (updateResult.success) {
+              processedCount += updateResult.updatedCount;
+              this.totalClassifiedSuccessfully += updateResult.updatedCount;
+            } else {
+              failedCount += batchSaveResults.length;
             }
             batchSaveResults.length = 0; // 清空批次数据
           }
           
           const totalProcessed = processedCount + uncachedImages.length;
-          logger.debug(`🔄 批次处理完成: 已处理 ${totalProcessed}/${remainingImages.length}，分类成功 ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`);
+          logger.debug(`🔄 批次处理完成: 已处理 ${totalProcessed}/${naImages.length}，分类成功 ${this.totalClassifiedSuccessfully}/${this.totalImagesToProcess}`);
           this.sendProgressMessage(
             'cache_checking',
             totalProcessed,
-            remainingImages.length
+            naImages.length
           );
         }
       }
@@ -2141,12 +2182,28 @@ class GalleryScannerService {
       // 处理剩余的批量保存数据（只有在主循环没有处理完的情况下）
       if (batchSaveResults.length > 0) {
         logger.debug(`🔄 处理最后剩余的 ${batchSaveResults.length} 个图片结果`);
-        const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
-        if (batchSaveResult.success) {
-          processedCount += batchSaveResult.processedCount;
-          this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
-          logger.debug(`✅ 最后批次处理完成: 成功${batchSaveResult.processedCount}个`);
+        
+        // 转换为批量更新分类信息的格式
+        const classificationDataArray = batchSaveResults.map(result => ({
+          uri: result.imageData.uri,
+          id: result.imageData.id,
+          category: result.classification.categoryId || result.classification.category,
+          confidence: result.classification.confidence,
+          idCardDetections: result.classification.idCardDetections,
+          generalDetections: result.classification.generalDetections,
+          mobileNetV3Detections: result.classification.mobileNetV3Detections,
+          message: result.classification.message
+        }));
+        
+        // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+        const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+        if (updateResult.success) {
+          processedCount += updateResult.updatedCount;
+          this.totalClassifiedSuccessfully += updateResult.updatedCount;
+          logger.debug(`✅ 最后批次处理完成: 成功${updateResult.updatedCount}个`);
           logger.debug(`🔍 当前统计: processedCount=${processedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
+        } else {
+          failedCount += batchSaveResults.length;
         }
       } else {
         logger.debug(`🔍 没有剩余的批量保存数据，batchSaveResults.length=${batchSaveResults.length}`);
@@ -2174,13 +2231,13 @@ class GalleryScannerService {
       this.sendProgressMessage(
         'cache_checking',
         processedCount,
-        remainingImages.length
+        naImages.length
       );
       
     } catch (error) {
       logger.error('❌ 智能分类查询失败:', error);
-      // 失败时，所有图片都需要继续处理
-      return { remainingImages, processedCount: 0, failedCount: 0 };
+      // 失败时，所有图片都需要继续处理（返回从数据库读取的所有NA图片）
+      return { remainingImages: naImages, processedCount: 0, failedCount: 0 };
     }
     
     logger.info(`✅ 第2层完成：缓存命中 ${processedCount} 张，${uncachedImages.length} 张继续处理`);
@@ -2197,10 +2254,16 @@ class GalleryScannerService {
     // 并行处理所有图片
     const promises = images.map(async (image) => {
       try {
+        const originalUri = extractOriginalUri(image);
+        const sourceUri = getUri(originalUri);
+        if (!sourceUri) {
+          throw new Error(`无法获取有效的图片URI: ${image.fileName || originalUri || 'unknown'}`);
+        }
+
         if (Platform.OS === 'web') {
           // PC端：缩放并获取 Blob
           const result = await ImageProcessor.resizeImageAndGetBlob(
-            image.uri,
+            sourceUri,
             1024,
             1024,
             {
@@ -2211,7 +2274,6 @@ class GalleryScannerService {
           );
           
           return {
-            uri: image.uri,
             resizedUri: result.uri,
             hash: image.hash,
             blob: result.blob,
@@ -2222,7 +2284,7 @@ class GalleryScannerService {
         } else {
           // 移动端：只缩放，不创建Blob（FormData直接使用文件URI）
           const result = await ImageProcessor.resizeImage(
-            image.uri,
+            sourceUri,
             1024,
             1024,
             {
@@ -2232,12 +2294,29 @@ class GalleryScannerService {
             }
           );
           
+          // ImageProcessor.resizeImage 返回的是 { uri, width, height }
+          // 注意：result.uri 是缩放后的文件URI（file:// 格式）
+          if (!result || !result.uri) {
+            logger.error(`❌ 图片缩放返回结果异常:`, { result, fileName: image.fileName, sourceUri });
+            throw new Error(`图片缩放失败：未返回有效的URI，result: ${JSON.stringify(result)}`);
+          }
+          
           // 获取文件大小（用于统计）
-          const stat = await RNFS.stat(result.uri.replace('file://', ''));
+          // result.uri 应该是 file:// 格式的路径，getLocalPath 会提取本地路径
+          const resizedLocalPath = getLocalPath(result.uri);
+          if (!resizedLocalPath) {
+            logger.error(`❌ 无法获取缩放图片的本地路径:`, { 
+              resizedUri: result.uri, 
+              fileName: image.fileName,
+              sourceUri,
+              resultKeys: Object.keys(result || {})
+            });
+            throw new Error(`无法获取缩放图片的本地路径: ${result.uri}`);
+          }
+          const stat = await RNFS.stat(resizedLocalPath);
           
           return {
-            uri: image.uri,
-            resizedUri: result.uri,
+            resizedUri: result.uri,  // 使用 result.uri，不是 result.resizedUri
             hash: image.hash,
             blob: null,  // 移动端不需要Blob
             blobSize: stat.size,  // 用于日志统计
@@ -2357,11 +2436,11 @@ class GalleryScannerService {
             }
             
             // 收集保存数据
-            const exifData = imageData.exifData || (imageData.path ? await extractExifData(imageData.path, this.useRemoteInference) : null);
+            // 远程推理阶段：只更新分类信息，不提取 EXIF 数据（图片已在数据库中存在）
             uploadData.push({
               imageData,
               classification,
-              exifData
+              exifData: null // 不提取 EXIF，使用数据库中已有的数据
             });
           } else {
             logger.warn('❌ 远程推理失败，原因:', {
@@ -2370,7 +2449,7 @@ class GalleryScannerService {
               data: item.data,
               error: item.error,
               fileName: imageData.fileName,
-              uri: imageData.uri
+              uri: extractOriginalUri(imageData)
             });
             failedImages.push(imageData);
             failedCount++;
@@ -2380,13 +2459,27 @@ class GalleryScannerService {
         // 每批次立即保存结果
         if (uploadData.length > 0) {
           logger.debug(`🔄 远程推理批次保存: ${uploadData.length} 个结果`);
-          const batchSaveResult = await this.saveImageResults(uploadData, false);
-          processedCount += batchSaveResult.processedCount;
-          failedCount += batchSaveResult.failedCount;
+          
+          // 转换为批量更新分类信息的格式
+          const classificationDataArray = uploadData.map(result => ({
+            uri: extractOriginalUri(result.imageData),
+            id: result.imageData.id,
+            category: result.classification.categoryId || result.classification.category,
+            confidence: result.classification.confidence,
+            idCardDetections: result.classification.idCardDetections,
+            generalDetections: result.classification.generalDetections,
+            mobileNetV3Detections: result.classification.mobileNetV3Detections,
+            message: result.classification.message
+          }));
+          
+          // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+          const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+          processedCount += updateResult.updatedCount;
+          failedCount += updateResult.failedCount;
           
           // 更新全局分类成功数
-          this.totalClassifiedSuccessfully += batchSaveResult.processedCount;
-          logger.debug(`✅ 远程推理批次保存完成: processedCount=${batchSaveResult.processedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
+          this.totalClassifiedSuccessfully += updateResult.updatedCount;
+          logger.debug(`✅ 远程推理批次保存完成: updatedCount=${updateResult.updatedCount}, totalClassifiedSuccessfully=${this.totalClassifiedSuccessfully}`);
           
           // 清空uploadData，准备下一批次
           uploadData.length = 0;
@@ -2439,6 +2532,10 @@ class GalleryScannerService {
       logger.info('✅ 本地模型加载完成');
     }
     
+    // 从数据库读取完整的图片数据（包括 imageDimensions）
+    const imageIds = remainingImages.map(img => img.id);
+    const fullImageDataMap = await UnifiedDataService.imageStorageService.getImagesByIds(imageIds);
+    
     let processedCount = 0;
     let failedCount = 0;
     
@@ -2449,18 +2546,34 @@ class GalleryScannerService {
       const batch = remainingImages.slice(i, i + batchSize);
       
       // 并行处理当前批次
-      const batchPromises = batch.map(async (imageData) => {
+      const batchPromises = batch.map(async (image) => {
         try {
-          // 提取EXIF（如果还没提取）
-          const exifData = imageData.exifData || (imageData.path ? await extractExifData(imageData.path, this.useRemoteInference) : null);
+          // 从完整数据中获取图片信息（包括 imageDimensions）
+          const imageData = fullImageDataMap.get(image.id);
+          if (!imageData) {
+            logger.warn(`⚠️ 无法找到图片完整数据: ${image.id}`);
+            return { success: false };
+          }
           
           // 本地推理（纯本地推理，前3层已完成截图检测、缓存查询、远程推理）
-          const classification = await this.imageClassifier.classifyImage(imageData.uri);
+          // classifyImage 内部会从 imageData 中提取 URI 和图像尺寸
+          const classification = await this.imageClassifier.classifyImage(imageData);
           
           if (classification.success) {
-            // 立即保存
-            const saved = await this.saveImageResult(imageData, classification, exifData);
-            if (saved.success) {
+            // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
+            const classificationDataArray = [{
+              uri: extractOriginalUri(imageData),
+              id: imageData.id,
+              category: classification.categoryId || classification.category,
+              confidence: classification.confidence,
+              idCardDetections: classification.idCardDetections,
+              generalDetections: classification.generalDetections,
+              mobileNetV3Detections: classification.mobileNetV3Detections,
+              message: classification.message
+            }];
+            
+            const updateResult = await UnifiedDataService.batchUpdateClassification(classificationDataArray, false);
+            if (updateResult.success && updateResult.updatedCount > 0) {
               // 直接累加到全局分类成功数
               this.totalClassifiedSuccessfully++;
               return { success: true };
@@ -2508,21 +2621,41 @@ class GalleryScannerService {
    * 阶段3e: 相似度检测
    * 对所有已分类的图片进行相似度检测
    */
-  async similarityDetectionPhase(scanStartTime) {
+  async similarityDetectionPhase(scanStartTime, candidateImages = []) {
     logger.info(`🔍 第5层：相似度检测`);
     this.sendProgressMessage('similarity_detection', 0, 0);
     
     try {
-      // 获取所有图片进行相似度检测
-      const allImages = await UnifiedDataService.readAllImages();
+      const hasCandidates = Array.isArray(candidateImages) && candidateImages.length > 0;
       
-      if (allImages.length === 0) {
+      let imagesForSimilarity = hasCandidates
+        ? candidateImages
+        : await UnifiedDataService.readAllImages();
+      
+      if (!imagesForSimilarity || imagesForSimilarity.length === 0) {
         logger.info('📊 第5层：没有图片，跳过相似度检测');
         return { processedCount: 0, failedCount: 0 };
       }
       
-      logger.info(`🔍 第5层：开始相似度检测，处理 ${allImages.length} 张图片`);
-      this.sendProgressMessage('similarity_detection', 0, allImages.length);
+      // 过滤掉暂存箱（tobecleaned）和手机截图（screenshot）分类的图片
+      const beforeFilterCount = imagesForSimilarity.length;
+      const tobecleanedCount = imagesForSimilarity.filter(img => img.category === 'tobecleaned').length;
+      const screenshotCount = imagesForSimilarity.filter(img => img.category === 'screenshot').length;
+      imagesForSimilarity = imagesForSimilarity.filter(image => {
+        return image.category !== 'tobecleaned' && image.category !== 'screenshot';
+      });
+      const filteredCount = beforeFilterCount - imagesForSimilarity.length;
+      if (filteredCount > 0) {
+        logger.info(`📊 第5层：已排除 ${filteredCount} 张图片（tobecleaned: ${tobecleanedCount}, screenshot: ${screenshotCount}）`);
+      }
+      
+      if (imagesForSimilarity.length === 0) {
+        logger.info('📊 第5层：过滤后没有图片，跳过相似度检测');
+        return { processedCount: 0, failedCount: 0 };
+      }
+      
+      logger.info(`🔍 第5层：开始相似度检测，处理 ${imagesForSimilarity.length} 张图片${hasCandidates ? '（增量）' : ''}`);
+      this.sendProgressMessage('similarity_detection', 0, imagesForSimilarity.length);
       
       // 重置相似组数量
       this.totalClassifiedSuccessfully = 0;
@@ -2534,6 +2667,8 @@ class GalleryScannerService {
         timeWindow: 300, // 5分钟时间窗口
         similarityThreshold: 0.8,
         groupType: 'similar',
+        images: imagesForSimilarity,
+        clearExisting: !hasCandidates,
         onProgress: (processed, total, groups) => {
           // 更新相似组数量（使用传递的groups参数）
           this.totalClassifiedSuccessfully = groups;
@@ -2554,7 +2689,7 @@ class GalleryScannerService {
       if (result.success) {
         logger.info(`✅ 第5层完成：相似度检测成功，发现 ${result.groups.length} 个相似组`);
         // 发送相似度检测完成消息
-        this.sendProgressMessage('similarity_detection', result.total, result.total);
+        this.sendProgressMessage('similarity_detection', result.total, imagesForSimilarity.length);
       
       } else {
         logger.error(`❌ 第5层失败：相似度检测失败: ${result.error}`);
@@ -2607,70 +2742,99 @@ class GalleryScannerService {
    * 使用多线程处理新增文件的EXIF提取和分类
    */
   async processImagesPhase(newImages, scanStartTime) {
-    if (newImages.length === 0) {
-      return { processedCount: 0, failedCount: 0 };
-    }
-    
     let totalProcessed = 0;
     let totalFailed = 0;
     
-    // 第1层：截图检测
-    logger.info(`🔄 开始漏斗式处理：共 ${newImages.length} 张图片`);
-    const { remainingImages: afterScreenshot, processedCount: screenshotCount, failedCount: screenshotFailed } = 
-      await this.screenshotDetectionPhase(newImages, scanStartTime);
-    totalProcessed += screenshotCount;
-    totalFailed += screenshotFailed;
-    
-    if (afterScreenshot.length === 0) {
-      logger.info(`✅ 漏斗处理完成：全部为截图，已处理 ${totalProcessed} 张`);
-      return { processedCount: totalProcessed, failedCount: totalFailed };
+    // 🔧 修复：即使没有新图片，也要处理数据库中已有的未分类图片
+    if (newImages.length > 0) {
+      // 第1层：截图检测（保存所有图片信息）
+      logger.info(`🔄 开始漏斗式处理：共 ${newImages.length} 张图片`);
+      const { processedCount: screenshotCount, failedCount: screenshotFailed } = 
+        await this.screenshotDetectionPhase(newImages, scanStartTime);
+      totalProcessed += screenshotCount;
+      totalFailed += screenshotFailed;
+    } else {
+      logger.info('🔄 没有新图片，跳过截图检测阶段，直接处理数据库中未分类的图片');
     }
     
-    // 如果远程服务可用，执行缓存查询和远程推理
+    // 🔧 修复竞态条件：确保缓存刷新完成后再读取
+    // processProgressData 中的 refreshCache() 是异步的，但可能还没完成
+    // 需要等待缓存构建完成后再读取 NA 分类图片
+    logger.debug('🔄 等待缓存刷新完成...');
+    try {
+      // 强制等待缓存构建完成（如果正在构建则等待，如果已构建则直接返回）
+      await UnifiedDataService.imageCache.buildCache();
+      logger.debug('✅ 缓存刷新完成');
+    } catch (error) {
+      logger.error('❌ 等待缓存刷新失败:', error);
+      // 不阻断流程，继续尝试读取
+    }
+    
+    // 提取NA分类的图片作为后续所有阶段的输入数据源
+    let naImages = [];
+    try {
+      naImages = await UnifiedDataService.readImagesByCategory('NA');
+      logger.info(`📊 提取到 ${naImages.length} 张未分类图片（NA），作为后续漏斗处理的输入数据源`);
+    } catch (error) {
+      logger.error('❌ 读取 NA 分类图片失败:', error);
+      return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: [] };
+    }
+    
+    // NA 图片在漏斗流程后将完成分类，这里直接复用列表
+    
+    if (naImages.length === 0) {
+      logger.info('✅ 没有未分类图片，跳过后续处理');
+      return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: [] };
+    }
+    
+    // 第2层和第3层：根据远程服务是否可用，决定执行缓存查询和远程推理
+    let remainingImages = naImages; // 初始剩余图片为所有NA分类图片
+    
     if (this.useRemoteInference) {
-      // 第2层：智能分类查询
+      // 第2层：远程缓存查询（处理NA分类图片，查询远程缓存）
       const { remainingImages: afterCache, processedCount: cacheCount, failedCount: cacheFailed } = 
-        await this.batchCacheCheckPhase(afterScreenshot, scanStartTime);
+        await this.batchCacheCheckPhase(naImages, scanStartTime);
       totalProcessed += cacheCount;
       totalFailed += cacheFailed;
       
       if (afterCache.length === 0) {
         logger.info(`✅ 漏斗处理完成：缓存已覆盖，已处理 ${totalProcessed} 张`);
-        return { processedCount: totalProcessed, failedCount: totalFailed };
+        return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
       }
       
-      // 第3层：批量远程推理
+      // 第3层：批量远程推理（处理缓存未命中的图片）
       const { remainingImages: afterRemote, processedCount: remoteCount, failedCount: remoteFailed } = 
         await this.batchRemoteInferencePhase(afterCache, scanStartTime);
       totalProcessed += remoteCount;
       totalFailed += remoteFailed;
       
+      // 更新剩余图片列表，用于后续本地推理降级
+      remainingImages = afterRemote;
+      
       if (afterRemote.length === 0) {
         logger.info(`✅ 漏斗处理完成：远程推理已覆盖，已处理 ${totalProcessed} 张`);
         // 发送远程推理完成消息
         this.sendProgressMessage('remote_inference', totalProcessed, totalProcessed);
-        return { processedCount: totalProcessed, failedCount: totalFailed };
+        return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
       }
-      
-      // 第4层：本地推理降级
-      const { processedCount: localCount, failedCount: localFailed } = 
-        await this.localInferenceFallbackPhase(afterRemote, scanStartTime);
-      totalProcessed += localCount;
-      totalFailed += localFailed;
     } else {
-      // 远程服务不可用，直接使用本地推理
-      logger.info('⚠️ 远程服务不可用，跳过缓存查询和远程推理，直接使用本地推理处理所有剩余图片');
+      logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将直接进入本地推理`);
+    }
+    
+    // 第4层：本地推理降级（处理远程推理失败或跳过的图片）
+    if (remainingImages.length > 0) {
       const { processedCount: localCount, failedCount: localFailed } = 
-        await this.localInferenceFallbackPhase(afterScreenshot, scanStartTime);
+        await this.localInferenceFallbackPhase(remainingImages, scanStartTime);
       totalProcessed += localCount;
       totalFailed += localFailed;
     }
     
     logger.info(`✅ 漏斗处理完成：总共处理 ${totalProcessed} 张，失败 ${totalFailed} 张`);
     
+    const similarityCandidates = naImages;
     
     // 阶段3-4完成
-    return { processedCount: totalProcessed, failedCount: totalFailed };
+    return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates };
   }
   
   /**

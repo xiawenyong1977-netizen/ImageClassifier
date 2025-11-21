@@ -1,4 +1,4 @@
-import { logger, Platform } from '../adapters/WebAdapters';
+import { logger, Platform, getUri } from '../adapters/WebAdapters';
 import imageProcessor from './ImageProcessor';
 
 /**
@@ -353,55 +353,65 @@ class ParallelHashCalculator {
       const totalImages = images.length;
       logger.info(`🚀 开始原生多线程哈希计算: ${totalImages} 张图片`);
       
-      // 提取文件路径（优先使用path，其次uri）
-      const filePaths = images.map(img => {
-        if (img.path) {
-          return img.path;
-        } else if (img.uri) {
-          // 移除 file:// 前缀
-          return img.uri.replace('file://', '');
+      // 提取contentUri（原生模块只支持contentUri）
+      // 使用getUri提取contentUri（如果是拼装格式，会自动解析出contentUri部分）
+      const contentUris = images.map((img, idx) => {
+        const uri = getUri(img);
+        // 验证必须有contentUri，否则报错
+        if (!uri || !uri.startsWith('content://')) {
+          throw new Error(`图片 ${idx} (${img.fileName || 'unknown'}) 没有有效的contentUri，无法使用原生多线程计算`);
         }
-        return null;
-      }).filter(p => p != null);
+        return uri;
+      });
       
-      if (filePaths.length === 0) {
-        logger.warn('⚠️ 没有有效的文件路径');
-        return images.map(img => ({ ...img, hash: null }));
-      }
+      // 调用原生批量哈希计算（只支持contentUri）
+      const result = await MediaStoreService.batchCalculateFileHash(contentUris);
       
-      // 调用原生批量哈希计算
-      const result = await MediaStoreService.batchCalculateFileHash(filePaths);
+      // 构建一个映射：contentUri -> hash结果
+      // result.results 数组中的每个元素的 index 字段对应 contentUris 数组的索引
+      const uriToHashMap = new Map();
+      result.results.forEach((hashResult) => {
+        if (hashResult.success && hashResult.index < contentUris.length) {
+          const uri = contentUris[hashResult.index];
+          uriToHashMap.set(uri, hashResult.hash);
+        }
+      });
       
       // 将结果映射回原始图片数组
-      const results = images.map((img, index) => {
-        const hashResult = result.results.find(r => r.index === index);
-        
-        if (hashResult && hashResult.success) {
+      // 使用contentUri匹配
+      const results = images.map((img) => {
+        const uri = getUri(img);
+        const hash = uriToHashMap.get(uri);
+        if (hash) {
           return {
             ...img,
-            hash: hashResult.hash
+            hash: hash
           };
         } else {
+          // 计算失败，返回错误
           return {
             ...img,
             hash: null,
-            hashError: hashResult ? hashResult.error : '未找到结果'
+            hashError: '哈希计算失败'
           };
         }
       });
       
       // 调用进度回调
       if (onProgress) {
-        onProgress(result.successCount, totalImages);
+        const successCount = results.filter(r => r.hash != null).length;
+        onProgress(successCount, totalImages);
       }
       
-      logger.info(`✅ 原生多线程哈希计算完成: 成功 ${result.successCount} 张，失败 ${result.failCount} 张，耗时 ${result.duration}ms`);
+      const successCount = results.filter(r => r.hash != null).length;
+      logger.info(`✅ 原生多线程哈希计算完成: 成功 ${successCount}/${totalImages} 张，失败 ${totalImages - successCount} 张，耗时 ${result.duration}ms`);
       
       return results;
       
     } catch (error) {
-      logger.error('❌ 原生哈希计算失败，回退到单线程:', error);
-      return this.calculateHashesSequential(images, onProgress);
+      logger.error('❌ 原生哈希计算失败:', error);
+      // 直接抛出错误，不再降级处理
+      throw error;
     }
   }
 

@@ -5,7 +5,7 @@
  */
 
 import ColorHistogramExtractor from './ColorHistogramExtractor.js';
-import { logger } from '../adapters/WebAdapters';
+import { logger, getUri } from '../adapters/WebAdapters';
 
 class ImageSimilarityService {
   constructor() {
@@ -74,24 +74,51 @@ class ImageSimilarityService {
       timeWindow = 300, // 5分钟
       similarityThreshold = 0.8,
       onProgress = null, // 进度回调函数
+      images = null,
+      clearExisting = images == null,
     } = options;
 
-    logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}`);
+    logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}, 输入图片=${images ? images.length : '全量'}`);
 
     try {
-      // 获取所有图片数据（精简信息）
-      const allImages = await this.getUnifiedDataService().readAllImages();
+      const unifiedService = this.getUnifiedDataService();
+      // 获取需要处理的图片数据
+      let allImages = images && Array.isArray(images) && images.length > 0
+        ? images
+        : await unifiedService.readAllImages();
       
       if (!allImages || allImages.length === 0) {
         logger.debug('⚠️ 没有找到图片数据');
         return { success: true, groups: [], processed: 0 };
       }
+      
+      // 过滤掉暂存箱（tobecleaned）和手机截图（screenshot）分类的图片
+      const beforeFilterCount = allImages.length;
+      const tobecleanedCount = allImages.filter(img => img.category === 'tobecleaned').length;
+      const screenshotCount = allImages.filter(img => img.category === 'screenshot').length;
+      allImages = allImages.filter(image => {
+        return image.category !== 'tobecleaned' && image.category !== 'screenshot';
+      });
+      const filteredCount = beforeFilterCount - allImages.length;
+      if (filteredCount > 0) {
+        logger.debug(`📊 相似度检测：已排除 ${filteredCount} 张图片（tobecleaned: ${tobecleanedCount}, screenshot: ${screenshotCount}）`);
+      }
 
-      // 每次检测都清空现有相似度数据，完全重新检测
-      logger.debug('🧹 清空现有相似度数据，开始完全重新检测');
-      await this.getUnifiedDataService().clearSimilarityData();
+      if (clearExisting) {
+        // 每次检测都清空现有相似度数据，完全重新检测
+        logger.debug('🧹 清空所有相似度数据，开始完全重新检测');
+        await unifiedService.clearSimilarityData();
+      } else if (images && images.length > 0) {
+        const idsToClear = images
+          .map(img => img?.id)
+          .filter(id => typeof id === 'string' || typeof id === 'number');
+        if (idsToClear.length > 0) {
+          logger.debug(`🧹 清除 ${idsToClear.length} 张图片的旧相似度数据`);
+          await unifiedService.clearSimilarityData(idsToClear);
+        }
+      }
      
-      logger.debug(`📊 总图片数: ${allImages.length}, 开始重新检测相似度`);
+      logger.debug(`📊 参与相似度检测的图片数: ${allImages.length}`);
 
       // 执行相似度检测
       const detectionResult = await this.detectSimilarityGroups(
@@ -212,15 +239,21 @@ class ImageSimilarityService {
   async detectSimilarityGroups(images, options = {}) {
     const opts = { ...this.defaultOptions, ...options };
     
-    // 1. 过滤掉没有takenAt的图片
+    // 1. 过滤掉没有takenAt的图片，以及排除暂存箱（tobecleaned）和手机截图（screenshot）分类
     const imagesWithTime = images.filter(image => {
+      // 排除暂存箱和手机截图分类
+      if (image.category === 'tobecleaned' || image.category === 'screenshot') {
+        return false;
+      }
+      // 必须有takenAt
       if (!image.takenAt) return false;
       // 确保takenAt是字符串类型
       const takenAtStr = String(image.takenAt);
       return takenAtStr.trim() !== '';
     });
     
-    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
+    const excludedCount = images.length - imagesWithTime.length;
+    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 排除${excludedCount}张（tobecleaned/screenshot/无时间）, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
     
     if (imagesWithTime.length === 0) {
       logger.debug('⚠️ 没有有效的图片进行相似度检测');
@@ -485,11 +518,22 @@ class ImageSimilarityService {
    */
   async _extractColorHistogram(image) {
     try {
+      // 使用 getUri 获取正确的 URI（PC端：file://，移动端：content://）
+      const imageUri = getUri(image);
+      if (!imageUri) {
+        logger.error('⚠️ 无法获取图片URI:', {
+          imageId: image?.id,
+          fileName: image?.fileName,
+          uri: image?.uri
+        });
+        return this._generateDefaultFeatures();
+      }
+      
       // 使用真实的颜色直方图提取器
-      const features = await this.histogramExtractor.extractHistogram(image.uri);
+      const features = await this.histogramExtractor.extractHistogram(imageUri);
       return features;
     } catch (error) {
-      console.error('❌ 提取颜色直方图失败:', error);
+      logger.error('❌ 提取颜色直方图失败:', error);
       // 如果提取失败，返回默认特征
       return this._generateDefaultFeatures();
     }
@@ -616,8 +660,8 @@ class ImageSimilarityService {
     
     // logger.debug(`📊 最大分类: ${dominantCategory.category} (${dominantCategory.count}张, ${dominantCategory.percentage.toFixed(1)}%)`);
     
-    // 特殊分类跳过
-    if (['screenshot', 'idcard'].includes(dominantCategory.category)) {
+    // 特殊分类跳过（暂存箱、手机截图、身份证）
+    if (['tobecleaned', 'screenshot', 'idcard'].includes(dominantCategory.category)) {
       logger.debug(`⏭️ 最大分类为${dominantCategory.category}，跳过相似度检测`);
       return [];
     }

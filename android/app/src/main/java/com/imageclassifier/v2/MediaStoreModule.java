@@ -1,4 +1,4 @@
-package com.imageclassifier;
+package com.imageclassifier.v2;
 
 import android.content.ContentResolver;
 import android.content.ContentUris;
@@ -89,11 +89,14 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     private boolean deleteFileViaMediaStore(String filePath) {
         try {
             // 检查权限
+            // 注意：使用 MediaStore API 删除图片时，对于应用自己创建的图片通常不需要额外权限
+            // 但为了兼容性，我们仍然检查基本权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
-                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                // Android 13+ 只需要 READ_MEDIA_IMAGES 权限即可删除自己创建的图片
+                // 删除其他应用的图片可能需要 WRITE_MEDIA_IMAGES，但我们的应用通常只删除自己创建的图片
+                if (reactContext.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") 
                     != PackageManager.PERMISSION_GRANTED) {
-                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
+                    Log.w(TAG, "缺少 READ_MEDIA_IMAGES 权限");
                     return false;
                 }
             } else {
@@ -161,7 +164,11 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             return false;
             
         } catch (Exception e) {
-            Log.e(TAG, "MediaStore删除失败: " + e.getMessage(), e);
+            if (e instanceof SecurityException || (e.getMessage() != null && e.getMessage().toLowerCase().contains("permission"))) {
+                Log.i(TAG, "MediaStore删除失败(权限受限): " + e.getMessage());
+            } else {
+                Log.e(TAG, "MediaStore删除失败: " + e.getMessage(), e);
+            }
             return false;
         }
     }
@@ -239,7 +246,9 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             
             ContentResolver contentResolver = reactContext.getContentResolver();
             
-            // 查询字段
+            // 查询字段（Android 10+ 添加 RELATIVE_PATH）
+            // 统一投影列：始终查询 DATA 和 RELATIVE_PATH（如果API支持）
+            // 不依赖版本号判断，直接查询，如果列不存在会返回 -1
             String[] projection = new String[]{
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DISPLAY_NAME,
@@ -250,7 +259,8 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 MediaStore.Images.Media.WIDTH,
                 MediaStore.Images.Media.HEIGHT,
                 MediaStore.Images.Media.MIME_TYPE,
-                MediaStore.Images.Media.DATA  // 文件路径
+                MediaStore.Images.Media.DATA,  // 绝对路径（优先使用，可能为null）
+                MediaStore.Images.Media.RELATIVE_PATH  // 相对路径（如果DATA为空，使用此路径）
             };
             
             // 排序：按拍摄时间降序（不在这里添加 LIMIT，因为不是所有 Android 版本都支持）
@@ -280,6 +290,10 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 int mimeTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE);
                 int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
                 
+                // 尝试获取 RELATIVE_PATH 列索引（可能不存在，使用 getColumnIndex）
+                // 不依赖版本号，直接尝试获取
+                int relativePathColumn = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH);
+                
                 // 手动实现分页：跳过 offset 个结果
                 if (offset > 0 && cursor.moveToPosition(offset - 1)) {
                     // 移动到起始位置
@@ -306,7 +320,13 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                     int width = cursor.getInt(widthColumn);
                     int height = cursor.getInt(heightColumn);
                     String mimeType = cursor.getString(mimeTypeColumn);
-                    String path = cursor.getString(dataColumn);
+                    String path = cursor.getString(dataColumn);  // 绝对路径（可能为null）
+                    
+                    // 读取 RELATIVE_PATH（如果列存在）
+                    String relativePath = null;
+                    if (relativePathColumn >= 0) {
+                        relativePath = cursor.getString(relativePathColumn);
+                    }
                     
                     // 构建Content URI
                     Uri contentUri = ContentUris.withAppendedId(
@@ -318,7 +338,21 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                     imageInfo.putString("id", String.valueOf(id));
                     imageInfo.putString("uri", contentUri.toString());
                     imageInfo.putString("fileName", displayName);
-                    imageInfo.putString("path", path);
+                    
+                    // 优先使用绝对路径（path），如果为空则使用相对路径（relativePath）
+                    if (path != null && !path.isEmpty()) {
+                        imageInfo.putString("path", path);
+                    } else if (relativePath != null && !relativePath.isEmpty()) {
+                        // 绝对路径为空，使用相对路径
+                        imageInfo.putString("path", relativePath);
+                    }
+                    // 如果两者都为空，则不设置path字段
+                    
+                    // 同时保存 relativePath（如果有），用于后续处理
+                    if (relativePath != null && !relativePath.isEmpty()) {
+                        imageInfo.putString("relativePath", relativePath);
+                    }
+                    
                     imageInfo.putDouble("size", size);
                     imageInfo.putDouble("dateTaken", dateTaken);
                     imageInfo.putDouble("dateModified", dateModified * 1000); // 转换为毫秒
@@ -622,6 +656,23 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     }
 
     /**
+     * 获取外部存储根目录路径
+     * @param promise Promise对象
+     */
+    @ReactMethod
+    public void getExternalStoragePath(Promise promise) {
+        try {
+            File externalStorageDir = android.os.Environment.getExternalStorageDirectory();
+            String path = externalStorageDir.getAbsolutePath();
+            Log.d(TAG, "外部存储根目录: " + path);
+            promise.resolve(path);
+        } catch (Exception e) {
+            Log.e(TAG, "获取外部存储路径失败: " + e.getMessage(), e);
+            promise.reject("GET_STORAGE_PATH_ERROR", e.getMessage());
+        }
+    }
+
+    /**
      * 批量计算文件哈希（多线程并行计算）
      * @param filePaths 文件路径数组
      * @param promise Promise对象
@@ -723,37 +774,44 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     }
 
     /**
-     * 计算单个文件的SHA-256哈希
-     * @param filePath 文件路径
+     * 计算单个文件的SHA-256哈希（仅支持Content URI）
+     * @param contentUri Content URI
      * @param index 索引
      * @return 哈希结果
      */
-    private HashResult calculateSingleFileHash(String filePath, int index) {
+    private HashResult calculateSingleFileHash(String contentUri, int index) {
         HashResult result = new HashResult();
         result.index = index;
-        result.filePath = filePath;
+        result.filePath = contentUri;
         
-        FileInputStream fis = null;
+        InputStream inputStream = null;
         try {
-            // 移除 file:// 前缀
-            String cleanPath = filePath.replace("file://", "");
-            File file = new File(cleanPath);
-            
-            if (!file.exists()) {
+            // 验证必须是Content URI
+            if (contentUri == null || !contentUri.startsWith("content://")) {
                 result.success = false;
-                result.error = "文件不存在";
+                result.error = "只支持Content URI，不支持文件路径";
+                return result;
+            }
+            
+            // 使用ContentResolver读取Content URI
+            Uri uri = Uri.parse(contentUri);
+            ContentResolver contentResolver = reactContext.getContentResolver();
+            inputStream = contentResolver.openInputStream(uri);
+            
+            if (inputStream == null) {
+                result.success = false;
+                result.error = "无法打开Content URI流";
                 return result;
             }
             
             // 创建SHA-256消息摘要
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             
-            // 读取文件并计算哈希
-            fis = new FileInputStream(file);
+            // 读取数据并计算哈希
             byte[] buffer = new byte[8192]; // 8KB缓冲区
             int bytesRead;
             
-            while ((bytesRead = fis.read(buffer)) != -1) {
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
                 digest.update(buffer, 0, bytesRead);
             }
             
@@ -774,13 +832,13 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             result.hash = hexString.toString();
             
         } catch (Exception e) {
-            Log.e(TAG, "计算文件哈希失败: " + filePath, e);
+            Log.e(TAG, "计算Content URI哈希失败: " + contentUri, e);
             result.success = false;
             result.error = e.getMessage();
         } finally {
-            if (fis != null) {
+            if (inputStream != null) {
                 try {
-                    fis.close();
+                    inputStream.close();
                 } catch (IOException e) {
                     // 忽略关闭错误
                 }
@@ -803,11 +861,12 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             
             // 检查权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Android 13+ 需要 WRITE_MEDIA_IMAGES 权限
-                if (reactContext.checkSelfPermission("android.permission.WRITE_MEDIA_IMAGES") 
+                // Android 13+ 只需要 READ_MEDIA_IMAGES 权限
+                // 使用 MediaStore API 保存图片时，系统会自动处理写入权限，不需要 WRITE_MEDIA_IMAGES
+                if (reactContext.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") 
                     != PackageManager.PERMISSION_GRANTED) {
-                    Log.w(TAG, "缺少 WRITE_MEDIA_IMAGES 权限");
-                    promise.reject("PERMISSION_DENIED", "需要 WRITE_MEDIA_IMAGES 权限");
+                    Log.w(TAG, "缺少 READ_MEDIA_IMAGES 权限");
+                    promise.reject("PERMISSION_DENIED", "需要相册读取权限（READ_MEDIA_IMAGES），请在系统设置中授予后重试");
                     return;
                 }
             } else {

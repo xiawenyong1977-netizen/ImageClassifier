@@ -1,3 +1,6 @@
+// 🔧 必须在所有 import 之前加载 polyfill
+import './src/polyfills';
+
 console.log('📦 index.js: 开始加载应用...');
 
 // 设置全局 Buffer polyfill (React Native 需要)

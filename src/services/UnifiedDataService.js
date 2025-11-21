@@ -2,7 +2,7 @@
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
 import configService from './ConfigService.js';
-import { logger, Platform, RNFS } from '../adapters/WebAdapters';
+import { logger, Platform, RNFS, getLocalPath, getUri } from '../adapters/WebAdapters';
 
 class UnifiedDataService {
   constructor() {
@@ -153,8 +153,9 @@ class UnifiedDataService {
       
       // 使用标准化的分类ID
       const normalizedCategory = this.getCategoryId(category);
+      logger.debug(`🔍 [readImagesByCategory] 原始分类: ${category}, 标准化后: ${normalizedCategory}`);
       
-      // 直接从缓存获取分类图片
+      // 先从缓存获取分类图片
       const categoryImages = this.imageCache.getImagesByCategory(normalizedCategory);
       
       // 🆕 检查返回的数据
@@ -346,38 +347,7 @@ class UnifiedDataService {
    * 优先从缓存搜索，缓存没有则从数据库搜索
    */
 
-  // ==================== 写接口 ====================
   
-
-  /**
-   * 保存图片分类结果
-   * 先写缓存，再写数据库
-   */
-  async writeImageClassification(imageData) {
-    try {
-      logger.debug('保存图片分类结果:', imageData.fileName);
-      
-      // 1. 先写数据库
-      const savedImage = await this.imageStorageService.saveImageClassification(imageData);
-      logger.debug('数据库写入完成');
-      
-      // 2. 精确更新缓存
-      const updateSuccess = this.imageCache.updateImageClassification(savedImage.id, savedImage.category);
-      if (updateSuccess) {
-        logger.debug('缓存精确更新完成');
-      } else {
-        logger.warn('缓存精确更新失败，将进行全量更新');
-        await this.imageCache.refreshCache();
-        logger.debug('缓存全量更新完成');
-      }
-      
-      return savedImage;
-      
-    } catch (error) {
-      logger.error('保存图片分类失败:', error);
-      throw error;
-    }
-  }
 
   /**
    * 批量保存图片分类结果
@@ -439,15 +409,28 @@ class UnifiedDataService {
       try {
         logger.debug('批量删除图片:', imageIds.length);
         
-        // 1. 先记录图片URI（在删除数据库记录之前）
-        const imageUris = [];
+        // 1. 先记录图片本地路径（在删除数据库记录之前）
+        const imagePaths = [];
+        const imageIdToPathMap = new Map();
         for (const imageId of imageIds) {
           const image = this.imageCache._getImageById(imageId);
-          if (image && image.uri && image.uri.startsWith('file://')) {
-            imageUris.push(image.uri);
+          if (!image) {
+            logger.warn(`⚠️ 无法找到图片: ${imageId}`);
+            continue;
           }
+          
+          // 使用 getLocalPath 获取本地路径（PC端：file:// URI转换为路径，移动端：content:// URI返回null）
+          const localPath = getLocalPath(image);
+          if (!localPath) {
+            // 移动端的 content:// URI 无法通过文件系统删除，跳过物理文件删除
+            logger.debug(`⚠️ 无法获取本地路径（可能是移动端content:// URI），跳过物理文件删除: ${imageId}`);
+            continue;
+          }
+          
+          imagePaths.push(localPath);
+          imageIdToPathMap.set(imageId, localPath);
         }
-        logger.debug(`记录到${imageUris.length}个物理文件路径`);
+        logger.debug(`记录到${imagePaths.length}个物理文件路径`);
         
         // 2. 先尝试删除物理文件
         let filesDeleted = 0;
@@ -459,23 +442,14 @@ class UnifiedDataService {
           onProgress({
             filesDeleted: 0,
             filesFailed: 0,
-            total: imageUris.length
+            total: imagePaths.length
           });
         }
         
-        // 创建URI到ImageId的映射
-        const uriToImageIdMap = new Map();
-        for (let i = 0; i < imageIds.length; i++) {
-          const image = this.imageCache._getImageById(imageIds[i]);
-          if (image && image.uri && image.uri.startsWith('file://')) {
-            uriToImageIdMap.set(image.uri, imageIds[i]);
-          }
-        }
-        
-        for (let i = 0; i < imageUris.length; i++) {
+        // 遍历图片ID，使用映射获取对应的路径
+        for (const imageId of imageIdToPathMap.keys()) {
           try {
-            const filePath = imageUris[i].replace('file://', '');
-            const imageId = uriToImageIdMap.get(imageUris[i]);
+            const filePath = imageIdToPathMap.get(imageId);
             
             // 检查文件是否存在
             const exists = await RNFS.exists(filePath);
@@ -498,7 +472,7 @@ class UnifiedDataService {
                 logger.debug(`🗑️ RNFS删除成功（文件已不存在）: ${filePath}`);
                 deleteSuccess = true;
               } else {
-                logger.warn(`⚠️ RNFS删除失败: ${filePath}`, rnfsError);
+                logger.debug(`🔍 RNFS删除失败: ${filePath}`, rnfsError);
                 deleteSuccess = false;
               }
             }
@@ -511,7 +485,7 @@ class UnifiedDataService {
             }
           } catch (fileError) {
             filesFailed++;
-            logger.warn(`❌ 删除物理文件失败: ${imageUris[i]}`, fileError);
+            logger.debug(`🔍 删除物理文件失败: ${filePath}`, fileError);
           }
           
           // Update progress for physical file deletion
@@ -519,7 +493,7 @@ class UnifiedDataService {
             onProgress({
               filesDeleted,
               filesFailed,
-              total: imageUris.length
+              total: imagePaths.length
             });
           }
         }
@@ -550,7 +524,8 @@ class UnifiedDataService {
         };
         
       } catch (error) {
-        logger.error('批量删除图片失败:', error);
+        // 删除失败通常是权限问题，属于正常情况，使用 debug 级别而不是 error
+        logger.debug('批量删除图片失败（可能是权限问题）:', error);
         throw error;
       }
     }
@@ -1129,6 +1104,39 @@ class UnifiedDataService {
     }
   }
 
+  /**
+   * 批量更新分类信息（只更新分类相关字段，不更新其他字段）
+   * @param {Array} classificationDataArray - 分类数据数组，每个元素包含：
+   *   - uri: 图片 URI（必需）
+   *   - id: 图片 ID（可选，如果有则使用，否则根据 URI 生成）
+   *   - category: 分类ID（必需）
+   *   - confidence: 置信度（可选）
+   *   - idCardDetections: 身份证检测结果（可选）
+   *   - generalDetections: 通用检测结果（可选）
+   *   - mobileNetV3Detections: MobileNetV3检测结果（可选）
+   *   - message: 大模型推理描述（可选）
+   * @param {boolean} updateCache - 是否立即更新缓存，默认false
+   * @returns {Promise<Object>} 更新结果统计 { success: boolean, updatedCount: number, failedCount: number }
+   */
+  async batchUpdateClassification(classificationDataArray, updateCache = false) {
+    try {
+      const result = await this.imageStorageService.batchUpdateClassification(classificationDataArray);
+      
+      // 根据参数决定是否立即更新缓存
+      if (updateCache && result.success) {
+        // 更新缓存
+        await this.imageCache.buildCache();
+        // 通知监听器
+        this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
+      }
+      
+      return result;
+    } catch (error) {
+      logger.error('❌ 批量更新分类信息失败:', error);
+      throw error;
+    }
+  }
+
   // 获取分类规则
   async getClassificationRules() {
     try {
@@ -1214,6 +1222,46 @@ class UnifiedDataService {
   }
 
   /**
+   * 完全重置数据库（模拟全新启动）
+   * 删除整个 IndexedDB 数据库，包括所有数据：图片、统计、设置、分类规则、相似度数据等
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async resetDatabase() {
+    try {
+      logger.info('🗑️ 开始重置数据库（模拟全新启动）...');
+      
+      // 如果使用的是 IndexedDB，直接删除数据库
+      if (Platform.OS === 'web') {
+        // 先清空缓存
+        this.imageCache.clearCache();
+        
+        // 删除整个数据库
+        await this.imageStorageService.storage.deleteDatabase();
+        
+        // 重置初始化状态
+        this.imageStorageService.isInitialized = false;
+        this.imageStorageService.storage.isInitialized = false;
+        this.imageStorageService.storage.db = null;
+        
+        logger.info('✅ 数据库已完全删除，下次访问时会自动重新创建');
+        return true;
+      }
+      
+      // 移动端：清空所有数据
+      await this.imageStorageService.clear();
+      
+      // 重建缓存
+      await this.imageCache.buildCache();
+      
+      logger.info('✅ 数据库已重置完成');
+      return true;
+    } catch (error) {
+      logger.error('❌ 重置数据库失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 批量更新图片相似度信息
    */
   async updateImagesSimilarity(imageSimilarityArray) {
@@ -1254,13 +1302,19 @@ class UnifiedDataService {
       
       // 构建统计信息
       const groups = similarityGroups.map(group => {
-        // 找到该组中最近的一张照片
+        // 找到该组中最近的一张照片（排除 tobecleaned 分类）
         let latestImage = null;
         let latestTime = 0;
+        let validImageCount = 0;
         
         group.images.forEach(imageInfo => {
           const image = imageMap.get(imageInfo.id);
           if (image) {
+            // 排除 tobecleaned 分类的图片
+            if (image.category === 'tobecleaned') {
+              return;
+            }
+            validImageCount++;
             const imageTime = image.takenAt ? new Date(image.takenAt).getTime() : image.timestamp;
             if (imageTime > latestTime) {
               latestTime = imageTime;
@@ -1271,16 +1325,19 @@ class UnifiedDataService {
         
         return {
           groupId: group.id,
-          imageCount: group.images.length,
-          latestImageUri: latestImage ? latestImage.uri : null
+          imageCount: validImageCount, // 使用有效图片数量（排除 tobecleaned）
+          latestImageUri: latestImage ? getUri(latestImage) : null
         };
       });
       
-      // 按组大小排序（从大到小）
-      groups.sort((a, b) => b.imageCount - a.imageCount);
+      // 过滤掉图片数量为 0 的组（所有图片都被移到暂存箱的情况）
+      const validGroups = groups.filter(group => group.imageCount > 0);
       
-      // logger.debug(`📊 相似度组统计: ${groups.length}个组`);
-      return groups;
+      // 按组大小排序（从大到小）
+      validGroups.sort((a, b) => b.imageCount - a.imageCount);
+      
+      // logger.debug(`📊 相似度组统计: ${validGroups.length}个组（已过滤空组）`);
+      return validGroups;
       
     } catch (error) {
       console.error('❌ 获取相似度组统计失败:', error);
@@ -1319,10 +1376,11 @@ class UnifiedDataService {
       const imageMap = new Map(allImages.map(img => [img.id, img]));
       
       // 直接使用缓存中的图片对象，添加相似度信息
+      // 排除 tobecleaned 分类的图片
       const images = group.images
         .map(imageInfo => {
           const image = imageMap.get(imageInfo.id);
-          if (image) {
+          if (image && image.category !== 'tobecleaned') {
             // 为缓存中的图片对象添加相似度信息
             image.similarityScore = imageInfo.similarity_score || 0;
             image.similarityGroupIndex = groupId;

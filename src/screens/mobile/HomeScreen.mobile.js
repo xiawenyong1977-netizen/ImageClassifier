@@ -30,7 +30,7 @@ import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import WakeLockService from '../../services/WakeLockService';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -268,8 +268,9 @@ const HomeScreen = ({ navigation }) => {
       const cityList = Object.keys(cityCounts)
         .map(cityName => {
           // 找到这个城市最近的一张照片（按时间戳降序）
+          // 排除 tobecleaned 分类的图片
           const cityImages = allImages
-            .filter(img => img.city === cityName)
+            .filter(img => img.city === cityName && img.category !== 'tobecleaned')
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           
           const latestImage = cityImages.length > 0 ? cityImages[0] : null;
@@ -277,7 +278,7 @@ const HomeScreen = ({ navigation }) => {
           return {
             name: cityName,
             count: cityCounts[cityName],
-            latestImageUri: latestImage ? latestImage.uri : null,
+            latestImageUri: latestImage ? getUri(latestImage) : null,
           };
         })
         .sort((a, b) => b.count - a.count);
@@ -302,6 +303,13 @@ const HomeScreen = ({ navigation }) => {
       setSimilarityGroups(groups);
       
       logger.debug(`🔍 相似组加载完成: ${groups.length}/${allGroups.length}组`);
+      
+      // 调试：检查相似组的 latestImageUri
+      if (groups.length > 0) {
+        groups.forEach((group, index) => {
+          logger.debug(`🔍 相似组 ${index + 1}: groupId=${group.groupId}, imageCount=${group.imageCount}, latestImageUri=${group.latestImageUri || 'null'}`);
+        });
+      }
       
     } catch (error) {
       logger.error('❌ 加载相似组失败:', error);
@@ -445,7 +453,9 @@ const HomeScreen = ({ navigation }) => {
   const [showScanTip, setShowScanTip] = useState(false);
 
   /**
-   * 检查并请求相册权限和位置权限
+   * 检查并请求所有需要的权限（一次性请求）
+   * Android 13+: 媒体访问权限、位置权限、通知权限
+   * Android 12-: 存储权限、位置权限
    */
   const checkAndRequestPermissions = async () => {
     if (Platform.OS !== 'android') {
@@ -453,21 +463,22 @@ const HomeScreen = ({ navigation }) => {
     }
 
     try {
-      logger.debug('📋 检查相册访问权限和位置权限...');
+      logger.debug('📋 检查相册访问权限、位置权限和通知权限...');
       logger.debug(`📱 Android 版本: API ${Platform.Version}`);
       
       // 根据 Android 版本请求不同的权限
       let permissions = [];
       
       if (Platform.Version >= 33) {
-        // Android 13+ (API 33+): 使用新的媒体权限
-        logger.debug('📋 Android 13+，请求新的媒体权限');
+        // Android 13+ (API 33+): 使用新的媒体权限 + 通知权限
+        logger.debug('📋 Android 13+，请求新的媒体权限和通知权限');
         permissions = [
           PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
           PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION, // 读取照片GPS信息
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS, // 通知权限（用于前台服务）
         ];
       } else {
-        // Android 12 及以下: 使用旧的存储权限
+        // Android 12 及以下: 使用旧的存储权限（不需要通知权限，因为 Android 12 及以下不需要）
         logger.debug('📋 Android 12-，请求旧的存储权限');
         permissions = [
           PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
@@ -486,12 +497,12 @@ const HomeScreen = ({ navigation }) => {
       logger.debug('📋 权限检查结果:', checkResults);
 
       if (checkResults.every(result => result === true)) {
-        logger.debug('✅ 已有相册访问权限');
+        logger.debug('✅ 所有权限已授权');
         return true;
       }
 
-      // 请求权限
-      logger.debug('📋 开始请求相册访问权限...');
+      // 请求权限（一次性请求所有需要的权限）
+      logger.debug('📋 开始一次性请求所有权限...');
       const grantResults = await PermissionsAndroid.requestMultiple(permissions);
       
       logger.debug('📋 权限请求结果:', grantResults);
@@ -501,20 +512,26 @@ const HomeScreen = ({ navigation }) => {
       );
 
       if (allGranted) {
-        logger.debug('✅ 相册访问权限已授权');
+        logger.debug('✅ 所有权限已授权');
         return true;
       } else {
         logger.warn('⚠️ 部分权限被拒绝');
+        const permissionText = Platform.Version >= 33 
+          ? '需要访问相册权限、位置权限和通知权限才能扫描图片并显示扫描进度。请在设置中授予权限。'
+          : '需要访问相册权限和位置权限才能扫描图片并获取GPS信息。请在设置中授予权限。';
         Alert.alert(
           '权限不足',
-          '需要访问相册权限和位置权限才能扫描图片并获取GPS信息。请在设置中授予权限。',
+          permissionText,
           [
             { text: '取消', style: 'cancel' },
             { 
               text: '去设置', 
               onPress: () => {
                 // TODO: 打开应用设置页面
-                Alert.alert('提示', '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限和位置权限');
+                const settingText = Platform.Version >= 33
+                  ? '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限、位置权限和通知权限'
+                  : '请手动进入系统设置 → 应用管理 → 芯图相册 → 权限，开启存储权限和位置权限';
+                Alert.alert('提示', settingText);
               }
             }
           ]
@@ -652,7 +669,7 @@ const HomeScreen = ({ navigation }) => {
       {/* 缩略图占满整个卡片 */}
       {category.recentImages && category.recentImages.length > 0 ? (
         <Image
-          source={{ uri: category.recentImages[0].uri }}
+          source={{ uri: getUri(category.recentImages[0]) || category.recentImages[0]?.uri }}
           style={styles.thumbnail}
           resizeMode="cover"
         />
@@ -734,6 +751,13 @@ const HomeScreen = ({ navigation }) => {
           source={{ uri: group.latestImageUri }}
           style={styles.thumbnail}
           resizeMode="cover"
+          onError={(error) => {
+            logger.error(`❌ 相似组缩略图加载失败:`, { 
+              groupId: group.groupId, 
+              latestImageUri: group.latestImageUri,
+              error: error.nativeEvent?.error || error
+            });
+          }}
         />
       ) : (
         <View style={[styles.thumbnail, { backgroundColor: '#9C27B0' }]}>
@@ -850,8 +874,9 @@ const HomeScreen = ({ navigation }) => {
                 onPress={() => {
                   try {
                     // 🆕 添加空值检查
-                    if (!image || !image.uri || !navigation) {
-                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, navigation: !!navigation });
+                    const imageUri = getUri(image);
+                    if (!image || !imageUri || !navigation) {
+                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, imageUri, navigation: !!navigation });
                       return;
                     }
                     
@@ -868,7 +893,7 @@ const HomeScreen = ({ navigation }) => {
                 }}
               >
                 <Image
-                  source={{ uri: image.uri }}
+                  source={{ uri: getUri(image) || image?.uri }}
                   style={styles.recentGridImage}
                   resizeMode="cover"
                 />

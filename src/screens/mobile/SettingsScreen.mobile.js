@@ -28,6 +28,7 @@ import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
+import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
 
 const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // ==================== 状态管理 ====================
@@ -42,6 +43,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   
   // 目录选择器状态
   const [showDirectoryPicker, setShowDirectoryPicker] = useState(false);
+  const [detectingDirectory, setDetectingDirectory] = useState(null);
   
   // AI增强预设相关状态
   const [aiEnhancePresets, setAiEnhancePresets] = useState({});
@@ -74,10 +76,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       if (savedSettings.scanPaths && savedSettings.scanPaths.length > 0) {
         setGalleryPaths(savedSettings.scanPaths);
       } else {
-        // 如果没有保存的路径，使用默认路径（移动端为空数组）
-        const imageStorageService = new ImageStorageService();
-        const defaultPaths = imageStorageService.getDefaultScanPaths();
-        setGalleryPaths(defaultPaths);
+        // 如果没有保存的路径，设置为空数组（移动端表示扫描整个设备）
+        setGalleryPaths([]);
       }
       
       // 设置其他设置项
@@ -169,6 +169,145 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   };
 
   /**
+   * 获取目录类型
+   */
+  const getDirectoryType = (path) => {
+    if (path.includes('WeiXin') || path.includes('WeChat')) return 'wechat';
+    if (path.includes('QQ')) return 'qq';
+    if (path.includes('DCIM/Camera')) return 'camera';
+    if (path.includes('Screenshots')) return 'screenshots';
+    return 'unknown';
+  };
+
+  /**
+   * 智能检测目录（支持微信、QQ、相机、截图）
+   */
+  const smartDetectDirectory = async (type) => {
+    // 定义多个可能的路径
+    let candidatePaths = [];
+    
+    if (type === 'wechat') {
+      candidatePaths = [
+        '/storage/emulated/0/Tencent/MicroMsg',
+        '/storage/emulated/0/Pictures/WeChat',
+        '/storage/emulated/0/DCIM/WeChat'
+      ];
+    } else if (type === 'qq') {
+      candidatePaths = [
+        '/storage/emulated/0/Tencent/QQ_Images',
+        '/storage/emulated/0/Tencent/QQ',
+        '/storage/emulated/0/Tencent/MobileQQ/photo',
+        '/storage/emulated/0/Tencent/MobileQQ/diskcache',
+        '/storage/emulated/0/tencent/Tim_Images',
+        '/storage/emulated/0/tencent/QQ_Images',
+        '/storage/emulated/0/tencent/mobileqq/photo',
+        '/storage/emulated/0/tencent/qq',
+        '/storage/emulated/0/Android/data/com.tencent.mobileqq/files/Tencent/QQ_Images'
+      ];
+    } else if (type === 'camera') {
+      candidatePaths = [
+        '/storage/emulated/0/DCIM/Camera',
+        '/storage/emulated/0/DCIM/100MEDIA',
+        '/storage/emulated/0/Pictures'
+      ];
+    } else if (type === 'screenshots') {
+      candidatePaths = [
+        '/storage/emulated/0/DCIM/Screenshots',
+        '/storage/emulated/0/Pictures/Screenshots',
+        '/storage/emulated/0/Pictures/截图'
+      ];
+    }
+
+    // 收集所有存在的路径
+    const foundPaths = [];
+    for (const basePath of candidatePaths) {
+      try {
+        logger.debug(`🔍 检测路径: ${basePath}`);
+        const exists = await RNFS.exists(basePath);
+        if (exists) {
+          const typeName = type === 'wechat' ? '微信' : type === 'qq' ? 'QQ' : type === 'camera' ? '相册' : '截图';
+          logger.debug(`✅ 检测到${typeName}目录: ${basePath}`);
+          foundPaths.push(basePath);
+        } else {
+          logger.debug(`❌ 路径不存在: ${basePath}`);
+        }
+      } catch (error) {
+        logger.error(`❌ 检测路径异常: ${basePath}`, error);
+      }
+    }
+    
+    const typeName = type === 'wechat' ? '微信' : type === 'qq' ? 'QQ' : type === 'camera' ? '相册' : '截图';
+    if (foundPaths.length > 0) {
+      logger.debug(`✅ 找到${foundPaths.length}个${typeName}目录: ${foundPaths.join(', ')}`);
+    } else {
+      logger.debug(`❌ 未找到${typeName}目录`);
+    }
+    return foundPaths;
+  };
+
+  /**
+   * 检测并添加目录
+   */
+  const detectAndAddDirectory = async (pathOrType) => {
+    try {
+      // 判断是类型字符串还是路径字符串
+      const dirType = pathOrType === 'wechat' || pathOrType === 'qq' || pathOrType === 'camera' || pathOrType === 'screenshots'
+        ? pathOrType 
+        : getDirectoryType(pathOrType);
+      
+      setDetectingDirectory(dirType);
+      
+      if (dirType === 'wechat' || dirType === 'qq' || dirType === 'camera' || dirType === 'screenshots') {
+        // 使用智能检测，尝试多个路径
+        const foundPaths = await smartDetectDirectory(dirType);
+        
+        if (foundPaths && foundPaths.length > 0) {
+          // 过滤掉已存在的路径
+          const newPaths = foundPaths.filter(path => !galleryPaths.includes(path));
+          
+          if (newPaths.length === 0) {
+            Alert.alert('提示', '所有目录都已存在');
+          } else {
+            // 添加所有新路径
+            const updatedPaths = [...galleryPaths, ...newPaths];
+            await saveGalleryPaths(updatedPaths);
+            
+            const typeName = dirType === 'wechat' ? '微信' : dirType === 'qq' ? 'QQ' : dirType === 'camera' ? '相册' : '截图';
+            if (foundPaths.length > newPaths.length) {
+              Alert.alert('成功', `添加了${newPaths.length}个${typeName}目录\n共检测到${foundPaths.length}个目录，${foundPaths.length - newPaths.length}个已存在`);
+            } else {
+              Alert.alert('成功', `添加了${newPaths.length}个${typeName}目录`);
+            }
+          }
+        } else {
+          const typeName = dirType === 'wechat' ? '微信' : dirType === 'qq' ? 'QQ' : dirType === 'camera' ? '相册' : '截图';
+          Alert.alert('未找到', `没有检测到${typeName}目录，可能该应用未安装或目录路径不同`);
+        }
+      } else {
+        // 未知类型使用固定路径检测
+        const exists = await RNFS.exists(pathOrType);
+        
+        if (exists) {
+          if (galleryPaths.includes(pathOrType)) {
+            Alert.alert('提示', '该目录已存在');
+          } else {
+            const updatedPaths = [...galleryPaths, pathOrType];
+            await saveGalleryPaths(updatedPaths);
+            Alert.alert('成功', '目录添加成功');
+          }
+        } else {
+          Alert.alert('未找到', '没有检测到该目录');
+        }
+      }
+    } catch (error) {
+      logger.error('检测目录失败:', error);
+      Alert.alert('错误', '检测失败，请重试');
+    } finally {
+      setDetectingDirectory(null);
+    }
+  };
+
+  /**
    * 检测存储信息
    */
   const detectStorageInfo = async () => {
@@ -213,15 +352,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         await generateQrCode();
       }
     } catch (error) {
-      // 检查是否是HTTP错误（包含状态码）
-      const isHttpError = error.message && /失败:\s*\d+/.test(error.message);
-      if (isHttpError) {
-        // 后端返回了非200状态码，使用error日志
-        logger.error('❌ 查询会员状态失败（后端错误）:', error);
-      } else {
-        // 网络错误等其他情况，也使用error日志
-        logger.error('❌ 查询会员状态失败（网络错误）:', error);
-      }
+      // 查询会员状态失败，使用debug日志（不输出error）
+      logger.debug('查询会员状态失败:', error);
       setWechatStatus('not_member');
       await generateQrCode();
     }
@@ -256,8 +388,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         }
       }, 2000);
     } catch (error) {
-      logger.error('生成二维码失败:', error);
-      Alert.alert('错误', '生成二维码失败，请重试');
+      // 生成二维码失败，使用debug日志（不输出error和弹窗）
+      logger.debug('生成二维码失败:', error);
       setCheckingFollow(false);
     }
   };
@@ -304,15 +436,37 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         logger.warn('⚠️ RNFS.saveImageToGallery 方法不可用');
       }
 
-      // 调起微信（无论保存是否成功）
-      await openWeChatDirectly(saveResult);
-
-      // 如果没有保存成功，提示用户
-      if (!saveResult) {
+      // 先显示提示，用户确认后再调起微信
+      if (saveResult) {
+        Alert.alert(
+          '保存成功',
+          '二维码已保存到相册，现在打开微信扫一扫？',
+          [
+            { text: '取消', style: 'cancel' },
+            { 
+              text: '打开微信', 
+              style: 'default',
+              onPress: async () => {
+                // 用户确认后调起微信（不传 saveResult，避免重复提示）
+                await openWeChatDirectly();
+              }
+            }
+          ]
+        );
+      } else {
         Alert.alert(
           '提示',
           '请手动打开微信，在右上角"+"菜单中选择"扫一扫"，然后扫描上方二维码',
-          [{ text: '知道了', style: 'default' }]
+          [
+            { text: '知道了', style: 'default' },
+            {
+              text: '打开微信',
+              style: 'default',
+              onPress: async () => {
+                await openWeChatDirectly();
+              }
+            }
+          ]
         );
       }
 
@@ -331,7 +485,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   /**
    * 调起微信扫一扫
    */
-  const openWeChatDirectly = async (saveResult = null) => {
+  const openWeChatDirectly = async () => {
     try {
       logger.debug('📱 正在调起微信主界面...');
       const weixinMain = 'weixin://';
@@ -339,38 +493,21 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       if (supportedMain) {
         await Linking.openURL(weixinMain);
         logger.debug('✅ 已调起微信主界面');
-        if (saveResult) {
-          Alert.alert(
-            '成功',
-            '二维码已保存到相册\n\n请在微信中打开“扫一扫”，扫描刚才保存的二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        }
       } else {
         logger.warn('⚠️ 无法调起微信');
-        if (saveResult) {
-          Alert.alert(
-            '提示',
-            '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        } else {
-          Alert.alert(
-            '提示',
-            '请手动打开微信，在“扫一扫”中扫描上方二维码',
-            [{ text: '知道了', style: 'default' }]
-          );
-        }
-      }
-    } catch (error) {
-      logger.error('❌ 调起微信失败:', error);
-      if (saveResult) {
         Alert.alert(
           '提示',
-          '二维码已保存到相册\n\n请手动打开微信，在“扫一扫”中扫描刚才保存的二维码',
+          '无法自动打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
           [{ text: '知道了', style: 'default' }]
         );
       }
+    } catch (error) {
+      logger.error('❌ 调起微信失败:', error);
+      Alert.alert(
+        '提示',
+        '无法打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
+        [{ text: '知道了', style: 'default' }]
+      );
     }
   };
 
@@ -431,8 +568,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       setShowEditModal(false);
       setEditingPreset(null);
       
-      // 通知其他页面设置已更新
-      if (typeof window !== 'undefined') {
+      // 通知其他页面设置已更新（仅在 Web 环境支持 CustomEvent 时）
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { 
           detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
         }));
@@ -464,8 +601,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       setAiEnhancePresets(updatedPresets);
       setSettings(newSettings);
       
-      // 通知其他页面设置已更新
-      if (typeof window !== 'undefined') {
+      // 通知其他页面设置已更新（仅在 Web 环境支持 CustomEvent 时）
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { 
           detail: { key: 'aiEnhancePresets', value: updatedPresets, settings: newSettings } 
         }));
@@ -606,6 +743,54 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             >
               <Text style={styles.directoryPickerButtonText}>📁 浏览选择目录</Text>
             </TouchableOpacity>
+
+            {/* 快捷目录按钮 */}
+            <View style={styles.quickDirectoryContainer}>
+              <Text style={styles.quickDirectoryTitle}>常用目录快速添加：</Text>
+              <View style={styles.quickDirectoryRow}>
+                <TouchableOpacity
+                  style={[styles.quickDirectoryButton, detectingDirectory === 'wechat' && styles.quickDirectoryButtonDetecting]}
+                  onPress={() => detectAndAddDirectory('wechat')}
+                  disabled={!!detectingDirectory}
+                >
+                  <Text style={styles.quickDirectoryButtonText}>
+                    {detectingDirectory === 'wechat' ? '🔍 检测中...' : '💬 微信目录'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickDirectoryButton, detectingDirectory === 'qq' && styles.quickDirectoryButtonDetecting]}
+                  onPress={() => detectAndAddDirectory('qq')}
+                  disabled={!!detectingDirectory}
+                >
+                  <Text style={styles.quickDirectoryButtonText}>
+                    {detectingDirectory === 'qq' ? '🔍 检测中...' : '💬 QQ目录'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.quickDirectoryRow}>
+                <TouchableOpacity
+                  style={[styles.quickDirectoryButton, detectingDirectory === 'camera' && styles.quickDirectoryButtonDetecting]}
+                  onPress={() => detectAndAddDirectory('camera')}
+                  disabled={!!detectingDirectory}
+                >
+                  <Text style={styles.quickDirectoryButtonText}>
+                    {detectingDirectory === 'camera' ? '🔍 检测中...' : '📷 相册目录'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickDirectoryButton, detectingDirectory === 'screenshots' && styles.quickDirectoryButtonDetecting]}
+                  onPress={() => detectAndAddDirectory('screenshots')}
+                  disabled={!!detectingDirectory}
+                >
+                  <Text style={styles.quickDirectoryButtonText}>
+                    {detectingDirectory === 'screenshots' ? '🔍 检测中...' : '📸 截图目录'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
             {/* 路径列表 */}
             {galleryPaths.map((path, index) => (
@@ -775,8 +960,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
             </View>
           </View>
-          {renderInfoItem('版本', '1.0.0')}
-          {renderInfoItem('构建版本', '2025.01.20')}
+          {renderInfoItem('版本', BUILD_VERSION)}
+          {renderInfoItem('构建版本', `${BUILD_VERSION_CODE} (${BUILD_DATE})`)}
           {renderInfoItem('平台', '移动端 (React Native)')}
           {renderInfoItem('存储类型', storageType)}
           {renderInfoItem('存储大小', storageSize)}
@@ -1401,6 +1586,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // 快捷目录按钮样式
+  quickDirectoryContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F2F2F7',
+  },
+  quickDirectoryTitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  quickDirectoryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  quickDirectoryButton: {
+    flex: 1,
+    padding: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickDirectoryButtonDetecting: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#2196F3',
+  },
+  quickDirectoryButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#007AFF',
   },
 });
 

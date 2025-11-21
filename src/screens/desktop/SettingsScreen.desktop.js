@@ -4,6 +4,7 @@ import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAda
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
+import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
 
 const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScanning }) => {
   const [settings, setSettings] = useState({});
@@ -48,15 +49,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         await generateQrCode();
       }
     } catch (error) {
-      // 检查是否是HTTP错误（包含状态码）
-      const isHttpError = error.message && /失败:\s*\d+/.test(error.message);
-      if (isHttpError) {
-        // 后端返回了非200状态码，使用error日志
-        logger.error('❌ 查询会员状态失败（后端错误）:', error);
-      } else {
-        // 网络错误等其他情况，也使用error日志
-        logger.error('❌ 查询会员状态失败（网络错误）:', error);
-      }
+      // 查询会员状态失败，使用debug日志（不输出error）
+      logger.debug('查询会员状态失败:', error);
       setWechatStatus('not_member');
       await generateQrCode();
     }
@@ -88,8 +82,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         }
       }, 2000);
     } catch (error) {
-      logger.error('生成二维码失败:', error);
-      Alert.alert('错误', '生成二维码失败，请重试');
+      // 生成二维码失败，使用debug日志（不输出error）
+      logger.debug('生成二维码失败:', error);
       setCheckingFollow(false);
     }
   };
@@ -113,11 +107,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         setGalleryPaths(savedSettings.scanPaths);
         setOriginalPaths([...savedSettings.scanPaths]); // 记录原始路径用于比较变更
       } else {
-        // 如果没有保存的路径，使用默认路径
-        const imageStorageService = new ImageStorageService();
-        const defaultPaths = imageStorageService.getDefaultScanPaths();
-        setGalleryPaths(defaultPaths);
-        setOriginalPaths([...defaultPaths]);
+        // 如果没有保存的路径，设置为空数组，用户需要手动添加路径
+        setGalleryPaths([]);
+        setOriginalPaths([]);
       }
       
       
@@ -735,12 +727,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>版本</Text>
-            <Text style={styles.infoValue}>1.0.0</Text>
+            <Text style={styles.infoValue}>{BUILD_VERSION}</Text>
           </View>
           
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>构建版本</Text>
-            <Text style={styles.infoValue}>2024.01.01</Text>
+            <Text style={styles.infoValue}>{BUILD_VERSION_CODE} ({BUILD_DATE})</Text>
           </View>
           
           <View style={styles.infoItem}>
@@ -996,7 +988,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -1035,7 +1026,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   pathsList: {
-    backgroundColor: '#fff',
+    // 移除白色背景，使用透明背景
   },
   pathItem: {
     flexDirection: 'row',

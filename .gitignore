@@ -74,6 +74,9 @@ ios/Pods/
 *.temp
 temp/
 TempProject/
+temp_cert.der
+temp_cert.pem
+aliyun-filing-info.txt
 
 # Backup files
 backup_*/

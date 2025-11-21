@@ -17,7 +17,7 @@ import GalleryScannerService from '../../services/GalleryScannerService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri } from '../../adapters/WebAdapters';
 
 const HomeScreen = () => {
   
@@ -567,13 +567,13 @@ const HomeScreen = () => {
         if (progress.shouldRefresh) {
           logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
           // 异步刷新，不阻塞扫描进度
-          setImmediate(async () => {
+          setTimeout(async () => {
             try {
               await loadData();
             } catch (error) {
               logger.error('❌ 定期刷新失败:', error);
             }
-          });
+          }, 0);
         }
       }, compareLimitOption);
       
@@ -1030,16 +1030,16 @@ const HomeScreen = () => {
         {/* 根据当前屏幕渲染对应页面 */}
         {currentScreen === 'Home' && (
           <View style={styles.screenContainer}>
-            {/* 消息提示区 - 只在显示正常内容时显示，readme时不显示 */}
-            {!((forceShowReadme || totalImagesCount === 0) && !isScanning) && (
+            {/* 消息提示区 */}
+            {!(forceShowReadme && !isScanning) && (
               <View style={styles.scanProgressBanner}>
                 <Text style={styles.scanProgressMessage}>
                   {globalMessage}
                 </Text>
               </View>
             )}
-            {/* 当没有图片时显示 readme，否则显示正常内容 */}
-            {(forceShowReadme || totalImagesCount === 0) && !isScanning ? (
+            {/* 主内容区域 */}
+            {forceShowReadme && !isScanning ? (
               <ReadmeView />
             ) : (
               renderHomeContent()
@@ -1192,10 +1192,11 @@ const HomeScreen = () => {
 // 渲染分类卡片组件
 const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => {
   // 稳定化图片源对象，避免不必要的重新渲染
-  const imageSource = useMemo(() => 
-    recentImages.length > 0 ? { uri: recentImages[0].uri } : null, 
-    [recentImages[0]?.uri]
-  );
+  const imageSource = useMemo(() => {
+    if (recentImages.length === 0) return null;
+    const imageUri = getUri(recentImages[0]);
+    return imageUri ? { uri: imageUri } : null;
+  }, [recentImages[0]]);
 
   return (
     <TouchableOpacity
@@ -1227,10 +1228,11 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
 // 渲染城市卡片组件
 const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
   // 稳定化图片源对象，避免不必要的重新渲染
-  const imageSource = useMemo(() => 
-    recentImages.length > 0 ? { uri: recentImages[0].uri } : null, 
-    [recentImages[0]?.uri]
-  );
+  const imageSource = useMemo(() => {
+    if (recentImages.length === 0) return null;
+    const imageUri = getUri(recentImages[0]);
+    return imageUri ? { uri: imageUri } : null;
+  }, [recentImages[0]]);
 
   return (
     <TouchableOpacity
@@ -1262,10 +1264,11 @@ const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
 // 渲染相似照片卡片组件
 const SimilarityCard = React.memo(({ group, onPress }) => {
   // 稳定化图片源对象，避免不必要的重新渲染
-  const imageSource = useMemo(() => 
-    group.latestImageUri ? { uri: group.latestImageUri } : null, 
-    [group.latestImageUri]
-  );
+  const imageSource = useMemo(() => {
+    if (!group.latestImageUri) return null;
+    const imageUri = getUri(group.latestImageUri);
+    return imageUri ? { uri: imageUri } : null;
+  }, [group.latestImageUri]);
 
   return (
     <TouchableOpacity

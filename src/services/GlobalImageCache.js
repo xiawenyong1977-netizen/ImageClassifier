@@ -88,9 +88,28 @@ class GlobalImageCache {
       const storageService = this.getStorageService();
       logger.debug('使用共享的存储服务实例');
       
+      // 🔍 诊断：准备调用 getImages
+      logger.debug(`🔍 [诊断] buildCache: 准备调用 storageService.getImages()...`);
+      
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
       const allImages = await storageService.getImages();
-      logger.debug(`获取到 ${allImages.length} 张图片`);
+      logger.debug(`🔍 [诊断] buildCache: 从数据库获取到 ${allImages.length} 张图片`);
+      
+      // 🔍 诊断：检查返回的数据类型
+      if (!Array.isArray(allImages)) {
+        logger.error(`🔍 [诊断] buildCache: getImages() 返回的不是数组! 类型: ${typeof allImages}, 值:`, allImages);
+      }
+      
+      // 🔍 诊断：检查分类分布
+      if (allImages.length > 0) {
+        const categoryCounts = {};
+        allImages.forEach(img => {
+          const cat = img.category || 'unknown';
+          categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        });
+        logger.debug(`🔍 [诊断] buildCache: 分类分布:`, categoryCounts);
+        logger.debug(`🔍 [诊断] buildCache: NA分类数量: ${categoryCounts['NA'] || 0}`);
+      }
       
       // 确保 allImages 是数组
       if (!Array.isArray(allImages)) {
@@ -193,7 +212,8 @@ class GlobalImageCache {
       // 更新统计信息
       const normalizedCategory = this._normalizeCategoryId(image.category);
       this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
-      if (image.city) {
+      // 城市统计需要排除 tobecleaned 分类的图片
+      if (image.city && image.category !== 'tobecleaned') {
         this.cache.cityCounts[image.city] = (this.cache.cityCounts[image.city] || 0) + 1;
       }
       
@@ -254,8 +274,10 @@ class GlobalImageCache {
       // 重新构建分类索引
       // 不再需要重建索引，直接通过过滤获取数据
       
-      // 重新构建分类统计
+      // 重新构建分类统计和城市统计（城市统计需要排除tobecleaned）
       this._rebuildCategoryCounts();
+      this._rebuildCityCounts();
+    
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
       
@@ -372,8 +394,8 @@ class GlobalImageCache {
       }
     }
     
-    // 如果都没找到，抛出错误
-    throw new Error(`未找到分类: ${categoryInput}`);
+    // 如果都没找到，返回原值（支持 'NA' 等未配置的分类）
+    return categoryInput;
   }
 
   // 更新选中统计 - 添加图片
@@ -589,13 +611,14 @@ class GlobalImageCache {
     let cityImageCount = 0;
     
     this.cache.allImages.forEach(img => {
-      if (img.city) {
+      // 排除 tobecleaned 分类的图片
+      if (img.city && img.category !== 'tobecleaned') {
         this.cache.cityCounts[img.city] = (this.cache.cityCounts[img.city] || 0) + 1;
         cityImageCount++;
       }
     });
     
-    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片`);
+    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片（已排除tobecleaned）`);
     
     // 调试：显示前5个城市统计
     const cityEntries = Object.entries(this.cache.cityCounts).slice(0, 5);
@@ -710,6 +733,17 @@ class GlobalImageCache {
   getImagesByCategory(category) {
     const normalizedCategory = this._normalizeCategoryId(category);
     
+    // 调试：统计分类分布
+    if (category === 'NA') {
+      const categoryStats = {};
+      this.cache.allImages.forEach(img => {
+        const cat = img?.category || 'null';
+        categoryStats[cat] = (categoryStats[cat] || 0) + 1;
+      });
+      logger.debug(`🔍 [NA查询] 缓存中图片分类统计:`, categoryStats);
+      logger.debug(`🔍 [NA查询] 标准化后的分类ID: ${normalizedCategory}, 缓存总数: ${this.cache.allImages.length}`);
+    }
+    
     const result = this.cache.allImages.filter(img => {
       // 🆕 添加空值检查
       if (!img || typeof img !== 'object') {
@@ -726,6 +760,10 @@ class GlobalImageCache {
       return imgCategory === normalizedCategory;
     });
     
+    if (category === 'NA') {
+      logger.debug(`🔍 [NA查询] 找到 ${result.length} 张NA分类图片`);
+    }
+    
     return result;
   }
 
@@ -737,7 +775,8 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      return img.city === city;
+      // 排除 tobecleaned 分类的图片
+      return img.city === city && img.category !== 'tobecleaned';
     });
   }
 
@@ -749,7 +788,8 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      return img.similarityGroupIndex === groupId;
+      // 排除 tobecleaned 分类的图片
+      return img.similarityGroupIndex === groupId && img.category !== 'tobecleaned';
     });
   }
 

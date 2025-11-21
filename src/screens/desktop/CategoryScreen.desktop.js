@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useFocusEffect, getWebAccessibleUri, logger } from '../../adapters/WebAdapters';
+import { useFocusEffect, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Modal, Platform, TextInput, ScrollView } from 'react-native';
 // 分页方案实现
 import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
 import WeChatAuthService from '../../services/WeChatAuthService';
+import EnhanceResultScreen from './EnhanceResultScreen.desktop';
 
 // 使用统一数据服务
 
@@ -92,21 +93,21 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
   // 直接使用传入的item数据，不需要额外加载
   const displayItem = item;
   
-  // 在Electron环境中直接使用file://URI
-  const webUri = displayItem.uri;
+  // 直接使用 getUri 获取的 URI（PC端：file://，移动端：content://）
+  const imageUri = getUri(displayItem);
   
   // 调试日志（已注释以减少控制台输出）
   // if (shouldLoad) {
-  //   logger.debug(`图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, webUri: ${webUri}, imageError: ${imageError}`);
+  //   logger.debug(`图片加载状态: ${item.id}, shouldLoad: ${shouldLoad}, imageUri: ${imageUri}, imageError: ${imageError}`);
   //   logger.debug(`原始数据: item.uri=${item.uri}, displayItem.uri=${displayItem?.uri}`);
   //   logger.debug(`分类信息: item.category=${item.category}, displayItem.category=${displayItem?.category}`);
-  //   if (!webUri) {
+  //   if (!imageUri) {
   //     logger.warn(`图片缺少URI: ${item.id}, 将显示占位符`);
   //   }
   // }
   
   // 只在出现问题时输出警告
-  if (shouldLoad && !webUri) {
+  if (shouldLoad && !imageUri) {
     logger.warn(`⚠️ 图片缺少URI: ${item.id}, 将显示占位符`);
   }
   
@@ -157,7 +158,7 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
       
       {/* Display image */}
       {shouldLoad ? (
-        webUri && !imageError ? (
+        imageUri && !imageError ? (
         <>
           {imageLoading && (
             <View style={styles.imageLoadingOverlay}>
@@ -165,7 +166,7 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
             </View>
           )}
         <Image
-            source={{ uri: webUri }}
+            source={{ uri: imageUri }}
           style={styles.image}
           resizeMode="cover"
             onLoad={handleImageLoad}
@@ -179,7 +180,7 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
             {displayItem.fileName || 'Image'}
           </Text>
           <Text style={styles.placeholderSubtext} numberOfLines={1}>
-            {imageError ? 'Load failed' : (displayItem.uri ? 'Local file' : 'Loading...')}
+            {imageError ? 'Load failed' : (imageUri ? 'Local file' : 'Loading...')}
             </Text>
           </View>
         )
@@ -410,6 +411,7 @@ const CategoryScreen = ({
   const [availableEnhancePresets, setAvailableEnhancePresets] = useState([]); // AI增强预设方案列表
   const snapshotImagesRef = useRef([]); // 模态框打开时的图片快照，使用 ref 而非 state（不需要触发渲染）
   const backgroundTaskRef = useRef(null); // 后台任务处理的Promise
+  const abortControllerRef = useRef(null); // 用于取消轮询的 AbortController
   
   // 分页相关状态 - 优先使用从prop传递的值（返回时恢复）
   const [currentPage, setCurrentPage] = useState(propCurrentPage || initialPage);
@@ -610,6 +612,13 @@ const CategoryScreen = ({
   }, []);
 
   // 按日期分组当前页面的图片（时间轴功能）- 使用useMemo缓存结果
+  const getLocalDateKey = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const groupedImages = useMemo(() => {
     // 早期返回：如果没有图片，直接返回空结果
     if (!allImages || allImages.length === 0) {
@@ -649,7 +658,7 @@ const CategoryScreen = ({
         date = new Date();
       }
       
-      const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD格式
+      const dateKey = getLocalDateKey(date); // YYYY-MM-DD格式
       
       if (!grouped[dateKey]) {
         grouped[dateKey] = [];
@@ -859,75 +868,135 @@ const CategoryScreen = ({
     toggleImageSelection(image.id);
   }, [toggleImageSelection]);
 
-  // 复制选中的图片到剪贴板
+  const getCurrentSelectedImages = useCallback(() => {
+    const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
+    
+    if (similarityGroupId) {
+      return UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
+    }
+    if (city) {
+      return UnifiedDataService.getSelectedImagesByCity(city);
+    }
+    if (normalizedCategory) {
+      return UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
+    }
+    return [];
+  }, [category, city, similarityGroupId]);
+
+  const buildFilePathList = (images) => {
+    const filePaths = [];
+    for (const image of images) {
+      // 直接使用 getLocalPath，它内部已经处理了路径标准化
+      const imagePath = getLocalPath(image);
+      if (!imagePath) {
+        logger.error('⚠️ 数据库缺少图片本地路径:', {
+          imageId: image?.id,
+          fileName: image?.fileName,
+          uri: image?.uri,
+          hasPath: !!image?.path
+        });
+        continue;
+      }
+      
+      logger.debug(`📋 处理图片:`, {
+        id: image?.id,
+        path: imagePath,
+        fileName: image?.fileName
+      });
+      
+      // getLocalPath 已经返回标准化路径，直接使用
+      // 对于 Windows，路径分隔符已经是反斜杠（在 normalizeFilePath 中处理）
+      filePaths.push(imagePath);
+    }
+    logger.debug(`📋 最终文件路径列表:`, filePaths);
+    return filePaths;
+  };
+
+  const copyFilePathsToClipboard = useCallback(async (filePaths, { successTitle, successMessage }) => {
+    if (typeof window === 'undefined' || !window.require) {
+      Alert.alert('错误', '当前环境不支持文件复制功能');
+      return { success: false };
+    }
+
+    const { ipcRenderer } = window.require('electron');
+
+    return new Promise((resolve) => {
+      ipcRenderer.once('copy-files-result', (event, result) => {
+        if (result.success) {
+          Alert.alert(successTitle, successMessage(result));
+        } else {
+          Alert.alert('失败', `复制失败: ${result.error}`);
+        }
+        resolve(result);
+      });
+      ipcRenderer.send('copy-files-to-clipboard', filePaths);
+    });
+  }, []);
+
+  // 复制选中的图片到剪贴板（用于分享）
   const handleCopyToClipboard = useCallback(async () => {
     try {
-      // 获取当前分类的选中图片对象数组
-      const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
-      const currentCategorySelectedImages = normalizedCategory 
-        ? UnifiedDataService.getSelectedImagesByCategory(normalizedCategory)
-        : [];
+      const selectedImages = getCurrentSelectedImages();
+      logger.debug(`📋 复制操作 - 选中图片数量: ${selectedImages.length}`);
+      logger.debug(`📋 第一个图片对象:`, selectedImages[0]);
       
-      logger.debug(`📋 复制操作 - 选中图片数量: ${currentCategorySelectedImages.length}`);
-      logger.debug(`📋 第一个图片对象:`, currentCategorySelectedImages[0]);
-      
-      if (currentCategorySelectedImages.length === 0) {
+      if (selectedImages.length === 0) {
         Alert.alert('提示', '请先选择要复制的图片');
         return;
       }
 
-      // 获取选中图片的文件路径
-      const filePaths = [];
-      for (const image of currentCategorySelectedImages) {
-        logger.debug(`📋 处理图片:`, {
-          id: image?.id,
-          uri: image?.uri,
-          path: image?.path,
-          fileName: image?.fileName
-        });
-        
-        // 优先使用path，其次使用uri
-        const imagePath = image?.path || image?.uri;
-        if (imagePath) {
-          // 使用normalizeFilePath确保路径格式正确
-          const normalizedPath = imagePath.replace(/^file:\/\/\//, '').replace(/\//g, '\\');
-          logger.debug(`📋 标准化路径: ${normalizedPath}`);
-          filePaths.push(normalizedPath);
-        } else {
-          logger.warn(`📋 图片缺少路径信息:`, image);
-        }
+      if (selectedImages.length > 9) {
+        Alert.alert(
+          '提示',
+          `当前选中了 ${selectedImages.length} 张图片。\n一次最多复制到剪贴板 9 张，请重新选择不超过 9 张的图片。`
+        );
+        return;
       }
 
-      logger.debug(`📋 最终文件路径列表:`, filePaths);
+      const filePaths = buildFilePathList(selectedImages);
 
       if (filePaths.length === 0) {
         Alert.alert('错误', '未找到有效的图片路径');
         return;
       }
 
-      // 在Electron环境中调用IPC复制文件到剪贴板
-      if (typeof window !== 'undefined' && window.require) {
-        const { ipcRenderer } = window.require('electron');
-        
-        // 发送复制请求到主进程
-        ipcRenderer.send('copy-files-to-clipboard', filePaths);
-        
-        // 监听复制结果
-        ipcRenderer.once('copy-files-result', (event, result) => {
-          if (result.success) {
-            Alert.alert('成功', `已将 ${filePaths.length} 个文件复制到剪贴板\n\n可以在资源管理器中粘贴（Ctrl+V）`);
-          } else {
-            Alert.alert('失败', `复制失败: ${result.error}`);
-          }
-        });
-      } else {
-        Alert.alert('错误', '当前环境不支持文件复制功能');
-      }
+      await copyFilePathsToClipboard(filePaths, {
+        successTitle: '复制成功',
+        successMessage: () => `已将 ${filePaths.length} 张图片复制到剪贴板。\n可在聊天窗口使用 Ctrl+V 粘贴。`
+      });
     } catch (error) {
       logger.error('复制文件到剪贴板失败:', error);
       Alert.alert('错误', `复制失败: ${error.message}`);
     }
-  }, [category]);
+  }, [getCurrentSelectedImages, copyFilePathsToClipboard]);
+
+  // 复制选中的图片到文件管理器（无限制）
+  const handleCopyToFileManager = useCallback(async () => {
+    try {
+      const selectedImages = getCurrentSelectedImages();
+      logger.debug(`📂 文件管理器复制 - 选中图片数量: ${selectedImages.length}`);
+      
+      if (selectedImages.length === 0) {
+        Alert.alert('提示', '请先选择要复制的图片');
+        return;
+      }
+
+      const filePaths = buildFilePathList(selectedImages);
+
+      if (filePaths.length === 0) {
+        Alert.alert('错误', '未找到有效的图片路径');
+        return;
+      }
+
+      await copyFilePathsToClipboard(filePaths, {
+        successTitle: '复制成功',
+        successMessage: () => `已复制 ${filePaths.length} 个文件。\n请在资源管理器目标文件夹按 Ctrl+V 粘贴。`
+      });
+    } catch (error) {
+      logger.error('复制文件路径失败:', error);
+      Alert.alert('错误', `复制失败: ${error.message}`);
+    }
+  }, [getCurrentSelectedImages, copyFilePathsToClipboard]);
 
   // 批量修改分类
   const handleBatchChangeCategory = useCallback(async (newCategory) => {
@@ -966,12 +1035,9 @@ const CategoryScreen = ({
             style: 'default',
             onPress: async () => {
               try {
-                let processed = 0;
-                
-                for (const image of selectedImagesList) {
-                  await UnifiedDataService.updateImagesCategory([image.id], newCategory, 'manual');
-                  processed++;
-                }
+                const imageIds = selectedImagesList.map(image => image.id);
+                const result = await UnifiedDataService.updateImagesCategory(imageIds, newCategory, 'manual');
+                const processed = result?.processed ?? imageIds.length;
                 
                 // 批量清除选中状态
                 for (const image of selectedImagesList) {
@@ -1099,11 +1165,69 @@ const CategoryScreen = ({
 
   // 关闭增强模态框
   const handleCloseEnhanceModal = () => {
+    // 如果任务还在进行中（processing状态），显示确认提示
+    if (isProcessing && enhanceProgress.status === 'processing') {
+      Alert.alert(
+        '确认关闭',
+        '照片增强任务已经提交，关闭后照片的处理结果将会临时保存在服务器。\n\n再次提交同一照片的相同处理将会直接从服务器中返回，不扣减额度。',
+        [
+          {
+            text: '取消',
+            style: 'cancel'
+          },
+          {
+            text: '确认关闭',
+            onPress: () => {
+              // 用户确认关闭，取消轮询任务
+              if (abortControllerRef.current) {
+                logger.debug('🛑 用户确认关闭模态框，取消轮询任务');
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+              }
+              
+              // 关闭模态框
+              setShowEnhanceModal(false);
+              
+              // 清空快照数据
+              snapshotImagesRef.current = [];
+              
+              // 重置处理状态
+              setIsProcessing(false);
+              setEnhanceProgress({
+                current: 0,
+                total: 0,
+                status: 'idle',
+                imageStatuses: []
+              });
+            }
+          }
+        ]
+      );
+      return;
+    }
+    
+    // 任务已完成或未开始，直接关闭
+    // 如果有正在进行的轮询任务，取消它（防止遗漏）
+    if (abortControllerRef.current) {
+      logger.debug('🛑 用户关闭模态框，取消轮询任务');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
     // 关闭模态框
     setShowEnhanceModal(false);
     
     // 清空快照数据
     snapshotImagesRef.current = [];
+    
+    // 重置处理状态
+    setIsProcessing(false);
+    setEnhanceProgress({
+      current: 0,
+      total: 0,
+      status: 'idle',
+      imageStatuses: []
+    });
   };
 
   // 保存并添加到暂存箱（合并原有的"保存到本地"和"添加为新图"）
@@ -1142,21 +1266,34 @@ const CategoryScreen = ({
         if (resultToAdd.originalImageId) {
           originalImage = await UnifiedDataService.readImageDetailsById(resultToAdd.originalImageId);
           logger.debug('✅ 从数据库获取完整原图信息');
-        } else if (resultToAdd.originalUri) {
-          // 如果没有 ID，尝试从 URI 查找
-          const tempImage = allImages.find(img => img.uri === resultToAdd.originalUri);
-          if (tempImage?.id) {
-            originalImage = await UnifiedDataService.readImageDetailsById(tempImage.id);
-            logger.debug('✅ 通过URI找到ID，从数据库获取完整原图信息');
+        } else if (resultToAdd.originalUri != null) {
+          // 如果没有 ID，尝试从 URI 查找（检查 null 和 undefined）
+          const targetOriginalUri = getUri(resultToAdd.originalUri);
+          if (targetOriginalUri) {
+            const tempImage = allImages.find(img => {
+              const imgUri = getUri(img);
+              return imgUri && targetOriginalUri && imgUri === targetOriginalUri;
+            });
+            if (tempImage?.id) {
+              originalImage = await UnifiedDataService.readImageDetailsById(tempImage.id);
+              logger.debug('✅ 通过URI找到ID，从数据库获取完整原图信息');
+            }
           }
         }
       } catch (error) {
         logger.warn('⚠️ 从数据库查询原图详细信息失败:', error);
         // 降级到使用精简信息
-        originalImage = allImages.find(img => 
-          img.id === resultToAdd.originalImageId || 
-          img.uri === resultToAdd.originalUri
-        );
+        originalImage = allImages.find(img => {
+          if (resultToAdd.originalImageId && img.id === resultToAdd.originalImageId) {
+            return true;
+          }
+          if (resultToAdd.originalUri != null) {
+            const imgUri = getUri(img);
+            const targetOriginalUri = getUri(resultToAdd.originalUri);
+            return imgUri && targetOriginalUri && imgUri === targetOriginalUri;
+          }
+          return false;
+        });
       }
       
       logger.debug('🔍 查找原图:', { 
@@ -1284,13 +1421,18 @@ const CategoryScreen = ({
       try {
         // 从缓存中查找刚保存的图片
         const allTobecleanedImages = await UnifiedDataService.readImagesByCategory('tobecleaned');
-        const savedImage = allTobecleanedImages.find(img => img.uri === newImageUri);
+        // 统一使用 getUri 进行比较
+        const newImageUriForCompare = getUri(newImageUri) || newImageUri;
+        const savedImage = allTobecleanedImages.find(img => {
+          const imgUri = getUri(img);
+          return imgUri && newImageUriForCompare && imgUri === newImageUriForCompare;
+        });
         
         // 列出所有缓存中的URI，便于对比
-        const cachedUris = allTobecleanedImages.map(img => img.uri);
+        const cachedUris = allTobecleanedImages.map(img => getUri(img)).filter(Boolean);
         logger.debug('🔍 保存后验证:', {
           savedUri: newImageUri,
-          savedUriLength: newImageUri.length,
+          savedUriForCompare: newImageUriForCompare,
           foundInCache: !!savedImage,
           totalTobecleaned: allTobecleanedImages.length,
           savedImageCategory: savedImage?.category,
@@ -1298,19 +1440,23 @@ const CategoryScreen = ({
           cachedUris: cachedUris.slice(0, 5) // 只显示前5个URI
         });
         
-        // 尝试模糊匹配（去掉file://前缀或者比较文件名）
+        // 尝试模糊匹配（比较文件名）
         const savedFileName = newImageUri.split('/').pop();
         const matchByFileName = allTobecleanedImages.find(img => {
-          const imgFileName = img.uri?.split('/').pop();
+          const imgUri = getUri(img);
+          if (!imgUri) return false;
+          const imgFileName = imgUri.split('/').pop();
           return imgFileName === savedFileName;
         });
         
         if (!savedImage && matchByFileName) {
+          const matchUri = getUri(matchByFileName);
           logger.warn('⚠️ URI不匹配，但文件名匹配:', {
             savedUri: newImageUri,
-            cachedUri: matchByFileName.uri,
+            savedUriForCompare: newImageUriForCompare,
+            cachedUri: matchUri,
             savedFileName,
-            cachedFileName: matchByFileName.uri.split('/').pop()
+            cachedFileName: matchUri?.split('/').pop()
           });
         }
         
@@ -1414,7 +1560,11 @@ const CategoryScreen = ({
             logger.debug(`  预处理 ${i + 1}/${images.length}: ${image.fileName}`);
             
             try {
-              const preparedImage = await ImageEnhanceService.prepareImageForEnhance(image.uri);
+              const imageUri = getUri(image);
+              if (!imageUri) {
+                throw new Error(`无法获取图片URI: ${image.fileName}`);
+              }
+              const preparedImage = await ImageEnhanceService.prepareImageForEnhance(imageUri);
               preparedImages.push({
                 ...preparedImage,
                 originalImage: image  // 保存原始图片信息
@@ -1448,7 +1598,10 @@ const CategoryScreen = ({
             imageStatuses: []
           });
           
-          // 3. 轮询任务状态（带进度回调）
+          // 3. 创建 AbortController 用于取消轮询
+          abortControllerRef.current = new AbortController();
+          
+          // 轮询任务状态（带进度回调和取消信号）
           let pollCount = 0;
           const enhanceResult = await ImageEnhanceService.pollTaskStatus(
             taskResult.task_id,
@@ -1471,12 +1624,12 @@ const CategoryScreen = ({
               
               // 解析每张图片的实时状态（从 status.results 数组）
               // 后端现在会实时返回每张图片的处理状态
-              const imageStatuses = status.results || [];
+              const imageStatuses = (status.results || []).filter(img => img != null); // 过滤掉 null 值
               
               // 打印状态更新（仅在有变化时）
               if (imageStatuses.length > 0) {
                 logger.debug(`📷 后端返回状态（${imageStatuses.length}张）:`, imageStatuses.map(img => 
-                  `[index=${img.index}, status=${img.status}, filename=${img.filename || 'N/A'}, hasUrl=${!!img.result_url}]`
+                  `[index=${img?.index ?? 'N/A'}, status=${img?.status ?? 'N/A'}, filename=${img?.filename || 'N/A'}, hasUrl=${!!img?.result_url}]`
                 ).join(', '));
               }
               
@@ -1494,17 +1647,26 @@ const CategoryScreen = ({
                 let hasUpdate = false;
                 
                 imageStatuses.forEach((imgStatus) => {
+                  if (!imgStatus) return; // 跳过 null 值
                   if (imgStatus.status === 'completed' && imgStatus.result_url) {
                     const index = imgStatus.index;
+                    // 确保 index 是有效数字
+                    if (index == null || typeof index !== 'number' || index < 0 || index >= preparedImages.length) {
+                      logger.warn(`⚠️ 无效的图片索引: ${index}, 跳过该状态更新`);
+                      return;
+                    }
                     const originalImage = preparedImages[index]?.originalImage;
                     
                     if (originalImage) {
                       const enhancedUrl = imgStatus.result_url || imgStatus.url || imgStatus.enhanced_url;
                       
                       // 检查是否已经存在这个索引的结果
+                      const originalImageUri = getUri(originalImage);
                       const existingIndex = newResults.findIndex(r => {
+                        // 确保 r 存在后再访问其属性
+                        if (!r) return false;
                         // 通过originalUri或index匹配
-                        return r.originalUri === originalImage.uri || 
+                        return (r.originalUri && originalImageUri && r.originalUri === originalImageUri) || 
                                (r.originalImageId === originalImage.id);
                       });
                       
@@ -1513,6 +1675,10 @@ const CategoryScreen = ({
                         if (!newResults[existingIndex].enhancedUri || newResults[existingIndex].status !== 'success') {
                           newResults[existingIndex] = {
                             ...newResults[existingIndex],
+                            // 确保 originalUri 和 originalImageId 字段存在
+                            originalImageId: newResults[existingIndex].originalImageId || originalImage.id,
+                            originalUri: newResults[existingIndex].originalUri || originalImageUri,
+                            originalFileName: newResults[existingIndex].originalFileName || originalImage.fileName,
                             enhancedUri: enhancedUrl,
                             status: 'success'
                           };
@@ -1523,7 +1689,7 @@ const CategoryScreen = ({
                         // 创建新结果（如果还没创建）
                         newResults[index] = {
                           originalImageId: originalImage.id,
-                          originalUri: originalImage.uri,
+                          originalUri: originalImageUri,
                           originalFileName: originalImage.fileName,
                           enhancedUri: enhancedUrl,
                           taskId: taskResult.task_id,
@@ -1541,10 +1707,16 @@ const CategoryScreen = ({
               });
               
               logger.debug(`📊 进度更新 [轮询${pollCount}次]: ${completedImages}/${taskResult.total_images} (${progressPercent.toFixed(1)}%) - 状态: ${status.status}`);
-            }
+            },
+            abortControllerRef.current?.signal // 传递取消信号
           );
           
           logger.debug(`✅ 任务完成，收到 ${enhanceResult.results?.length || 0} 个结果`);
+          
+          // 清理 AbortController（任务完成）
+          if (abortControllerRef.current) {
+            abortControllerRef.current = null;
+          }
           
           // 4. 处理结果（API 返回格式: { status: 'completed', results: [{result_url, ...}, ...] }）
           let successCount = 0;
@@ -1565,9 +1737,10 @@ const CategoryScreen = ({
               if (result.status === 'completed' && enhancedUrl) {
                 // ✅ 成功的图片
                 if (originalImage) {
+                  const originalImageUri = getUri(originalImage);
                   results.push({
                     originalImageId: originalImage.id,
-                    originalUri: originalImage.uri,
+                    originalUri: originalImageUri,
                     originalFileName: originalImage.fileName,
                     enhancedUri: enhancedUrl,
                     taskId: taskResult.task_id,
@@ -1588,9 +1761,10 @@ const CategoryScreen = ({
                 
                 // 将失败的图片也加入结果，但标记为失败状态
                 if (originalImage) {
+                  const originalImageUri = getUri(originalImage);
                   results.push({
                     originalImageId: originalImage.id,
-                    originalUri: originalImage.uri,
+                    originalUri: originalImageUri,
                     originalFileName: originalImage.fileName,
                     enhancedUri: null,  // 没有增强后的图片
                     taskId: taskResult.task_id,
@@ -1614,8 +1788,22 @@ const CategoryScreen = ({
           }
           
         } catch (error) {
+          // 清理 AbortController（无论成功还是失败）
+          if (abortControllerRef.current) {
+            abortControllerRef.current = null;
+          }
+          
+          // 如果是用户取消操作，不显示错误提示
+          if (error.message && error.message.includes('轮询已被用户取消')) {
+            logger.debug('🛑 用户取消了增强任务');
+            return; // 静默退出，不显示错误
+          }
+          
           logger.error('❌ 批量增强失败:', error);
-          Alert.alert('错误', `处理失败: ${error.message}`);
+          // 只有在模态框仍然显示时才提示错误
+          if (showEnhanceModal) {
+            Alert.alert('错误', `处理失败: ${error.message}`);
+          }
         }
         
         // 处理完成
@@ -1642,6 +1830,19 @@ const CategoryScreen = ({
       await backgroundTaskRef.current;
       
     } catch (error) {
+      // 检查是否是用户取消操作（正常操作，不记录为错误）
+      if (error.message && error.message.includes('轮询已被用户取消')) {
+        logger.debug('🛑 用户取消增强处理');
+        setEnhanceProgress(prev => ({
+          ...prev,
+          status: 'cancelled'
+        }));
+        setIsProcessing(false);
+        // 用户取消不需要显示错误提示
+        return;
+      }
+      
+      // 其他错误才记录为错误
       logger.error('❌ 增强处理失败:', error);
       setEnhanceProgress(prev => ({
         ...prev,
@@ -2061,6 +2262,16 @@ const CategoryScreen = ({
                       }}>
                       <Text style={styles.actionMenuItemText}>📋 复制到剪贴板</Text>
                     </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.actionMenuItem}
+                      onPress={() => {
+                        setShowActionMenu(false);
+                        setShowCategorySubmenu(false);
+                        handleCopyToFileManager();
+                      }}>
+                      <Text style={styles.actionMenuItemText}>📂 复制到文件管理器</Text>
+                    </TouchableOpacity>
                   </>
                 )}
               </View>
@@ -2069,7 +2280,7 @@ const CategoryScreen = ({
         )}
       </View>
     );
-  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, handleCopyToClipboard, showActionMenu, showCategorySubmenu, handleBatchChangeCategory, handleBatchDelete, clearCategorySelections, toggleSelectAll, selectionVersion]);
+  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, handleCopyToClipboard, handleCopyToFileManager, showActionMenu, showCategorySubmenu, handleBatchChangeCategory, handleBatchDelete, clearCategorySelections, toggleSelectAll, selectionVersion]);
 
   // 懒加载图片容器组件
   const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress, highlightedId, setRef }) => {
@@ -2558,7 +2769,7 @@ const CategoryScreen = ({
 
       {/* AI 图像增强模态框 */}
       {showEnhanceModal && (
-        <EnhanceModal
+        <EnhanceResultScreen
           visible={showEnhanceModal}
           onClose={handleCloseEnhanceModal}
           preset={enhancePreset}
@@ -2577,276 +2788,7 @@ const CategoryScreen = ({
   );
 };
 
-// ==================== EnhanceModal 组件 ====================
-const EnhanceModal = ({
-  visible,
-  onClose,
-  preset,
-  availablePresets = [],
-  progress,
-  selectedImages = [],
-  results = [],
-  currentIndex,
-  isProcessing,
-  onIndexChange,
-  onSave
-}) => {
-  // 获取当前图片的信息
-  const currentImage = selectedImages[currentIndex] || selectedImages[0] || {};
-  const currentResult = results[currentIndex] || {};
-  const isFailed = currentResult.status === 'failed';
-  const isSaved = currentResult.saved === true;
-  
-  // 调试日志
-  logger.debug(`🔍 EnhanceModal当前图片: index=${currentIndex}, results.length=${results.length}, currentResult=`, {
-    status: currentResult.status,
-    hasEnhancedUri: !!currentResult.enhancedUri,
-    enhancedUri: currentResult.enhancedUri || 'N/A'
-  });
-  
-  // 获取当前预设名称（从可用预设列表中查找）
-  const getPresetName = () => {
-    const found = availablePresets.find(p => p.id === preset);
-    return found ? found.name : 'AI增强';
-  };
-  
-  // 获取图片状态（从后端实时返回或results）
-  const getImageStatus = (index) => {
-    // 优先使用results（处理完成后的最终结果）
-    if (results.length > 0 && results[index]) {
-      return results[index].status === 'failed' ? 'failed' : 'completed';
-    }
-    
-    // 其次使用后端实时状态
-    if (progress.imageStatuses && progress.imageStatuses.length > 0) {
-      const imageStatus = progress.imageStatuses.find(img => img.index === index);
-      if (imageStatus) {
-        return imageStatus.status;
-      }
-    }
-    
-    // 如果正在处理，根据进度估算
-    if (isProcessing) {
-      if (index < progress.current) return 'completed';
-      if (index === progress.current) return 'processing';
-      return 'pending';
-    }
-    
-    return 'pending';
-  };
-
-  // 导航按钮处理
-  const goToPrevious = () => {
-    if (currentIndex > 0) {
-      onIndexChange(currentIndex - 1);
-    }
-  };
-
-  const goToNext = () => {
-    if (currentIndex < selectedImages.length - 1) {
-      onIndexChange(currentIndex + 1);
-    }
-  };
-
-  // 大图对比视图
-  const renderComparisonView = () => {
-    const status = getImageStatus(currentIndex);
-    
-    // 显示原图
-    const renderOriginalImage = () => (
-      <View style={styles.enhanceComparisonImageContainer}>
-        <View style={styles.enhanceComparisonImageLabelContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>原图</Text>
-          {selectedImages.length > 1 && (
-            <Text style={styles.enhanceComparisonImageCounter}>
-              {currentIndex + 1}/{selectedImages.length}
-            </Text>
-          )}
-        </View>
-        <Image
-          source={{ uri: currentImage.uri }}
-          style={styles.enhanceComparisonImage}
-          resizeMode="contain"
-        />
-      </View>
-    );
-
-    // 显示增强图或状态
-    const renderEnhancedImage = () => {
-      // 未开始处理
-      if (!isProcessing && results.length === 0) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-              <Text style={styles.enhanceComparisonPlaceholderIcon}>🎨</Text>
-              <Text style={styles.enhanceComparisonPlaceholderText}>选择方案开始处理</Text>
-            </View>
-          </View>
-        );
-      }
-
-      // 处理中 - 显示状态
-      if (status === 'pending' || status === 'processing') {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>
-              {status === 'processing' ? '处理中' : '等待处理'}
-            </Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-              {status === 'processing' ? (
-                <>
-                  <ActivityIndicator size="large" color="#2196F3" />
-                  <Text style={styles.enhanceComparisonPlaceholderText}>照片创玩中...</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.enhanceComparisonPlaceholderIcon}>⏳</Text>
-                  <Text style={styles.enhanceComparisonPlaceholderText}>等待处理</Text>
-                </>
-              )}
-            </View>
-          </View>
-        );
-      }
-
-      // 处理失败
-      if (status === 'failed' || isFailed) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>处理失败</Text>
-            <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonFailedContainer]}>
-              <Text style={styles.enhanceComparisonFailedIcon}>⚠️</Text>
-              <Text style={styles.enhanceComparisonFailedTitle}>处理失败</Text>
-              <Text style={styles.enhanceComparisonFailedMessage}>
-                {currentResult.errorMessage || '未知错误'}
-              </Text>
-              <Text style={styles.enhanceComparisonFailedHint}>
-                请尝试单独处理此图片，或稍后重试
-              </Text>
-            </View>
-          </View>
-        );
-      }
-
-      // 处理成功 - 显示增强后的图片
-      if (status === 'completed' && currentResult.enhancedUri) {
-        return (
-          <View style={styles.enhanceComparisonImageContainer}>
-            <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-            <Image
-              source={{ uri: currentResult.enhancedUri }}
-              style={styles.enhanceComparisonImage}
-              resizeMode="contain"
-              onError={(error) => logger.error('❌ Image加载失败:', currentResult.enhancedUri, error)}
-              onLoad={() => logger.debug('✅ Image加载成功:', currentResult.enhancedUri)}
-            />
-          </View>
-        );
-      }
-
-      // 默认占位
-      return (
-        <View style={styles.enhanceComparisonImageContainer}>
-          <Text style={styles.enhanceComparisonImageLabel}>增强图</Text>
-          <View style={[styles.enhanceComparisonImage, styles.enhanceComparisonPlaceholder]}>
-            <Text style={styles.enhanceComparisonPlaceholderText}>暂无结果</Text>
-          </View>
-        </View>
-      );
-    };
-
-    return (
-      <View style={styles.enhanceComparisonSection}>
-        <View style={styles.enhanceComparisonContainer}>
-          {/* 左侧：原图和增强图 */}
-          <View style={styles.enhanceComparisonImages}>
-            {renderOriginalImage()}
-            {renderEnhancedImage()}
-          </View>
-
-          {/* 右侧：操作按钮区 */}
-          <View style={styles.enhanceComparisonRightButtons}>
-            {/* 上一张按钮 */}
-            {selectedImages.length > 1 && (
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === 0 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToPrevious}
-                disabled={currentIndex === 0}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↑</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 下一张按钮 */}
-            {selectedImages.length > 1 && (
-              <TouchableOpacity
-                style={[
-                  styles.enhanceComparisonNavButtonVertical,
-                  currentIndex === selectedImages.length - 1 && styles.enhanceComparisonNavButtonDisabled
-                ]}
-                onPress={goToNext}
-                disabled={currentIndex === selectedImages.length - 1}
-              >
-                <Text style={styles.enhanceComparisonNavButtonText}>↓</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* 保存按钮 */}
-            <TouchableOpacity
-              style={[
-                styles.enhanceComparisonSaveButtonVertical,
-                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonDisabled
-              ]}
-              onPress={onSave}
-              disabled={status !== 'completed' || !currentResult.enhancedUri || isSaved}
-            >
-              <Text style={[
-                styles.enhanceComparisonSaveButtonText,
-                (status !== 'completed' || !currentResult.enhancedUri || isSaved) && styles.enhanceComparisonSaveButtonTextDisabled
-              ]}>
-                {isSaved ? '✅' : '💾'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-      style={{ zIndex: 999999 }}
-    >
-      <View style={styles.enhanceModalOverlay}>
-        <View style={styles.enhanceModalContent}>
-          {/* 标题栏 */}
-          <View style={styles.enhanceModalHeader}>
-            <View style={styles.enhanceModalTitleContainer}>
-              <Text style={styles.enhanceModalTitle}>{getPresetName()}</Text>
-              <Text style={styles.enhanceModalCounter}>
-                {results.filter(r => r.status === 'success' && r.enhancedUri).length}/{progress.total || results.length || selectedImages.length}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.enhanceModalCloseButton}>
-              <Text style={styles.enhanceModalCloseButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 大图对比视图 */}
-          {renderComparisonView()}
-        </View>
-      </View>
-    </Modal>
-  );
-};
+// EnhanceModal 已移至 EnhanceResultScreen.desktop.js
 
 const styles = StyleSheet.create({
   container: {

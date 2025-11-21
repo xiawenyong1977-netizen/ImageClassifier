@@ -5,8 +5,14 @@
   "displayName": "芯图相册",
   "main": "index.js",
   "scripts": {
-    "android": "react-native run-android",
-    "ios": "react-native run-ios",
+    "prebuild": "node scripts/generate-build-info.js",
+    "android": "npm run prebuild && react-native run-android",
+    "ios": "npm run prebuild && react-native run-ios",
+    "harmonyos:check": "powershell -ExecutionPolicy Bypass -File scripts/check-harmonyos-env.ps1",
+    "harmonyos:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-harmonyos-env.ps1",
+    "harmonyos:init": "node scripts/init-harmonyos-project.js",
+    "harmonyos:install": "cd harmonyos && ohpm install",
+    "harmonyos:test-deps": "node scripts/test-harmonyos-deps.js",
     "start": "react-native start",
     "test": "jest",
     "lint": "eslint ."
@@ -47,12 +53,12 @@
     "react-native-webview": "^13.16.0",
     "react-window": "^2.1.0",
     "react-window-infinite-loader": "^1.0.10",
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "@babel/runtime": "^7.20.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@babel/preset-env": "^7.20.0",
-    "@babel/runtime": "^7.20.0",
     "@react-native-community/cli": "^11.3.7",
     "@react-native-community/cli-platform-android": "^11.3.7",
     "@react-native/eslint-config": "^0.72.0",

@@ -18,7 +18,7 @@ import ImageStorageService from './ImageStorageService';
 class WeChatAuthService {
   constructor() {
     this.apiConfig = {
-      baseURL: 'https://www.xintuxiangce.top',
+      baseURL: 'https://api.aifuture.net.cn',
       endpoints: {
         qrcode: '/api/v1/auth/wechat/qrcode',
         checkFollow: '/api/v1/auth/wechat/check-follow',
@@ -65,17 +65,14 @@ class WeChatAuthService {
       clearTimeout(timeoutId);
       if (!response.ok) {
         const text = await response.text();
-        // 404且返回"用户未关注公众号"，属于正常情况，使用debug日志
-        const isUserNotFollowed = response.status === 404 && 
-          (text.includes('未关注') || text.includes('not_followed') || text.includes('未关注公众号'));
-        
-        if (isUserNotFollowed) {
-          logger.debug(`🔍 用户未关注公众号 (${response.status}):`, text);
-          // 未关注按非会员处理，不抛出错误
+        // 404属于正常情况（可能是用户未关注公众号或其他原因），使用debug日志
+        if (response.status === 404) {
+          logger.debug(`🔍 查询会员状态返回404 (${response.status}):`, text);
+          // 404按非会员处理，不抛出错误
           return { isMember: false };
         } else {
-          // 其他错误情况，使用error日志
-          logger.error(`❌ 查询会员状态失败 (${response.status}):`, text);
+          // 其他非404错误情况，使用debug日志（不输出error）
+          logger.debug(`查询会员状态失败 (${response.status}):`, text);
           throw new Error(`查询会员状态失败: ${response.status}`);
         }
       }
@@ -102,10 +99,10 @@ class WeChatAuthService {
       return { isMember: !!isMember };
     } catch (error) {
       if (error.name === 'AbortError') {
-        logger.error('❌ 查询会员状态超时');
+        logger.debug('查询会员状态超时');
         throw new Error('查询会员状态超时，请检查网络连接');
       }
-      logger.error('❌ 查询会员状态失败:', error);
+      logger.debug('查询会员状态失败:', error);
       // 失败时按非会员处理，避免阻塞扫描
       return { isMember: false };
     }
@@ -188,10 +185,10 @@ class WeChatAuthService {
       logger.debug(`📡 API响应内容:`, responseText);
 
       if (!response.ok) {
-        logger.error(`❌ 生成二维码失败 (${response.status}):`, responseText);
-        logger.error('❌ 请求URL:', url);
-        logger.error('❌ 请求体:', requestBody);
-        logger.error('❌ 客户端ID:', clientId);
+        logger.debug(`生成二维码失败 (${response.status}):`, responseText);
+        logger.debug('请求URL:', url);
+        logger.debug('请求体:', requestBody);
+        logger.debug('客户端ID:', clientId);
         let errorMessage = '生成二维码失败';
         try {
           const errorJson = JSON.parse(responseText);
@@ -217,10 +214,10 @@ class WeChatAuthService {
 
     } catch (error) {
       if (error.name === 'AbortError') {
-        logger.error('❌ 生成二维码超时');
+        logger.debug('生成二维码超时');
         throw new Error('生成二维码超时，请检查网络连接');
       }
-      logger.error('❌ 生成二维码失败:', error.message || error);
+      logger.debug('生成二维码失败:', error.message || error);
       throw new Error(error.message || '生成二维码失败');
     }
   }

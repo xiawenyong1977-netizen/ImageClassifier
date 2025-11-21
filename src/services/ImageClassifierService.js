@@ -1,6 +1,6 @@
 import UnifiedDataService from './UnifiedDataService.js';
 import configService from './ConfigService.js';
-import { logger, ModelPathAdapter, CanvasAdapter, Platform } from '../adapters/WebAdapters';
+import { logger, ModelPathAdapter, CanvasAdapter, Platform, getUri } from '../adapters/WebAdapters';
 import imageProcessor from './ImageProcessor';
 
 class ImageClassifierService {
@@ -28,8 +28,9 @@ class ImageClassifierService {
     this.BATCH_CONFIG = {
       CACHE_BATCH_SIZE: 100,      // 批量缓存查询大小
       UPLOAD_BATCH_SIZE: 20,       // 批量上传大小（移动端会在每批次后清理临时文件）
-      REMOTE_TIMEOUT: 120000,     // 远程请求超时（毫秒）- 增加到120秒（移动端网络较慢）
-      HEALTH_CHECK_TIMEOUT: 5000  // 健康检查超时（毫秒）
+      REMOTE_TIMEOUT: 180000,     // 远程请求超时（毫秒）- 增加到180秒（后台网络可能更慢）
+      CACHE_TIMEOUT: 60000,       // 缓存查询超时（毫秒）- 60秒
+      HEALTH_CHECK_TIMEOUT: 10000  // 健康检查超时（毫秒）- 增加到10秒
     };
     
     // 注意：已移除 Web Worker 池，使用主线程并行推理
@@ -522,10 +523,10 @@ class ImageClassifierService {
    * 图片分类主方法（纯本地推理）
    * 注意：此方法仅用于扫描流程的第4层本地推理降级
    * 截图检测、缓存查询、远程推理已在前3层完成
-   * @param {string} imageUri - 图片URI
+   * @param {Object} imageData - 图片数据对象，包含 uri、imageDimensions 等字段
    * @returns {Promise<Object>} 分类结果
    */
-  async classifyImage(imageUri) {
+  async classifyImage(imageData) {
     const totalStartTime = Date.now();
     
     try {
@@ -534,10 +535,40 @@ class ImageClassifierService {
         throw new Error('ImageClassifierService 未初始化，请先调用 initialize() 方法');
       }
 
-      // 获取图像尺寸（使用ImageProcessor，后续预处理可以复用）
-      const dimensionsStart = Date.now();
-      const imageDimensions = await imageProcessor.getImageDimensions(imageUri);
-      const dimensionsTime = Date.now() - dimensionsStart;
+      // 从 imageData 中获取 URI
+      const imageUri = getUri(imageData);
+      if (!imageUri) {
+        logger.error('⚠️ 本地推理：无法获取图片URI:', {
+          imageId: imageData?.id,
+          fileName: imageData?.fileName,
+          uri: imageData?.uri
+        });
+        throw new Error(`无法获取图片URI: ${imageData?.fileName || 'unknown'}`);
+      }
+
+      // 从 imageData 中提取图像尺寸
+      // 设计：imageDimensions 必须是一个对象，包含 width 和 height 两个数字属性
+      const dims = imageData.imageDimensions;
+
+      if (!dims || 
+          typeof dims !== 'object' || 
+          typeof dims.width !== 'number' || dims.width <= 0 ||
+          typeof dims.height !== 'number' || dims.height <= 0) {
+        logger.error('⚠️ 数据库缺少图片尺寸数据:', {
+          imageId: imageData?.id,
+          fileName: imageData?.fileName,
+          uri: imageData?.uri,
+          hasImageDimensions: !!imageData?.imageDimensions,
+          imageDimensionsType: typeof imageData?.imageDimensions,
+          imageDimensionsValue: imageData?.imageDimensions
+        });
+        throw new Error(`数据库缺少图片尺寸数据: ${imageData?.fileName || 'unknown'}`);
+      }
+      
+      const imageDimensions = {
+        width: dims.width,
+        height: dims.height
+      };
       
       // 执行本地并行推理
       const inferenceStart = Date.now();
@@ -566,7 +597,6 @@ class ImageClassifierService {
       
       // 输出完整的性能分析报告
       logger.info(`🎯 单张图片分类完整性能报告:`);
-      logger.info(`  ├─ 获取图像尺寸: ${dimensionsTime}ms`);
       logger.info(`  ├─ 模型推理总时间: ${inferenceTime}ms`);
       logger.info(`  ├─ 分类映射: ${mappingTime}ms`);
       logger.info(`  └─ 总耗时: ${totalTime}ms`);
@@ -588,7 +618,6 @@ class ImageClassifierService {
         // 返回性能统计
         performanceMetrics: {
           totalTime,
-          dimensionsTime,
           inferenceTime,
           mappingTime
         }
@@ -1229,17 +1258,21 @@ class ImageClassifierService {
 
   /**
    * 识别手机截图
-   * @param {string} imageUri - 图片URI
    * @param {string} fileName - 文件名
    * @param {number} width - 图片宽度
    * @param {number} height - 图片高度
+   * @param {string} path - 文件路径（可选，可能是相对路径或绝对路径）
    * @returns {Promise<boolean>} 如果是手机截图返回true，否则返回false
    */
-  async identifyMobileScreenshot(imageUri, fileName, width, height) {
+  async identifyMobileScreenshot(fileName, width, height, path = null) {
     try {
       // 特征1：分辨率判定 - 宽高比<=0.5（手机竖屏比例，包括滚动截图）
-      const aspectRatio = width / height;
-      const isMobileResolution = aspectRatio <= 0.5;
+      // 只有当宽高都大于0时才进行宽高比判断，避免除零错误
+      let isMobileResolution = false;
+      if (width > 0 && height > 0) {
+        const aspectRatio = width / height;
+        isMobileResolution = aspectRatio <= 0.5;
+      }
       
       // 特征2：文件名判定 - 包含截图关键词
       const fileNameLower = (fileName || '').toLowerCase();
@@ -1247,14 +1280,27 @@ class ImageClassifierService {
                               fileNameLower.includes('截图') || 
                               fileNameLower.includes('screen');
       
-      const isScreenshot = isMobileResolution || isScreenshotFile;
+      // 特征3：路径判定 - 检查是否在截图目录中
+      // path可能是相对路径（Android 10+）或绝对路径（Android 9及以下），PC和移动端都兼容
+      let isScreenshotPath = false;
+      const screenshotKeywords = ['screenshots', '截图', 'screen'];
+      
+      if (path) {
+        const pathLower = path.toLowerCase();
+        isScreenshotPath = screenshotKeywords.some(keyword => 
+          pathLower.includes(keyword)
+        );
+      }
+      
+      const isScreenshot = isMobileResolution || isScreenshotFile || isScreenshotPath;
       
       // 只在检测到手机截图时输出调试信息
       if (isScreenshot) {
-        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio.toFixed(3)}, 文件名=${fileName}`);
+        const aspectRatio = width > 0 && height > 0 ? (width / height).toFixed(3) : 'N/A';
+        logger.debug(`📱 检测到手机截图: ${width}x${height}, 宽高比=${aspectRatio}, 文件名=${fileName}, 路径=${path || 'N/A'}`);
       }
       
-      // 两个特征中只要有一个满足就判定为手机截图
+      // 特征中只要有一个满足就判定为手机截图
       return isScreenshot;
     } catch (error) {
       logger.warn('⚠️ 手机截图检测失败:', error.message);
@@ -1554,7 +1600,7 @@ class ImageClassifierService {
    */
   getAPIConfig() {
     return {
-      baseURL: 'https://www.xintuxiangce.top',
+      baseURL: 'https://api.aifuture.net.cn',
       timeout: 30000, // 30秒超时
       categoryMap: {
         "social_activities": "social_activities",
@@ -1609,35 +1655,6 @@ class ImageClassifierService {
   }
 
   /**
-   * 批量检测手机截图
-   * @param {Array} imageDataList - [{ uri, fileName, width, height }]
-   * @returns {Promise<{screenshots: Array, nonScreenshots: Array}>}
-   */
-  async batchDetectScreenshots(imageDataList) {
-    const screenshots = [];
-    const nonScreenshots = [];
-    
-    for (const imageData of imageDataList) {
-      const isScreenshot = await this.identifyMobileScreenshot(
-        imageData.uri, 
-        imageData.fileName, 
-        imageData.width, 
-        imageData.height
-      );
-      
-      if (isScreenshot) {
-        screenshots.push(imageData);
-      } else {
-        nonScreenshots.push(imageData);
-      }
-    }
-    
-    logger.debug(`📱 批量截图检测完成：${screenshots.length} 张截图，${nonScreenshots.length} 张非截图`);
-    
-    return { screenshots, nonScreenshots };
-  }
-
-  /**
    * 批量查询缓存
    * @param {Array<string>} imageHashes - 图片哈希数组（自动分批处理）
    * @param {string} userId - 可选的用户ID
@@ -1666,21 +1683,41 @@ class ImageClassifierService {
           headers['X-User-ID'] = userId;
         }
         
-        const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ image_hashes: batchHashes })
-        });
+        // 添加超时控制，防止后台请求挂起
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          logger.warn(`⚠️ 缓存查询超时 (${this.BATCH_CONFIG.CACHE_TIMEOUT}ms)，中止请求...`);
+          controller.abort();
+        }, this.BATCH_CONFIG.CACHE_TIMEOUT);
         
-        if (!response.ok) {
-          throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+        try {
+          const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ image_hashes: batchHashes }),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId); // 成功后清除超时器
+          
+          if (!response.ok) {
+            throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+          }
+          
+          const result = await response.json();
+          allItems.push(...result.items);
+          totalCached += result.cached_count;
+          
+          logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
+        } catch (fetchError) {
+          clearTimeout(timeoutId); // 失败后也要清除超时器
+          if (fetchError.name === 'AbortError') {
+            logger.warn(`⚠️ 批次 ${Math.floor(i / batchSize) + 1} 缓存查询超时，跳过该批次`);
+            // 继续处理下一批次，不抛出错误
+            continue;
+          }
+          throw fetchError;
         }
-        
-        const result = await response.json();
-        allItems.push(...result.items);
-        totalCached += result.cached_count;
-        
-        logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
       }
       
       logger.debug(`✅ 批量缓存查询完成：总命中 ${totalCached}/${imageHashes.length}`);

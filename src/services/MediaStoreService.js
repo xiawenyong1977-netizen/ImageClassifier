@@ -38,6 +38,17 @@ class MediaStoreService {
   }
 
   /**
+   * 获取外部存储根目录路径
+   * @returns {Promise<string>} 外部存储根目录路径
+   */
+  async getExternalStoragePath() {
+    if (!this.isAvailable) {
+      throw new Error('MediaStore 不可用');
+    }
+    return await MediaStoreModule.getExternalStoragePath();
+  }
+
+  /**
    * 获取所有图片清单
    * @param {Object} options - 选项
    * @param {number} options.limit - 限制返回数量，0表示不限制（默认：0）
@@ -221,7 +232,7 @@ class MediaStoreService {
       const result = await MediaStoreModule.deleteFile(filePath);
       return result;
     } catch (error) {
-      logger.error(`❌ MediaStore: 删除文件失败 (path=${filePath})`, error);
+      logger.debug(`🔍 MediaStore: 删除文件失败 (path=${filePath})`, error);
       // 抛出错误而不是静默返回false
       throw new Error(`删除文件失败: ${error.message}`);
     }
@@ -277,24 +288,34 @@ class MediaStoreService {
    * @returns {Object} 兼容格式的图片对象
    */
   convertToCompatibleFormat(mediaStoreImage) {
-    // MediaStore返回的URI是 content:// 格式
-    // 我们需要转换为 file:// 格式以便兼容现有代码
-    const fileUri = mediaStoreImage.path ? `file://${mediaStoreImage.path}` : mediaStoreImage.uri;
-
-    return {
-      uri: fileUri,
-      contentUri: mediaStoreImage.uri,  // 保留原始content URI
-      mediaStoreId: mediaStoreImage.id,
+    const contentUri = mediaStoreImage.uri; // content://media/external/images/media/67129
+    
+    // 原生模块已经处理了优先级逻辑：优先使用绝对路径（DATA），如果为空则使用相对路径（RELATIVE_PATH）
+    // 所以这里直接使用path字段即可，不需要再判断relativePath
+    const path = (mediaStoreImage.path && mediaStoreImage.path.trim()) ? mediaStoreImage.path : null;
+    
+    // 拼装URI：如果有path，拼装成contentUri||path格式
+    // 如果没有path，只存储contentUri
+    let uri;
+    if (path && path.trim()) {
+      uri = `${contentUri}||${path}`;
+    } else {
+      uri = contentUri;
+    }
+    
+    const result = {
+      uri: uri,  // contentUri||path 或 contentUri
       fileName: mediaStoreImage.fileName,
       size: mediaStoreImage.size,
       timestamp: this.convertMediaStoreTimestamp(mediaStoreImage.dateTaken || mediaStoreImage.dateModified || mediaStoreImage.dateAdded),
-      path: mediaStoreImage.path,
       width: mediaStoreImage.width,
       height: mediaStoreImage.height,
       mimeType: mediaStoreImage.mimeType,
       // 元数据标记
       source: 'mediastore'
     };
+    
+    return result;
   }
 
   /**

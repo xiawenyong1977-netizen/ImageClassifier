@@ -1,0 +1,61 @@
+{
+  module: {
+    name: entry,
+    type: entry,
+    description: 芯图相册主模块,
+    mainElement: EntryAbility,
+    deviceTypes: [
+      phone,
+      tablet
+    ],
+    deliveryWithInstall: true,
+    installationFree: false,
+    pages: [
+      pages/Index
+    ],
+    abilities: [
+      {
+        name: EntryAbility,
+        srcEntry: ./ets/entryability/EntryAbility.ets,
+        description: 应用入口,
+        icon: $media:icon,
+        label: $string:entry_MainAbility,
+        startWindowIcon: $media:icon,
+        startWindowBackground: $color:start_window_background,
+        exported: true,
+        skills: [
+          {
+            entities: [
+              entity.system.home
+            ],
+            actions: [
+              action.system.home
+            ]
+          }
+        ]
+      }
+    ],
+    requestPermissions: [
+      {
+        name: ohos.permission.READ_MEDIA,
+        reason: 需要读取相册图片,
+        usedScene: {
+          abilities: [
+            EntryAbility
+          ],
+          when: inuse
+        }
+      },
+      {
+        name: ohos.permission.WRITE_MEDIA,
+        reason: 需要保存图片,
+        usedScene: {
+          abilities: [
+            EntryAbility
+          ],
+          when: inuse
+        }
+      }
+    ]
+  }
+}

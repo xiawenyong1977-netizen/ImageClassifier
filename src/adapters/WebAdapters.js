@@ -92,12 +92,63 @@ class Logger {
 // 创建单例实例
 const logger = new Logger();
 
+// URI分隔符：用于拼装contentUri和relativePath
+// 使用双竖线 || 作为分隔符，确保在content URI中绝对不会出现
+const URI_SEPARATOR = '||';
+
+const isPermissionDenied = (error) => {
+  const message = typeof error === 'string' ? error : error?.message;
+  const code = typeof error === 'object' ? error?.code : undefined;
+  
+  const permissionCodes = ['EACCES', 'EPERM', 'PERMISSION_DENIED', 'SECURITY_EXCEPTION'];
+  if (code && permissionCodes.includes(String(code).toUpperCase())) {
+    return true;
+  }
+  
+  if (!message || typeof message !== 'string') {
+    return false;
+  }
+  
+  const lowerMessage = message.toLowerCase();
+  return [
+    '权限',
+    'permission',
+    'eacces',
+    'eperm',
+    'securityexception',
+    'operation not permitted',
+    'selinux',
+    'requires android.permission',
+  ].some(keyword => lowerMessage.includes(keyword));
+};
+
 // 统一的Platform对象 - 在文件顶部定义，供内部函数使用
 // Web环境的Platform对象（移动端会使用WebAdapters.native.js中的实现）
 export const Platform = { 
   OS: 'web',
   Version: undefined,
   select: (obj) => obj.web || obj.default
+};
+
+// AppState（Web环境模拟，移动端会使用WebAdapters.native.js中的实现）
+export const AppState = {
+  currentState: 'active',
+  addEventListener: (event, handler) => {
+    // Web环境：监听窗口焦点变化
+    if (event === 'change') {
+      const handleFocus = () => handler('active');
+      const handleBlur = () => handler('background');
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('blur', handleBlur);
+      return {
+        remove: () => {
+          window.removeEventListener('focus', handleFocus);
+          window.removeEventListener('blur', handleBlur);
+        }
+      };
+    }
+    return { remove: () => {} };
+  }
 };
 
 // URI转换函数 - 将文件URI转换为Web可访问的格式
@@ -134,8 +185,10 @@ export const normalizeFilePath = (filePath) => {
   
   let normalizedPath = filePath;
   
-  // 移除file://前缀
-  if (normalizedPath.startsWith('file://')) {
+  // 移除file://前缀（支持 file:// 和 file:/// 两种格式）
+  if (normalizedPath.startsWith('file:///')) {
+    normalizedPath = normalizedPath.replace('file:///', '');
+  } else if (normalizedPath.startsWith('file://')) {
     normalizedPath = normalizedPath.replace('file://', '');
   }
   
@@ -144,8 +197,346 @@ export const normalizeFilePath = (filePath) => {
   while (normalizedPath.startsWith('/') && normalizedPath.length > 2 && normalizedPath[2] === ':') {
     normalizedPath = normalizedPath.substring(1);
   }
+
+  // 解码可能存在的URL编码路径（如中文、空格、冒号等）
+  // 需要分段解码，因为路径可能部分编码、部分未编码
+  try {
+    // 对于 Windows 路径，需要分别处理盘符和路径部分
+    if (normalizedPath.match(/^[A-Za-z]:/)) {
+      const driveMatch = normalizedPath.match(/^([A-Za-z]:)(.*)$/);
+      if (driveMatch) {
+        const drive = driveMatch[1]; // 盘符，例如 "C:"
+        const pathPart = driveMatch[2]; // 路径部分
+        
+        // 对路径部分分段解码
+        const decodedPathPart = pathPart.split('/').map(segment => {
+          if (!segment) return segment; // 保留空字符串（用于处理连续斜杠）
+          try {
+            // 尝试解码每个路径段
+            return decodeURIComponent(segment);
+          } catch (e) {
+            // 如果解码失败（可能已经是未编码的），保留原始值
+            return segment;
+          }
+        }).join('/');
+        
+        normalizedPath = drive + decodedPathPart;
+      }
+    } else {
+      // 非 Windows 路径：尝试解码整个路径
+      normalizedPath = decodeURIComponent(normalizedPath);
+    }
+  } catch (e) {
+    // 如果解码失败，保留原始字符串
+    // 这通常意味着路径已经是未编码的格式
+  }
+
+  // URI 标准化：统一使用正斜杠（即使是 Windows 路径）
+  // Node.js 的 fs 模块和 RNFS 都支持正斜杠路径，即使在 Windows 上
+  // 这样保存到数据库的 URI 格式是标准的（使用正斜杠）
+  normalizedPath = normalizedPath.replace(/\\/g, '/');
   
   return normalizedPath;
+};
+
+// 将文件路径转换为 file:// URI，正确处理路径中的特殊字符（包括冒号、中文等）
+// Windows路径中的冒号（除了盘符）需要被编码为 %3A
+// 中文和其他特殊字符需要被正确编码
+export const pathToFileUri = (filePath) => {
+  if (!filePath) return filePath;
+  
+  // 如果已经是 file:// URI，需要确保它被正确编码
+  if (filePath.startsWith('file://')) {
+    // 调用 ensureEncodedFileUri 确保编码正确
+    return ensureEncodedFileUri(filePath);
+  }
+  
+  // 规范化路径：将反斜杠转换为正斜杠
+  let normalizedPath = filePath.replace(/\\/g, '/');
+  
+  // Windows路径处理：保留盘符后的冒号，但编码路径中其他位置的冒号
+  // 例如：C:/test:image/中文/photo.jpg -> file:///C:/test%3Aimage/%E4%B8%AD%E6%96%87/photo.jpg
+  if (Platform.OS === 'web' && normalizedPath.match(/^[A-Za-z]:/)) {
+    // Windows路径：分离盘符和路径部分
+    const driveMatch = normalizedPath.match(/^([A-Za-z]:)(.*)$/);
+    if (driveMatch) {
+      const drive = driveMatch[1]; // 例如 "C:"
+      let pathPart = driveMatch[2]; // 例如 "/test:image/中文/photo.jpg"
+      
+      // 确保路径部分以 / 开头（如果没有）
+      if (!pathPart.startsWith('/')) {
+        pathPart = '/' + pathPart;
+      }
+      
+      // 对路径部分进行编码，分段处理每个路径段
+      // 这样可以正确处理中文、冒号、空格等特殊字符
+      const encodedPath = pathPart.split('/').map((segment, index) => {
+        // 第一个空字符串（由于 split 产生的）保留为空字符串
+        if (!segment) {
+          return segment;
+        }
+        
+        // 对每个路径段进行编码，处理冒号、中文等特殊字符
+        // encodeURIComponent 会正确编码：冒号(:) -> %3A，中文 -> %E4%B8%AD%E6%96%87 等
+        return encodeURIComponent(segment);
+      }).join('/');
+      
+      // PC端使用 file:/// 格式（三个斜杠）
+      return `file:///${drive}${encodedPath}`;
+    }
+  }
+  
+  // 非Windows路径或无法识别的格式：分段编码路径
+  // 使用 split 和 map 确保每个路径段都被正确编码
+  const encodedPath = normalizedPath.split('/').map(segment => {
+    if (!segment) {
+      return segment; // 保留空字符串
+    }
+    return encodeURIComponent(segment);
+  }).join('/');
+  
+  // PC端使用 file:/// 格式，移动端使用 file:// 格式
+  return Platform.OS === 'web' ? `file:///${encodedPath}` : `file://${encodedPath}`;
+};
+
+const ensureEncodedFileUri = (uri) => {
+  if (!uri || typeof uri !== 'string') {
+    return null;
+  }
+
+  if (!uri.startsWith('file://')) {
+    return pathToFileUri(uri);
+  }
+
+  try {
+    const tripleSlash = uri.startsWith('file:///');
+    const prefix = tripleSlash ? 'file:///' : 'file://';
+    let pathPart = uri.slice(prefix.length);
+
+    // 移除前导斜杠（如果有）
+    if (pathPart.startsWith('/')) {
+      pathPart = pathPart.replace(/^\/+/, '');
+    }
+
+    // 对于 Windows 路径，需要特殊处理盘符
+    if (pathPart.match(/^[A-Za-z]:/)) {
+      const driveMatch = pathPart.match(/^([A-Za-z]:)(.*)$/);
+      if (driveMatch) {
+        const drive = driveMatch[1]; // 盘符，例如 "C:"
+        let pathSegments = driveMatch[2]; // 路径部分
+        
+        // 确保路径部分以 / 开头（如果没有）
+        if (!pathSegments.startsWith('/')) {
+          pathSegments = '/' + pathSegments;
+        }
+        
+        // 分段解码和重新编码，确保所有特殊字符（包括中文、冒号）都被正确编码
+        const encodedPath = pathSegments.split('/').map((segment) => {
+          if (!segment) {
+            return segment; // 保留空字符串
+          }
+          
+          // 先解码（如果已经编码），然后重新编码
+          // 这样可以确保所有路径段都被正确编码
+          let decodedSegment = segment;
+          try {
+            decodedSegment = decodeURIComponent(segment);
+          } catch (decodeError) {
+            // 如果解码失败（可能已经是未编码的），使用原始值
+            decodedSegment = segment;
+          }
+          
+          // 重新编码，确保冒号、中文等特殊字符都被正确编码
+          return encodeURIComponent(decodedSegment);
+        }).join('/');
+        
+        return `file:///${drive}${encodedPath}`;
+      }
+    }
+    
+    // 非 Windows 路径：分段解码和重新编码
+    const segments = pathPart.split('/').map((segment) => {
+      if (!segment) {
+        return segment; // 保留空字符串
+      }
+      
+      // 先解码（如果已经编码），然后重新编码
+      let decodedSegment = segment;
+      try {
+        decodedSegment = decodeURIComponent(segment);
+      } catch (decodeError) {
+        // 如果解码失败（可能已经是未编码的），使用原始值
+        decodedSegment = segment;
+      }
+      
+      // 重新编码，确保所有特殊字符都被正确编码
+      return encodeURIComponent(decodedSegment);
+    });
+    
+    return `${prefix}${segments.join('/')}`;
+  } catch (error) {
+    logger.warn(`⚠️ ensureEncodedFileUri failed: ${error.message}`);
+    return uri;
+  }
+};
+
+/**
+ * 统一处理路径参数，将字符串或对象转换为统一的URI字符串
+ * @param {string|object} input - 可以是URI字符串或图片对象
+ * @returns {string|null} URI字符串（从对象的uri字段提取，或直接返回字符串）
+ */
+const normalizePathParams = (input) => {
+  if (!input) {
+    return null;
+  }
+
+  // 字符串输入：直接返回（URI字符串，如 "content://..." 或 "file://..."）
+  if (typeof input === 'string') {
+    return input.trim();
+  }
+
+  // 对象输入：提取uri字段（图片对象，如 { uri: '...', fileName: '...', ... }）
+  if (typeof input === 'object') {
+    return input.uri ?? null;
+  }
+
+  return null;
+};
+
+/**
+ * 解析拼装的URI（contentUri||relativePath 格式）
+ * @param {string} uri - 可能是拼装的URI或普通URI
+ * @returns {Object} { contentUri, relativePath, isCombined }
+ */
+const parseCombinedUri = (uri) => {
+  if (!uri || typeof uri !== 'string') {
+    return { contentUri: null, relativePath: null, isCombined: false };
+  }
+  
+  // 检查是否包含分隔符 ||
+  const separatorIndex = uri.indexOf(URI_SEPARATOR);
+  if (separatorIndex === -1) {
+    // 没有分隔符，说明是普通URI
+    return { 
+      contentUri: uri.startsWith('content://') ? uri : null,
+      relativePath: null, 
+      isCombined: false 
+    };
+  }
+  
+  // 有分隔符，拆分
+  const contentUri = uri.substring(0, separatorIndex);
+  const relativePath = uri.substring(separatorIndex + URI_SEPARATOR.length);
+  
+  return { 
+    contentUri, 
+    relativePath, 
+    isCombined: true 
+  };
+};
+
+
+
+/**
+ * 从输入中提取本地文件路径
+ * @param {string|object} input - 可以是URI字符串或图片对象
+ * @returns {string|null} 本地文件路径（相对路径或绝对路径），如果是content:// URI则返回null
+ */
+export const getLocalPath = (input) => {
+  const originalUri = normalizePathParams(input);
+  
+  // 如果没有originalUri，返回null
+  if (!originalUri || typeof originalUri !== 'string') {
+    return null;
+  }
+  
+  // 检查是否是拼装格式（contentUri||path）
+  // path可能是相对路径（Android 10+）或绝对路径（Android 9及以下）
+  const { relativePath, isCombined } = parseCombinedUri(originalUri);
+  
+  if (isCombined && relativePath) {
+    // 是拼装格式，直接返回path部分（MediaStore返回的路径已经是标准格式）
+    return relativePath;
+  }
+  
+  // 不是拼装格式，按原逻辑处理
+  if (originalUri.startsWith('content://')) {
+    // content:// URI 无法直接获取本地路径
+    return null;
+  }
+  
+  // 普通路径或file:// URI，标准化后返回
+  return normalizeFilePath(originalUri);
+};
+
+/**
+ * 从输入中提取file:// URI
+ * @param {string|object} input - 可以是URI字符串或图片对象
+ * @returns {string|null} file:// URI，如果是content:// URI则返回null
+ */
+export const getFileUri = (input) => {
+  const originalUri = normalizePathParams(input);
+
+  if (!originalUri || typeof originalUri !== 'string') {
+    return null;
+  }
+
+  if (originalUri.startsWith('content://')) {
+    return null;
+  }
+
+  if (originalUri.startsWith('file://')) {
+    return ensureEncodedFileUri(originalUri);
+  }
+
+  const normalizedPath = normalizeFilePath(originalUri);
+  return normalizedPath ? pathToFileUri(normalizedPath) : null;
+};
+
+/**
+ * 从输入中提取content:// URI
+ * @param {string|object} input - 可以是URI字符串或图片对象
+ * @returns {string|null} content:// URI，如果不是content:// URI则返回null
+ */
+export const getContentUri = (input) => {
+  const originalUri = normalizePathParams(input);
+  
+  if (!originalUri || typeof originalUri !== 'string') {
+    return null;
+  }
+  
+  // 检查originalUri是否是拼装格式（contentUri||relativePath）
+  const { contentUri: parsedContentUri, isCombined } = parseCombinedUri(originalUri);
+  
+  if (isCombined && parsedContentUri) {
+    // 是拼装格式，返回contentUri部分
+    return parsedContentUri;
+  }
+  
+  // 不是拼装格式，按原逻辑处理
+  if (originalUri.startsWith('content://')) {
+    return originalUri;
+  }
+
+  return null;
+};
+
+/**
+ * 获取图片URI（自动选择content://或file://）
+ * 移动端返回content:// URI，PC端返回file:// URI
+ * @param {string|Object} input - originalUri字符串或包含uri字段的对象
+ * @returns {string|null} content:// URI 或 file:// URI，如果无法获取则返回null
+ */
+export const getUri = (input) => {
+  // 优先尝试获取content:// URI（移动端）
+  // getContentUri内部已经处理了拼装格式的解析
+  const contentUri = getContentUri(input);
+  if (contentUri) {
+    return contentUri;
+  }
+  
+  // 如果没有content:// URI，尝试获取file:// URI（PC端）
+  return getFileUri(input);
 };
 
 // 文件信息获取函数 - 统一处理不同平台的文件信息获取
@@ -262,6 +653,8 @@ export const PermissionsAndroid = {
     READ_EXTERNAL_STORAGE: 'android.permission.READ_EXTERNAL_STORAGE',
     WRITE_EXTERNAL_STORAGE: 'android.permission.WRITE_EXTERNAL_STORAGE',
     READ_MEDIA_IMAGES: 'android.permission.READ_MEDIA_IMAGES',
+    ACCESS_MEDIA_LOCATION: 'android.permission.ACCESS_MEDIA_LOCATION',
+    POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
     CAMERA: 'android.permission.CAMERA',
   },
   RESULTS: {
@@ -417,14 +810,18 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
+        const path = eval('require("path")');
         
-        const files = fs.readdirSync(dirPath);
+        // 规范化路径：移除 file:// 前缀，确保使用正确的路径格式
+        let normalizedDirPath = normalizeFilePath(dirPath);
+        
+        // 使用 path.join 确保路径正确拼接（处理包含冒号的路径）
+        const files = fs.readdirSync(normalizedDirPath);
         const result = [];
         
         for (const file of files) {
-          // 确保路径正确拼接，避免缺少路径分隔符
-          const normalizedDirPath = dirPath.replace(/\\/g, '/').replace(/\/$/, '');
-          const fullPath = `${normalizedDirPath}/${file}`;
+          // 使用 path.join 确保路径正确拼接，正确处理包含冒号的路径
+          const fullPath = path.join(normalizedDirPath, file);
           const stats = fs.statSync(fullPath);
           
           const item = {
@@ -541,12 +938,14 @@ export const RNFS = {
             }
             logger.warn('⚠️ MediaStore删除失败，降级到RNFS');
           } catch (error) {
-            logger.warn('⚠️ MediaStore删除失败:', error.message);
+            const mediaStoreLog = isPermissionDenied(error) ? logger.info.bind(logger) : logger.warn.bind(logger);
+            mediaStoreLog('⚠️ MediaStore删除失败:', error?.message || error);
             // 继续尝试RNFS
           }
         }
       } catch (error) {
-        logger.warn('⚠️ MediaStore删除失败:', error.message);
+        const mediaStoreLog = isPermissionDenied(error) ? logger.info.bind(logger) : logger.warn.bind(logger);
+        mediaStoreLog('⚠️ MediaStore删除失败:', error?.message || error);
       }
       
       // 策略2: 降级到RNFS（Android 9及以下，或MediaStore失败时）
@@ -566,15 +965,23 @@ export const RNFS = {
         // 验证文件是否真的被删除了
         const stillExists = await RNFS.exists(cleanPath);
         if (stillExists) {
-          logger.error('❌ RNFS删除失败，文件仍然存在:', cleanPath);
-          throw new Error('文件删除失败，文件仍然存在');
+          logger.info('ℹ️ RNFS删除失败，文件仍然存在（可能缺少删除权限）:', cleanPath);
+          const error = new Error('文件删除失败，文件仍然存在');
+          error.code = 'PERMISSION_DENIED';
+          throw error;
         }
         
         logger.debug('🗑️ RNFS删除成功:', cleanPath);
         return true;
       } catch (error) {
-        logger.error('❌ RNFS删除失败:', error.message);
-        throw error;
+        const isPerm = isPermissionDenied(error);
+        // 删除失败通常是权限问题，属于正常情况，统一使用 debug 级别
+        logger.debug('RNFS删除失败（可能是权限问题）:', error?.message || error);
+        const errObj = error instanceof Error ? error : new Error(error?.message || String(error || '删除失败'));
+        if (isPerm && !errObj.code) {
+          errObj.code = 'PERMISSION_DENIED';
+        }
+        throw errObj;
       }
     } else {
       // iOS或其他平台：直接使用RNFS

@@ -6,10 +6,10 @@
  * 2. 左右滑动切换
  * 3. 缩放和平移
  * 4. 显示图片信息
- * 5. 图片操作（删除、暂存、重新分类、分享）
+ * 5. 图片操作（删除、暂存、重新分类、分享、照片创玩）
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,11 +20,14 @@ import {
   FlatList,
   ScrollView,
   Modal,
+  Share,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
-import { logger } from '../../adapters/WebAdapters';
+import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -46,22 +49,47 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const [allImagesState, setAllImagesState] = useState(allImages); // 可变的图片列表
   const [showInfo, setShowInfo] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [showEnhancePresets, setShowEnhancePresets] = useState(false);
+  const [enhancePresets, setEnhancePresets] = useState({});
   const flatListRef = useRef(null);
+
+  // 使用 getUri 统一获取图片 URI
+  const resolveImageUri = useCallback((image) => {
+    if (!image) return null;
+    return getUri(image);
+  }, []);
+
+  const resolveLocalPath = useCallback((image) => {
+    if (!image) return null;
+    
+    // 使用getLocalPath获取path（可能是相对路径或绝对路径）
+    // getLocalPath会自动处理拼装格式（contentUri||path），提取path部分
+    // 如果image.uri是file:// URI，getLocalPath也会自动处理
+    const path = getLocalPath(image);
+    if (path) {
+      return path;
+    }
+    
+    // 最后的回退：直接使用image.path字段（如果有）
+    return image.path || null;
+  }, []);
 
   // 获取图片尺寸（优先使用数据库中的）
   const imageDimensions = currentImage?.imageDimensions || 
     (currentImage?.width && currentImage?.height ? 
       { width: currentImage.width, height: currentImage.height } : null);
+  const displayUri = resolveImageUri(currentImage);
+  const displayLocalPath = resolveLocalPath(currentImage);
   
   // 调试：检查当前图片是否有效
   React.useEffect(() => {
-    if (!currentImage || !currentImage.uri) {
+    if (!currentImage || !displayUri) {
       logger.error(`⚠️ 当前图片无效！索引：${currentImageIndex}，总数：${allImagesState.length}`);
       logger.error('当前图片对象:', currentImage);
     } else {
-      logger.debug(`✅ 当前图片：索引${currentImageIndex}/${allImagesState.length}，URI: ${currentImage.uri?.substring(0, 50)}...`);
+      logger.debug(`✅ 当前图片：索引${currentImageIndex}/${allImagesState.length}，URI: ${displayUri?.substring(0, 50)}...`);
     }
-  }, [currentImageIndex]);
+  }, [currentImageIndex, currentImage, allImagesState.length, displayUri]);
 
   // 初始化时滚动到正确的起始位置
   React.useEffect(() => {
@@ -80,9 +108,26 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // 当图片索引变化时，加载完整的图片详情
   React.useEffect(() => {
     const loadImageDetails = async () => {
+      // 检查索引是否有效，如果无效则自动调整
+      if (currentImageIndex < 0 || currentImageIndex >= allImagesState.length) {
+        if (allImagesState.length > 0) {
+          // 自动调整索引到有效范围（如果超出范围，调整到最后一张）
+          const adjustedIndex = currentImageIndex >= allImagesState.length 
+            ? allImagesState.length - 1 
+            : Math.max(0, currentImageIndex);
+          logger.debug(`图片索引无效：${currentImageIndex}/${allImagesState.length}，自动调整到：${adjustedIndex}`);
+          setCurrentImageIndex(adjustedIndex);
+          return; // 等待索引更新后重新触发 useEffect
+        } else {
+          // 列表为空，无法加载
+          logger.warn(`图片索引无效：${currentImageIndex}/${allImagesState.length}，列表为空，跳过详情加载`);
+          return;
+        }
+      }
+      
       const imageData = allImagesState[currentImageIndex];
       if (!imageData || !imageData.id) {
-        logger.warn('图片数据无效，跳过详情加载');
+        logger.warn(`图片数据无效（索引${currentImageIndex}），跳过详情加载`);
         return;
       }
 
@@ -160,25 +205,36 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         return false;
       }
       
-      // 更新图片列表
-      setAllImagesState(updatedImages);
-      
-      // 调整当前索引
+      // 调整当前索引（在更新列表之前）
       let newIndex = currentImageIndex;
       if (currentImageIndex >= updatedImages.length) {
         // 如果当前索引超出范围，跳到最后一张
-        newIndex = updatedImages.length - 1;
+        newIndex = Math.max(0, updatedImages.length - 1);
         logger.debug(`索引超出范围，调整到最后一张：${newIndex}`);
       }
       
+      // 使用函数式更新确保索引和列表同步更新，避免 useEffect 在索引更新前执行
+      setAllImagesState(updatedImages);
+      if (newIndex !== currentImageIndex) {
+        // 使用函数式更新，确保使用最新的列表状态
+        setCurrentImageIndex(prevIndex => {
+          // 再次检查，确保索引在有效范围内
+          if (prevIndex >= updatedImages.length && updatedImages.length > 0) {
+            const adjustedIndex = updatedImages.length - 1;
+            logger.debug(`函数式更新：调整索引：${prevIndex} → ${adjustedIndex}`);
+            return adjustedIndex;
+          }
+          return newIndex;
+        });
+      }
+      
       // 滚动到正确位置
-      if (flatListRef.current && newIndex !== currentImageIndex) {
+      if (flatListRef.current) {
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({
             index: newIndex,
             animated: true
           });
-          setCurrentImageIndex(newIndex);
         }, 100);
       }
       
@@ -187,6 +243,40 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       logger.error('❌ 重新加载图片列表失败:', error);
       return false;
     }
+  };
+
+  /**
+   * 重新加载图片列表并处理索引调整（公共函数）
+   * @param {string} operationDescription - 操作描述，用于日志（如："删除"、"标记为待处置"、"修改分类"）
+   * @returns {Promise<boolean>} - 是否成功重新加载
+   */
+  const reloadImageListWithIndexAdjustment = async (operationDescription) => {
+    // 保存当前索引，用于判断是否是最后一张
+    const wasLastImage = currentImageIndex === allImagesState.length - 1;
+    
+    // 重新加载图片列表（reloadImageList 会处理索引调整）
+    const reloadSuccess = await reloadImageList();
+    
+    // 如果删除的是最后一张，使用函数式更新确保索引正确
+    // 使用 setTimeout 确保状态更新完成后再检查
+    if (reloadSuccess && wasLastImage) {
+      setTimeout(() => {
+        // 使用函数式更新获取最新的列表状态并调整索引
+        setAllImagesState(prevList => {
+          setCurrentImageIndex(prevIndex => {
+            if (prevIndex >= prevList.length && prevList.length > 0) {
+              const adjustedIndex = prevList.length - 1;
+              logger.debug(`${operationDescription}最后一张后，调整索引：${prevIndex} → ${adjustedIndex}`);
+              return adjustedIndex;
+            }
+            return prevIndex;
+          });
+          return prevList;
+        });
+      }, 50);
+    }
+    
+    return reloadSuccess;
   };
 
   /**
@@ -328,16 +418,28 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 
                 logger.debug('删除结果:', result);
               if (result.success) {
-                  logger.debug('删除成功，准备返回上一页...');
-                  Alert.alert('成功', '图片已删除', [
-                    { text: '确定', onPress: goBack },
-                  ]);
+                  logger.debug('删除成功，准备更新列表...');
+                  
+                  // 重新加载图片列表并处理索引调整
+                  const reloadSuccess = await reloadImageListWithIndexAdjustment('删除');
+                  
+                  // 如果列表为空，reloadImageList 已经处理了返回上一页的逻辑
+                  // 如果列表不为空，继续浏览
+                  if (reloadSuccess) {
+                    // 显示成功提示，但不自动返回
+                    Alert.alert('成功', '图片已删除');
+                  } else {
+                    // 列表为空，reloadImageList 已经处理了返回逻辑，这里不需要额外操作
+                    logger.debug('列表已空，已返回上一页');
+                  }
               } else {
-                  logger.error('删除失败:', result);
+                  // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
+                  logger.debug('删除失败（可能是权限问题）:', result);
                 Alert.alert('删除失败', `删除失败，请检查文件权限`);
               }
             } catch (error) {
-                logger.error('❌ 删除图片失败:', error);
+                // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
+                logger.debug('删除图片失败（可能是权限问题）:', error);
               Alert.alert('错误', '删除失败，请重试');
             }
           },
@@ -376,8 +478,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 
                 logger.debug('标记为待处置成功');
                 
-                // 重新加载图片列表
-                await reloadImageList();
+                // 重新加载图片列表并处理索引调整
+                await reloadImageListWithIndexAdjustment('标记为待处置');
     } catch (error) {
                 logger.error('标记为待处置失败:', error);
                 Alert.alert('错误', '标记为待处置失败，请重试');
@@ -456,7 +558,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       // 重新加载图片列表（如果是从分类页进入的）
       if (category && category !== newCategory) {
         logger.debug('分类已改变，重新加载图片列表');
-        await reloadImageList();
+        await reloadImageListWithIndexAdjustment('修改分类');
       }
     } catch (error) {
       logger.error('修改分类失败:', error);
@@ -464,6 +566,148 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     }
   };
 
+  /**
+   * 分享当前图片
+   */
+  const handleShare = async () => {
+    const shareUri = resolveImageUri(currentImage);
+    if (!currentImage || !shareUri) {
+      Alert.alert('错误', '图片信息不完整，无法分享');
+      return;
+    }
+
+    try {
+      const urls = [shareUri];
+      
+      // 优先尝试使用原生模块分享（支持单张和多张）
+      const { MultiImageShareModule } = NativeModules;
+      if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
+        // 使用原生模块分享
+        await MultiImageShareModule.shareMultipleImages(urls);
+        logger.debug('✅ 原生模块分享成功');
+      } else {
+        // 原生模块不可用，使用React Native Share
+        // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
+        const result = await Share.share({
+          url: shareUri,
+          title: '芯图相册',
+        });
+        
+        if (result.action === Share.sharedAction) {
+          logger.debug('✅ 分享成功');
+        } else if (result.action === Share.dismissedAction) {
+          logger.debug('用户取消分享');
+        }
+      }
+    } catch (error) {
+      logger.error('❌ 分享失败:', error);
+      Alert.alert('分享失败', '分享失败，请重试');
+    }
+  };
+
+  /**
+   * 打开照片创玩面板
+   */
+  const openEnhancePanel = async () => {
+    try {
+      // 切换展开/收起
+      if (showEnhancePresets) {
+        setShowEnhancePresets(false);
+        return;
+      }
+      const settings = await UnifiedDataService.readSettings();
+      const presets = settings?.aiEnhancePresets || {};
+      setEnhancePresets(presets);
+      setShowEnhancePresets(true);
+    } catch (error) {
+      logger.error('加载增强方案失败:', error);
+      Alert.alert('错误', '加载增强方案失败，请稍后重试');
+    }
+  };
+
+  /**
+   * 点击增强方案：数量与额度检查
+   */
+  const handleEnhancePresetPress = async (presetId) => {
+    try {
+      const count = 1; // 单张图片
+      
+      // 会员状态检查
+      const { isMember } = await WeChatAuthService.getMembershipStatus();
+      if (!isMember) {
+        Alert.alert('提示', '该功能仅对会员开放，请在设置页面开通终身会员后再试。');
+        return;
+      }
+
+      // 额度检查
+      const credits = await WeChatAuthService.getCredits();
+      if (!credits || typeof credits.remaining !== 'number') {
+        Alert.alert('错误', '获取额度失败，请稍后重试');
+        return;
+      }
+      if (credits.remaining < count) {
+        Alert.alert('提示', '剩余额度不足，请去"芯图相册"服务号购买额度');
+        return;
+      }
+
+      // 弹出二次确认：显示剩余额度与本次消耗额度
+      Alert.alert(
+        '使用额度确认',
+        `本次将消耗：${count}\n剩余额度：${credits.remaining}\n\n是否继续？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确认',
+            style: 'default',
+            onPress: async () => {
+              try {
+                setShowEnhancePresets(false);
+                const presetName = (enhancePresets && enhancePresets[presetId] && enhancePresets[presetId].name) ? enhancePresets[presetId].name : presetId;
+                await performEnhance(presetId, presetName);
+              } catch (e) {
+                logger.error('提交增强失败:', e);
+                Alert.alert('错误', e.message || '提交失败，请稍后重试');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      logger.error('增强检查失败:', error);
+      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+    }
+  };
+
+  /**
+   * 执行增强
+   */
+  const performEnhance = async (presetId, presetDisplayName) => {
+    try {
+      logger.debug('准备提交增强任务', { presetId, count: 1 });
+      
+      const enhanceUri = resolveImageUri(currentImage);
+      if (!currentImage || !currentImage.id || !enhanceUri) {
+        Alert.alert('错误', '图片信息不完整');
+        return;
+      }
+
+      const selectedItems = [{ id: currentImage.id, uri: enhanceUri }];
+
+      // 直接导航到结果页，任务提交和轮询在结果页中处理
+      if (typeof navigation !== 'undefined') {
+        navigation.navigate('EnhanceResult', {
+          presetName: presetDisplayName,
+          presetId: presetId,
+          selected: selectedItems,
+          results: {},
+          initialIndex: 0,
+        });
+      }
+    } catch (error) {
+      logger.error('导航到结果页失败:', error);
+      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+    }
+  };
 
   // ==================== 渲染函数 ====================
 
@@ -573,8 +817,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
             <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>文件路径:</Text>
             <Text style={styles.infoValue} numberOfLines={3}>
-              {currentImage.uri ? currentImage.uri.replace('file://', '') : '未知'}
-              </Text>
+              {displayLocalPath || (displayUri ? displayUri.replace('file://', '') : '未知')}
+            </Text>
             </View>
 
             <View style={styles.infoRow}>
@@ -698,6 +942,41 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
+   * 渲染照片创玩面板
+   */
+  const renderEnhancePanel = () => {
+    if (!showEnhancePresets) return null;
+
+    return (
+      <View style={styles.enhancePanel}>
+        <ScrollView
+          style={styles.enhanceList}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
+          contentContainerStyle={styles.enhanceListContent}
+        >
+          {Object.entries(enhancePresets)
+            .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
+            .map(([presetId, preset], index) => (
+              <TouchableOpacity
+                key={presetId}
+                style={[
+                  styles.enhancePresetItem,
+                  ((index + 1) % 4 !== 0) && { marginRight: 6 },
+                ]}
+                onPress={() => handleEnhancePresetPress(presetId)}
+              >
+                <Text style={styles.presetName} numberOfLines={1}>
+                  {preset.name || presetId}
+                </Text>
+              </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  /**
    * 渲染底部操作栏
    */
   const renderActions = () => {
@@ -705,6 +984,9 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     
     return (
       <View style={styles.actionsBar}>
+        {/* 照片创玩面板 */}
+        {isToBeCleanedCategory && renderEnhancePanel()}
+        
         {/* 删除/暂存按钮（根据当前分类显示） */}
         <TouchableOpacity style={styles.actionButton} onPress={handleDelete}>
           <Text style={styles.actionIcon}>{isToBeCleanedCategory ? '🗑️' : '📦'}</Text>
@@ -715,7 +997,21 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           <Text style={styles.actionIcon}>🏷️</Text>
           <Text style={styles.actionLabel}>分类</Text>
         </TouchableOpacity>
-        </View>
+        
+        {/* 照片创玩按钮（仅在暂存箱显示） */}
+        {isToBeCleanedCategory && (
+          <TouchableOpacity style={styles.actionButton} onPress={openEnhancePanel}>
+            <Text style={styles.actionIcon}>✨</Text>
+            <Text style={styles.actionLabel}>照片创玩</Text>
+          </TouchableOpacity>
+        )}
+        
+        {/* 分享按钮 */}
+        <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+          <Text style={styles.actionIcon}>📤</Text>
+          <Text style={styles.actionLabel}>分享</Text>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -798,18 +1094,27 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               setCurrentImageIndex(index);
             }
           }}
-          renderItem={({ item, index }) => (
-            <View style={styles.imagePage}>
-              <Image
-                source={{ uri: item.uri }}
-                style={styles.image}
-                resizeMode="contain"
-                onError={(e) => {
-                  logger.error(`❌ 图片[${index}]加载失败: ${e.nativeEvent.error}`);
-                }}
-              />
-          </View>
-          )}
+          renderItem={({ item, index }) => {
+            const itemUri = resolveImageUri(item);
+            return (
+              <View style={styles.imagePage}>
+                {itemUri ? (
+                  <Image
+                    source={{ uri: itemUri }}
+                    style={styles.image}
+                    resizeMode="contain"
+                    onError={(e) => {
+                      logger.error(`❌ 图片[${index}]加载失败: ${e.nativeEvent.error}`);
+                    }}
+                  />
+                ) : (
+                  <View style={[styles.image, styles.imagePlaceholder]}>
+                    <Text style={styles.placeholderText}>无法加载图片</Text>
+                  </View>
+                )}
+            </View>
+            );
+          }}
         />
 
         {/* 导航箭头 */}
@@ -888,7 +1193,13 @@ const styles = StyleSheet.create({
   imagePlaceholder: {
     width: SCREEN_WIDTH,
     height: '100%',
-    backgroundColor: '#000000',
+    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    color: '#8E8E93',
+    fontSize: 14,
   },
   
   // 导航箭头样式已移除 - 使用纯手势操作
@@ -970,6 +1281,7 @@ const styles = StyleSheet.create({
   
   // 操作栏
   actionsBar: {
+    position: 'relative',
     flexDirection: 'row',
     backgroundColor: 'rgba(28, 28, 30, 0.9)',
     paddingVertical: 12,
@@ -977,9 +1289,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
   },
   actionButton: {
+    flex: 1,
     alignItems: 'center',
     padding: 8,
-    minWidth: 60,
   },
   actionIcon: {
     fontSize: 24,
@@ -1036,6 +1348,48 @@ const styles = StyleSheet.create({
   selectedCategoryText: {
     color: '#007AFF',
     fontWeight: 'bold',
+  },
+  
+  // 照片创玩面板
+  enhancePanel: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 88,
+    backgroundColor: 'rgba(28, 28, 30, 0.96)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3A3A3C',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  enhanceList: {
+    maxHeight: 96,
+    marginTop: 6,
+  },
+  enhanceListContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 0,
+  },
+  enhancePresetItem: {
+    width: (SCREEN_WIDTH - 36 - 6 * 3) / 4,
+    height: 44,
+    marginBottom: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2C2C2E',
+    backgroundColor: 'rgba(44, 44, 46, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  presetName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
   },
 });
 
