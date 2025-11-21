@@ -74,9 +74,9 @@
 
 ### 下载安装
 
-**方式1：官网下载**
-1. 访问官网：https://www.xintuxiangce.top/
-2. 点击下载按钮
+**方式1：官网下载（推荐）**
+1. 访问官网：https://www.xintuxiangce.top
+2. 点击下载按钮，选择对应平台版本
 3. 运行安装程序
 4. 按照提示完成安装
 
@@ -253,13 +253,13 @@ npx react-native run-ios        # 运行iOS版本
 
 ### PC桌面版
 
-![主界面](public/readme/首页-1.jpg)
+![主界面](https://www.xintuxiangce.top/images/首页-1.jpg)
 *主界面 - 查看分类统计和最近照片*
 
-![分类详情](public/readme/分类进展和统计信息.jpg)
+![分类详情](https://www.xintuxiangce.top/images/分类进展和统计信息.jpg)
 *分类详情 - 查看各个类别的照片*
 
-![暂存箱](public/readme/暂存.jpg)
+![暂存箱](https://www.xintuxiangce.top/images/暂存.jpg)
 *暂存箱 - 批量处理照片*
 
 ## 🤝 贡献指南
@@ -282,11 +282,11 @@ npx react-native run-ios        # 运行iOS版本
 
 ## 📚 相关资源
 
-- [官方网站](https://www.xintuxiangce.top/) - 软件下载和使用指南
-- [使用教程](https://www.xintuxiangce.top/blog.html) - 详细的使用教程
-- [技术博客](https://www.xintuxiangce.top/blog.html) - AI照片分类技术解析
-- [常见问题](https://www.xintuxiangce.top/#faq) - FAQ解答
-- [更新日志](https://github.com/xiawenyong1977-netizen/ImageClassifier/releases) - 版本更新记录
+- 🌐 [官方网站](https://www.xintuxiangce.top) - 软件下载和使用指南
+- 📖 [使用教程](https://www.xintuxiangce.top/blog.html) - 详细的使用教程
+- 💡 [技术博客](https://www.xintuxiangce.top/blog.html) - AI照片分类技术解析
+- ❓ [常见问题](https://www.xintuxiangce.top/#faq) - FAQ解答
+- 📦 [更新日志](https://github.com/xiawenyong1977-netizen/ImageClassifier/releases) - 版本更新记录
 
 ## 🔐 权限说明
 
@@ -397,12 +397,12 @@ cd android
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-## 📞 联系方式
+## 📞 联系我们
 
 - 🌐 **官网**：https://www.xintuxiangce.top
-- 📧 **邮箱**：contact@xintuxiangce.top
+- 📧 **邮箱**：xiawenyong@xintuxiangce.top
 - 💬 **问题反馈**：[GitHub Issues](https://github.com/xiawenyong1977-netizen/ImageClassifier/issues)
-- 📱 **技术支持**：通过官网联系表单
+- 📱 **技术支持**：通过官网联系表单获取帮助
 
 ## 🙏 致谢
 

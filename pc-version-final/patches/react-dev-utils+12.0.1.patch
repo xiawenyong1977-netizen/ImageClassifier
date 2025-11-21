@@ -1,0 +1,28 @@
+diff --git a/node_modules/react-dev-utils/ModuleScopePlugin.js b/node_modules/react-dev-utils/ModuleScopePlugin.js
+index e2c16ff..b2fe90f 100644
+--- a/node_modules/react-dev-utils/ModuleScopePlugin.js
++++ b/node_modules/react-dev-utils/ModuleScopePlugin.js
+@@ -27,15 +27,21 @@ class ModuleScopePlugin {
+         if (!request.context.issuer) {
+           return callback();
+         }
++        // 🔧 修复：检查 descriptionFileRoot 是否存在
+         if (
+           // If this resolves to a node_module, we don't care what happens next
+-          request.descriptionFileRoot.indexOf('/node_modules/') !== -1 ||
+-          request.descriptionFileRoot.indexOf('\\node_modules\\') !== -1 ||
++          (request.descriptionFileRoot && request.descriptionFileRoot.indexOf('/node_modules/') !== -1) ||
++          (request.descriptionFileRoot && request.descriptionFileRoot.indexOf('\\node_modules\\') !== -1) ||
+           // Make sure this request was manual
+           !request.__innerRequest_request
+         ) {
+           return callback();
+         }
++        
++        // 🔧 如果 descriptionFileRoot 不存在，跳过检查
++        if (!request.descriptionFileRoot) {
++          return callback();
++        }
+         // Resolve the issuer from our appSrc and make sure it's one of our files
+         // Maybe an indexOf === 0 would be better?
+         if (
