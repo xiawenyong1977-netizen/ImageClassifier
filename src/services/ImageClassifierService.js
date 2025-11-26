@@ -1593,6 +1593,66 @@ class ImageClassifierService {
     }
   }
 
+  /**
+   * 翻译ImageNet类别ID为英文名称
+   * @param {string} classId - 如 "imagenet_class_664"
+   * @returns {string} 英文名称或原ID
+   */
+  translateImageNetClass(classId) {
+    try {
+      // 提取数字部分
+      const match = classId.match(/imagenet_class_(\d+)/);
+      if (!match) {
+        return classId; // 如果不是标准格式，返回原ID
+      }
+      
+      const classNumber = parseInt(match[1]);
+      
+      // 🔥 修复：通过 configService 根据 ID 获取类别信息，而不是通过数组索引
+      // 因为数组索引和类别 ID 可能不匹配（如果 ID 不是从 0 开始或有缺失）
+      const classInfo = this.configService.getMobileNetV3ClassById(classNumber);
+      if (classInfo && classInfo.english) {
+        return classInfo.english;
+      }
+      
+      // 如果找不到，返回去掉前缀的数字ID
+      return classNumber.toString();
+    } catch (error) {
+      logger.warn(`翻译ImageNet类别失败: ${classId}`, error);
+      return classId;
+    }
+  }
+
+  /**
+   * 翻译 mobileNetV3Detections 中的 imagenet_class_xxx 为英文名称
+   * @param {Object} mobileNetV3Detections - MobileNetV3检测结果
+   * @returns {Object} 翻译后的检测结果
+   */
+  translateMobileNetV3Detections(mobileNetV3Detections) {
+    if (!mobileNetV3Detections || !mobileNetV3Detections.predictions || !Array.isArray(mobileNetV3Detections.predictions)) {
+      return mobileNetV3Detections;
+    }
+    
+    const translated = {
+      ...mobileNetV3Detections,
+      predictions: mobileNetV3Detections.predictions.map(prediction => {
+        if (prediction.class && typeof prediction.class === 'string' && prediction.class.startsWith('imagenet_class_')) {
+          const translatedName = this.translateImageNetClass(prediction.class);
+          if (translatedName !== prediction.class) {
+            logger.debug(`🔄 翻译 MobileNetV3: ${prediction.class} -> ${translatedName}`);
+          }
+          return {
+            ...prediction,
+            class: translatedName || prediction.class
+          };
+        }
+        return prediction;
+      })
+    };
+    
+    return translated;
+  }
+
   // ==================== 后端分类服务方法 ====================
   
   /**
@@ -1865,11 +1925,41 @@ class ImageClassifierService {
             break; // 成功，跳出重试循环
           } catch (fetchError) {
             clearTimeout(timeoutId); // 失败后也要清除超时器
+            
+            // 检查是否是超时错误
+            const isTimeoutError = fetchError.name === 'AbortError' || 
+                                   fetchError.message === 'The user aborted a request.' ||
+                                   fetchError.message?.includes('aborted');
+            
+            // 检查是否是网络错误
+            const isNetworkError = fetchError.message === 'Network request failed' ||
+                                  fetchError.message?.includes('network') ||
+                                  fetchError.message?.includes('Network');
+            
+            if (isTimeoutError) {
+              logger.warn(`⚠️ 请求超时或被中止 (${timeout}ms):`, {
+                error: fetchError.name || fetchError.message,
+                retryCount,
+                maxRetries,
+                batchSize: imageDataList.length,
+                totalSize: `${(totalBlobSize / 1024 / 1024).toFixed(2)}MB`
+              });
+              
+              // 超时错误不重试，直接抛出
+              const timeoutError = new Error(`请求超时 (${timeout}ms)`);
+              timeoutError.name = 'TimeoutError';
+              timeoutError.originalError = fetchError;
+              throw timeoutError;
+            }
+            
             retryCount++;
             
-            // 如果还有重试机会，等待后重试
-            if (retryCount <= maxRetries && fetchError.message === 'Network request failed') {
-              logger.warn(`⚠️ 请求失败，${retryCount}/${maxRetries}次重试，等待1秒后重试...`);
+            // 如果还有重试机会且是网络错误，等待后重试
+            if (retryCount <= maxRetries && isNetworkError) {
+              logger.warn(`⚠️ 网络请求失败，${retryCount}/${maxRetries}次重试，等待1秒后重试...`, {
+                error: fetchError.message,
+                batchSize: imageDataList.length
+              });
               await new Promise(resolve => setTimeout(resolve, 1000));
               
               // 【关键】重建FormData对象，因为可能被破坏了
@@ -1894,6 +1984,13 @@ class ImageClassifierService {
             }
             
             // 没有重试机会了，或者不是网络错误，抛出异常
+            logger.error(`❌ 请求失败（无法重试）:`, {
+              error: fetchError.name || fetchError.message,
+              retryCount,
+              maxRetries,
+              isNetworkError,
+              isTimeoutError
+            });
             throw fetchError; // 抛给外层catch处理
           }
         }
@@ -1927,14 +2024,38 @@ class ImageClassifierService {
           items: itemsWithData
         };
       } catch (batchError) {
-        // 异常处理（JSON解析失败、FormData构建失败等）
-        logger.error(`❌ 批量处理异常:`, batchError);
+        // 检查是否是超时错误
+        const isTimeoutError = batchError.name === 'TimeoutError' ||
+                              batchError.name === 'AbortError' ||
+                              batchError.message === 'The user aborted a request.' ||
+                              batchError.message?.includes('超时') ||
+                              batchError.message?.includes('timeout') ||
+                              batchError.message?.includes('aborted');
+        
+        // 根据错误类型记录不同的日志
+        if (isTimeoutError) {
+          logger.warn(`⚠️ 批量处理超时或被中止:`, {
+            error: batchError.name || batchError.message,
+            batchSize: imageDataList.length,
+            originalError: batchError.originalError || batchError
+          });
+        } else {
+          // 其他异常（JSON解析失败、FormData构建失败等）
+          logger.error(`❌ 批量处理异常:`, {
+            error: batchError.name || batchError.message,
+            batchSize: imageDataList.length,
+            stack: batchError.stack
+          });
+        }
+        
         const failedItems = imageDataList.map((imageData, idx) => ({
           index: idx,
           filename: imageData.fileName,
           success: false,
           data: null,
-          error: batchError.message,
+          error: isTimeoutError 
+            ? `请求超时或被中止: ${batchError.message || 'Aborted'}` 
+            : batchError.message || '批量处理失败',
           imageData: imageData.imageData
         }));
         
@@ -1953,8 +2074,18 @@ class ImageClassifierService {
       }
     } catch (error) {
       // 处理超时和取消请求的情况
-      if (error.name === 'AbortError' || error.message === 'The user aborted a request.') {
-        logger.warn('⚠️ 远程推理超时或被取消，将降级到本地推理');
+      const isTimeoutError = error.name === 'TimeoutError' ||
+                            error.name === 'AbortError' || 
+                            error.message === 'The user aborted a request.' ||
+                            error.message?.includes('超时') ||
+                            error.message?.includes('timeout');
+      
+      if (isTimeoutError) {
+        logger.warn('⚠️ 远程推理超时或被取消，将降级到本地推理', {
+          timeout: this.BATCH_CONFIG.REMOTE_TIMEOUT,
+          batchSize: imageDataList.length,
+          error: error.message || error.name
+        });
         return {
           success: false,
           total: imageDataList.length,
@@ -1964,15 +2095,33 @@ class ImageClassifierService {
             index,
             success: false,
             data: null,
-            error: '请求超时或取消',
+            error: `请求超时 (${this.BATCH_CONFIG.REMOTE_TIMEOUT}ms)`,
             imageData
           }))
         };
       }
       
-      logger.error('❌ 批量分类失败:', error.message || error);
-      logger.error('❌ 错误详情:', error);
-      throw error;
+      // 处理其他错误
+      logger.error('❌ 批量分类失败:', {
+        error: error.message || error.name,
+        batchSize: imageDataList.length,
+        stack: error.stack
+      });
+      
+      // 返回失败结果而不是抛出异常，让调用方可以降级到本地推理
+      return {
+        success: false,
+        total: imageDataList.length,
+        success_count: 0,
+        fail_count: imageDataList.length,
+        items: imageDataList.map((imageData, index) => ({
+          index,
+          success: false,
+          data: null,
+          error: error.message || '批量分类失败',
+          imageData
+        }))
+      };
     }
   }
 

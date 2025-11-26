@@ -956,7 +956,7 @@ export const RNFS = {
         // 先检查文件是否存在
         const fileExists = await RNFS.exists(cleanPath);
         if (!fileExists) {
-          logger.warn('⚠️ 文件不存在，无需删除:', cleanPath);
+          logger.debug('ℹ️ 文件不存在，无需删除:', cleanPath);
           return true;
         }
         

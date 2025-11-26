@@ -933,7 +933,6 @@ const HomeScreen = () => {
             {cityCounts && Object.keys(cityCounts).length > 0 ? (
               Object.entries(cityCounts)
                 .sort(([,a], [,b]) => b - a)
-                .slice(0, 10)
                 .map(([city, count]) => {
                   const recentImages = cityRecentImages[city] || [];
                   return (

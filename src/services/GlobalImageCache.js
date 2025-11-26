@@ -71,7 +71,6 @@ class GlobalImageCache {
     }
 
     // 只在真正开始构建时打印
-    logger.debug('开始构建缓存...');
     this.isLoading = true;
 
     try {
@@ -82,33 +81,16 @@ class GlobalImageCache {
         logger.debug('✅ ConfigService 初始化完成');
       }
       
-      logger.debug('开始构建全局图片缓存...');
       
       // 获取存储服务实例（共享 UnifiedDataService 的实例）
       const storageService = this.getStorageService();
-      logger.debug('使用共享的存储服务实例');
-      
-      // 🔍 诊断：准备调用 getImages
-      logger.debug(`🔍 [诊断] buildCache: 准备调用 storageService.getImages()...`);
       
       // 获取所有图片的精简数据（ImageStorageService已经做了数据转换）
       const allImages = await storageService.getImages();
-      logger.debug(`🔍 [诊断] buildCache: 从数据库获取到 ${allImages.length} 张图片`);
       
-      // 🔍 诊断：检查返回的数据类型
+      // 检查返回的数据类型
       if (!Array.isArray(allImages)) {
-        logger.error(`🔍 [诊断] buildCache: getImages() 返回的不是数组! 类型: ${typeof allImages}, 值:`, allImages);
-      }
-      
-      // 🔍 诊断：检查分类分布
-      if (allImages.length > 0) {
-        const categoryCounts = {};
-        allImages.forEach(img => {
-          const cat = img.category || 'unknown';
-          categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-        });
-        logger.debug(`🔍 [诊断] buildCache: 分类分布:`, categoryCounts);
-        logger.debug(`🔍 [诊断] buildCache: NA分类数量: ${categoryCounts['NA'] || 0}`);
+        logger.error(`buildCache: getImages() 返回的不是数组! 类型: ${typeof allImages}, 值:`, allImages);
       }
       
       // 确保 allImages 是数组
@@ -145,15 +127,11 @@ class GlobalImageCache {
       // 直接通过过滤 allImages 来获取数据
       
       // 计算统计信息
-      logger.debug('🔄 开始重新计算分类统计...');
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
-      logger.debug('✅ 分类统计计算完成');
       
       // 加载相似组数据到图片对象中
-      logger.debug('🔄 开始加载相似组数据...');
       await this._loadSimilarityGroupData();
-      logger.debug('✅ 相似组数据加载完成');
       
       // 获取最近图片（从缓存中取前20张）
       this.cache.recentImages = this.cache.allImages
@@ -166,8 +144,6 @@ class GlobalImageCache {
       
       this.isLoaded = true;
       this.isLoading = false;
-      
-      logger.debug('✅ 全局图片缓存构建完成');
       
       // 通知所有监听器
       this.notifyListeners();
@@ -187,7 +163,6 @@ class GlobalImageCache {
 
   // 刷新缓存
   async refreshCache() {
-    logger.debug('🔄 强制刷新缓存（重置状态并重建）');
     this.isLoaded = false;
     this.isLoading = false;
     return this.buildCache();
@@ -297,7 +272,6 @@ class GlobalImageCache {
     if (forceLog) {
       logger.debug(`🔄 重新构建ID映射表，图片数量: ${this.cache.allImages.length}`);
     } else {
-      logger.debug(`构建ID映射表，图片数量: ${this.cache.allImages.length}`);
     }
     this.imageIdToIndex.clear();
     this.cache.allImages.forEach((img, index) => {
@@ -361,7 +335,6 @@ class GlobalImageCache {
 
   // 重新构建分类统计
   _rebuildCategoryCounts() {
-    logger.debug('📊 开始计算分类统计，总图片数:', this.cache.allImages.length);
     this.cache.categoryCounts = {};
     this.cache.allImages.forEach((img, index) => {
       if (img.category) {
@@ -370,7 +343,6 @@ class GlobalImageCache {
         this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
       }
     });
-    logger.debug('📊 分类统计计算结果:', this.cache.categoryCounts);
   }
 
   // 标准化分类ID（直接使用ConfigService）
@@ -476,27 +448,20 @@ class GlobalImageCache {
       const similarityGroupIndex = await this.imageStorageService.getSimilarityGroupIndex();
       
       if (!similarityGroupIndex || Object.keys(similarityGroupIndex).length === 0) {
-        logger.debug('📊 没有相似组数据需要加载');
         return;
       }
       
-      logger.debug(`📊 开始加载相似组数据，共 ${Object.keys(similarityGroupIndex).length} 个相似组`);
-      
       // 为每个图片设置相似组信息
-      let processedCount = 0;
       for (const [groupId, imageIds] of Object.entries(similarityGroupIndex)) {
         if (Array.isArray(imageIds)) {
           for (const imageId of imageIds) {
             const image = this._getImageById(imageId);
             if (image) {
               image.similarityGroupIndex = groupId;
-              processedCount++;
             }
           }
         }
       }
-      
-      logger.debug(`✅ 相似组数据加载完成，处理了 ${processedCount} 张图片`);
       
     } catch (error) {
       console.error('❌ 加载相似组数据失败:', error);
@@ -618,13 +583,6 @@ class GlobalImageCache {
       }
     });
     
-    logger.debug(`🏙️ 城市统计构建完成: 共 ${Object.keys(this.cache.cityCounts).length} 个城市，${cityImageCount} 张有城市信息的图片（已排除tobecleaned）`);
-    
-    // 调试：显示前5个城市统计
-    const cityEntries = Object.entries(this.cache.cityCounts).slice(0, 5);
-    if (cityEntries.length > 0) {
-      logger.debug(`🏙️ 城市统计示例:`, cityEntries);
-    }
   }
   
   // 重新构建最近图片

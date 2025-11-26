@@ -52,6 +52,10 @@
       "chinese": "证件照",
       "english": "ID Card"
     },
+    "NA": {
+      "chinese": "待分类",
+      "english": "to be classified"
+    },
     "tobecleaned": {
       "chinese": "暂存箱",
       "english": "To Be Cleaned"
@@ -66,6 +70,7 @@
     "idcard",
     "screenshot",
     "other",
+    "NA",
     "tobecleaned"
   ],
   "objectMappings": {

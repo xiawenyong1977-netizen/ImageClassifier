@@ -259,28 +259,45 @@ class ImageProcessor {
 
   /**
    * 【移动端实现】使用原生模块获取图片尺寸
+   * 添加内存池错误的重试机制
    */
   async _getImageDimensionsWithJimp(imageUri) {
-    try {
-      if (!RNImage) {
-        throw new Error('React Native Image 模块未加载');
-      }
-      
-      return new Promise((resolve, reject) => {
-        RNImage.getSize(
-          imageUri,
-          (width, height) => {
-            resolve({ width, height });
-          },
-          (error) => {
-            reject(new Error(`获取图片尺寸失败: ${error}`));
-          }
-        );
-      });
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 200; // 200ms延迟
+    
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (!RNImage) {
+          throw new Error('React Native Image 模块未加载');
+        }
+        
+        return await new Promise((resolve, reject) => {
+          RNImage.getSize(
+            imageUri,
+            (width, height) => {
+              resolve({ width, height });
+            },
+            (error) => {
+              reject(new Error(`获取图片尺寸失败: ${error}`));
+            }
+          );
+        });
 
-    } catch (error) {
-      logger.error(`❌ [Native] 获取图片尺寸失败: ${imageUri}`, error);
-      throw new Error(`获取图片尺寸失败: ${error.message}`);
+      } catch (error) {
+        const isMemoryPoolError = error?.message?.includes('Pool hard cap violation') || 
+                                 error?.message?.includes('Hard cap');
+        
+        // 如果是内存池错误且还有重试机会，等待后重试
+        if (isMemoryPoolError && attempt < MAX_RETRIES - 1) {
+          logger.warn(`⚠️ [Native] 获取图片尺寸失败（内存池限制），${RETRY_DELAY}ms后重试 (${attempt + 1}/${MAX_RETRIES}): ${imageUri}`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (attempt + 1)));
+          continue;
+        }
+        
+        // 最后一次尝试或非内存池错误，直接抛出
+        logger.error(`❌ [Native] 获取图片尺寸失败: ${imageUri}`, error);
+        throw new Error(`获取图片尺寸失败: ${error.message}`);
+      }
     }
   }
 

@@ -669,7 +669,6 @@ class UnifiedDataService {
    */
   async forceRefreshCache() {
     try {
-      logger.debug('🔄 强制刷新缓存...');
       await this.imageCache.refreshCache();
       logger.debug('✅ 缓存刷新完成');
     } catch (error) {
@@ -1208,6 +1207,20 @@ class UnifiedDataService {
   }
 
   /**
+   * 查询从指定时间点之后有更新的图片
+   * @param {string|Date} sinceTimestamp - ISO 8601格式的时间字符串或Date对象
+   * @returns {Promise<Array>} 图片列表（完整信息）
+   */
+  async readImagesUpdatedAfter(sinceTimestamp) {
+    try {
+      return await this.imageStorageService.getImagesUpdatedAfter(sinceTimestamp);
+    } catch (error) {
+      logger.error('读取最近更新的图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 清空相似度数据
    */
   async clearSimilarityData() {
@@ -1268,7 +1281,6 @@ class UnifiedDataService {
     try {
       // logger.debug('批量更新图片相似度信息:', imageSimilarityArray.length);
       await this.imageStorageService.updateImagesSimilarity(imageSimilarityArray);
-      logger.debug('图片相似度信息更新完成');
     } catch (error) {
       logger.error('更新图片相似度信息失败:', error);
       throw error;
@@ -1292,7 +1304,6 @@ class UnifiedDataService {
       const similarityGroups = await this.imageStorageService.getSimilarityGroups('similar');
       
       if (!similarityGroups || similarityGroups.length === 0) {
-        logger.debug('📊 没有找到相似度组数据');
         return [];
       }
       

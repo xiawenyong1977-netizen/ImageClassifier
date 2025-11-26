@@ -27,6 +27,36 @@ try {
  */
 export const ScanService = {
   /**
+   * 检查扫描服务是否正在运行
+   * @returns {Promise<boolean>} 服务是否运行
+   */
+  isRunning: () => {
+    if (Platform.OS === 'android' && ScanServiceModule) {
+      try {
+        return ScanServiceModule.isScanServiceRunning();
+      } catch (error) {
+        console.warn('检查服务状态失败:', error);
+        return Promise.resolve(false);
+      }
+    }
+    return Promise.resolve(false);
+  },
+  
+  /**
+   * 强制停止扫描服务（如果正在运行）
+   * 用于在启动新扫描前清理旧的服务状态
+   */
+  forceStop: () => {
+    if (Platform.OS === 'android' && ScanServiceModule) {
+      try {
+        ScanServiceModule.forceStopScanService();
+      } catch (error) {
+        console.warn('强制停止服务失败:', error);
+      }
+    }
+  },
+  
+  /**
    * 启动扫描前台服务
    */
   start: () => {

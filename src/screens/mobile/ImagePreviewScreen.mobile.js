@@ -385,7 +385,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // ==================== 图片操作 ====================
 
   /**
-   * 删除/标记待处置（根据当前分类判断）
+   * 删除图片（所有分类都支持）
    */
   const handleDelete = () => {
     if (!currentImage || !currentImage.id) {
@@ -393,102 +393,107 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       return;
     }
     
-    const isToBeCleanedCategory = currentImage.category === 'tobecleaned';
-    
-    if (isToBeCleanedCategory) {
-      // 如果当前分类是 tobecleaned，执行真正的删除
-      logger.debug('当前分类是tobecleaned，执行删除操作...');
+    // 所有分类都执行真正的删除
+    logger.debug('执行删除操作...');
     Alert.alert(
       '确认删除',
-        '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
-        [
-          { 
-            text: '取消', 
-            style: 'cancel',
-            onPress: () => logger.debug('用户取消删除')
-          },
+      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消删除')
+        },
         {
           text: '删除',
           style: 'destructive',
           onPress: async () => {
-              logger.debug('用户确认删除，开始删除流程...');
-              try {
-                logger.debug('调用writeDeleteImages方法...');
-                const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
-                
-                logger.debug('删除结果:', result);
+            logger.debug('用户确认删除，开始删除流程...');
+            try {
+              logger.debug('调用writeDeleteImages方法...');
+              const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
+              
+              logger.debug('删除结果:', result);
               if (result.success) {
-                  logger.debug('删除成功，准备更新列表...');
-                  
-                  // 重新加载图片列表并处理索引调整
-                  const reloadSuccess = await reloadImageListWithIndexAdjustment('删除');
-                  
-                  // 如果列表为空，reloadImageList 已经处理了返回上一页的逻辑
-                  // 如果列表不为空，继续浏览
-                  if (reloadSuccess) {
-                    // 显示成功提示，但不自动返回
-                    Alert.alert('成功', '图片已删除');
-                  } else {
-                    // 列表为空，reloadImageList 已经处理了返回逻辑，这里不需要额外操作
-                    logger.debug('列表已空，已返回上一页');
-                  }
+                logger.debug('删除成功，准备更新列表...');
+                
+                // 重新加载图片列表并处理索引调整
+                const reloadSuccess = await reloadImageListWithIndexAdjustment('删除');
+                
+                // 如果列表为空，reloadImageList 已经处理了返回上一页的逻辑
+                // 如果列表不为空，继续浏览
+                if (reloadSuccess) {
+                  // 显示成功提示，但不自动返回
+                  Alert.alert('成功', '图片已删除');
+                } else {
+                  // 列表为空，reloadImageList 已经处理了返回逻辑，这里不需要额外操作
+                  logger.debug('列表已空，已返回上一页');
+                }
               } else {
-                  // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
-                  logger.debug('删除失败（可能是权限问题）:', result);
+                // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
+                logger.debug('删除失败（可能是权限问题）:', result);
                 Alert.alert('删除失败', `删除失败，请检查文件权限`);
               }
             } catch (error) {
-                // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
-                logger.debug('删除图片失败（可能是权限问题）:', error);
+              // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
+              logger.debug('删除图片失败（可能是权限问题）:', error);
               Alert.alert('错误', '删除失败，请重试');
             }
           },
         },
       ]
     );
-    } else {
-      // 如果当前分类不是 tobecleaned，标记为待处置
-      logger.debug('当前分类不是tobecleaned，标记为待处置...');
-      Alert.alert(
-        '标记为待处置',
-        '确定要将这张图片标记为待处置吗？\n\n图片将被移动到"待处置"分类中。',
-        [
-          { 
-            text: '取消', 
-            style: 'cancel',
-            onPress: () => logger.debug('用户取消标记为待处置')
-          },
-          {
-            text: '标记',
-            onPress: async () => {
-              logger.debug('用户确认标记为待处置，开始更新分类...');
-              try {
-                // 更新分类为 tobecleaned（服务层会自动清理相似组信息）
-                await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
-                
-                // 更新本地状态
-      setCurrentImage(prev => ({ 
-        ...prev, 
-                  category: 'tobecleaned',
-                  confidence: 'manual',
-                  similarityGroupIndex: null,
-                  similarityScore: null,
-                  similarityGroupType: null
-                }));
-                
-                logger.debug('标记为待处置成功');
-                
-                // 重新加载图片列表并处理索引调整
-                await reloadImageListWithIndexAdjustment('标记为待处置');
-    } catch (error) {
-                logger.error('标记为待处置失败:', error);
-                Alert.alert('错误', '标记为待处置失败，请重试');
-              }
-            },
-          },
-        ]
-      );
+  };
+
+  /**
+   * 暂存图片（移动到待处置分类）
+   */
+  const handleStaging = () => {
+    if (!currentImage || !currentImage.id) {
+      Alert.alert('错误', '图片信息不完整，无法操作');
+      return;
     }
+    
+    logger.debug('标记为待处置...');
+    Alert.alert(
+      '标记为待处置',
+      '确定要将这张图片标记为待处置吗？\n\n图片将被移动到"待处置"分类中。',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消标记为待处置')
+        },
+        {
+          text: '标记',
+          onPress: async () => {
+            logger.debug('用户确认标记为待处置，开始更新分类...');
+            try {
+              // 更新分类为 tobecleaned（服务层会自动清理相似组信息）
+              await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
+              
+              // 更新本地状态
+              setCurrentImage(prev => ({ 
+                ...prev, 
+                category: 'tobecleaned',
+                confidence: 'manual',
+                similarityGroupIndex: null,
+                similarityScore: null,
+                similarityGroupType: null
+              }));
+              
+              logger.debug('标记为待处置成功');
+              
+              // 重新加载图片列表并处理索引调整
+              await reloadImageListWithIndexAdjustment('标记为待处置');
+            } catch (error) {
+              logger.error('标记为待处置失败:', error);
+              Alert.alert('错误', '标记为待处置失败，请重试');
+            }
+          },
+        },
+      ]
+    );
   };
 
   /**
@@ -987,11 +992,19 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         {/* 照片创玩面板 */}
         {isToBeCleanedCategory && renderEnhancePanel()}
         
-        {/* 删除/暂存按钮（根据当前分类显示） */}
+        {/* 删除按钮（所有分类都显示） */}
         <TouchableOpacity style={styles.actionButton} onPress={handleDelete}>
-          <Text style={styles.actionIcon}>{isToBeCleanedCategory ? '🗑️' : '📦'}</Text>
-          <Text style={styles.actionLabel}>{isToBeCleanedCategory ? '删除' : '暂存'}</Text>
+          <Text style={styles.actionIcon}>🗑️</Text>
+          <Text style={styles.actionLabel}>删除</Text>
         </TouchableOpacity>
+        
+        {/* 暂存按钮（非暂存箱分类显示） */}
+        {!isToBeCleanedCategory && (
+          <TouchableOpacity style={styles.actionButton} onPress={handleStaging}>
+            <Text style={styles.actionIcon}>📦</Text>
+            <Text style={styles.actionLabel}>暂存</Text>
+          </TouchableOpacity>
+        )}
         
         <TouchableOpacity style={styles.actionButton} onPress={toggleCategorySelector}>
           <Text style={styles.actionIcon}>🏷️</Text>

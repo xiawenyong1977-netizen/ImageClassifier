@@ -13,13 +13,13 @@ const path = require('path');
 const now = new Date();
 
 // 生成构建版本号（与 build.gradle 中的规则一致）
-// 格式：yyMMddHHmm（例如：2511121430 表示 2025年11月12日 14:30）
-const year = String(now.getFullYear()).slice(-2); // 年份后两位
+// 格式：MMddHHmm（例如：11251430 表示 11月25日 14:30）
+// 注意：不使用年份，因为年份会导致版本号超出 int 范围
 const month = String(now.getMonth() + 1).padStart(2, '0');
 const day = String(now.getDate()).padStart(2, '0');
 const hour = String(now.getHours()).padStart(2, '0');
 const minute = String(now.getMinutes()).padStart(2, '0');
-const buildVersionCode = `${year}${month}${day}${hour}${minute}`; // yyMMddHHmm
+const buildVersionCode = `${month}${day}${hour}${minute}`; // MMddHHmm
 
 // 生成易读的构建时间格式（用于显示）
 // 格式：YYYY-MM-DD HH:mm（例如：2025-11-12 14:30）
@@ -37,7 +37,7 @@ const buildInfoContent = `// 构建信息 - 此文件在构建时自动生成
 // 构建版本号格式与 android/app/build.gradle 中的 versionCode 规则一致
 
 export const BUILD_VERSION = '${buildVersion}'; // 版本名（例如：1.0.0）
-export const BUILD_VERSION_CODE = '${buildVersionCode}'; // 构建版本号（yyMMddHHmm格式，例如：2511121430）
+export const BUILD_VERSION_CODE = '${buildVersionCode}'; // 构建版本号（MMddHHmm格式，例如：11251430）
 export const BUILD_DATE = '${buildDateFormatted}'; // 构建时间（易读格式：YYYY-MM-DD HH:mm）
 `;
 

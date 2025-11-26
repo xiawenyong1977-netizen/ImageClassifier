@@ -139,13 +139,58 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 Log.d(TAG, "找到MediaStore ID: " + id);
                 cursor.close();
                 
-                // 使用MediaStore删除文件
+                // 使用MediaStore删除文件到回收站
                 Uri deleteUri = Uri.withAppendedPath(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, 
                     String.valueOf(id)
                 );
                 
                 Log.d(TAG, "删除URI: " + deleteUri);
+                
+                // 🔥 优先使用 IS_TRASHED 和 DATE_EXPIRES 实现删除到回收站
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // Android 11+ (API 30+) 使用 IS_TRASHED 和 DATE_EXPIRES
+                    try {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.Images.Media.IS_TRASHED, 1);
+                        // 设置30天后过期（自动永久删除），时间戳为秒级
+                        long expireTime = System.currentTimeMillis() / 1000 + (30L * 24 * 60 * 60);
+                        values.put(MediaStore.Images.Media.DATE_EXPIRES, expireTime);
+                        
+                        int updatedRows = contentResolver.update(deleteUri, values, null, null);
+                        Log.d(TAG, "MediaStore标记为回收站: " + updatedRows + " 行，过期时间: " + expireTime);
+                        
+                        if (updatedRows > 0) {
+                            Log.d(TAG, "✅ 文件已移动到回收站（30天后自动永久删除）");
+                            // 文件已移动到回收站，不需要验证文件是否存在
+                            return true;
+                        } else {
+                            Log.w(TAG, "⚠️ 标记为回收站失败，降级到直接删除");
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "⚠️ 使用IS_TRASHED失败: " + e.getMessage() + "，降级到直接删除");
+                    }
+                }
+                
+                // 降级方案：Android 10 尝试使用 IS_PENDING（部分厂商可能不支持）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    try {
+                        ContentValues values = new ContentValues();
+                        values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                        int updatedRows = contentResolver.update(deleteUri, values, null, null);
+                        Log.d(TAG, "MediaStore标记为IS_PENDING: " + updatedRows + " 行");
+                        
+                        if (updatedRows > 0) {
+                            Log.d(TAG, "✅ 文件已标记为待删除（IS_PENDING）");
+                            return true;
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "⚠️ 使用IS_PENDING失败: " + e.getMessage());
+                    }
+                }
+                
+                // 最后的降级方案：直接删除（如果上述方法都不支持或失败）
+                Log.d(TAG, "降级到直接删除");
                 int deletedRows = contentResolver.delete(deleteUri, null, null);
                 Log.d(TAG, "MediaStore删除结果: " + deletedRows + " 行");
                 
@@ -600,10 +645,14 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     /**
      * 解析EXIF日期时间格式 (yyyy:MM:dd HH:mm:ss) 为时间戳
      */
+    /**
+     * 解析EXIF日期时间格式 (yyyy:MM:dd HH:mm:ss) 为时间戳
+     * EXIF日期时间字符串已经是拍摄时的本地时间，直接解析，不做时区转换
+     */
     private long parseExifDateTime(String dateTimeStr) {
         try {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US);
-            sdf.setTimeZone(TimeZone.getDefault());
+            // 不设置时区，使用系统默认时区直接解析（EXIF时间已经是本地时间）
             Date date = sdf.parse(dateTimeStr);
             return date != null ? date.getTime() : 0;
         } catch (Exception e) {
@@ -694,66 +743,36 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 return;
             }
             
-            long startTime = System.currentTimeMillis();
-            
-            // 创建线程池（使用CPU核心数）
-            int threadCount = Runtime.getRuntime().availableProcessors();
-            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-            
-            Log.d(TAG, "使用 " + threadCount + " 个线程并行计算");
-            
-            // 创建任务列表
-            List<Future<HashResult>> futures = new ArrayList<>();
-            
+            // 转换为List<String>
+            List<String> uriList = new ArrayList<>();
             for (int i = 0; i < fileCount; i++) {
-                final String filePath = filePaths.getString(i);
-                final int index = i;
-                
-                // 提交任务到线程池
-                Future<HashResult> future = executor.submit(new Callable<HashResult>() {
-                    @Override
-                    public HashResult call() {
-                        return calculateSingleFileHash(filePath, index);
-                    }
-                });
-                
-                futures.add(future);
+                uriList.add(filePaths.getString(i));
             }
             
-            // 收集结果
+            // 调用内部批量计算方法
+            List<HashResult> hashResults = batchCalculateHashesInternal(uriList);
+            
+            // 转换为React Native格式
             WritableArray results = Arguments.createArray();
             int successCount = 0;
             int failCount = 0;
             
-            for (Future<HashResult> future : futures) {
-                try {
-                    HashResult result = future.get(); // 阻塞等待结果
-                    
-                    WritableMap resultMap = Arguments.createMap();
-                    resultMap.putInt("index", result.index);
-                    resultMap.putString("filePath", result.filePath);
-                    resultMap.putBoolean("success", result.success);
-                    
-                    if (result.success) {
-                        resultMap.putString("hash", result.hash);
-                        successCount++;
-                    } else {
-                        resultMap.putString("error", result.error);
-                        failCount++;
-                    }
-                    
-                    results.pushMap(resultMap);
-                    
-                } catch (Exception e) {
-                    Log.e(TAG, "获取哈希计算结果失败: " + e.getMessage());
+            for (HashResult result : hashResults) {
+                WritableMap resultMap = Arguments.createMap();
+                resultMap.putInt("index", result.index);
+                resultMap.putString("filePath", result.filePath);
+                resultMap.putBoolean("success", result.success);
+                
+                if (result.success) {
+                    resultMap.putString("hash", result.hash);
+                    successCount++;
+                } else {
+                    resultMap.putString("error", result.error);
                     failCount++;
                 }
+                
+                results.pushMap(resultMap);
             }
-            
-            // 关闭线程池
-            executor.shutdown();
-            
-            long duration = System.currentTimeMillis() - startTime;
             
             // 构建返回结果
             WritableMap finalResult = Arguments.createMap();
@@ -761,9 +780,8 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             finalResult.putInt("successCount", successCount);
             finalResult.putInt("failCount", failCount);
             finalResult.putInt("total", fileCount);
-            finalResult.putDouble("duration", duration);
             
-            Log.d(TAG, "批量哈希计算完成: 成功=" + successCount + ", 失败=" + failCount + ", 耗时=" + duration + "ms");
+            Log.d(TAG, "批量哈希计算完成: 成功=" + successCount + ", 失败=" + failCount);
             
             promise.resolve(finalResult);
             
@@ -771,6 +789,77 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
             Log.e(TAG, "批量哈希计算失败: " + e.getMessage(), e);
             promise.reject("BATCH_HASH_ERROR", e.getMessage());
         }
+    }
+    
+    /**
+     * 批量计算哈希值（内部方法，供Java内部调用）
+     * 复用batchCalculateFileHash的核心逻辑，但使用Java标准类型
+     * @param uriList 图片URI列表（支持contentUri||filePath格式、content:// URI或文件路径）
+     * @return 哈希计算结果列表
+     */
+    public List<HashResult> batchCalculateHashesInternal(List<String> uriList) {
+        if (uriList == null || uriList.isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        long startTime = System.currentTimeMillis();
+        Log.d(TAG, "开始批量并行计算 " + uriList.size() + " 个文件的哈希值");
+        
+        // 创建线程池（使用CPU核心数）
+        int threadCount = Runtime.getRuntime().availableProcessors();
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        
+        Log.d(TAG, "使用 " + threadCount + " 个线程并行计算");
+        
+        // 创建任务列表
+        List<Future<HashResult>> futures = new ArrayList<>();
+        
+        for (int i = 0; i < uriList.size(); i++) {
+            final String uri = uriList.get(i);
+            final int index = i;
+            
+            // 提交任务到线程池
+            Future<HashResult> future = executor.submit(new Callable<HashResult>() {
+                @Override
+                public HashResult call() {
+                    return calculateSingleFileHash(uri, index);
+                }
+            });
+            
+            futures.add(future);
+        }
+        
+        // 收集结果
+        List<HashResult> results = new ArrayList<>();
+        for (Future<HashResult> future : futures) {
+            try {
+                HashResult result = future.get(); // 阻塞等待结果
+                results.add(result);
+            } catch (Exception e) {
+                Log.e(TAG, "获取哈希计算结果失败: " + e.getMessage());
+                // 创建失败结果
+                HashResult errorResult = new HashResult();
+                errorResult.index = results.size();
+                errorResult.success = false;
+                errorResult.error = e.getMessage();
+                results.add(errorResult);
+            }
+        }
+        
+        // 关闭线程池
+        executor.shutdown();
+        
+        long duration = System.currentTimeMillis() - startTime;
+        int successCount = 0;
+        for (HashResult result : results) {
+            if (result.success) {
+                successCount++;
+            }
+        }
+        
+        Log.d(TAG, "批量哈希计算完成: 成功=" + successCount + ", 失败=" + (results.size() - successCount) + ", 耗时=" + duration + "ms");
+        
+        return results;
     }
 
     /**
@@ -784,24 +873,57 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
         result.index = index;
         result.filePath = contentUri;
         
+        String hash = calculateImageHash(contentUri);
+        if (hash != null) {
+            result.success = true;
+            result.hash = hash;
+        } else {
+            result.success = false;
+            result.error = "计算哈希失败";
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 计算图片的SHA-256哈希值（公共方法，支持Content URI和文件路径）
+     * @param uriString 图片URI（contentUri||filePath格式、content:// URI或文件路径）
+     * @return 哈希值（十六进制字符串），失败返回null
+     */
+    public String calculateImageHash(String uriString) {
         InputStream inputStream = null;
         try {
-            // 验证必须是Content URI
-            if (contentUri == null || !contentUri.startsWith("content://")) {
-                result.success = false;
-                result.error = "只支持Content URI，不支持文件路径";
-                return result;
+            // 优先使用contentUri，如果没有则使用filePath
+            String contentUriString = extractContentUri(uriString);
+            if (contentUriString == null) {
+                // 尝试使用filePath
+                String filePath = extractFilePath(uriString);
+                if (filePath != null) {
+                    inputStream = new FileInputStream(new File(filePath));
+                } else if (uriString != null && !uriString.contains("||")) {
+                    // 如果URI不包含分隔符，可能是纯文件路径或纯Content URI
+                    if (uriString.startsWith("content://")) {
+                        contentUriString = uriString;
+                    } else {
+                        // 尝试作为文件路径处理
+                        inputStream = new FileInputStream(new File(uriString));
+                    }
+                } else {
+                    Log.w(TAG, "无法提取URI: " + uriString);
+                    return null;
+                }
             }
             
-            // 使用ContentResolver读取Content URI
-            Uri uri = Uri.parse(contentUri);
-            ContentResolver contentResolver = reactContext.getContentResolver();
-            inputStream = contentResolver.openInputStream(uri);
+            // 如果是Content URI，使用ContentResolver打开
+            if (contentUriString != null) {
+                Uri uri = Uri.parse(contentUriString);
+                ContentResolver contentResolver = reactContext.getContentResolver();
+                inputStream = contentResolver.openInputStream(uri);
+            }
             
             if (inputStream == null) {
-                result.success = false;
-                result.error = "无法打开Content URI流";
-                return result;
+                Log.w(TAG, "无法打开图片流: " + uriString);
+                return null;
             }
             
             // 创建SHA-256消息摘要
@@ -828,13 +950,11 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 hexString.append(hex);
             }
             
-            result.success = true;
-            result.hash = hexString.toString();
+            return hexString.toString();
             
         } catch (Exception e) {
-            Log.e(TAG, "计算Content URI哈希失败: " + contentUri, e);
-            result.success = false;
-            result.error = e.getMessage();
+            Log.e(TAG, "计算图片哈希失败: " + uriString, e);
+            return null;
         } finally {
             if (inputStream != null) {
                 try {
@@ -844,8 +964,49 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
                 }
             }
         }
+    }
+    
+    /**
+     * 解析拼装URI，提取contentUri部分
+     * @param combinedUri 拼装URI（contentUri||filePath格式）或普通URI
+     * @return contentUri字符串
+     */
+    private String extractContentUri(String combinedUri) {
+        if (combinedUri == null || combinedUri.isEmpty()) {
+            return null;
+        }
         
-        return result;
+        int separatorIndex = combinedUri.indexOf("||");
+        if (separatorIndex >= 0) {
+            // 提取contentUri部分（分隔符之前的部分）
+            return combinedUri.substring(0, separatorIndex);
+        }
+        
+        // 如果没有分隔符，检查是否是content:// URI
+        if (combinedUri.startsWith("content://")) {
+            return combinedUri;
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 解析拼装URI，提取filePath部分
+     * @param combinedUri 拼装URI（contentUri||filePath格式）或普通URI
+     * @return filePath字符串，如果没有则返回null
+     */
+    private String extractFilePath(String combinedUri) {
+        if (combinedUri == null || combinedUri.isEmpty()) {
+            return null;
+        }
+        
+        int separatorIndex = combinedUri.indexOf("||");
+        if (separatorIndex >= 0) {
+            // 提取filePath部分（分隔符之后的部分）
+            return combinedUri.substring(separatorIndex + 2);
+        }
+        
+        return null;
     }
 
     /**
@@ -1022,13 +1183,13 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     }
 
     /**
-     * 哈希计算结果类
+     * 哈希计算结果类（公共类，供外部调用）
      */
-    private static class HashResult {
-        int index;
-        String filePath;
-        boolean success;
-        String hash;
-        String error;
+    public static class HashResult {
+        public int index;
+        public String filePath;
+        public boolean success;
+        public String hash;
+        public String error;
     }
 }

@@ -12,7 +12,7 @@ docs/
 ├── harmonyos/                   # 鸿蒙(HarmonyOS)相关文档（10个文档）
 ├── platforms/                   # 平台相关文档
 │   ├── macOS/                   # macOS平台文档（4个文档）
-│   └── android/                 # Android/华为平台文档（5个文档）
+│   └── android/                 # Android/华为平台文档（6个文档）
 ├── features/                     # 功能特性文档
 │   ├── ai-enhancement/          # AI图像增强功能（2个文档）
 │   ├── api/                      # API调用指南（1个文档）
@@ -114,6 +114,7 @@ docs/
 #### Android/华为平台 (platforms/android/)
 - **华为手机开发人员选项开启指南.md** - 开发人员选项开启指南
 - **华为手机调试配置指南.md** - 华为手机调试配置完整指南
+- **查看Release版本日志指南.md** - Android Release版本日志查看完整指南
 - **后台扫描实现方案.md** - Android后台扫描前台服务实现方案
 - **获取pepk.jar说明.md** - 如何获取华为应用签名工具pepk.jar
 - **阿里云备案信息提取指南.md** - 阿里云App备案信息提取指南

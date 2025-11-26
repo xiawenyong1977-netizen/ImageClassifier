@@ -67,7 +67,7 @@ class WeChatAuthService {
         const text = await response.text();
         // 404属于正常情况（可能是用户未关注公众号或其他原因），使用debug日志
         if (response.status === 404) {
-          logger.debug(`🔍 查询会员状态返回404 (${response.status}):`, text);
+          // 查询会员状态返回404，用户未关注公众号（正常情况，不需要打印日志）
           // 404按非会员处理，不抛出错误
           return { isMember: false };
         } else {

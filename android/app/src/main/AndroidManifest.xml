@@ -68,7 +68,8 @@
         android:name=".ScanForegroundService"
         android:enabled="true"
         android:exported="false"
-        android:foregroundServiceType="dataSync" />
+        android:foregroundServiceType="dataSync"
+        android:stopWithTask="false" />  <!-- 🔥 新增：应用关闭时不停止服务 -->
       
       <activity
         android:name=".MainActivity"

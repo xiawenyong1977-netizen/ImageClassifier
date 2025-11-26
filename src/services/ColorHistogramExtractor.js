@@ -29,6 +29,7 @@ class ColorHistogramExtractor {
   async extractHistogram(imageUri) {
     try {
       // 使用 ImageProcessor 获取图片尺寸
+      // 如果遇到内存池错误，会在这里抛出
       const dimensions = await imageProcessor.getImageDimensions(imageUri);
       
       // 计算缩放比例（为了性能，限制最大尺寸）
@@ -58,7 +59,15 @@ class ColorHistogramExtractor {
       return features;
       
     } catch (error) {
-      logger.error('❌ 提取颜色直方图失败:', error);
+      // 检查是否是内存池错误
+      const isMemoryPoolError = error?.message?.includes('Pool hard cap violation') || 
+                               error?.message?.includes('Hard cap');
+      
+      if (isMemoryPoolError) {
+        logger.error('❌ 提取颜色直方图失败（内存池硬限制）:', error.message);
+      } else {
+        logger.error('❌ 提取颜色直方图失败:', error);
+      }
       throw error;
     }
   }

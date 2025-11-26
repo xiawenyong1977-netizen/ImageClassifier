@@ -2,6 +2,26 @@ apply plugin: "com.android.application"
 apply plugin: "com.facebook.react"
 
 /**
+ * 在构建前自动生成构建信息
+ * 确保无论通过什么方式构建（npm run android、react-native run-android、Android Studio），都会更新构建版本
+ */
+task generateBuildInfo(type: Exec) {
+    description = 'Generate build info before building'
+    group = 'build'
+    workingDir = rootProject.projectDir.parentFile
+    commandLine = ['node', 'scripts/generate-build-info.js']
+    doFirst {
+        println "🔄 正在生成构建信息..."
+    }
+    doLast {
+        println "✅ 构建信息生成完成"
+    }
+}
+
+// 确保在构建前运行 generateBuildInfo
+preBuild.dependsOn generateBuildInfo
+
+/**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
@@ -43,20 +63,25 @@ def jscFlavor = 'org.webkit:android-jsc:+'
 
 /**
  * 获取基于构建日期和时间的版本号
- * 格式：yyMMddHHmm（例如：2511121430 表示 2025年11月12日 14:30）
- * 使用年份后两位，确保版本号在 int 范围内（最大支持到 2099年）
+ * 格式：MMddHHmm（例如：11251430 表示 11月25日 14:30）
+ * 使用月份、日期、小时、分钟，确保版本号在 int 范围内（最大 12312359）
  * 这样每次构建时版本号会自动更新，且可以从版本号看出构建的日期和时间
  * 确保同一天多次构建时版本号也不同，保证唯一性和递增性
+ * 注意：不使用年份，因为年份会导致版本号超出 int 范围
  */
 def getVersionCode = { ->
     try {
         def date = new Date()
-        def formattedDateTime = date.format('yyMMddHHmm')
+        // 使用 SimpleDateFormat 确保格式正确
+        def sdf = new java.text.SimpleDateFormat('MMddHHmm')
+        def formattedDateTime = sdf.format(date)
         def versionCode = Integer.parseInt(formattedDateTime)
-        println "构建版本号 (versionCode): ${versionCode} (构建时间: ${date.format('yyyy-MM-dd HH:mm')})"
+        def displayTime = new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm').format(date)
+        println "构建版本号 (versionCode): ${versionCode} (构建时间: ${displayTime})"
         return versionCode
     } catch (Exception e) {
         println "警告: 无法生成基于日期时间的版本号，使用默认值 1. 错误: ${e.message}"
+        e.printStackTrace()
         return 1
     }
 }

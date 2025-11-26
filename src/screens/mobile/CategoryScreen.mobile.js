@@ -121,8 +121,9 @@ const CategoryScreen = ({ route, navigation }) => {
       ];
     }
     
-    // 所有非 tobecleaned 的情况（普通分类、城市、相似组）：放入暂存箱 + 修改分类
+    // 所有非 tobecleaned 的情况（普通分类、城市、相似组）：删除 + 放入暂存箱 + 修改分
     return [
+      { id: 'delete', label: '永久删除', icon: '🗑️', color: '#FF3B30' },
       { id: 'staging', label: '放入暂存箱', icon: '📦', color: '#FF9500' },
       { id: 'changeCategory', label: '修改分类', icon: '📁', color: '#007AFF' },
     ];
@@ -1055,7 +1056,7 @@ const CategoryScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 批量删除（仅用于 tobecleaned 分类，与 PC 端一致）
+   * 批量删除（所有分类都支持）
    */
   const batchDelete = async (imageIds) => {
     Alert.alert(

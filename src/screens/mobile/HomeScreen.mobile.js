@@ -57,10 +57,6 @@ const HomeScreen = ({ navigation }) => {
   // 消息提示
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   
-  // 添加调试日志来跟踪状态更新
-  useEffect(() => {
-    logger.debug(`🔍 globalMessage 状态更新: ${globalMessage}`);
-  }, [globalMessage]);
   
   // 隐藏空分类设置
   const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
@@ -191,7 +187,7 @@ const HomeScreen = ({ navigation }) => {
 
 
   /**
-   * 加载分类列表（包括暂存箱，最多8个，按配置文件顺序）
+   * 加载分类列表（按配置文件顺序）
    */
   const loadCategories = async () => {
     try {
@@ -221,8 +217,7 @@ const HomeScreen = ({ navigation }) => {
           count: categoryCounts[categoryConfig.id] || 0,
           color: categoryConfig.color || '#666666',
           recentImages: [], // 稍后加载
-        }))
-        .slice(0, 8); // 最多8个分类
+        }));
       
       // 并行加载每个分类的最近一张照片（只加载有照片的分类）
       const categoryWithImagesPromises = categoryList.map(async (category) => {
@@ -248,7 +243,6 @@ const HomeScreen = ({ navigation }) => {
       
       const categoryWithImages = await Promise.all(categoryWithImagesPromises);
       setCategories(categoryWithImages);
-      logger.debug(`📁 分类列表加载完成: ${categoryWithImages.length}个分类 (hideEmpty: ${hideEmptyCategories})`);
       
     } catch (error) {
       logger.error('❌ 加载分类列表失败:', error);
@@ -284,7 +278,6 @@ const HomeScreen = ({ navigation }) => {
         .sort((a, b) => b.count - a.count);
       
       setCities(cityList);
-      logger.debug(`🏙️ 城市列表加载完成: ${cityList.length}个城市`);
       
     } catch (error) {
       logger.error('❌ 加载城市列表失败:', error);
@@ -302,14 +295,6 @@ const HomeScreen = ({ navigation }) => {
       const groups = allGroups.slice(0, 8);
       setSimilarityGroups(groups);
       
-      logger.debug(`🔍 相似组加载完成: ${groups.length}/${allGroups.length}组`);
-      
-      // 调试：检查相似组的 latestImageUri
-      if (groups.length > 0) {
-        groups.forEach((group, index) => {
-          logger.debug(`🔍 相似组 ${index + 1}: groupId=${group.groupId}, imageCount=${group.imageCount}, latestImageUri=${group.latestImageUri || 'null'}`);
-        });
-      }
       
     } catch (error) {
       logger.error('❌ 加载相似组失败:', error);
@@ -325,7 +310,6 @@ const HomeScreen = ({ navigation }) => {
       const recent = (cache.recentImages || []).slice(0, 12);
       
       setRecentImages(recent);
-      logger.debug(`📸 最近照片加载完成: ${recent.length}张`);
       
     } catch (error) {
       logger.error('❌ 加载最近照片失败:', error);
@@ -573,6 +557,10 @@ const HomeScreen = ({ navigation }) => {
       }
 
       setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
       setGlobalMessage('正在初始化...');
       logger.debug('🔍 开始扫描相册...');
       
@@ -584,31 +572,31 @@ const HomeScreen = ({ navigation }) => {
       
       const galleryScannerService = new GalleryScannerService();
       
+      // 🆕 检查使用的扫描版本
+      const scanVersion = galleryScannerService.getScanVersion();
+      const isNativeScan = galleryScannerService.isUsingNativeScan();
+      logger.info(`📱 扫描服务版本: ${scanVersion}`);
+      logger.info(`📱 是否使用原生扫描: ${isNativeScan ? '是 ✅' : '否 ❌'}`);
+      
       // 初始化服务
       await galleryScannerService.initialize();
       
       // 开始扫描，显示进度（使用和PC端一致的进度消息）
       await galleryScannerService.scanGalleryWithProgress((progress) => {
-        logger.debug('📊 收到扫描进度:', progress);
         // progress已经包含了simpleMessage字段，这是PC端格式化后的消息
         if (progress) {
           const message = progress.simpleMessage || progress.message || '处理中...';
-          logger.debug(`🔍 准备更新消息: ${message}`);
           setGlobalMessage(message);
-          logger.debug(`🔍 消息已更新: ${message}`);
           
-          // 🆕 检查是否需要刷新页面
+          // 🆕 检查是否需要刷新页面数据（缓存重建已在 processProgressData 中完成）
           if (progress.shouldRefresh) {
-            logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
             // 使用 setTimeout 确保状态更新不被阻塞
             setTimeout(async () => {
               try {
-                // 强制刷新存储服务缓存
-                await GlobalImageCache.refreshCache();
-                // 只刷新页面数据，不刷新扫描完成信息（扫描还在进行中）
+                // 只刷新页面数据，不重建缓存（缓存重建已在 processProgressData 中完成）
                 await loadAllData();
               } catch (error) {
-                logger.error('❌ 定期刷新失败:', error);
+                logger.error('❌ 刷新页面数据失败:', error);
               }
             }, 0);
           }
@@ -631,6 +619,10 @@ const HomeScreen = ({ navigation }) => {
       // 释放唤醒锁
       await WakeLockService.release();
       setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
     }
   };
 
@@ -688,7 +680,7 @@ const HomeScreen = ({ navigation }) => {
   );
 
   /**
-   * 渲染按内容分类区（4列网格，最多8个）
+   * 渲染按内容分类区（4列网格）
    */
   const renderCategoriesSection = () => {
     return (
@@ -845,7 +837,7 @@ const HomeScreen = ({ navigation }) => {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🏙️ 按城市</Text>
         <View style={styles.categoriesGrid}>
-          {cities.slice(0, 8).map(renderCityCard)}
+          {cities.map(renderCityCard)}
         </View>
         </View>
     );

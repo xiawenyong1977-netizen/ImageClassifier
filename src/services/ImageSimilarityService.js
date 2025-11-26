@@ -146,7 +146,8 @@ class ImageSimilarityService {
         success: true,
         groups: detectionResult.groups,
         processed: detectionResult.processed,
-        total: allImages.length
+        total: allImages.length,
+        windows: detectionResult.windows // 窗口数量
       };
 
     } catch (error) {
@@ -220,7 +221,6 @@ class ImageSimilarityService {
 
       // 使用批量更新函数，避免多次读取全部数据
       await this.getUnifiedDataService().updateImagesSimilarity(imageSimilarityArray);
-      logger.debug(`✅ 保存检测结果成功，批量更新${imageSimilarityArray.length}张图片`);
 
     } catch (error) {
       console.error('❌ 保存检测结果失败:', error);
@@ -393,7 +393,6 @@ class ImageSimilarityService {
           windows.push([...currentWindow]);
         } else if (currentWindow.length === 2) {
           // 2张照片的窗口跳过，不进行相似度检测
-          console.log(`⏰ 跳过2张照片窗口，只处理3张或以上照片的窗口`);
         }
         windowStartTime = imageTime;
         currentWindow = [image];
@@ -482,32 +481,60 @@ class ImageSimilarityService {
    * @private
    */
   async _extractFeaturesForWindow(windowImages) {
-    // 并行提取所有图片的特征
-    const featurePromises = windowImages.map(async (image) => {
-      try {
-        let features = image.similarity_features;
-        
-        // 如果没有特征或需要重新提取
-        if (!features || !features.color_histogram) {
-          features = await this._extractColorHistogram(image);
+    // 限制并发数量，避免内存池硬限制错误
+    // React Native的内存池硬限制约为192MB，同时加载多张图片会超过限制
+    const CONCURRENT_LIMIT = 2; // 同时最多处理2张图片
+    const results = [];
+    
+    // 分批处理，避免同时加载太多图片
+    for (let i = 0; i < windowImages.length; i += CONCURRENT_LIMIT) {
+      const batch = windowImages.slice(i, i + CONCURRENT_LIMIT);
+      
+      // 并行处理当前批次
+      const batchPromises = batch.map(async (image) => {
+        try {
+          let features = image.similarity_features;
           
-          // 保存特征到图片对象
-          return {
-            ...image,
-            similarity_features: features,
-            color_histogram: features.color_histogram
-          };
-        } else {
+          // 如果没有特征或需要重新提取
+          if (!features || !features.color_histogram) {
+            features = await this._extractColorHistogram(image);
+            
+            // 保存特征到图片对象
+            return {
+              ...image,
+              similarity_features: features,
+              color_histogram: features.color_histogram
+            };
+          } else {
+            return image;
+          }
+        } catch (error) {
+          // 检查是否是内存池错误
+          const isMemoryPoolError = error?.message?.includes('Pool hard cap violation') || 
+                                   error?.message?.includes('Hard cap');
+          
+          if (isMemoryPoolError) {
+            logger.warn(`⚠️ 图片${image.fileName}特征提取失败（内存池限制），跳过:`, error.message);
+          } else {
+            logger.warn(`⚠️ 提取图片${image.fileName}特征失败:`, error);
+          }
+          
+          // 返回原图片对象，不包含特征
           return image;
         }
-      } catch (error) {
-        console.warn(`⚠️ 提取图片${image.fileName}特征失败:`, error);
-        return image;
+      });
+      
+      // 等待当前批次完成
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+      
+      // 批次之间稍作延迟，让内存有时间释放
+      if (i + CONCURRENT_LIMIT < windowImages.length) {
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
-    });
+    }
     
-    // 等待所有特征提取完成
-    return await Promise.all(featurePromises);
+    return results;
   }
 
   /**
@@ -763,7 +790,6 @@ class ImageSimilarityService {
         if (similarity >= options.similarityThreshold) {
           similarImages.push(image2);
           processed.add(j);
-          logger.debug(`🔗 发现相似图片: ${image1.fileName} <-> ${image2.fileName} (相似度: ${(similarity * 100).toFixed(1)}%)`);
         }
       }
       
@@ -1110,14 +1136,27 @@ class ImageSimilarityService {
       logger.info(`🧹 开始清理 ${tempFiles.length} 个临时文件...`);
       
       let cleanedCount = 0;
+      let skippedCount = 0; // 已不存在的文件数量
       let failedFiles = [];
       
-      // 第一次尝试：批量删除
+      // 第一次尝试：批量删除（先检查文件是否存在）
       for (const file of tempFiles) {
         try {
+          // 先检查文件是否存在
+          const fileExists = await RNFS.exists(file.path);
+          if (!fileExists) {
+            skippedCount++;
+            continue; // 文件不存在，跳过删除
+          }
+          
           await RNFS.unlink(file.path);
           cleanedCount++;
         } catch (error) {
+          // 如果错误是文件不存在，跳过
+          if (error.code === 'ENOENT' || error.message?.includes('does not exist')) {
+            skippedCount++;
+            continue;
+          }
           failedFiles.push(file);
         }
       }
@@ -1131,9 +1170,21 @@ class ImageSimilarityService {
         const retryFailed = [];
         for (const file of failedFiles) {
           try {
+            // 重试前再次检查文件是否存在
+            const fileExists = await RNFS.exists(file.path);
+            if (!fileExists) {
+              skippedCount++;
+              continue; // 文件不存在，跳过删除
+            }
+            
             await RNFS.unlink(file.path);
             cleanedCount++;
           } catch (error) {
+            // 如果错误是文件不存在，跳过
+            if (error.code === 'ENOENT' || error.message?.includes('does not exist')) {
+              skippedCount++;
+              continue;
+            }
             retryFailed.push(file);
           }
         }
@@ -1141,6 +1192,11 @@ class ImageSimilarityService {
         if (retryFailed.length > 0) {
           logger.debug(`⚠️ ${retryFailed.length} 个文件清理失败，将在下次扫描时清理`);
         }
+      }
+      
+      // 记录跳过统计（静默处理，不输出警告）
+      if (skippedCount > 0) {
+        logger.debug(`ℹ️ ${skippedCount} 个文件已不存在，跳过清理`);
       }
       
       if (cleanedCount > 0) {

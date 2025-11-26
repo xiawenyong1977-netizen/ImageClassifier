@@ -2228,16 +2228,10 @@ class ImageStorageService {
   // Get all images (精简结构)
   async getImages() {
     try {
-      logger.debug(`🔍 [诊断] getImages: 开始执行...`);
       await this.ensureInitialized();
-      logger.debug(`🔍 [诊断] getImages: 初始化完成`);
-      
-      logger.debug(`🔍 [诊断] getImages: 准备调用 storage.getItem('images')...`);
       const fullImages = await this.storage.getItem(this.storageKeys.images);
-      logger.debug(`🔍 [诊断] getImages: storage.getItem 返回结果, 类型: ${typeof fullImages}, 是否为数组: ${Array.isArray(fullImages)}, 长度: ${Array.isArray(fullImages) ? fullImages.length : 'N/A'}`);
       
       if (!fullImages) {
-        logger.debug(`🔍 [诊断] getImages: fullImages 为 null/undefined，返回空数组`);
         return [];
       }
       
@@ -2280,6 +2274,162 @@ class ImageStorageService {
       
     } catch (error) {
       logger.error('Failed to get images:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 查询从指定时间点之后有更新的图片
+   * @param {string|Date} sinceTimestamp - ISO 8601格式的时间字符串或Date对象
+   * @returns {Promise<Array>} 图片列表（完整信息，包含 createdAt 和 updatedAt）
+   */
+  async getImagesUpdatedAfter(sinceTimestamp) {
+    try {
+      await this.ensureInitialized();
+      
+      // 转换为ISO 8601格式字符串
+      let sinceTimeStr;
+      if (sinceTimestamp instanceof Date) {
+        sinceTimeStr = sinceTimestamp.toISOString();
+      } else if (typeof sinceTimestamp === 'string') {
+        sinceTimeStr = sinceTimestamp;
+      } else {
+        throw new Error('sinceTimestamp 必须是 Date 对象或 ISO 8601 字符串');
+      }
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        return await this._getImagesUpdatedAfterIndexedDB(sinceTimeStr);
+      } else {
+        // 移动端：SQLite
+        return await this._getImagesUpdatedAfterSQLite(sinceTimeStr);
+      }
+      
+    } catch (error) {
+      logger.error('查询最近更新的图片失败:', error);
+      return [];
+    }
+  }
+
+  // 移动端：SQLite查询
+  async _getImagesUpdatedAfterSQLite(sinceTimeStr) {
+    try {
+      // 确保数据库已初始化
+      await this.ensureInitialized();
+      
+      // 检查数据库对象
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ SQLite数据库对象为空');
+        return [];
+      }
+      
+      if (!this.storage.db.executeSql) {
+        logger.error('❌ SQLite数据库executeSql方法不存在');
+        return [];
+      }
+      
+      // 使用SQL查询：updatedAt > sinceTimeStr
+      const sql = `SELECT * FROM images WHERE updatedAt > ? ORDER BY updatedAt DESC`;
+      const [result] = await this.storage.db.executeSql(sql, [sinceTimeStr]);
+      
+      if (!result || !result.rows) {
+        return [];
+      }
+      
+      const images = [];
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        // 解析JSON字段
+        const img = {
+          id: row.id,
+          uri: row.uri,
+          fileName: row.fileName,
+          category: row.category,
+          confidence: row.confidence,
+          timestamp: row.timestamp,
+          takenAt: row.takenAt,
+          size: row.size,
+          mimeType: row.mimeType,
+          width: row.width,
+          height: row.height,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          altitude: row.altitude,
+          accuracy: row.accuracy,
+          address: row.address,
+          city: row.city,
+          country: row.country,
+          province: row.province,
+          district: row.district,
+          street: row.street,
+          locationSource: row.locationSource,
+          cityDistance: row.cityDistance,
+          message: row.message,
+          // 解析JSON字段
+          idCardDetections: row.idCardDetections ? JSON.parse(row.idCardDetections) : null,
+          generalDetections: row.generalDetections ? JSON.parse(row.generalDetections) : null,
+          mobileNetV3Detections: row.mobileNetV3Detections ? JSON.parse(row.mobileNetV3Detections) : null,
+          imageDimensions: row.imageDimensions ? JSON.parse(row.imageDimensions) : null
+        };
+        images.push(img);
+      }
+      
+      logger.debug(`📥 SQLite查询最近更新的图片: 找到 ${images.length} 张（since: ${sinceTimeStr}）`);
+      return images;
+      
+    } catch (error) {
+      logger.error('SQLite查询最近更新的图片失败:', error);
+      return [];
+    }
+  }
+
+  // PC端：IndexedDB查询
+  async _getImagesUpdatedAfterIndexedDB(sinceTimeStr) {
+    try {
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB数据库对象为空');
+        return [];
+      }
+      
+      return new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readonly');
+        const store = transaction.objectStore('images');
+        const images = [];
+        
+        // IndexedDB 没有 updatedAt 索引，需要遍历所有图片
+        const request = store.openCursor();
+        
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            const img = cursor.value;
+            // 比较 updatedAt 字符串（ISO 8601格式可以直接字符串比较）
+            if (img.updatedAt && img.updatedAt > sinceTimeStr) {
+              images.push(img);
+            }
+            cursor.continue();
+          } else {
+            // 按 updatedAt DESC 排序
+            images.sort((a, b) => {
+              const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+              const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+              return timeB - timeA;
+            });
+            logger.debug(`📥 IndexedDB查询最近更新的图片: 找到 ${images.length} 张（since: ${sinceTimeStr}）`);
+            resolve(images);
+          }
+        };
+        
+        request.onerror = () => {
+          logger.error('IndexedDB查询最近更新的图片失败:', request.error);
+          reject(request.error);
+        };
+      });
+      
+    } catch (error) {
+      logger.error('IndexedDB查询最近更新的图片失败:', error);
       return [];
     }
   }
@@ -2700,7 +2850,7 @@ class ImageStorageService {
             ...defaultAiEnhancePresets,
             ...result.aiEnhancePresets
           };
-          logger.debug('✅ 已合并 AI 增强预设方案（包含新预设）');
+          // 已合并 AI 增强预设方案（包含新预设）
         }
         
         // 🆕 初始化默认预设
@@ -3949,8 +4099,6 @@ class ImageStorageService {
       await this.saveSimilarityData(similarityData);
       await this.saveSimilarityGroupIndex(groupIndex);
       
-      logger.debug(`✅ 批量更新图片相似度数据: ${imageSimilarityArray.length}张图片`);
-      logger.debug(`✅ 更新相似组索引: ${Object.keys(groupIndex).length}个组`);
       return true;
     } catch (error) {
       logger.error(' 批量更新图片相似度数据失败:', error);
