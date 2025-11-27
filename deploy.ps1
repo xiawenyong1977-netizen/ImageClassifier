@@ -1,0 +1,373 @@
+# 部署脚本 - 构建并部署 Android 和 PC 版本
+# 使用方法: .\deploy.ps1
+# 
+# 参数说明:
+#   -ServerHost: 服务器主机名或IP地址 (默认: "web")
+#   -ServerUser: 服务器用户名 (默认: "root")
+#   -ServerPath: 服务器目标路径 (默认: "/var/www/xintuxiangce/website/dist")
+#   -QiniuUploadScript: 服务器上七牛CDN上传脚本路径 (默认: "/path/to/qiniu-upload.sh")
+#
+# 示例:
+#   .\deploy.ps1 -ServerHost "192.168.1.100" -QiniuUploadScript "/root/upload-to-qiniu.sh"
+#
+# 注意:
+#   1. 需要确保已安装 OpenSSH 客户端 (Windows 10/11 通常已内置)
+#   2. 需要配置 SSH 密钥认证或准备输入密码
+#   3. 需要根据实际情况修改 QiniuUploadScript 路径
+
+param(
+    [string]$ServerHost = "web",
+    [string]$ServerUser = "root",
+    [string]$ServerPath = "/var/www/xintuxiangce/website/dist",
+    [string]$QiniuUploadScript = "/var/www/xintuxiangce/qiniu-upload.py"  # 需要根据实际情况修改
+)
+
+$ErrorActionPreference = "Stop"
+
+# 获取脚本所在目录（使用 $PSScriptRoot 或回退到 $MyInvocation）
+if ($PSScriptRoot) {
+    $scriptDir = $PSScriptRoot
+} else {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+
+# 获取当前时间戳（2位年份+月+日+时+分）
+function Get-Timestamp {
+    $now = Get-Date
+    return $now.ToString("yyMMddHHmm")
+}
+
+# 检查文件是否存在且生成时间在10分钟内
+function Test-FileRecent {
+    param(
+        [string]$FilePath,
+        [int]$Minutes = 10
+    )
+    
+    if (-not (Test-Path $FilePath)) {
+        Write-Host "❌ 文件不存在: $FilePath" -ForegroundColor Red
+        return $false
+    }
+    
+    $file = Get-Item $FilePath
+    $fileTime = $file.LastWriteTime
+    $now = Get-Date
+    $timeDiff = ($now - $fileTime).TotalMinutes
+    
+    Write-Host "📄 文件: $FilePath" -ForegroundColor Cyan
+    Write-Host "   生成时间: $fileTime" -ForegroundColor Gray
+    Write-Host "   时间差: $([math]::Round($timeDiff, 2)) 分钟" -ForegroundColor Gray
+    
+    if ($timeDiff -gt $Minutes) {
+        Write-Host "⚠️  警告: 文件生成时间超过 $Minutes 分钟！" -ForegroundColor Yellow
+        return $false
+    }
+    
+    return $true
+}
+
+# 压缩文件
+function Compress-File {
+    param(
+        [string]$FilePath,
+        [string]$OutputPath
+    )
+    
+    Write-Host "📦 压缩文件: $FilePath -> $OutputPath" -ForegroundColor Yellow
+    
+    # 转换为绝对路径（使用脚本所在目录作为基准）
+    if (-not [System.IO.Path]::IsPathRooted($FilePath)) {
+        $FilePath = Join-Path $scriptDir $FilePath
+    }
+    $FilePath = [System.IO.Path]::GetFullPath($FilePath)
+    
+    if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
+        $OutputPath = Join-Path $scriptDir $OutputPath
+    }
+    $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+    
+    if (-not (Test-Path $FilePath)) {
+        throw "源文件不存在: $FilePath"
+    }
+    
+    # 确保输出目录存在
+    $outputDir = Split-Path $OutputPath -Parent
+    if (-not (Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+        Write-Host "   创建输出目录: $outputDir" -ForegroundColor Gray
+    }
+    
+    # 使用 .NET 压缩单个文件
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    
+    # 如果输出文件已存在，先删除
+    if (Test-Path $OutputPath) {
+        Remove-Item $OutputPath -Force
+    }
+    
+    # 创建 ZIP 文件并添加单个文件
+    $zip = [System.IO.Compression.ZipFile]::Open($OutputPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $entry = $zip.CreateEntry((Split-Path $FilePath -Leaf))
+        $entryStream = $entry.Open()
+        try {
+            $fileStream = [System.IO.File]::OpenRead($FilePath)
+            try {
+                $fileStream.CopyTo($entryStream)
+            } finally {
+                $fileStream.Close()
+            }
+        } finally {
+            $entryStream.Close()
+        }
+    } finally {
+        $zip.Dispose()
+    }
+    
+    Write-Host "✅ 压缩完成: $OutputPath" -ForegroundColor Green
+}
+
+Write-Host "🚀 开始部署流程..." -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+
+# 检查必要的命令是否可用
+$requiredCommands = @("scp", "ssh")
+foreach ($cmd in $requiredCommands) {
+    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
+        Write-Host "❌ 错误: 未找到命令 '$cmd'，请确保已安装 OpenSSH 客户端" -ForegroundColor Red
+        Write-Host "   在 Windows 上，可以通过以下方式安装:" -ForegroundColor Yellow
+        Write-Host "   设置 -> 应用 -> 可选功能 -> 添加功能 -> OpenSSH 客户端" -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+# 步骤1: 构建 Android 版本
+Write-Host "`n📱 步骤1: 构建 Android 版本..." -ForegroundColor Yellow
+Push-Location android
+try {
+    & .\build-and-sign-release.ps1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android 构建失败"
+    }
+} finally {
+    Pop-Location
+}
+
+# 步骤2: 构建 PC 版本
+Write-Host "`n💻 步骤2: 构建 PC 版本..." -ForegroundColor Yellow
+Push-Location pc-version-final
+try {
+    cmd /c ".\build.bat"
+    if ($LASTEXITCODE -ne 0) {
+        throw "PC 构建失败"
+    }
+} finally {
+    Pop-Location
+}
+
+# 步骤3: 检查文件生成时间
+Write-Host "`n🔍 步骤3: 检查文件生成时间..." -ForegroundColor Yellow
+
+$files = @(
+    @{
+        Path = "pc-version-final\dist\XinTuAlbum 1.0.0.exe"
+        Name = "便携版"
+    },
+    @{
+        Path = "pc-version-final\dist\XinTuAlbum-Setup-1.0.0.exe"
+        Name = "安装版"
+    },
+    @{
+        Path = "android\app\build\outputs\apk\release\app-release-signed.apk"
+        Name = "Android APK"
+    }
+)
+
+$allRecent = $true
+foreach ($file in $files) {
+    if (-not (Test-FileRecent -FilePath $file.Path -Minutes 10)) {
+        $allRecent = $false
+    }
+}
+
+if (-not $allRecent) {
+    Write-Host "`n⚠️  警告: 部分文件生成时间超过10分钟！" -ForegroundColor Yellow
+    $response = Read-Host "是否继续部署? (Y/N)"
+    if ($response -ne "Y" -and $response -ne "y") {
+        Write-Host "❌ 用户取消部署" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# 步骤4: 压缩文件
+Write-Host "`n📦 步骤4: 压缩文件..." -ForegroundColor Yellow
+
+$timestamp = Get-Timestamp
+$tempDir = ".\deploy-temp"
+if (Test-Path $tempDir) {
+    Remove-Item $tempDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $tempDir | Out-Null
+
+# 压缩便携版
+$portableSource = "pc-version-final\dist\XinTuAlbum 1.0.0.exe"
+$portableZipLocal = "$tempDir\xtxc$timestamp.zip"
+$portableZipRemote = "xtxc$timestamp.zip"
+if (Test-Path $portableSource) {
+    Compress-File -FilePath $portableSource -OutputPath $portableZipLocal
+} else {
+    throw "便携版文件不存在: $portableSource"
+}
+
+# 压缩安装版
+$setupSource = "pc-version-final\dist\XinTuAlbum-Setup-1.0.0.exe"
+$setupZipLocal = "$tempDir\xtxcsetup$timestamp.zip"
+$setupZipRemote = "xtxcsetup$timestamp.zip"
+if (Test-Path $setupSource) {
+    Compress-File -FilePath $setupSource -OutputPath $setupZipLocal
+} else {
+    throw "安装版文件不存在: $setupSource"
+}
+
+# 处理 Android APK（不压缩，直接重命名）
+$apkSource = "android\app\build\outputs\apk\release\app-release-signed.apk"
+$apkFileLocal = "$tempDir\xtxc$timestamp.apk"
+$apkFileRemote = "xtxc$timestamp.apk"
+if (Test-Path $apkSource) {
+    Write-Host "📱 复制并重命名 APK 文件: $apkSource -> $apkFileLocal" -ForegroundColor Yellow
+    # 转换为绝对路径
+    if (-not [System.IO.Path]::IsPathRooted($apkSource)) {
+        $apkSource = Join-Path $scriptDir $apkSource
+    }
+    $apkSource = [System.IO.Path]::GetFullPath($apkSource)
+    
+    if (-not [System.IO.Path]::IsPathRooted($apkFileLocal)) {
+        $apkFileLocal = Join-Path $scriptDir $apkFileLocal
+    }
+    $apkFileLocal = [System.IO.Path]::GetFullPath($apkFileLocal)
+    
+    # 确保输出目录存在
+    $apkOutputDir = Split-Path $apkFileLocal -Parent
+    if (-not (Test-Path $apkOutputDir)) {
+        New-Item -ItemType Directory -Path $apkOutputDir -Force | Out-Null
+    }
+    
+    Copy-Item -Path $apkSource -Destination $apkFileLocal -Force
+    Write-Host "✅ APK 文件处理完成: $apkFileLocal" -ForegroundColor Green
+} else {
+    throw "Android APK 文件不存在: $apkSource"
+}
+
+# 步骤5: 复制文件到服务器
+Write-Host "`n📤 步骤5: 复制文件到服务器..." -ForegroundColor Yellow
+
+$serverAddress = "${ServerUser}@${ServerHost}"
+
+# 复制便携版
+Write-Host "复制便携版到服务器..." -ForegroundColor Cyan
+scp $portableZipLocal "${serverAddress}:${ServerPath}/pc/portable/$portableZipRemote"
+if ($LASTEXITCODE -ne 0) {
+    throw "复制便携版失败"
+}
+
+# 复制安装版
+Write-Host "复制安装版到服务器..." -ForegroundColor Cyan
+scp $setupZipLocal "${serverAddress}:${ServerPath}/pc/setup/$setupZipRemote"
+if ($LASTEXITCODE -ne 0) {
+    throw "复制安装版失败"
+}
+
+# 复制 Android APK
+Write-Host "复制 Android APK 到服务器..." -ForegroundColor Cyan
+scp $apkFileLocal "${serverAddress}:${ServerPath}/android/$apkFileRemote"
+if ($LASTEXITCODE -ne 0) {
+    throw "复制 Android APK 失败"
+}
+
+# 步骤6: 调用服务器上的七牛 CDN 上传脚本
+Write-Host "`n☁️  步骤6: 七牛 CDN 上传..." -ForegroundColor Yellow
+Write-Host "是否上传到七牛 CDN?" -ForegroundColor Cyan
+Write-Host "  [Y] 是，上传到七牛 CDN" -ForegroundColor Gray
+Write-Host "  [N] 否，跳过上传" -ForegroundColor Gray
+$uploadChoice = Read-Host "请选择 (Y/N)"
+
+if ($uploadChoice -eq "Y" -or $uploadChoice -eq "y") {
+    Write-Host "`n开始上传到七牛 CDN..." -ForegroundColor Yellow
+    
+    # 先检查脚本是否存在
+    Write-Host "检查上传脚本是否存在: $QiniuUploadScript" -ForegroundColor Cyan
+    $scriptCheck = ssh "${serverAddress}" "if [ -f '$QiniuUploadScript' ]; then echo 'EXISTS'; else echo 'NOT_FOUND'; fi" 2>&1
+    $scriptCheck = $scriptCheck -join "`n"
+    
+    if ($scriptCheck -notmatch "EXISTS") {
+        Write-Host "❌ 错误: 上传脚本不存在或无法访问" -ForegroundColor Red
+        Write-Host "   服务器: ${serverAddress}" -ForegroundColor Yellow
+        Write-Host "   脚本路径: $QiniuUploadScript" -ForegroundColor Yellow
+        Write-Host "`n检查结果: $scriptCheck" -ForegroundColor Gray
+        
+        # 列出可能的脚本位置
+        Write-Host "`n正在查找可能的脚本位置..." -ForegroundColor Cyan
+        $findResult = ssh "${serverAddress}" "find /var/www -name '*qiniu*.sh' -o -name '*qiniu*.py' -o -name '*upload*.sh' -o -name '*upload*.py' 2>/dev/null | head -5" 2>&1
+        if ($findResult) {
+            Write-Host "找到以下可能的脚本:" -ForegroundColor Yellow
+            $findResult | ForEach-Object { Write-Host "   $_" -ForegroundColor Gray }
+        }
+        
+        Write-Host "`n请确认脚本路径是否正确，或手动执行上传" -ForegroundColor Yellow
+        $continue = Read-Host "是否继续尝试执行? (Y/N)"
+        if ($continue -ne "Y" -and $continue -ne "y") {
+            Write-Host "⏭️  已跳过七牛 CDN 上传" -ForegroundColor Gray
+            exit 0
+        }
+    }
+    
+    # 根据文件扩展名确定执行命令
+    $scriptExt = [System.IO.Path]::GetExtension($QiniuUploadScript).ToLower()
+    if ($scriptExt -eq ".py") {
+        $execCommand = "python3"
+        Write-Host "检测到 Python 脚本，使用 python3 执行" -ForegroundColor Cyan
+    } elseif ($scriptExt -eq ".sh") {
+        $execCommand = "bash"
+        Write-Host "检测到 Shell 脚本，使用 bash 执行" -ForegroundColor Cyan
+    } else {
+        # 默认尝试 python3，如果失败再尝试 bash
+        $execCommand = "python3"
+        Write-Host "未识别脚本类型，尝试使用 python3 执行" -ForegroundColor Cyan
+    }
+    
+    # 获取脚本所在目录
+    $scriptDir = Split-Path $QiniuUploadScript -Parent
+    
+    # 检查脚本是否有执行权限，如果没有则添加
+    Write-Host "检查并设置脚本执行权限..." -ForegroundColor Cyan
+    ssh "${serverAddress}" "chmod +x '$QiniuUploadScript' 2>/dev/null"
+    
+    # 执行上传脚本（先切换到脚本所在目录，确保能找到配置文件）
+    Write-Host "执行上传脚本: $QiniuUploadScript" -ForegroundColor Cyan
+    Write-Host "切换到脚本目录: $scriptDir" -ForegroundColor Gray
+    ssh "${serverAddress}" "cd '$scriptDir' && $execCommand '$QiniuUploadScript'"
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "⚠️  警告: 七牛 CDN 上传脚本执行失败" -ForegroundColor Yellow
+        Write-Host "   服务器: ${serverAddress}" -ForegroundColor Yellow
+        Write-Host "   脚本路径: $QiniuUploadScript" -ForegroundColor Yellow
+        Write-Host "   请手动检查脚本和服务器状态" -ForegroundColor Yellow
+    } else {
+        Write-Host "✅ 七牛 CDN 上传完成" -ForegroundColor Green
+    }
+} else {
+    Write-Host "⏭️  已跳过七牛 CDN 上传" -ForegroundColor Gray
+}
+
+# 清理临时文件
+Write-Host "`n🧹 清理临时文件..." -ForegroundColor Yellow
+Remove-Item $tempDir -Recurse -Force
+
+Write-Host "`n🎉 部署完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "时间戳: $timestamp" -ForegroundColor Cyan
+Write-Host "便携版: xtxc$timestamp.zip" -ForegroundColor Cyan
+Write-Host "安装版: xtxcsetup$timestamp.zip" -ForegroundColor Cyan
+Write-Host "Android: xtxc$timestamp.apk" -ForegroundColor Cyan
+
