@@ -13,6 +13,9 @@ import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.graphics.BitmapFactory;
+import android.graphics.Bitmap;
+import android.graphics.Matrix;
+import java.io.ByteArrayOutputStream;
 
 import androidx.exifinterface.media.ExifInterface;
 
@@ -142,8 +145,26 @@ public class GalleryScanService {
         }
         
         // 查询数据库中分类为NA的照片（上次遗留下来没有分类完成的照片）
-        List<Map<String, Object>> naImages = imageDataService.getImagesByCategory("NA");
-        int naCount = naImages != null ? naImages.size() : 0;
+        List<Map<String, Object>> naImagesMap = imageDataService.getImagesByCategory("NA");
+        int naCount = naImagesMap != null ? naImagesMap.size() : 0;
+        
+        // 🔥 将 NA 分类的图片转换为 ImageInfo 列表（用于缓存查询阶段）
+        List<ImageInfo> naImages = new ArrayList<>();
+        if (naImagesMap != null && !naImagesMap.isEmpty()) {
+            for (Map<String, Object> imageMap : naImagesMap) {
+                ImageInfo imageInfo = new ImageInfo();
+                imageInfo.uri = (String) imageMap.get("uri");
+                imageInfo.fileName = (String) imageMap.get("fileName");
+                imageInfo.path = (String) imageMap.get("path");
+                // id 字段在数据库中可能是 String 或 Long，需要转换为 String
+                Object idObj = imageMap.get("id");
+                if (idObj != null) {
+                    imageInfo.id = idObj instanceof String ? (String) idObj : String.valueOf(idObj);
+                }
+                naImages.add(imageInfo);
+            }
+            Log.d(TAG, "查询到 " + naCount + " 张 NA 分类图片，将在缓存查询阶段处理");
+        }
         
         // 计算总数量：新增照片 + 数据库中分类为NA的照片
         totalImagesToBeClassified = newImages.size() + naCount;
@@ -151,9 +172,12 @@ public class GalleryScanService {
         Log.d(TAG, "总数量计算: 新增 " + newImages.size() + " 张 + NA分类 " + naCount + " 张 = 总计 " + totalImagesToBeClassified + " 张");
         
         // 在后台线程执行后续扫描阶段
+        // 注意：newImages 进入完整流程（截图检测 -> 缓存查询 -> 远程推理）
+        //      naImages 只进入缓存查询阶段（跳过截图检测）
+        final List<ImageInfo> finalNaImages = naImages; // 需要在 lambda 中使用，需要 final
         executorService.execute(() -> {
             try {
-                performScan(currentScanId, newImages, remoteApiUrl, cacheApiUrl);
+                performScan(currentScanId, newImages, finalNaImages, remoteApiUrl, cacheApiUrl);
             } catch (Exception e) {
                 Log.e(TAG, "扫描过程发生错误", e);
                 sendErrorEvent(currentScanId, "扫描失败: " + e.getMessage());
@@ -166,34 +190,52 @@ public class GalleryScanService {
     /**
      * 执行扫描流程（后续阶段）
      * 从阶段3开始：截图检测 -> 远端缓存查询 -> 远程推理
+     * @param scanId 扫描ID
+     * @param newImages 新增图片（需要完整流程：截图检测 -> 缓存查询 -> 远程推理）
+     * @param naImages NA分类图片（只需要缓存查询 -> 远程推理，跳过截图检测）
+     * @param remoteApiUrl 远程推理API地址
+     * @param cacheApiUrl 缓存查询API地址
      */
-    private void performScan(String scanId, List<ImageInfo> newImages, 
+    private void performScan(String scanId, List<ImageInfo> newImages, List<ImageInfo> naImages,
                             String remoteApiUrl, String cacheApiUrl) {
         long scanStartTime = System.currentTimeMillis();
-        Log.d(TAG, "开始后续扫描阶段: " + scanId + ", 待处理图片: " + newImages.size());
+        Log.d(TAG, "开始后续扫描阶段: " + scanId + ", 新增图片: " + newImages.size() + " 张, NA分类图片: " + (naImages != null ? naImages.size() : 0) + " 张");
         
         try {
-            if (newImages.isEmpty()) {
-                Log.d(TAG, "扫描完成: 没有新图片需要处理");
+            // 阶段3a: 截图检测（只处理新增图片，NA分类图片跳过此阶段）
+            List<ImageInfo> naImagesAfterScreenshot = new ArrayList<>();
+            if (!newImages.isEmpty()) {
+                // 注意：进度事件在 detectScreenshots 函数内部发送（开始和完成事件）
+                naImagesAfterScreenshot = detectScreenshots(newImages, remoteApiUrl);
+                Log.d(TAG, "阶段3a完成: 检测完成，剩余待处理: " + naImagesAfterScreenshot.size() + " 张");
+                
+                // 等待一小段时间，确保阶段3a的完成事件先被处理（避免事件顺序混乱）
+                try {
+                    Thread.sleep(50); // 50ms延迟，确保事件顺序
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } else {
+                Log.d(TAG, "阶段3a: 没有新增图片，跳过截图检测");
+            }
+            
+            // 阶段3b: 远端缓存查询
+            // 合并新增图片（经过截图检测后）和 NA 分类图片一起进行缓存查询
+            List<ImageInfo> imagesForCacheQuery = new ArrayList<>();
+            imagesForCacheQuery.addAll(naImagesAfterScreenshot);
+            if (naImages != null && !naImages.isEmpty()) {
+                imagesForCacheQuery.addAll(naImages);
+                Log.d(TAG, "合并 NA 分类图片到缓存查询: " + naImages.size() + " 张");
+            }
+            
+            if (imagesForCacheQuery.isEmpty()) {
+                Log.d(TAG, "扫描完成: 没有图片需要缓存查询");
                 completeScan(scanId);
                 return;
             }
             
-            // 阶段3a: 截图检测
-            // 注意：进度事件在 detectScreenshots 函数内部发送（开始和完成事件）
-            List<ImageInfo> naImagesAfterScreenshot = detectScreenshots(newImages, remoteApiUrl);
-            Log.d(TAG, "阶段3a完成: 检测完成，剩余待处理: " + naImagesAfterScreenshot.size() + " 张");
-            
-            // 等待一小段时间，确保阶段3a的完成事件先被处理（避免事件顺序混乱）
-            try {
-                Thread.sleep(50); // 50ms延迟，确保事件顺序
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            
-            // 阶段3b: 远端缓存查询
             // 注意：进度事件在 queryRemoteCache 函数内部发送（开始和完成事件）
-            CacheResult cacheResult = queryRemoteCache(naImagesAfterScreenshot, cacheApiUrl);
+            CacheResult cacheResult = queryRemoteCache(imagesForCacheQuery, cacheApiUrl);
             Log.d(TAG, "阶段3b完成: 缓存命中 " + cacheResult.hitCount + " 张");
             
             // 等待一小段时间，确保阶段3b的完成事件先被处理（避免事件顺序混乱）
@@ -1063,6 +1105,65 @@ public class GalleryScanService {
     }
     
     /**
+     * 压缩图片到指定大小（与 JS 层保持一致：1024x1024，质量 90%）
+     * @param imageInputStream 原始图片输入流
+     * @param maxSize 最大尺寸（宽或高的最大值），默认 1024
+     * @param quality JPEG 压缩质量（0-100），默认 90
+     * @return 压缩后的图片字节数组
+     */
+    private byte[] compressImage(InputStream imageInputStream, int maxSize, int quality) throws IOException {
+        // 读取原始图片
+        Bitmap originalBitmap = BitmapFactory.decodeStream(imageInputStream);
+        if (originalBitmap == null) {
+            throw new IOException("无法解码图片");
+        }
+        
+        try {
+            int originalWidth = originalBitmap.getWidth();
+            int originalHeight = originalBitmap.getHeight();
+            
+            // 计算缩放比例，保持宽高比
+            float scale = Math.min((float) maxSize / originalWidth, (float) maxSize / originalHeight);
+            
+            // 如果图片已经小于目标尺寸，不需要缩放
+            if (scale >= 1.0f) {
+                Log.d(TAG, "📷 图片尺寸 " + originalWidth + "x" + originalHeight + " 已小于 " + maxSize + "，无需压缩");
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
+                return outputStream.toByteArray();
+            }
+            
+            // 计算新尺寸
+            int newWidth = Math.round(originalWidth * scale);
+            int newHeight = Math.round(originalHeight * scale);
+            
+            Log.d(TAG, "📷 压缩图片: " + originalWidth + "x" + originalHeight + " -> " + newWidth + "x" + newHeight);
+            
+            // 缩放图片
+            Bitmap scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true);
+            
+            try {
+                // 压缩为 JPEG
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
+                byte[] compressedData = outputStream.toByteArray();
+                
+                Log.d(TAG, "✅ 压缩完成: 原始大小约 " + (originalWidth * originalHeight * 3 / 1024) + " KB -> 压缩后 " + (compressedData.length / 1024) + " KB");
+                
+                return compressedData;
+            } finally {
+                // 释放缩放后的 Bitmap
+                if (scaledBitmap != originalBitmap) {
+                    scaledBitmap.recycle();
+                }
+            }
+        } finally {
+            // 释放原始 Bitmap
+            originalBitmap.recycle();
+        }
+    }
+    
+    /**
      * 检测是否为截图（使用EXIF数据优化）
      */
     private boolean isScreenshot(ImageInfo image, ExifData exifData) {
@@ -1512,6 +1613,19 @@ public class GalleryScanService {
         
         Log.d(TAG, "🌐 准备远程推理请求: " + apiUrl + ", 图片数量: " + images.size());
         
+        // 检查网络状态（仅在 Release 版本中可能更严格）
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) reactContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+            if (networkInfo == null || !networkInfo.isConnected()) {
+                Log.w(TAG, "⚠️ 警告: 网络未连接，但继续尝试请求");
+            } else {
+                Log.d(TAG, "✅ 网络状态: " + networkInfo.getTypeName() + ", 已连接");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "⚠️ 无法检查网络状态: " + e.getMessage());
+        }
+        
         // 生成边界字符串
         String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
         
@@ -1557,6 +1671,35 @@ public class GalleryScanService {
                         continue;
                     }
                     
+                    // 🔥 压缩图片（与 JS 层保持一致：1024x1024，质量 90%）
+                    byte[] compressedImageData;
+                    try {
+                        compressedImageData = compressImage(imageInputStream, 1024, 90);
+                        imageInputStream.close();
+                    } catch (Exception compressError) {
+                        Log.e(TAG, "❌ 图片压缩失败: " + uriString + ", 使用原始图片", compressError);
+                        // 压缩失败时，重新打开输入流使用原始图片
+                        imageInputStream.close();
+                        if (uriString.startsWith("content://")) {
+                            Uri uri = Uri.parse(uriString);
+                            imageInputStream = reactContext.getContentResolver().openInputStream(uri);
+                        } else if (uriString.startsWith("file://")) {
+                            String filePath = uriString.replace("file://", "");
+                            imageInputStream = new FileInputStream(filePath);
+                        } else {
+                            imageInputStream = new FileInputStream(uriString);
+                        }
+                        // 读取原始图片数据
+                        ByteArrayOutputStream originalData = new ByteArrayOutputStream();
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = imageInputStream.read(buffer)) != -1) {
+                            originalData.write(buffer, 0, bytesRead);
+                        }
+                        compressedImageData = originalData.toByteArray();
+                        imageInputStream.close();
+                    }
+                    
                     // 写入文件字段头
                     String fileName = image.fileName != null ? image.fileName : "image.jpg";
                     String fileField = "--" + boundary + "\r\n";
@@ -1564,18 +1707,17 @@ public class GalleryScanService {
                     fileField += "Content-Type: image/jpeg\r\n\r\n";
                     outputStream.write(fileField.getBytes("UTF-8"));
                     
-                    // 写入文件内容
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = imageInputStream.read(buffer)) != -1) {
-                        outputStream.write(buffer, 0, bytesRead);
-                    }
+                    // 写入压缩后的图片数据
+                    outputStream.write(compressedImageData);
                     outputStream.write("\r\n".getBytes("UTF-8"));
-                    
-                    imageInputStream.close();
                 } catch (Exception e) {
-                    Log.e(TAG, "读取图片文件失败: " + uriString, e);
-                    // 继续处理下一张图片
+                    Log.e(TAG, "❌ 读取图片文件失败: " + uriString, e);
+                    Log.e(TAG, "   错误类型: " + e.getClass().getSimpleName());
+                    Log.e(TAG, "   错误消息: " + e.getMessage());
+                    if (e.getCause() != null) {
+                        Log.e(TAG, "   原因: " + e.getCause().getMessage());
+                    }
+                    // 继续处理下一张图片（跳过这张图片）
                 }
             }
             

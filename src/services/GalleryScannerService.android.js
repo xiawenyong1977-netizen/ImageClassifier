@@ -520,6 +520,20 @@ class GalleryScannerService {
    * 3. 统一进行规则映射
    */
   async phase5_LocalInferenceAndRuleMapping() {
+    // 🔥 确保 ImageClassifierService 已初始化（本地推理需要）
+    if (!this.imageClassifier.isInitialized) {
+      logger.info('🔧 初始化 ImageClassifierService（本地推理需要）...');
+      try {
+        await this.imageClassifier.initialize();
+        logger.info('✅ ImageClassifierService 初始化完成');
+      } catch (error) {
+        logger.error('❌ ImageClassifierService 初始化失败:', error);
+        // 初始化失败时，本地推理阶段将无法工作，但不影响其他阶段
+        logger.warn('⚠️ 本地推理阶段将跳过（服务未初始化）');
+        return;
+      }
+    }
+    
     // 查询所有NA分类的图片（精简信息，只包含ID等基本信息）
     const naImagesSimplified = await UnifiedDataService.readImagesByCategory('NA');
 
