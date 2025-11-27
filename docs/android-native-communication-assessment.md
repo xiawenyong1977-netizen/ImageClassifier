@@ -322,3 +322,5 @@ public void handleLocalInferenceResult(String requestId, ReadableArray results) 
    - 错误处理完善
 
 
+
+
