@@ -47,11 +47,25 @@ class Logger {
 
   // 便捷方法
   error(message, ...args) {
-    this.log('error', message, ...args);
+    // 🔥 错误日志在 Release 版本也要输出，便于调试
+    const timestamp = new Date().toISOString();
+    const prefix = `[${timestamp}] [ERROR]`;
+    console.error(prefix, message, ...args);
+    // 如果调试模式开启，也调用 log 方法（虽然会重复，但保持一致性）
+    if (this.isDebug) {
+      this.log('error', message, ...args);
+    }
   }
 
   warn(message, ...args) {
-    this.log('warn', message, ...args);
+    // 🔥 警告日志在 Release 版本也要输出，便于调试
+    const timestamp = new Date().toISOString();
+    const prefix = `[${timestamp}] [WARN]`;
+    console.warn(prefix, message, ...args);
+    // 如果调试模式开启，也调用 log 方法（虽然会重复，但保持一致性）
+    if (this.isDebug) {
+      this.log('warn', message, ...args);
+    }
   }
 
   info(message, ...args) {
