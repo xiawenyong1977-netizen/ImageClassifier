@@ -481,6 +481,27 @@ export const getFileUri = (input) => {
     return null;
   }
 
+  // 检查是否是拼装格式（fileUri||path 或 contentUri||path）
+  const { contentUri, relativePath, isCombined } = parseCombinedUri(originalUri);
+  
+  if (isCombined) {
+    // 拼装格式：检查第一部分是否是 file:// URI
+    if (contentUri && contentUri.startsWith('file://')) {
+      // 第一部分是 file:// URI，直接返回（确保编码正确）
+      return ensureEncodedFileUri(contentUri);
+    }
+    
+    // 如果第一部分不是 file://，但有路径部分，尝试从路径构建 file:// URI
+    if (relativePath) {
+      const normalizedPath = normalizeFilePath(relativePath);
+      return normalizedPath ? pathToFileUri(normalizedPath) : null;
+    }
+    
+    // 拼装格式但第一部分是 content://，无法转换为 file:// URI
+    return null;
+  }
+
+  // 不是拼装格式，按原逻辑处理
   if (originalUri.startsWith('content://')) {
     return null;
   }
