@@ -10,6 +10,7 @@ import {
   Platform,  // 🆕 使用统一的Platform对象
   getLocalPath,
   getContentUri,
+  getFileUri,  // 🔥 用于将文件路径转换为 file:// URI
   getUri
 } from '../adapters/WebAdapters';
 
@@ -397,12 +398,14 @@ const extractExifData = async (filePath, fileName, contentUri) => {
       if (!imageDimensions.width || !imageDimensions.height) {
         try {
           const imageUri = getFileUri(filePath);
-          const dimensions = await ImageProcessor.getImageDimensions(imageUri);
-          if (dimensions) {
-            imageDimensions = {
-              width: dimensions.width,
-              height: dimensions.height
-            };
+          if (imageUri) {
+            const dimensions = await ImageProcessor.getImageDimensions(imageUri);
+            if (dimensions) {
+              imageDimensions = {
+                width: dimensions.width,
+                height: dimensions.height
+              };
+            }
           }
         } catch (error) {
           logger.warn(`⚠️ ImageProcessor 获取尺寸失败: ${error.message}`);

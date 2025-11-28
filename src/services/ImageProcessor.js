@@ -220,8 +220,6 @@ class ImageProcessor {
    */
   async _getImageDimensionsWithCanvas(imageUri) {
     try {
-      // 获取图片尺寸
-      
       // 检查是否是同一张图片
       let img;
       if (this.currentImageUri === imageUri && this.currentImage) {
@@ -233,8 +231,20 @@ class ImageProcessor {
         img.crossOrigin = 'anonymous';
         
         await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
+          const timeout = setTimeout(() => {
+            reject(new Error(`图片加载超时: ${imageUri}`));
+          }, 10000);
+          
+          img.onload = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+          
+          img.onerror = (error) => {
+            clearTimeout(timeout);
+            reject(new Error(`图片加载失败: ${imageUri}`));
+          };
+          
           img.src = imageUri;
         });
         
