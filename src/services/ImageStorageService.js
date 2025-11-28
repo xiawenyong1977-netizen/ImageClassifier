@@ -2789,8 +2789,9 @@ class ImageStorageService {
             logger.debug(`📁 PC端设置默认扫描目录: ${defaultPicturesDir}`);
           }
         }
+        // 默认隐藏空分类（true），只有用户主动设置为显示空分类时才是 false
         if (result.hideEmptyCategories === undefined || result.hideEmptyCategories === null) {
-          result.hideEmptyCategories = false;
+          result.hideEmptyCategories = true;
         }
         if (result.scanInterval === undefined || result.scanInterval === null) {
           result.scanInterval = 5;

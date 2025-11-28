@@ -58,8 +58,8 @@ const HomeScreen = ({ navigation }) => {
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   
   
-  // 隐藏空分类设置
-  const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
+  // 隐藏空分类设置（默认隐藏空分类）
+  const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
 
   // ==================== 初始化加载 ====================
   useEffect(() => {
@@ -125,13 +125,19 @@ const HomeScreen = ({ navigation }) => {
   
   /**
    * 加载"隐藏空分类"设置
+   * 默认隐藏空分类（true），只有用户主动设置为显示空分类时才是 false
    */
   const loadHideEmptyCategoriesSetting = async () => {
     try {
       const settings = await UnifiedDataService.readSettings();
-      setHideEmptyCategories(settings.hideEmptyCategories === true);
+      // 如果设置未定义，默认为 true（隐藏空分类）
+      // 只有当用户明确设置为 false 时才显示空分类
+      const shouldHide = settings.hideEmptyCategories !== false;
+      setHideEmptyCategories(shouldHide);
     } catch (error) {
       logger.error('加载隐藏空分类设置失败:', error);
+      // 出错时默认隐藏空分类
+      setHideEmptyCategories(true);
     }
   };
   

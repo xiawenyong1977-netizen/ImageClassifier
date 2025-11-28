@@ -33,7 +33,8 @@ const HomeScreen = () => {
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
-  const [hideEmptyCategories, setHideEmptyCategories] = useState(false);
+  // 隐藏空分类设置（默认隐藏空分类）
+  const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
@@ -116,8 +117,11 @@ const HomeScreen = () => {
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
-      setHideEmptyCategories(settings.hideEmptyCategories === true);
-      hideEmptyCategoriesRef.current = settings.hideEmptyCategories === true;
+      // 如果设置未定义，默认为 true（隐藏空分类）
+      // 只有当用户明确设置为 false 时才显示空分类
+      const shouldHide = settings.hideEmptyCategories !== false;
+      setHideEmptyCategories(shouldHide);
+      hideEmptyCategoriesRef.current = shouldHide;
       
       const totalCount = Array.isArray(allImages) ? allImages.length : 0;
       setTotalImagesCount(totalCount);
