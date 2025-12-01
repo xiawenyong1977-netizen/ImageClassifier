@@ -21,7 +21,8 @@ const { useEffect, useState } = React;
 
 // Import desktop screens
 import HomeScreen from './screens/desktop/HomeScreen.desktop';
-import UnifiedDataService from './services/UnifiedDataService';
+// UnifiedDataService 使用动态导入避免热更新时的循环依赖问题
+// import UnifiedDataService from './services/UnifiedDataService';
 import IPCListenerService from './services/IPCListenerService';
 import configService from './services/ConfigService';
 import { logger } from './adapters/WebAdapters';
@@ -40,7 +41,9 @@ export default function App() {
         // 初始化配置服务
         await configService.initialize();
         
-        // 初始化数据服务
+        // 初始化数据服务（使用动态导入避免热更新时的循环依赖问题）
+        const UnifiedDataServiceModule = await import('./services/UnifiedDataService');
+        const UnifiedDataService = UnifiedDataServiceModule.default;
         await UnifiedDataService.initialize();
         
         // 初始化 IPC 监听器

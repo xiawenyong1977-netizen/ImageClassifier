@@ -30,7 +30,8 @@ class IPCListenerService {
 
     // 💻 PC端：检查 Electron 环境
     if (typeof window === 'undefined' || !window.require) {
-      logger.warn('⚠️ 非 Electron 环境，跳过 IPC 监听器初始化');
+      // WEB 环境下不输出警告（这是正常的），改为 debug 级别
+      logger.debug('🌐 非 Electron 环境（WEB 浏览器），跳过 IPC 监听器初始化（这是正常的）');
       return;
     }
 

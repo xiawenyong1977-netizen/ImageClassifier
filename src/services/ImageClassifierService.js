@@ -1765,6 +1765,8 @@ class ImageClassifierService {
           }
           
           const result = await response.json();
+          
+          
           allItems.push(...result.items);
           totalCached += result.cached_count;
           
@@ -2002,6 +2004,7 @@ class ImageClassifierService {
         }
         
         const result = await response.json();
+        
         
         // 合并结果，保留原始 imageData 引用
         const itemsWithData = result.items.map((item, idx) => ({
@@ -2260,7 +2263,6 @@ class ImageClassifierService {
       
       const result = await response.json();
       
-      // 不再输出缓存查询结果日志，由调用方决定是否输出
       
       return result;
       

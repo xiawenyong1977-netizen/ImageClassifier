@@ -77,7 +77,7 @@ const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPr
 });
 
 // Simplified image item component
-const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, onLongPress, onRightPress, isVisible = true }, ref) => {
+const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, isInStagingBox, onPress, onLongPress, onRightPress, isVisible = true }, ref) => {
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
@@ -202,6 +202,13 @@ const ImageItem = React.forwardRef(({ item, isSelected, isHighlighted, onPress, 
           <Text style={styles.selectionText}>✓</Text>
         </View>
       )}
+      
+      {/* 已暂存标签（只在非暂存箱分类中显示） */}
+      {isInStagingBox && (
+        <View style={styles.stagingBoxBadge}>
+          <Text style={styles.stagingBoxBadgeText}>已暂存</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 });
@@ -209,7 +216,8 @@ ImageItem.displayName = 'ImageItem';
 
 const CategoryScreen = ({ 
   category: propCategory, 
-  city: propCity, 
+  city: propCity,
+  color: propColor,
   similarityGroupId: propSimilarityGroupId, // 添加相似组ID参数
   currentImageId: propCurrentImageId, // 从ImagePreview返回时的当前图片ID
   currentPage: propCurrentPage, // 从ImagePreview返回时恢复的页码
@@ -226,6 +234,8 @@ const CategoryScreen = ({
   const category = propCategory || route?.params?.category;
   // 优先使用 prop 中的 city，然后是 route.params.city
   const city = propCity || route?.params?.city;
+  // 优先使用 prop 中的 color，然后是 route.params.color
+  const color = propColor || route?.params?.color;
   // 优先使用 prop 中的 similarityGroupId，然后是 route.params.similarityGroupId
   const similarityGroupId = propSimilarityGroupId || route?.params?.similarityGroupId;
   
@@ -235,6 +245,8 @@ const CategoryScreen = ({
   
   // 高亮图片状态（从ImagePreview返回时使用）
   const [highlightedImageId, setHighlightedImageId] = useState(null);
+  // 暂存箱图片ID集合（用于快速检查图片是否在暂存箱中）
+  const [stagingBoxImageIds, setStagingBoxImageIds] = useState(new Set());
   const scrollViewRef = useRef(null);
   const imageRefs = useRef({});
   
@@ -247,15 +259,19 @@ const CategoryScreen = ({
         // 加载相似组图片
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         images = groupData.images || [];
-        // 过滤掉tobecleaned分类的照片
-        images = images.filter(img => img.category !== 'tobecleaned');
-        logger.debug(`从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}, 已过滤tobecleaned`);
+        logger.debug(`从相似组获取图片: 总数=${images.length}, groupId=${similarityGroupId}`);
+      } else if (color) {
+        // 按颜色加载
+        images = await UnifiedDataService.readImagesByColor(color);
+        logger.debug(`按颜色获取图片: 总数=${images.length}, color=${color}`);
       } else if (city) {
         // 按城市加载
         images = await UnifiedDataService.readImagesByLocation(city, null);
-        // 过滤掉tobecleaned分类的照片
-        images = images.filter(img => img.category !== 'tobecleaned');
-        logger.debug(`从城市获取图片: 总数=${images.length}, city=${city}, 已过滤tobecleaned`);
+        logger.debug(`从城市获取图片: 总数=${images.length}, city=${city}`);
+      } else if (category === 'stagingBox') {
+        // 加载暂存箱图片
+        images = await UnifiedDataService.getStagingBoxImages();
+        logger.debug(`从暂存箱获取图片: 总数=${images.length}`);
       } else if (category) {
         // 按分类加载
         images = await UnifiedDataService.readImagesByCategory(category);
@@ -289,14 +305,28 @@ const CategoryScreen = ({
       
       logger.debug(`选中状态: ${selectedImageIds.length} 张图片被选中`);
       
+      // 如果当前分类不是暂存箱，检查哪些图片在暂存箱中
+      let stagingBoxIds = new Set();
+      if (category !== 'stagingBox') {
+        try {
+          const stagingBoxImages = await UnifiedDataService.getStagingBoxImages();
+          stagingBoxIds = new Set(stagingBoxImages.map(img => img.id));
+          logger.debug(`暂存箱图片数量: ${stagingBoxIds.size}`);
+        } catch (error) {
+          logger.error('获取暂存箱图片失败:', error);
+        }
+      }
+      
       setAllImages(images);
       setSelectedImages(selectedImageIds);
+      setStagingBoxImageIds(stagingBoxIds);
     } catch (error) {
       logger.error('获取图片数据失败:', error);
       setAllImages([]);
       setSelectedImages([]);
+      setStagingBoxImageIds(new Set());
     }
-  }, [category, city, similarityGroupId]);
+  }, [category, city, color, similarityGroupId]);
 
   // 初始加载图片数据
   useEffect(() => {
@@ -344,29 +374,19 @@ const CategoryScreen = ({
 
   // 全选/取消全选
   const toggleSelectAll = useCallback(() => {
-    if (selectedImages.length === allImages.length) {
+    if (selectedImages.length === allImages.length && allImages.length > 0) {
       // 如果全部选中，则取消全选
+      // 直接清除所有选中状态，避免循环依赖
+      const allImageIds = allImages.map(img => img.id);
       setSelectedImages([]);
-      // 根据当前模式清除选中状态
-      let filterType, filterValue, logPrefix;
-      if (similarityGroupId) {
-        filterType = 'similarityGroup';
-        filterValue = similarityGroupId;
-        logPrefix = '相似组';
-      } else if (city) {
-        filterType = 'city';
-        filterValue = city;
-        logPrefix = '城市';
-      } else {
-        filterType = 'category';
-        filterValue = category;
-        logPrefix = '分类';
-      }
-      const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
-      logger.debug(`${logPrefix}取消全选: 操作了 ${deselectedCount} 张图片`);
+      allImageIds.forEach(id => {
+        UnifiedDataService.setImageSelection(id, false);
+        window.dispatchEvent(new CustomEvent('imageSelectionChanged', {
+          detail: { imageId: id, isSelected: false }
+        }));
+      });
+      setSelectAll(false);
     } else {
-
-      
       // 否则全选当前页面的所有图片
       const allImageIds = allImages.map(img => img.id);
       setSelectedImages(allImageIds);
@@ -383,7 +403,7 @@ const CategoryScreen = ({
         window.dispatchEvent(event);
       });
     }
-  }, [selectedImages.length, allImages, category, city, similarityGroupId]);
+  }, [selectedImages.length, allImages]);
   
   
   // 删除进度状态
@@ -523,87 +543,69 @@ const CategoryScreen = ({
   // 监听从ImagePreview返回时的currentImageId，进行高亮和滚动
   useEffect(() => {
     const currentImageId = propCurrentImageId || route?.params?.currentImageId;
-    if (currentImageId) {
-      // 验证图片是否在当前分类/城市/相似组中
-      const imageExists = allImages.some(img => img.id === currentImageId);
-      
-      if (imageExists) {
-        logger.debug('🎯 检测到返回的图片ID，准备高亮和滚动:', currentImageId);
+    if (!currentImageId) {
+      return; // 没有图片ID，直接返回
+    }
+    
+    // 如果图片列表为空，等待数据加载完成
+    if (allImages.length === 0) {
+      return;
+    }
+    
+    // 验证图片是否在当前分类/城市/相似组中
+    const imageExists = allImages.some(img => img.id === currentImageId);
+    
+    if (!imageExists) {
+      return; // 提前返回，不执行高亮和滚动
+    }
+    
+    // 设置高亮状态
+    setHighlightedImageId(currentImageId);
+    
+    // 3秒后自动取消高亮
+    const highlightTimer = setTimeout(() => {
+      setHighlightedImageId(null);
+    }, 3000);
+    
+    // 滚动到该图片位置 - 在Web环境使用DOM API
+    const scrollTimer = setTimeout(() => {
+      if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+        // Web环境：使用DOM查询和scrollIntoView
+        // 方法1：通过data-image-id属性查找
+        const domElement = document.querySelector(`[data-image-id="${currentImageId}"]`);
         
-        // 设置高亮状态
-        setHighlightedImageId(currentImageId);
-      } else {
-        logger.warn('⚠️ 图片不在当前列表中，跳过高亮:', currentImageId);
-        return; // 提前返回，不执行高亮和滚动
-      }
-      
-      // 3秒后自动取消高亮
-      const highlightTimer = setTimeout(() => {
-        setHighlightedImageId(null);
-      }, 3000);
-      
-      // 滚动到该图片位置 - 在Web环境使用DOM API
-      const scrollTimer = setTimeout(() => {
-        logger.debug('🔍 开始查找图片元素，currentImageId:', currentImageId);
-        
-        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-          // Web环境：使用DOM查询和scrollIntoView
-          // 方法1：通过data-image-id属性查找
-          const domElement = document.querySelector(`[data-image-id="${currentImageId}"]`);
-          
-          logger.debug('📊 DOM查询结果:', { 
-            hasDomElement: !!domElement,
-            elementTag: domElement?.tagName,
-            elementClass: domElement?.className
-          });
-          
-          if (domElement) {
-            try {
-              logger.debug('🌐 使用DOM scrollIntoView滚动到图片');
-              domElement.scrollIntoView({ 
-                behavior: 'smooth', 
-                block: 'center',
-                inline: 'nearest'
-              });
-              logger.debug('✅ scrollIntoView 调用成功');
-            } catch (error) {
-              logger.error('❌ scrollIntoView失败:', error);
-            }
-          } else {
-            logger.warn('❌ 未找到DOM元素，尝试查找所有可能的图片元素');
-            // 输出调试信息
-            const allImageElements = document.querySelectorAll('[data-image-id]');
-            logger.debug('📋 页面上所有图片元素数量:', allImageElements.length);
-            if (allImageElements.length > 0) {
-              logger.debug('📋 前3个图片ID:', 
-                Array.from(allImageElements).slice(0, 3).map(el => el.getAttribute('data-image-id'))
-              );
-            }
-          }
-        } else {
-          // 非Web环境的降级方案
-          logger.debug('📱 非Web环境，使用React Native API');
-          const imageElement = imageRefs.current[currentImageId];
-          if (imageElement && scrollViewRef.current) {
-            imageElement.measureLayout(
-              scrollViewRef.current,
-              (x, y) => {
-                logger.debug('✅ 测量到图片位置:', { x, y });
-                scrollViewRef.current.scrollTo({ y: y - 100, animated: true });
-              },
-              (error) => {
-                logger.warn('❌ measureLayout失败:', error);
-              }
-            );
+        if (domElement) {
+          try {
+            domElement.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center',
+              inline: 'nearest'
+            });
+          } catch (error) {
+            logger.error('❌ scrollIntoView失败:', error);
           }
         }
-      }, 500); // 增加延迟到500ms，确保DOM已完全渲染
-      
-      return () => {
-        clearTimeout(highlightTimer);
-        clearTimeout(scrollTimer);
-      };
-    }
+      } else {
+        // 非Web环境的降级方案
+        const imageElement = imageRefs.current[currentImageId];
+        if (imageElement && scrollViewRef.current) {
+          imageElement.measureLayout(
+            scrollViewRef.current,
+            (x, y) => {
+              scrollViewRef.current.scrollTo({ y: y - 100, animated: true });
+            },
+            (error) => {
+              logger.warn('❌ measureLayout失败:', error);
+            }
+          );
+        }
+      }
+    }, 500); // 增加延迟到500ms，确保DOM已完全渲染
+    
+    return () => {
+      clearTimeout(highlightTimer);
+      clearTimeout(scrollTimer);
+    };
   }, [propCurrentImageId, route?.params?.currentImageId, allImages]);
   
   // 关闭下拉框
@@ -811,6 +813,8 @@ const CategoryScreen = ({
         fromScreen = 'SimilarityGroup';
       } else if (city) {
         fromScreen = 'City';
+      } else if (category === 'stagingBox') {
+        fromScreen = 'StagingBox';
       }
       
       // 完全不变地传递接收到的screenProps，不要修改任何内容
@@ -831,36 +835,6 @@ const CategoryScreen = ({
     UnifiedDataService.setImageSelection(image.id, true);
   }, []);
 
-
-  // Clear current selections (清除当前分类或城市的选中状态)
-  const clearCategorySelections = useCallback(() => {
-    // 统一使用_deselectImagesByFilter方法清除选中状态
-    let filterType, filterValue, logPrefix;
-    if (similarityGroupId) {
-      filterType = 'similarityGroup';
-      filterValue = similarityGroupId;
-      logPrefix = '相似组';
-    } else if (city) {
-      filterType = 'city';
-      filterValue = city;
-      logPrefix = '城市';
-    } else if (category) {
-      filterType = 'category';
-      filterValue = category;
-      logPrefix = '分类';
-    } else {
-      return; // 没有有效的过滤条件
-    }
-    
-    const deselectedCount = UnifiedDataService._deselectImagesByFilter(filterType, filterValue);
-    logger.debug(`清除${logPrefix}选中状态: ${filterValue}, 操作了 ${deselectedCount} 张图片`);
-    
-    // 清除本地状态
-    setSelectedImages([]);
-    setSelectAll(false);
-  }, [category, city, similarityGroupId]);
-
-
   // Image right click handler
   const handleImageRightPress = useCallback((image) => {
     logger.debug(`处理右键点击: ${image.id}`);
@@ -868,20 +842,54 @@ const CategoryScreen = ({
     toggleImageSelection(image.id);
   }, [toggleImageSelection]);
 
+  // 获取当前选中的图片（需要在 clearCategorySelections 之前定义）
   const getCurrentSelectedImages = useCallback(() => {
-    const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
-    
     if (similarityGroupId) {
       return UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
     }
     if (city) {
       return UnifiedDataService.getSelectedImagesByCity(city);
     }
-    if (normalizedCategory) {
+    if (color) {
+      // 按颜色选中的图片需要从所有选中图片中过滤
+      const allSelected = UnifiedDataService.getSelectedImages();
+      const colorImages = allImages.filter(img => img.background_color === color);
+      const colorImageIds = new Set(colorImages.map(img => img.id));
+      return allSelected.filter(img => colorImageIds.has(img.id));
+    }
+    if (category === 'stagingBox') {
+      // 暂存箱选中的图片需要从所有选中图片中过滤
+      const allSelected = UnifiedDataService.getSelectedImages();
+      const stagingBoxImageIds = new Set(allImages.map(img => img.id));
+      return allSelected.filter(img => stagingBoxImageIds.has(img.id));
+    }
+    if (category) {
+      const normalizedCategory = UnifiedDataService.getCategoryId(category);
       return UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
     }
     return [];
-  }, [category, city, similarityGroupId]);
+  }, [category, city, color, similarityGroupId, allImages]);
+
+  // Clear current selections (清除当前分类或城市的选中状态)
+  const clearCategorySelections = useCallback(() => {
+    // 统一使用 getCurrentSelectedImages 获取当前选中的图片，然后清除它们的选中状态
+    const currentSelected = getCurrentSelectedImages();
+    const imageIds = currentSelected.map(img => img.id);
+    
+    // 清除选中状态
+    imageIds.forEach(id => {
+      UnifiedDataService.setImageSelection(id, false);
+      window.dispatchEvent(new CustomEvent('imageSelectionChanged', {
+        detail: { imageId: id, isSelected: false }
+      }));
+    });
+    
+    logger.debug(`清除选中状态: 操作了 ${imageIds.length} 张图片`);
+    
+    // 清除本地状态
+    setSelectedImages([]);
+    setSelectAll(false);
+  }, [getCurrentSelectedImages]);
 
   const buildFilePathList = (images) => {
     const filePaths = [];
@@ -1001,17 +1009,8 @@ const CategoryScreen = ({
   // 批量修改分类
   const handleBatchChangeCategory = useCallback(async (newCategory) => {
     try {
-      const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
-      
-      // 获取选中图片
-      let selectedImagesList = [];
-      if (similarityGroupId) {
-        selectedImagesList = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
-      } else if (normalizedCategory) {
-        selectedImagesList = UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
-      } else if (city) {
-        selectedImagesList = UnifiedDataService.getSelectedImagesByCity(city);
-      }
+      // 获取选中图片 - 统一使用 getCurrentSelectedImages
+      const selectedImagesList = getCurrentSelectedImages();
       
       const selectedCount = selectedImagesList.length;
       
@@ -1049,7 +1048,6 @@ const CategoryScreen = ({
                 // 检查清除后的统计
                 const afterClearCounts = UnifiedDataService.getSelectedCountsByCategory();
                 logger.debug('🔍 清除后的分类选中统计:', afterClearCounts);
-                logger.debug('🔍 当前分类的选中数:', afterClearCounts[normalizedCategory]);
                 
                 // 重新加载图片数据
                 await loadImages();
@@ -1319,7 +1317,7 @@ const CategoryScreen = ({
       const completeImageData = {
         uri: newImageUri, // 必须有uri，系统会根据uri生成id
         fileName: saveResult.fileName,
-        category: 'tobecleaned', // 分类信息（必须）
+        category: originalImage?.category || 'other', // 保持原图的分类，如果没有则默认为 other
         confidence: 1.0, // 默认置信度
         timestamp: timestamp, // 时间戳（必须）
         takenAt: timestamp || null, // 拍摄时间
@@ -1335,8 +1333,8 @@ const CategoryScreen = ({
       
       // 验证必要字段
       if (!completeImageData.category) {
-        logger.warn('⚠️ 图片数据缺少category，自动设置为tobecleaned');
-        completeImageData.category = 'tobecleaned';
+        logger.warn('⚠️ 图片数据缺少category，自动设置为other');
+        completeImageData.category = 'other';
       }
       if (!completeImageData.timestamp) {
         logger.warn('⚠️ 图片数据缺少timestamp，使用当前时间');
@@ -1383,6 +1381,12 @@ const CategoryScreen = ({
       
       await UnifiedDataService.writeImageDetailedInfo([completeImageData], false); // 传入 false，不使用自动缓存更新
       
+      // 如果是在暂存箱页面，将图片添加到暂存箱
+      if (category === 'stagingBox' && expectedImageId) {
+        await UnifiedDataService.addToStagingBox([expectedImageId]);
+        logger.debug('✅ 图片已添加到暂存箱:', expectedImageId);
+      }
+      
       // 🔧 强制刷新缓存（确保新图片能立即显示）
       await UnifiedDataService.imageCache.refreshCache();
       
@@ -1419,22 +1423,22 @@ const CategoryScreen = ({
       
       // 6. 验证保存结果（调试用）
       try {
-        // 从缓存中查找刚保存的图片
-        const allTobecleanedImages = await UnifiedDataService.readImagesByCategory('tobecleaned');
+        // 从暂存箱中查找刚保存的图片
+        const allStagingBoxImages = await UnifiedDataService.getStagingBoxImages();
         // 统一使用 getUri 进行比较
         const newImageUriForCompare = getUri(newImageUri) || newImageUri;
-        const savedImage = allTobecleanedImages.find(img => {
+        const savedImage = allStagingBoxImages.find(img => {
           const imgUri = getUri(img);
           return imgUri && newImageUriForCompare && imgUri === newImageUriForCompare;
         });
         
         // 列出所有缓存中的URI，便于对比
-        const cachedUris = allTobecleanedImages.map(img => getUri(img)).filter(Boolean);
+        const cachedUris = allStagingBoxImages.map(img => getUri(img)).filter(Boolean);
         logger.debug('🔍 保存后验证:', {
           savedUri: newImageUri,
           savedUriForCompare: newImageUriForCompare,
           foundInCache: !!savedImage,
-          totalTobecleaned: allTobecleanedImages.length,
+          totalStagingBox: allStagingBoxImages.length,
           savedImageCategory: savedImage?.category,
           savedImageId: savedImage?.id,
           cachedUris: cachedUris.slice(0, 5) // 只显示前5个URI
@@ -1442,7 +1446,7 @@ const CategoryScreen = ({
         
         // 尝试模糊匹配（比较文件名）
         const savedFileName = newImageUri.split('/').pop();
-        const matchByFileName = allTobecleanedImages.find(img => {
+        const matchByFileName = allStagingBoxImages.find(img => {
           const imgUri = getUri(img);
           if (!imgUri) return false;
           const imgFileName = imgUri.split('/').pop();
@@ -1461,9 +1465,9 @@ const CategoryScreen = ({
         }
         
         if (!savedImage && !matchByFileName) {
-          logger.error('❌ 新保存的图片不在缓存中！', {
+          logger.error('❌ 新保存的图片不在暂存箱中！', {
             savedUri: newImageUri,
-            cachedCount: allTobecleanedImages.length,
+            cachedCount: allStagingBoxImages.length,
             allCachedUris: cachedUris
           });
         }
@@ -1472,7 +1476,7 @@ const CategoryScreen = ({
       }
       
       // 7. 刷新列表（等待缓存更新完成后再刷新，如果在暂存箱，可以立即看到新图片）
-      if (category === 'tobecleaned') {
+      if (category === 'stagingBox') {
         // writeImageDetailedInfo 已经重建了缓存，现在只需要从缓存重新读取
         await loadImages();
         logger.debug('✅ 已刷新图片列表');
@@ -1853,176 +1857,191 @@ const CategoryScreen = ({
     }
   };
 
-  // Batch delete
-  const handleBatchDelete = useCallback(() => {
-    // 使用UnifiedDataService获取标准化的分类ID
-    const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
-    
-    // 获取选中图片数量 - 支持相似组
-    const selectedCountsByCategory = UnifiedDataService.getSelectedCountsByCategory();
-    const selectedCountsByCity = UnifiedDataService.getSelectedCountsByCity();
-    const selectedCountsBySimilarityGroup = UnifiedDataService.getSelectedCountsBySimilarityGroup();
-    
-    let selectedCount;
-    if (similarityGroupId) {
-      selectedCount = selectedCountsBySimilarityGroup[similarityGroupId] || 0;
-    } else if (normalizedCategory) {
-      selectedCount = selectedCountsByCategory[normalizedCategory] || 0;
-    } else if (city) {
-      selectedCount = selectedCountsByCity[city] || 0;
-    } else {
-      selectedCount = 0;
-    }
-    
-    if (selectedCount === 0) return;
-
-    // 获取当前选中的图片 - 支持相似组
-    let currentCategorySelectedImages;
-    if (similarityGroupId) {
-      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
-    } else if (normalizedCategory) {
-      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesByCategory(normalizedCategory);
-    } else if (city) {
-      currentCategorySelectedImages = UnifiedDataService.getSelectedImagesByCity(city);
-    } else {
-      currentCategorySelectedImages = [];
-    }
-
-    // 检查当前模式是否为tobecleaned分类
-    const isToBeCleanedCategory = normalizedCategory === 'tobecleaned';
-    
-    // 使用实际要删除的图片数量
+  // 批量添加到暂存箱
+  const handleBatchAddToStagingBox = useCallback(() => {
+    // 统一使用 getCurrentSelectedImages 获取选中图片
+    const currentCategorySelectedImages = getCurrentSelectedImages();
     const actualSelectedCount = currentCategorySelectedImages.length;
+    
+    if (actualSelectedCount === 0) return;
 
-    if (isToBeCleanedCategory) {
-      // 如果是tobecleaned分类，执行真正的删除操作
-      Alert.alert(
-        '确认删除',
-        `确定要删除选中的 ${actualSelectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '删除',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                setShowDeleteProgress(true);
-                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: actualSelectedCount });
-                
-                const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
-                const result = await UnifiedDataService.writeDeleteImages(
-                  selectedImageIds,
-                  (progress) => {
-                    setDeleteProgress(progress);
-                  }
+    Alert.alert(
+      '添加到暂存箱',
+      `确定要将选中的 ${actualSelectedCount} 张图片添加到暂存箱吗？\n\n图片将被添加到暂存箱，但分类信息不会改变。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '添加',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
+              
+              // 清除选中状态
+              clearCategorySelections();
+              // 将图片添加到暂存箱（不修改category字段）
+              const addResult = await UnifiedDataService.addToStagingBox(selectedImageIds);
+              if (!addResult.success) {
+                throw new Error(`添加到暂存箱失败: ${addResult.errors.map(e => e.error).join(', ')}`);
+              }
+              const processed = addResult.added || selectedImageIds.length;
+              
+              // 检查相似组是否还存在，如果不存在则导航回HomeScreen
+              if (similarityGroupId) {
+                const remainingImages = UnifiedDataService.imageCache.getImagesBySimilarityGroup(similarityGroupId);
+                if (remainingImages.length <= 1) {
+                  logger.debug(`相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
+                  Alert.alert('操作完成', `已成功将 ${processed} 张图片添加到暂存箱\n\n相似组已被删除，返回主页面`, [
+                    { text: '确定', onPress: () => onBack() }
+                  ]);
+                  return;
+                }
+              }
+              
+              // 重新加载图片数据
+              await loadImages();
+              
+              Alert.alert('操作完成', `已成功将 ${processed} 张图片添加到暂存箱`);
+              
+            } catch (error) {
+              Alert.alert('操作失败', '添加到暂存箱时发生错误，请重试');
+            }
+          },
+        },
+      ]
+    );
+  }, [getCurrentSelectedImages, clearCategorySelections, similarityGroupId, onBack, loadImages]);
+
+  // 批量从暂存箱移除
+  const handleBatchRemoveFromStagingBox = useCallback(() => {
+    // 统一使用 getCurrentSelectedImages 获取选中图片
+    const currentCategorySelectedImages = getCurrentSelectedImages();
+    const actualSelectedCount = currentCategorySelectedImages.length;
+    
+    if (actualSelectedCount === 0) return;
+
+    Alert.alert(
+      '从暂存箱移除',
+      `确定要从暂存箱移除选中的 ${actualSelectedCount} 张图片吗？\n\n这些图片将从暂存箱中移除，但不会删除文件。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '移除',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
+              
+              // 清除选中状态
+              clearCategorySelections();
+              
+              // 从暂存箱移除图片
+              const removeResult = await UnifiedDataService.removeFromStagingBox(selectedImageIds);
+              if (!removeResult.success) {
+                const errorMessages = removeResult.errors?.map(e => e.error || e.message || '未知错误').join(', ') || '未知错误';
+                throw new Error(`从暂存箱移除失败: ${errorMessages}`);
+              }
+              
+              const processed = removeResult.removed || selectedImageIds.length;
+              
+              // 重新加载图片数据
+              await loadImages();
+              
+              Alert.alert('操作完成', `已成功从暂存箱移除 ${processed} 张图片`);
+              
+            } catch (error) {
+              logger.error('从暂存箱移除失败:', error);
+              Alert.alert('操作失败', `从暂存箱移除时发生错误: ${error.message}`);
+            }
+          },
+        },
+      ]
+    );
+  }, [getCurrentSelectedImages, clearCategorySelections, loadImages]);
+
+  // 批量删除
+  const handleBatchDelete = useCallback(() => {
+    // 统一使用 getCurrentSelectedImages 获取选中图片
+    const currentCategorySelectedImages = getCurrentSelectedImages();
+    const actualSelectedCount = currentCategorySelectedImages.length;
+    
+    if (actualSelectedCount === 0) return;
+
+    Alert.alert(
+      '确认删除',
+      `确定要删除选中的 ${actualSelectedCount} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setShowDeleteProgress(true);
+              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: actualSelectedCount });
+              
+              const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
+              const result = await UnifiedDataService.writeDeleteImages(
+                selectedImageIds,
+                (progress) => {
+                  setDeleteProgress(progress);
+                }
+              );
+              
+              // 立即关闭删除进度对话框
+              setShowDeleteProgress(false);
+              
+              // 检查删除结果
+              if (result.filesFailed > 0) {
+                // 有文件删除失败，显示权限提示
+                Alert.alert(
+                  '删除完成', 
+                  `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                  [
+                    { text: '知道了', style: 'default' }
+                  ]
                 );
                 
-                // 立即关闭删除进度对话框
-                setShowDeleteProgress(false);
-                
-                // 检查删除结果
-                if (result.filesFailed > 0) {
-                  // 有文件删除失败，显示权限提示
-                  Alert.alert(
-                    '删除完成', 
-                    `成功删除 ${result.filesDeleted} 张图片，${result.filesFailed} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
-                    [
-                      { text: '知道了', style: 'default' }
-                    ]
-                  );
-                  
-                  // 只移除成功删除的图片
-                  setAllImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));
-                } else {
-                  // 全部删除成功，移除所有选中的图片
-                  setAllImages(prevImages => prevImages.filter(img => !selectedImageIds.includes(img.id)));
-                }
-                
-                // 清除选中状态
-                clearCategorySelections();
-                
-                // 重新加载图片以确保UI正确更新
-                await loadImages();
-                
-              } catch (error) {
-                setShowDeleteProgress(false);
-                Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
+                // 只移除成功删除的图片
+                setAllImages(prevImages => prevImages.filter(img => !result.successfulImageIds.includes(img.id)));
+              } else {
+                // 全部删除成功，移除所有选中的图片
+                setAllImages(prevImages => prevImages.filter(img => !selectedImageIds.includes(img.id)));
               }
-            },
+              
+              // 清除选中状态
+              clearCategorySelections();
+              
+              // 重新加载图片以确保UI正确更新
+              await loadImages();
+              
+            } catch (error) {
+              setShowDeleteProgress(false);
+              Alert.alert('Operation Failed', 'Error occurred during deletion, please try again');
+            }
           },
-        ]
-      );
-    } else {
-      // 如果不是tobecleaned分类，将选中的图片设置为tobecleaned分类
-      Alert.alert(
-        '暂存',
-        `确定要将选中的 ${actualSelectedCount} 张图片暂存到待处置吗？\n\n这些图片将被移动到"待处置"分类中。`,
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '标记',
-            style: 'default',
-            onPress: async () => {
-              try {
-                const selectedImageIds = currentCategorySelectedImages.map(img => img.id);
-                
-                // 清除选中状态
-                clearCategorySelections();
-                // 批量更新图片分类为tobecleaned，并从相似组中移除
-                let processed = 0;
-                // 使用批量更新接口，提升性能（服务层会自动清理相似组信息）
-                const result = await UnifiedDataService.updateImagesCategory(selectedImageIds, 'tobecleaned', 'manual');
-                processed = result.processed;
-                
-          
-                
-                // 检查相似组是否还存在，如果不存在则导航回HomeScreen
-                if (similarityGroupId) {
-                  const remainingImages = UnifiedDataService.imageCache.getImagesBySimilarityGroup(similarityGroupId);
-                  if (remainingImages.length <= 1) {
-                    logger.debug(`相似组 ${similarityGroupId} 已被删除，导航回HomeScreen`);
-                    Alert.alert('操作完成', `已成功暂存 ${processed} 张图片到待处置\n\n相似组已被删除，返回主页面`, [
-                      { text: '确定', onPress: () => onBack() }
-                    ]);
-                    return;
-                  }
-                }
-                
-                // 重新加载图片数据
-                await loadImages();
-                
-                Alert.alert('操作完成', `已成功暂存 ${processed} 张图片到待处置`);
-                
-              } catch (error) {
-                Alert.alert('操作失败', '标记图片时发生错误，请重试');
-              }
-            },
-          },
-        ]
-      );
-    }
-  }, [category, city, similarityGroupId]);
+        },
+      ]
+    );
+  }, [getCurrentSelectedImages, clearCategorySelections, loadImages]);
 
   // Header 组件 - 可以重新渲染
   const HeaderComponent = useCallback(() => {
+    // 检查是否为暂存箱
+    const isStagingBox = category === 'stagingBox';
     
-    // 使用UnifiedDataService获取标准化的分类ID
-    const normalizedCategory = category ? UnifiedDataService.getCategoryId(category) : null;
-    
-    // 获取所有分类列表（排除tobecleaned）
+    // 获取所有分类列表（排除tobecleaned，因为暂存箱已独立）
     const configService = UnifiedDataService.configService;
     let availableCategories = [];
     if (configService?.isConfigLoaded()) {
       const categoryMap = configService.getCategoryNameMap();
       availableCategories = Object.entries(categoryMap)
-        .filter(([id]) => id !== 'tobecleaned')
+        .filter(([id]) => id !== 'tobecleaned') // 排除旧的tobecleaned分类
         .map(([id, names]) => ({
           id,
           chinese: names.chinese,
           english: names.english
         }));
-      
-      // logger.debug('调试信息 - 可用分类:', availableCategories);
     }
     
     // 使用本地selectedImages state计算选中数量
@@ -2047,6 +2066,10 @@ const CategoryScreen = ({
       <Text style={styles.title}>
         {similarityGroupId 
           ? `相似照片组 (${allImages.length}张)` 
+          : category === 'stagingBox'
+          ? `🗑️ 暂存箱 (${allImages.length}张)`
+          : color
+          ? `🎨 ${color} (${allImages.length}张)`
           : city 
             ? `${city} (${allImages.length}张)` 
             : `${UnifiedDataService.getCategoryDisplayName(category)} (${allImages.length}张)`
@@ -2182,97 +2205,109 @@ const CategoryScreen = ({
                   </View>
                 </TouchableOpacity>
                 
-                {/* 非tobecleaned分类：暂存 */}
-                {normalizedCategory !== 'tobecleaned' && (
+                {/* 照片创玩（带二级菜单） - 所有分类都显示 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  activeOpacity={1}
+                  onMouseEnter={() => {
+                    logger.debug('🖱️ 鼠标进入照片创玩菜单项');
+                    setShowEnhanceSubmenu(true);
+                  }}
+                  onMouseLeave={() => {
+                    logger.debug('🖱️ 鼠标离开照片创玩菜单项');
+                    setShowEnhanceSubmenu(false);
+                  }}
+                >
+                  <View style={styles.actionMenuItemWithSubmenu}>
+                    <Text style={styles.actionMenuItemText}>✨ 照片创玩 ›</Text>
+                    
+                    {/* 二级菜单：增强方案列表 */}
+                    {showEnhanceSubmenu && availableEnhancePresets.length > 0 && (
+                      <View 
+                        style={styles.categorySubmenu}
+                        onMouseEnter={() => setShowEnhanceSubmenu(true)}
+                        onMouseLeave={() => setShowEnhanceSubmenu(false)}
+                      >
+                        {availableEnhancePresets.map((preset) => (
+                          <TouchableOpacity
+                            key={preset.id}
+                            style={styles.categorySubmenuItem}
+                            onPress={() => {
+                              logger.debug('选择方案:', preset.id, preset.name);
+                              setShowActionMenu(false);
+                              setShowCategorySubmenu(false);
+                              setShowEnhanceSubmenu(false);
+                              handleAIEnhance(preset.id);
+                            }}>
+                            <Text style={styles.categorySubmenuItemText}>
+                              {preset.icon ? `${preset.icon} ` : ''}{preset.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+                
+                {/* 删除 - 所有分类都显示 */}
+                <TouchableOpacity
+                  style={[styles.actionMenuItem, styles.actionMenuItemDanger]}
+                  onPress={() => {
+                    setShowActionMenu(false);
+                    setShowCategorySubmenu(false);
+                    handleBatchDelete();
+                  }}>
+                  <Text style={[styles.actionMenuItemText, styles.actionMenuItemTextDanger]}>
+                    ❌ 删除
+                  </Text>
+                </TouchableOpacity>
+                
+                {/* 复制到剪贴板 - 所有分类都显示 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={() => {
+                    setShowActionMenu(false);
+                    setShowCategorySubmenu(false);
+                    handleCopyToClipboard();
+                  }}>
+                  <Text style={styles.actionMenuItemText}>📋 复制到剪贴板</Text>
+                </TouchableOpacity>
+                
+                {/* 复制到文件管理器 - 所有分类都显示 */}
+                <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={() => {
+                    setShowActionMenu(false);
+                    setShowCategorySubmenu(false);
+                    handleCopyToFileManager();
+                  }}>
+                  <Text style={styles.actionMenuItemText}>📂 复制到文件管理器</Text>
+                </TouchableOpacity>
+                
+                {/* 暂存 - 只有非暂存箱显示 */}
+                {!isStagingBox && (
                   <TouchableOpacity
                     style={styles.actionMenuItem}
                     onPress={() => {
                       setShowActionMenu(false);
                       setShowCategorySubmenu(false);
-                      handleBatchDelete();
+                      handleBatchAddToStagingBox();
                     }}>
-                    <Text style={styles.actionMenuItemText}>📌 暂存</Text>
+                    <Text style={styles.actionMenuItemText}>🗑️ 暂存</Text>
                   </TouchableOpacity>
                 )}
                 
-                {/* tobecleaned分类：AI增强（带二级菜单） + 删除 + 复制 */}
-                {normalizedCategory === 'tobecleaned' && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.actionMenuItem}
-                      activeOpacity={1}
-                      onMouseEnter={() => {
-                        logger.debug('🖱️ 鼠标进入照片创玩菜单项');
-                        setShowEnhanceSubmenu(true);
-                      }}
-                      onMouseLeave={() => {
-                        logger.debug('🖱️ 鼠标离开照片创玩菜单项');
-                        setShowEnhanceSubmenu(false);
-                      }}
-                    >
-                      <View style={styles.actionMenuItemWithSubmenu}>
-                        <Text style={styles.actionMenuItemText}>✨ 照片创玩 ›</Text>
-                        
-                        {/* 二级菜单：增强方案列表 */}
-                        {showEnhanceSubmenu && availableEnhancePresets.length > 0 && (
-                          <View 
-                            style={styles.categorySubmenu}
-                            onMouseEnter={() => setShowEnhanceSubmenu(true)}
-                            onMouseLeave={() => setShowEnhanceSubmenu(false)}
-                          >
-                            {availableEnhancePresets.map((preset) => (
-                              <TouchableOpacity
-                                key={preset.id}
-                                style={styles.categorySubmenuItem}
-                                onPress={() => {
-                                  logger.debug('选择方案:', preset.id, preset.name);
-                                  setShowActionMenu(false);
-                                  setShowCategorySubmenu(false);
-                                  setShowEnhanceSubmenu(false);
-                                  handleAIEnhance(preset.id);
-                                }}>
-                                <Text style={styles.categorySubmenuItemText}>
-                                  {preset.icon ? `${preset.icon} ` : ''}{preset.name}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity
-                      style={[styles.actionMenuItem, styles.actionMenuItemDanger]}
-                      onPress={() => {
-                        setShowActionMenu(false);
-                        setShowCategorySubmenu(false);
-                        handleBatchDelete();
-                      }}>
-                      <Text style={[styles.actionMenuItemText, styles.actionMenuItemTextDanger]}>
-                        🗑️ 删除
-                      </Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity
-                      style={styles.actionMenuItem}
-                      onPress={() => {
-                        setShowActionMenu(false);
-                        setShowCategorySubmenu(false);
-                        handleCopyToClipboard();
-                      }}>
-                      <Text style={styles.actionMenuItemText}>📋 复制到剪贴板</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity
-                      style={styles.actionMenuItem}
-                      onPress={() => {
-                        setShowActionMenu(false);
-                        setShowCategorySubmenu(false);
-                        handleCopyToFileManager();
-                      }}>
-                      <Text style={styles.actionMenuItemText}>📂 复制到文件管理器</Text>
-                    </TouchableOpacity>
-                  </>
+                {/* 从暂存箱移除 - 只有暂存箱显示 */}
+                {isStagingBox && (
+                  <TouchableOpacity
+                    style={styles.actionMenuItem}
+                    onPress={() => {
+                      setShowActionMenu(false);
+                      setShowCategorySubmenu(false);
+                      handleBatchRemoveFromStagingBox();
+                    }}>
+                    <Text style={styles.actionMenuItemText}>📤 从暂存箱移除</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             )}
@@ -2280,10 +2315,10 @@ const CategoryScreen = ({
         )}
       </View>
     );
-  }, [city, category, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, handleCopyToClipboard, handleCopyToFileManager, showActionMenu, showCategorySubmenu, handleBatchChangeCategory, handleBatchDelete, clearCategorySelections, toggleSelectAll, selectionVersion]);
+  }, [city, category, color, similarityGroupId, onBack, currentPage, pageInput, totalPages, itemsPerPage, showDropdown, dropdownOptions, selectAll, selectedImages.length, handleCopyToClipboard, handleCopyToFileManager, showActionMenu, showCategorySubmenu, showEnhanceSubmenu, availableEnhancePresets, handleBatchChangeCategory, handleBatchAddToStagingBox, handleBatchRemoveFromStagingBox, handleBatchDelete, handleAIEnhance, clearCategorySelections, toggleSelectAll, selectionVersion, allImages.length]);
 
   // 懒加载图片容器组件
-  const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress, highlightedId, setRef }) => {
+  const LazyImageContainer = React.memo(({ item, index, total, getIsSelected, onPress, onLongPress, onRightPress, highlightedId, isInStagingBox, setRef }) => {
     const [selected, setSelected] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
     const isHighlighted = highlightedId === item.id;
@@ -2342,12 +2377,39 @@ const CategoryScreen = ({
           item={item}
           isSelected={selected}
           isHighlighted={isHighlighted}
+          isInStagingBox={isInStagingBox}
           onPress={onPress}
           onLongPress={onLongPress}
           onRightPress={handleRightPress}
           isVisible={isVisible}
         />
       </View>
+    );
+  }, (prevProps, nextProps) => {
+    // 自定义比较函数：如果 highlightedId 与当前 item.id 相关，必须重新渲染
+    const prevIsHighlighted = prevProps.highlightedId === prevProps.item.id;
+    const nextIsHighlighted = nextProps.highlightedId === nextProps.item.id;
+    
+    // 如果高亮状态发生变化（从高亮变为不高亮，或从不高亮变为高亮），需要重新渲染
+    if (prevIsHighlighted !== nextIsHighlighted) {
+      return false; // 返回 false 表示需要重新渲染
+    }
+    
+    // 如果 highlightedId 本身变化了，也需要重新渲染（可能影响其他图片的高亮状态）
+    if (prevProps.highlightedId !== nextProps.highlightedId) {
+      return false;
+    }
+    
+    // 如果 isInStagingBox 状态变化，需要重新渲染
+    if (prevProps.isInStagingBox !== nextProps.isInStagingBox) {
+      return false;
+    }
+    
+    // 其他 props 使用默认浅比较
+    return (
+      prevProps.item.id === nextProps.item.id &&
+      prevProps.index === nextProps.index &&
+      prevProps.total === nextProps.total
     );
   });
 
@@ -2377,11 +2439,18 @@ const CategoryScreen = ({
             onPress={handleImagePress}
             onLongPress={handleImageLongPress}
             onRightPress={handleImageRightPress}
+            highlightedId={highlightedImageId}
+            isInStagingBox={stagingBoxImageIds.has(item.id)}
+            setRef={(id, el) => {
+              if (el) {
+                imageRefs.current[id] = el;
+              }
+            }}
           />
         ))}
       </ScrollView>
     );
-  }, [paginationData.currentPageImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress]);
+  }, [paginationData.currentPageImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, highlightedImageId, stagingBoxImageIds]);
 
   // 时间轴标题点击处理 - 全选/取消全选该时间段的所有图片
   const handleTimelineHeaderPress = useCallback((imagesForDate) => {
@@ -2435,6 +2504,10 @@ const CategoryScreen = ({
           <Text style={styles.emptySubtitle}>
             {similarityGroupId 
               ? '该相似组暂无图片' 
+              : category === 'stagingBox'
+              ? '暂存箱暂无图片'
+              : color
+              ? `该颜色暂无图片`
               : city 
                 ? `${city} 暂无图片` 
                 : '该分类暂无图片'
@@ -2491,6 +2564,7 @@ const CategoryScreen = ({
                     onLongPress={handleImageLongPress}
                     onRightPress={handleImageRightPress}
                     highlightedId={highlightedImageId}
+                    isInStagingBox={stagingBoxImageIds.has(image.id)}
                     setRef={(id, el) => {
                       if (el) {
                         imageRefs.current[id] = el;
@@ -2504,7 +2578,7 @@ const CategoryScreen = ({
                 })}
       </ScrollView>
     );
-  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, city, handleTimelineHeaderPress]);
+  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, city, handleTimelineHeaderPress, highlightedImageId, stagingBoxImageIds]);
 
   // 分页控制已集成到头部区域
 
@@ -2723,9 +2797,11 @@ const CategoryScreen = ({
       <Text style={styles.emptySubtitle}>
         {similarityGroupId 
           ? '该相似组暂无图片' 
-          : city 
-            ? `${city} 暂无图片` 
-            : '该分类暂无图片'
+          : category === 'stagingBox'
+          ? '暂存箱暂无图片'
+          : city
+          ? `${city} 暂无图片`
+          : '该分类暂无图片'
         }
       </Text>
       </View>
@@ -3303,6 +3379,30 @@ const styles = StyleSheet.create({
     color: '#fff',
    fontSize: 14,
     fontWeight: 'bold',
+  },
+  stagingBoxBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  stagingBoxBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
   imagePlaceholder: {
     width: '100%',

@@ -1696,7 +1696,9 @@ class GalleryScannerService {
           generalDetections: classification.generalDetections || [],
           mobileNetV3Detections: classification.mobileNetV3Detections || null,
           // 保存大模型推理描述
-          message: classification.message || null
+          message: classification.message || null,
+          // 保存背景颜色
+          background_color: classification.background_color || null
         };
       } else {
         // 完整保存：保存所有信息（包括 EXIF 数据）
@@ -1727,7 +1729,9 @@ class GalleryScannerService {
           // 保存图像尺寸信息
           imageDimensions: exifData.imageDimensions || null,
           // 保存大模型推理描述
-          message: classification.message || null
+          message: classification.message || null,
+          // 保存背景颜色
+          background_color: classification.background_color || null
         };
       }
       
@@ -1785,7 +1789,9 @@ class GalleryScannerService {
               generalDetections: classification.generalDetections || [],
               mobileNetV3Detections: classification.mobileNetV3Detections || null,
               // 保存大模型推理描述
-              message: classification.message || null
+              message: classification.message || null,
+              // 保存背景颜色
+              background_color: classification.background_color || null
             };
           } else {
             // 其他阶段：保存完整信息（包括 EXIF 数据）
@@ -1830,7 +1836,9 @@ class GalleryScannerService {
               // 保存图像尺寸信息
               imageDimensions: exifData?.imageDimensions || null,
               // 保存大模型推理描述
-              message: classification.message || null
+              message: classification.message || null,
+              // 保存背景颜色
+              background_color: classification.background_color || null
             };
           }
           
@@ -2196,7 +2204,9 @@ class GalleryScannerService {
             generalDetections: [],
             mobileNetV3Detections: null,
             // 保存大模型推理的描述信息
-            message: cacheItem.data.description || cacheItem.data.message || null
+            message: cacheItem.data.description || cacheItem.data.message || null,
+            // 保存背景颜色
+            background_color: cacheItem.data.background_color || null
           };
           
           // 缓存检查阶段：只更新分类信息，不提取 EXIF 数据
@@ -2227,7 +2237,8 @@ class GalleryScannerService {
               idCardDetections: result.classification.idCardDetections,
               generalDetections: result.classification.generalDetections,
               mobileNetV3Detections: result.classification.mobileNetV3Detections,
-              message: result.classification.message
+              message: result.classification.message,
+              background_color: result.classification.background_color || null
             }));
             
             // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）
@@ -2467,7 +2478,8 @@ class GalleryScannerService {
                 idCardDetections: [],
                 generalDetections: [],
                 mobileNetV3Detections: null,
-                message: item.data.description || item.data.message || null
+                message: item.data.description || item.data.message || null,
+                background_color: item.data.background_color || null
               };
             } else if (item.data.local_inference_result) {
               // 小模型推理：只保存检测结果，分类保持为NA，让漏斗到下个阶段处理
@@ -2539,7 +2551,8 @@ class GalleryScannerService {
             idCardDetections: result.classification.idCardDetections,
             generalDetections: result.classification.generalDetections,
             mobileNetV3Detections: result.classification.mobileNetV3Detections,
-            message: result.classification.message
+            message: result.classification.message,
+            background_color: result.classification.background_color || null
           }));
           
           // 使用批量更新分类信息函数（只更新分类字段，保留其他字段）

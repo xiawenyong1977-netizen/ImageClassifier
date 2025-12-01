@@ -30,11 +30,17 @@ const HomeScreen = () => {
   const [recentImages, setRecentImages] = useState([]);
   const [categoryCounts, setCategoryCounts] = useState({});
   const [cityCounts, setCityCounts] = useState({});
+  const [colorCounts, setColorCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
+  const [colorRecentImages, setColorRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
+  const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
+  // 显示设置
+  const [showColorCategories, setShowColorCategories] = useState(true);
+  const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
@@ -55,13 +61,15 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesData, categoryCountsData, cityCountsData, similarityGroupsData, settings, allImages] = await Promise.all([
+      const [recentImagesData, categoryCountsData, cityCountsData, colorCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
         UnifiedDataService.readRecentImages(20),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
+        UnifiedDataService.readColorCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
         UnifiedDataService.readSettings(),
-        UnifiedDataService.readAllImages()
+        UnifiedDataService.readAllImages(),
+        UnifiedDataService.getStagingBoxCount()
       ]);
       
       // 加载各分类的最近图片（只在有图片时加载）
@@ -105,6 +113,25 @@ const HomeScreen = () => {
         cityImagesMap[cityName] = images;
       });
       
+      // 加载各颜色的最近图片（按数量排序取前10个）
+      const sortedColors = Object.entries(colorCountsData).sort(([,a], [,b]) => b - a);
+      const colorIds = sortedColors.slice(0, 10).map(([colorName]) => colorName);
+      const colorImagesPromises = colorIds.map(async (colorName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByColor(colorName, 1);
+          return { colorName, images };
+        } catch (error) {
+          logger.error(`加载颜色 ${colorName} 最近图片失败:`, error);
+          return { colorName, images: [] };
+        }
+      });
+      
+      const colorImagesResults = await Promise.all(colorImagesPromises);
+      const colorImagesMap = {};
+      colorImagesResults.forEach(({ colorName, images }) => {
+        colorImagesMap[colorName] = images;
+      });
+      
       // 更新状态
       logger.debug('准备更新状态 - 分类统计:', categoryCountsData);
       logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
@@ -114,14 +141,23 @@ const HomeScreen = () => {
       setRecentImages(recentImagesData);
       setCategoryCounts(categoryCountsData);
       setCityCounts(cityCountsData);
+      setColorCounts(colorCountsData);
+      setStagingBoxCount(stagingBoxCountData);
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
+      setColorRecentImages(colorImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
       // 只有当用户明确设置为 false 时才显示空分类
       const shouldHide = settings.hideEmptyCategories !== false;
       setHideEmptyCategories(shouldHide);
       hideEmptyCategoriesRef.current = shouldHide;
+      
+      // 读取显示设置（默认为 true）
+      const shouldShowColors = settings.showColorCategories !== false;
+      const shouldShowSimilarity = settings.showSimilarityGroups !== false;
+      setShowColorCategories(shouldShowColors);
+      setShowSimilarityGroups(shouldShowSimilarity);
       
       const totalCount = Array.isArray(allImages) ? allImages.length : 0;
       setTotalImagesCount(totalCount);
@@ -383,17 +419,33 @@ const HomeScreen = () => {
       loadData();
     };
 
+    const handleSettingsUpdated = (event) => {
+      logger.debug('收到设置更新事件，重新加载数据');
+      const { key, settings: newSettings } = event.detail || {};
+      // 如果更新了显示相关的设置，立即更新状态
+      if (key === 'showColorCategories' || key === 'showSimilarityGroups') {
+        if (newSettings) {
+          setShowColorCategories(newSettings.showColorCategories !== false);
+          setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
+        }
+      }
+      // 重新加载数据以应用所有设置
+      loadData();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('navigate-to-settings', handleNavigateToSettings);
       window.addEventListener('scanProgress', handleScanProgressEvent);
       window.addEventListener('dataCleared', handleDataCleared);
       window.addEventListener('dataRefreshed', handleDataRefreshed);
+      window.addEventListener('settingsUpdated', handleSettingsUpdated);
       
       return () => {
         window.removeEventListener('navigate-to-settings', handleNavigateToSettings);
         window.removeEventListener('scanProgress', handleScanProgressEvent);
         window.removeEventListener('dataCleared', handleDataCleared);
         window.removeEventListener('dataRefreshed', handleDataRefreshed);
+        window.removeEventListener('settingsUpdated', handleSettingsUpdated);
       };
     }
   }, [handleScanProgress, loadData]);
@@ -416,6 +468,20 @@ const HomeScreen = () => {
       similarityGroupId: null,
       fromScreen: 'Category',
       currentImageId: null, // 清除返回时的图片ID
+      currentPage: null, // 清除返回时的页码
+      viewMode: null // 清除返回时的视图模式
+    }));
+  };
+
+  // 处理颜色点击
+  const handleColorPress = (color) => {
+    logger.debug('点击颜色:', color);
+    setCurrentScreen('Category');
+    setScreenProps(prev => ({
+      ...prev,
+      category: null,
+      city: null,
+      color,
       currentPage: null, // 清除返回时的页码
       viewMode: null // 清除返回时的视图模式
     }));
@@ -510,7 +576,12 @@ const HomeScreen = () => {
     
     // 移除setRefreshing(true)，避免UI闪烁
     try {
-      // 重新加载数据（不再重建缓存，不显示loading状态）
+      // 先重建缓存（确保数据是最新的）
+      logger.debug('🔄 开始重建缓存...');
+      await UnifiedDataService.forceRefreshCache();
+      logger.debug('✅ 缓存重建完成');
+      
+      // 重新加载数据
       await loadData();
     } catch (error) {
       logger.error('刷新数据失败:', error);
@@ -955,8 +1026,37 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* 相似照片板块 - 只有当有相似照片组时才显示 */}
-        {similarityGroups && similarityGroups.length > 0 && (
+        {/* 颜色分类卡片 - 根据设置显示 */}
+        {showColorCategories && (
+          <View style={styles.categoriesSection}>
+            <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>🎨 按颜色</Text>
+            </View>
+            <View style={styles.categoriesContainer}>
+              {colorCounts && Object.keys(colorCounts).length > 0 ? (
+              Object.entries(colorCounts)
+                .sort(([,a], [,b]) => b - a)
+                .map(([color, count]) => {
+                  const recentImages = colorRecentImages[color] || [];
+                  return (
+                    <ColorCard
+                      key={color}
+                      color={color}
+                      count={count}
+                      recentImages={recentImages}
+                      onPress={handleColorPress}
+                    />
+                  );
+                })
+            ) : (
+                <Text style={styles.emptyMessage}>暂无颜色数据</Text>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* 相似照片板块 - 根据设置显示，且只有当有相似照片组时才显示 */}
+        {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
           <View style={styles.categoriesSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>🔗 相似照片</Text>
@@ -1016,6 +1116,23 @@ const HomeScreen = () => {
             <Text style={styles.titleBarTitle}>芯图相册</Text>
           </View>
           <View style={styles.titleBarRight}>
+            {/* 暂存箱按钮 */}
+            <TouchableOpacity 
+              style={styles.titleBarStagingButton}
+              onPress={() => {
+                logger.debug('标题栏暂存箱按钮被点击');
+                setCurrentScreen('Category');
+                setScreenProps({ category: 'stagingBox' });
+              }}
+            >
+              <Text style={styles.titleBarStagingIcon}>🗑️</Text>
+              {stagingBoxCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{stagingBoxCount > 99 ? '99+' : stagingBoxCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            
             {/* 设置按钮 */}
             <TouchableOpacity 
               style={styles.titleBarSettingsButton}
@@ -1121,19 +1238,23 @@ const HomeScreen = () => {
                   const savedViewMode = urlParams.get('viewMode');
                   
                   
-                  if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City') {
-                    logger.debug('从分类/相似组/城市页面返回', { 
+                  if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City' || fromScreen === 'StagingBox') {
+                    logger.debug('从分类/相似组/城市/暂存箱页面返回', { 
                       imageId, 
                       currentPage: savedCurrentPage, 
-                      viewMode: savedViewMode 
+                      viewMode: savedViewMode,
+                      category,
+                      fromScreen
                     });
                     
                     setCurrentScreen('Category');
                     
                     // 恢复上下文信息到screenProps，包括页码、视图模式和当前图片ID
+                    // 对于暂存箱，确保 category 设置为 'stagingBox'
+                    const finalCategory = fromScreen === 'StagingBox' ? 'stagingBox' : (category || null);
                     setScreenProps(prev => ({
                       ...prev,
-                      category: category || null,
+                      category: finalCategory,
                       city: city || null,
                       similarityGroupId: similarityGroupId || null,
                       fromScreen: fromScreen,
@@ -1178,7 +1299,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1222,6 +1343,42 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
       {/* 覆盖层显示分类信息 */}
       <View style={styles.categoryOverlay}>
         <Text style={styles.categoryName}>{category.name}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// 渲染颜色卡片组件
+const ColorCard = React.memo(({ color, count, recentImages, onPress }) => {
+  // 稳定化图片源对象，避免不必要的重新渲染
+  const imageSource = useMemo(() => {
+    if (recentImages.length === 0) return null;
+    const imageUri = getUri(recentImages[0]);
+    return imageUri ? { uri: imageUri } : null;
+  }, [recentImages[0]]);
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(color)}
+    >
+      {/* 缩略图占满整个卡片 */}
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: color || '#9E9E9E' }]}>
+          <Text style={styles.emptyThumbnailText}>🎨</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示颜色信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{color}</Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
     </TouchableOpacity>
@@ -1361,6 +1518,39 @@ const styles = StyleSheet.create({
   titleBarSettingsIcon: {
     fontSize: 16,
     color: '#74b1be',
+  },
+  titleBarStagingButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(116, 177, 190, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    position: 'relative',
+  },
+  titleBarStagingIcon: {
+    fontSize: 16,
+    color: '#74b1be',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#FF5722',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#2f3241',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   // 扫描进度提示区样式
   scanProgressBanner: {

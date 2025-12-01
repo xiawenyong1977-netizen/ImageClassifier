@@ -311,6 +311,72 @@ class UnifiedDataService {
   }
 
   /**
+   * 获取颜色统计
+   * 优先从缓存读取，缓存没有则从数据库读取
+   */
+  async readColorCounts() {
+    try {
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
+      const cache = this.imageCache.getCache();
+      if (cache.colorCounts && Object.keys(cache.colorCounts).length > 0) {
+        logger.debug('从缓存读取颜色统计');
+        return cache.colorCounts;
+      }
+      
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有颜色统计，返回空对象');
+      return {};
+      
+    } catch (error) {
+      logger.error('读取颜色统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 根据颜色获取图片
+   * 优先从缓存读取
+   */
+  async readImagesByColor(color, limit = null) {
+    try {
+      // 确保缓存已加载
+      await this.imageCache.buildCache();
+      
+      // 从缓存获取所有图片
+      const allImages = this.imageCache.getCache().allImages;
+      
+      // 过滤出指定颜色的图片
+      const colorImages = allImages.filter(img => 
+        img.background_color === color
+      );
+      
+      // 按时间排序
+      const sortedImages = colorImages.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      
+      return limit ? sortedImages.slice(0, limit) : sortedImages;
+      
+    } catch (error) {
+      logger.error('读取颜色图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定颜色的最近图片
+   * 优先从缓存读取
+   */
+  async readRecentImagesByColor(color, limit = 4) {
+    return await this.readImagesByColor(color, limit);
+  }
+
+  /**
    * 根据城市/地区获取图片
    * 优先从缓存读取，缓存没有则从数据库读取
    */
@@ -674,6 +740,82 @@ class UnifiedDataService {
     } catch (error) {
       console.error('❌ 强制刷新缓存失败:', error);
       throw error;
+    }
+  }
+
+  // ==================== 暂存箱相关方法 ====================
+
+  /**
+   * 添加图片到暂存箱
+   * @param {Array<string>} imageIds - 图片ID数组
+   * @returns {Promise<{success: boolean, added: number, errors: Array}>}
+   */
+  async addToStagingBox(imageIds) {
+    try {
+      const result = await this.imageStorageService.addToStagingBox(imageIds);
+      // 刷新缓存
+      await this.imageCache.refreshCache();
+      return result;
+    } catch (error) {
+      logger.error('添加图片到暂存箱失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 从暂存箱移除图片
+   * @param {Array<string>} imageIds - 图片ID数组
+   * @returns {Promise<{success: boolean, removed: number, errors: Array}>}
+   */
+  async removeFromStagingBox(imageIds) {
+    try {
+      const result = await this.imageStorageService.removeFromStagingBox(imageIds);
+      // 刷新缓存
+      await this.imageCache.refreshCache();
+      return result;
+    } catch (error) {
+      logger.error('从暂存箱移除图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取暂存箱所有图片
+   * @returns {Promise<Array>} 图片数组
+   */
+  async getStagingBoxImages() {
+    try {
+      return await this.imageStorageService.getStagingBoxImages();
+    } catch (error) {
+      logger.error('获取暂存箱图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取暂存箱图片数量
+   * @returns {Promise<number>}
+   */
+  async getStagingBoxCount() {
+    try {
+      return await this.imageStorageService.getStagingBoxCount();
+    } catch (error) {
+      logger.error('获取暂存箱数量失败:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 检查图片是否在暂存箱
+   * @param {string} imageId - 图片ID
+   * @returns {Promise<boolean>}
+   */
+  async isInStagingBox(imageId) {
+    try {
+      return await this.imageStorageService.isInStagingBox(imageId);
+    } catch (error) {
+      logger.error('检查图片是否在暂存箱失败:', error);
+      return false;
     }
   }
 
@@ -1321,10 +1463,6 @@ class UnifiedDataService {
         group.images.forEach(imageInfo => {
           const image = imageMap.get(imageInfo.id);
           if (image) {
-            // 排除 tobecleaned 分类的图片
-            if (image.category === 'tobecleaned') {
-              return;
-            }
             validImageCount++;
             const imageTime = image.takenAt ? new Date(image.takenAt).getTime() : image.timestamp;
             if (imageTime > latestTime) {
@@ -1336,7 +1474,7 @@ class UnifiedDataService {
         
         return {
           groupId: group.id,
-          imageCount: validImageCount, // 使用有效图片数量（排除 tobecleaned）
+          imageCount: validImageCount,
           latestImageUri: latestImage ? getUri(latestImage) : null
         };
       });
@@ -1387,11 +1525,10 @@ class UnifiedDataService {
       const imageMap = new Map(allImages.map(img => [img.id, img]));
       
       // 直接使用缓存中的图片对象，添加相似度信息
-      // 排除 tobecleaned 分类的图片
       const images = group.images
         .map(imageInfo => {
           const image = imageMap.get(imageInfo.id);
-          if (image && image.category !== 'tobecleaned') {
+          if (image) {
             // 为缓存中的图片对象添加相似度信息
             image.similarityScore = imageInfo.similarity_score || 0;
             image.similarityGroupIndex = groupId;

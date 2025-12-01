@@ -8,6 +8,7 @@ class GlobalImageCache {
       allImages: [],
       categoryCounts: {},
       cityCounts: {},
+      colorCounts: {},
       recentImages: [],
       selectedCategoryCounts: {}, // 选中图片的分类统计
       selectedCityCounts: {}, // 选中图片的城市统计
@@ -129,6 +130,7 @@ class GlobalImageCache {
       // 计算统计信息
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      this._rebuildColorCounts();
       
       // 加载相似组数据到图片对象中
       await this._loadSimilarityGroupData();
@@ -187,9 +189,13 @@ class GlobalImageCache {
       // 更新统计信息
       const normalizedCategory = this._normalizeCategoryId(image.category);
       this.cache.categoryCounts[normalizedCategory] = (this.cache.categoryCounts[normalizedCategory] || 0) + 1;
-      // 城市统计需要排除 tobecleaned 分类的图片
-      if (image.city && image.category !== 'tobecleaned') {
+      // 城市统计
+      if (image.city) {
         this.cache.cityCounts[image.city] = (this.cache.cityCounts[image.city] || 0) + 1;
+      }
+      // 颜色统计
+      if (image.background_color) {
+        this.cache.colorCounts[image.background_color] = (this.cache.colorCounts[image.background_color] || 0) + 1;
       }
       
       // 更新最近图片列表（保持前20张）
@@ -252,6 +258,7 @@ class GlobalImageCache {
       // 重新构建分类统计和城市统计（城市统计需要排除tobecleaned）
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      this._rebuildColorCounts();
     
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
@@ -554,6 +561,7 @@ class GlobalImageCache {
       // 重新构建统计信息
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      this._rebuildColorCounts();
       this._rebuildRecentImages();
       
       logger.debug(`✅ 图片删除完成: ${imageToDelete.fileName}`);
@@ -576,13 +584,24 @@ class GlobalImageCache {
     let cityImageCount = 0;
     
     this.cache.allImages.forEach(img => {
-      // 排除 tobecleaned 分类的图片
-      if (img.city && img.category !== 'tobecleaned') {
+      if (img.city) {
         this.cache.cityCounts[img.city] = (this.cache.cityCounts[img.city] || 0) + 1;
         cityImageCount++;
       }
     });
     
+  }
+
+  // 重新构建颜色统计
+  _rebuildColorCounts() {
+    this.cache.colorCounts = {};
+    
+    this.cache.allImages.forEach(img => {
+      // 只统计有背景颜色的图片（排除 null、undefined 和空字符串）
+      if (img.background_color && img.background_color.trim() !== '') {
+        this.cache.colorCounts[img.background_color] = (this.cache.colorCounts[img.background_color] || 0) + 1;
+      }
+    });
   }
   
   // 重新构建最近图片
@@ -626,6 +645,7 @@ class GlobalImageCache {
       // 重新构建统计信息
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
+      this._rebuildColorCounts();
       this._rebuildSelectedStats();
       this._rebuildRecentImages();
       
@@ -733,8 +753,7 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      // 排除 tobecleaned 分类的图片
-      return img.city === city && img.category !== 'tobecleaned';
+      return img.city === city;
     });
   }
 
@@ -746,8 +765,7 @@ class GlobalImageCache {
         console.warn(`⚠️ 发现无效的图片对象:`, img);
         return false;
       }
-      // 排除 tobecleaned 分类的图片
-      return img.similarityGroupIndex === groupId && img.category !== 'tobecleaned';
+      return img.similarityGroupIndex === groupId;
     });
   }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, Alert, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -92,6 +92,7 @@ const ImagePreviewScreen = ({
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 1 });
   const [loading, setLoading] = useState(true);
+  const [isInStagingBox, setIsInStagingBox] = useState(false); // 跟踪图片是否在暂存箱
   
   // 导航相关状态
   const [categoryImages, setCategoryImages] = useState([]);
@@ -143,13 +144,21 @@ const ImagePreviewScreen = ({
           });
           setCurrentImage(fullImageDetails);
           
+          // 检查图片是否在暂存箱
+          const inStagingBox = await UnifiedDataService.isInStagingBox(finalImageId);
+          setIsInStagingBox(inStagingBox);
+          
           // 加载当前上下文的所有图片用于导航
           await loadContextImages(fullImageDetails);
         } else {
           logger.error(`图片详情加载失败: ${finalImageId}`);
+          // 图片加载失败时，重置暂存箱状态
+          setIsInStagingBox(false);
         }
       } catch (error) {
         logger.error(`加载图片详情异常: ${finalImageId}`, error);
+        // 发生异常时，重置暂存箱状态
+        setIsInStagingBox(false);
       } finally {
         setLoading(false);
       }
@@ -182,21 +191,22 @@ const ImagePreviewScreen = ({
         contextType = '最近照片';
         contextValue = 'Home';
         images = await UnifiedDataService.readRecentImages(50); // 加载最近50张照片
+      } else if (fromScreen === 'StagingBox' || actualCategory === 'stagingBox') {
+        // 从暂存箱进入
+        contextType = '暂存箱';
+        contextValue = 'StagingBox';
+        images = await UnifiedDataService.getStagingBoxImages();
       } else if (actualSimilarityGroupId) {
         // 从相似组进入
         contextType = '相似组';
         contextValue = actualSimilarityGroupId;
         const groupData = await UnifiedDataService.getSimilarityGroupImages(actualSimilarityGroupId);
         images = groupData.images || [];
-        // 过滤掉tobecleaned分类的照片
-        images = images.filter(img => img.category !== 'tobecleaned');
       } else if (actualCity) {
         // 从城市进入
         contextType = '城市';
         contextValue = actualCity;
         images = await UnifiedDataService.readImagesByLocation(actualCity, null);
-        // 过滤掉tobecleaned分类的照片
-        images = images.filter(img => img.category !== 'tobecleaned');
       } else if (actualCategory) {
         // 从分类进入
         contextType = '分类';
@@ -233,19 +243,19 @@ const ImagePreviewScreen = ({
         // 从首页最近照片进入
         logger.debug('从最近照片重新加载...');
         updatedImages = await UnifiedDataService.readRecentImages(50);
+      } else if (fromScreen === 'StagingBox' || category === 'stagingBox') {
+        // 来自暂存箱
+        logger.debug('从暂存箱重新加载...');
+        updatedImages = await UnifiedDataService.getStagingBoxImages();
       } else if (similarityGroupId) {
         // 来自相似组
         logger.debug('从相似组重新加载...');
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
-        const groupImages = groupData.images || [];
-        // 过滤掉 tobecleaned 分类的照片（保持与相似组页面一致）
-        updatedImages = groupImages.filter(img => img.category !== 'tobecleaned');
+        updatedImages = groupData.images || [];
       } else if (city) {
         // 来自城市分类
         logger.debug('从城市分类重新加载...');
-        const cityImages = await UnifiedDataService.readImagesByLocation(city);
-        // 过滤掉 tobecleaned 分类的照片（保持与城市页面一致）
-        updatedImages = cityImages.filter(img => img.category !== 'tobecleaned');
+        updatedImages = await UnifiedDataService.readImagesByLocation(city, null);
       } else if (category) {
         // 来自普通分类
         logger.debug('从分类重新加载...');
@@ -359,9 +369,10 @@ const ImagePreviewScreen = ({
   }, [loading, currentImageIndex, categoryImages.length]);
 
   const handleBack = () => {
-    // 使用传入的 onBack 回调
+    // 使用传入的 onBack 回调，传递当前图片ID以便返回时定位
     if (onBack) {
-      onBack();
+      const currentImageId = currentImage?.id || finalImageId;
+      onBack(currentImageId);
     }
   };
 
@@ -423,10 +434,10 @@ const ImagePreviewScreen = ({
     }
   };
 
+  // 删除图片（所有图片都可以删除）
   const handleDelete = () => {
     logger.debug('删除按钮被点击，currentImage:', currentImage);
     logger.debug('图片ID:', currentImage?.id);
-    logger.debug('当前分类:', currentImage?.category);
     
     if (!currentImage || !currentImage.id) {
       logger.error('错误：currentImage 或 currentImage.id 不存在');
@@ -434,106 +445,170 @@ const ImagePreviewScreen = ({
       return;
     }
     
-    const isToBeCleanedCategory = currentImage.category === 'tobecleaned';
-    
-    if (isToBeCleanedCategory) {
-      // 如果当前分类是tobecleaned，执行真正的删除
-      logger.debug('当前分类是tobecleaned，执行删除操作...');
-      Alert.alert(
-        '确认删除',
-        '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
-        [
-          { 
-            text: '取消', 
-            style: 'cancel',
-            onPress: () => logger.debug('用户取消删除')
-          },
-          {
-            text: '删除',
-            style: 'destructive',
-            onPress: async () => {
-              logger.debug('用户确认删除，开始删除流程...');
-              try {
-                // 显示自定义进度对话框
-                setShowDeleteProgress(true);
-                setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
-                
-                logger.debug('调用deleteImage方法...');
-                const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
-                
-                logger.debug('删除结果:', result);
-                if (result.success) {
-                  logger.debug('删除成功，准备切换到下一张...');
-                  // 延迟关闭进度对话框，让用户看到最终结果
-                  setTimeout(async () => {
-                    setShowDeleteProgress(false);
-                    
-                    // 重新加载图片列表并自动切换到下一张
-                    // reloadImageList 会自动处理切换逻辑，如果列表为空会提示并返回
-                    await reloadImageList();
-                  }, 1000);
-                } else {
-                  logger.error('删除失败:', result.message);
+    logger.debug('执行删除操作...');
+    Alert.alert(
+      '确认删除',
+      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消删除')
+        },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: async () => {
+            logger.debug('用户确认删除，开始删除流程...');
+            try {
+              // 显示自定义进度对话框
+              setShowDeleteProgress(true);
+              setDeleteProgress({ filesDeleted: 0, filesFailed: 0, total: 1 });
+              
+              logger.debug('调用deleteImage方法...');
+              const result = await UnifiedDataService.writeDeleteImages([currentImage.id]);
+              
+              logger.debug('删除结果:', result);
+              if (result.success) {
+                logger.debug('删除成功，准备切换到下一张...');
+                // 延迟关闭进度对话框，让用户看到最终结果
+                setTimeout(async () => {
                   setShowDeleteProgress(false);
-                  Alert.alert('删除失败', result.message);
-                }
-              } catch (error) {
+                  
+                  // 重新加载图片列表并自动切换到下一张
+                  // reloadImageList 会自动处理切换逻辑，如果列表为空会提示并返回
+                  await reloadImageList();
+                }, 1000);
+              } else {
+                logger.error('删除失败:', result.message);
                 setShowDeleteProgress(false);
-                Alert.alert('错误', '删除失败，请重试');
+                Alert.alert('删除失败', result.message);
               }
-            },
+            } catch (error) {
+              setShowDeleteProgress(false);
+              Alert.alert('错误', '删除失败，请重试');
+            }
           },
-        ]
-      );
-    } else {
-      // 如果当前分类不是tobecleaned，标记为待处置
-      logger.debug('当前分类不是tobecleaned，标记为待处置...');
-      Alert.alert(
-        '标记为待处置',
-        '确定要将这张图片标记为待处置吗？\n\n图片将被移动到"待处置"分类中。',
-        [
-          { 
-            text: '取消', 
-            style: 'cancel',
-            onPress: () => logger.debug('用户取消标记为待处置')
+        },
+      ]
+    );
+  };
+
+  // 添加到暂存箱（只在不在暂存箱时显示）
+  const handleAddToStagingBox = () => {
+    logger.debug('暂存按钮被点击，currentImage:', currentImage);
+    logger.debug('图片ID:', currentImage?.id);
+    
+    if (!currentImage || !currentImage.id) {
+      logger.error('错误：currentImage 或 currentImage.id 不存在');
+      Alert.alert('错误', '图片信息不完整，无法操作');
+      return;
+    }
+    
+    logger.debug('添加到暂存箱...');
+    Alert.alert(
+      '添加到暂存箱',
+      '确定要将这张图片添加到暂存箱吗？\n\n图片将被添加到暂存箱，但分类信息不会改变。',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消添加到暂存箱')
+        },
+        {
+          text: '添加',
+          style: 'default',
+          onPress: async () => {
+            logger.debug('用户确认添加到暂存箱，开始操作...');
+            try {
+              // 添加到暂存箱（不修改category字段）
+              const addResult = await UnifiedDataService.addToStagingBox([currentImage.id]);
+              if (!addResult.success) {
+                throw new Error(`添加到暂存箱失败: ${addResult.errors.map(e => e.error).join(', ')}`);
+              }
+              
+              // 更新本地状态
+              setIsInStagingBox(true);
+              
+              logger.debug('添加到暂存箱成功');
+              
+              // 重新加载图片列表
+              await reloadImageList();
+              
+              // 通知父组件数据已变化
+              if (onDataChange) {
+                onDataChange();
+              }
+            } catch (error) {
+              logger.error('添加到暂存箱失败:', error);
+              Alert.alert('错误', `添加到暂存箱失败: ${error.message}`);
+            }
           },
-          {
-            text: '标记',
-            style: 'default',
-            onPress: async () => {
-              logger.debug('用户确认标记为待处置，开始更新分类...');
-              try {
-                // 更新分类为tobecleaned（服务层会自动清理相似组信息）
-                await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
-                
-                // 更新本地状态
-                setCurrentImage(prev => ({ 
-                  ...prev, 
-                  category: 'tobecleaned',
-                  confidence: 'manual',
-                  similarityGroupIndex: null,
-                  similarityScore: null,
-                  similarityGroupType: null
-                }));
-                
-                logger.debug('标记为待处置成功');
-                
-                // 重新加载图片列表
-                await reloadImageList();
-                
+        },
+      ]
+    );
+  };
+
+  // 从暂存箱移除（只在暂存箱中时显示）
+  const handleRemoveFromStagingBox = () => {
+    logger.debug('从暂存箱移除按钮被点击，currentImage:', currentImage);
+    logger.debug('图片ID:', currentImage?.id);
+    
+    if (!currentImage || !currentImage.id) {
+      logger.error('错误：currentImage 或 currentImage.id 不存在');
+      Alert.alert('错误', '图片信息不完整，无法操作');
+      return;
+    }
+    
+    logger.debug('从暂存箱移除...');
+    Alert.alert(
+      '从暂存箱移除',
+      '确定要从暂存箱移除这张图片吗？\n\n图片将从暂存箱中移除，但不会删除文件。',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消从暂存箱移除')
+        },
+        {
+          text: '移除',
+          style: 'default',
+          onPress: async () => {
+            logger.debug('用户确认从暂存箱移除，开始操作...');
+            try {
+              // 从暂存箱移除
+              const removeResult = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
+              if (!removeResult.success) {
+                const errorMessages = removeResult.errors?.map(e => e.error || e.message || '未知错误').join(', ') || '未知错误';
+                throw new Error(`从暂存箱移除失败: ${errorMessages}`);
+              }
+              
+              // 更新本地状态
+              setIsInStagingBox(false);
+              
+              logger.debug('从暂存箱移除成功');
+              
+              // 如果当前是从暂存箱进入的，重新加载图片列表（会自动处理导航）
+              // 如果列表为空，reloadImageList 会自动返回上一页
+              const reloadSuccess = await reloadImageList();
+              
+              // 如果重新加载失败或列表为空，不显示成功提示（reloadImageList 已处理）
+              if (reloadSuccess) {
                 // 通知父组件数据已变化
                 if (onDataChange) {
                   onDataChange();
                 }
-              } catch (error) {
-                logger.error('标记为待处置失败:', error);
-                Alert.alert('错误', '标记为待处置失败，请重试');
+                
+                Alert.alert('操作完成', '已成功从暂存箱移除图片');
               }
-            },
+            } catch (error) {
+              logger.error('从暂存箱移除失败:', error);
+              Alert.alert('错误', `从暂存箱移除失败: ${error.message}`);
+            }
           },
-        ]
-      );
-    }
+        },
+      ]
+    );
   };
 
   // 处理分类修改
@@ -597,50 +672,96 @@ const ImagePreviewScreen = ({
     }
   };
 
-  /**
-   * 分享当前图片
-   */
-  const handleShare = async () => {
+  // 构建文件路径列表
+  const buildFilePathList = useCallback((images) => {
+    const filePaths = [];
+    for (const image of images) {
+      const imagePath = getLocalPath(image);
+      if (!imagePath) {
+        logger.error('⚠️ 数据库缺少图片本地路径:', {
+          imageId: image?.id,
+          fileName: image?.fileName,
+          uri: image?.uri,
+          hasPath: !!image?.path
+        });
+        continue;
+      }
+      filePaths.push(imagePath);
+    }
+    return filePaths;
+  }, []);
+
+  // 复制文件路径到剪贴板
+  const copyFilePathsToClipboard = useCallback(async (filePaths, { successTitle, successMessage }) => {
+    if (typeof window === 'undefined' || !window.require) {
+      Alert.alert('错误', '当前环境不支持文件复制功能');
+      return { success: false };
+    }
+
+    const { ipcRenderer } = window.require('electron');
+
+    return new Promise((resolve) => {
+      ipcRenderer.once('copy-files-result', (event, result) => {
+        if (result.success) {
+          Alert.alert(successTitle, successMessage(result));
+        } else {
+          Alert.alert('失败', `复制失败: ${result.error}`);
+        }
+        resolve(result);
+      });
+      ipcRenderer.send('copy-files-to-clipboard', filePaths);
+    });
+  }, []);
+
+  // 复制当前图片到剪贴板
+  const handleCopyToClipboard = useCallback(async () => {
     if (!currentImage) {
-      Alert.alert('错误', '图片信息不完整，无法分享');
+      Alert.alert('错误', '图片信息不完整，无法复制');
       return;
     }
 
     try {
-      // 在PC端，使用Electron shell API
-      if (typeof window !== 'undefined' && window.require) {
-        const { ipcRenderer } = window.require('electron');
-        const pathModule = window.require('path');
-        
-        // 获取本地文件路径（getLocalPath内部已经标准化路径）
-        const filePath = getLocalPath(currentImage);
-        if (!filePath) {
-          Alert.alert('错误', '无法获取图片本地路径');
-          return;
-        }
-        
-        // 复制图片对象到剪贴板
-        const result = await ipcRenderer.invoke('shell-copy-image-to-clipboard', filePath);
-        
-        if (result.success) {
-          logger.debug('✅ 图片已复制到剪贴板');
-          const fileName = pathModule.basename(filePath);
-          Alert.alert('分享成功', `"${fileName}" 已复制到剪贴板\n\n可在微信聊天框中直接粘贴(Ctrl+V)`);
-        } else {
-          throw new Error(result.error || '复制失败');
-        }
-      } else {
-        // 非Electron环境，功能开发中
-        Alert.alert('提示', '分享功能目前仅在桌面版（Electron）环境中可用，功能开发中');
-        logger.warn('⚠️ 非Electron环境，分享功能不可用');
+      const filePaths = buildFilePathList([currentImage]);
+
+      if (filePaths.length === 0) {
+        Alert.alert('错误', '未找到有效的图片路径');
+        return;
       }
+
+      await copyFilePathsToClipboard(filePaths, {
+        successTitle: '复制成功',
+        successMessage: () => `已将图片复制到剪贴板。\n可在聊天窗口使用 Ctrl+V 粘贴。`
+      });
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        logger.error('❌ 分享失败:', error);
-        Alert.alert('分享失败', '分享失败，请重试');
-      }
+      logger.error('复制文件到剪贴板失败:', error);
+      Alert.alert('错误', `复制失败: ${error.message}`);
     }
-  };
+  }, [currentImage, buildFilePathList, copyFilePathsToClipboard]);
+
+  // 复制当前图片到文件管理器
+  const handleCopyToFileManager = useCallback(async () => {
+    if (!currentImage) {
+      Alert.alert('错误', '图片信息不完整，无法复制');
+      return;
+    }
+
+    try {
+      const filePaths = buildFilePathList([currentImage]);
+
+      if (filePaths.length === 0) {
+        Alert.alert('错误', '未找到有效的图片路径');
+        return;
+      }
+
+      await copyFilePathsToClipboard(filePaths, {
+        successTitle: '复制成功',
+        successMessage: () => `已复制文件。\n请在资源管理器目标文件夹按 Ctrl+V 粘贴。`
+      });
+    } catch (error) {
+      logger.error('复制文件路径失败:', error);
+      Alert.alert('错误', `复制失败: ${error.message}`);
+    }
+  }, [currentImage, buildFilePathList, copyFilePathsToClipboard]);
 
   /**
    * 打开照片创玩面板
@@ -1155,14 +1276,14 @@ const ImagePreviewScreen = ({
         originalImage = null;
       }
       
-      // 5. 添加到数据库（tobecleaned分类）
+      // 5. 添加到数据库（保持原图的分类）
       const timestamp = Date.now();
       
       // 准备完整的图片数据（复制原图的检测结果和描述信息）
       const completeImageData = {
         uri: newImageUri,
         fileName: saveResult.fileName,
-        category: 'tobecleaned',
+        category: originalImage?.category || 'other', // 保持原图的分类
         confidence: 1.0,
         timestamp: timestamp,
         takenAt: timestamp,
@@ -1178,6 +1299,35 @@ const ImagePreviewScreen = ({
       
       // 使用 writeImageDetailedInfo 保存图片数据
       await UnifiedDataService.writeImageDetailedInfo([completeImageData], false);
+      
+      // 如果当前图片在暂存箱，将新图片也添加到暂存箱
+      if (isInStagingBox && currentImage?.id) {
+        // 生成预期ID以便后续验证（使用与存储服务相同的算法）
+        let expectedImageId;
+        try {
+          const storageService = UnifiedDataService.imageStorageService;
+          if (storageService?.storage?.generateStableId) {
+            expectedImageId = storageService.storage.generateStableId(newImageUri);
+          } else {
+            // 备用算法（与generateStableId相同的逻辑）
+            let hash = 0;
+            for (let i = 0; i < newImageUri.length; i++) {
+              const char = newImageUri.charCodeAt(i);
+              hash = ((hash << 5) - hash) + char;
+              hash = hash & hash;
+            }
+            expectedImageId = `img_${Math.abs(hash).toString(36)}`;
+          }
+        } catch (e) {
+          logger.warn('⚠️ 生成预期ID失败:', e);
+          expectedImageId = null;
+        }
+        
+        if (expectedImageId) {
+          await UnifiedDataService.addToStagingBox([expectedImageId]);
+          logger.debug('✅ 新图片已添加到暂存箱:', expectedImageId);
+        }
+      }
       
       // 强制刷新缓存（确保新图片能立即显示）
       await UnifiedDataService.imageCache.refreshCache();
@@ -1250,9 +1400,7 @@ const ImagePreviewScreen = ({
           <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
             正在加载...
           </Text>
-          <View style={styles.deleteButton}>
-            <Text style={styles.deleteButtonText}>📌</Text>
-          </View>
+          <View style={styles.headerActions} />
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -1275,9 +1423,7 @@ const ImagePreviewScreen = ({
           <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
             图片未找到
           </Text>
-          <View style={styles.deleteButton}>
-            <Text style={styles.deleteButtonText}>📌</Text>
-          </View>
+          <View style={styles.headerActions} />
         </View>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>图片未找到</Text>
@@ -1301,43 +1447,14 @@ const ImagePreviewScreen = ({
             <Text style={styles.imageCounter}>
               {' '}({currentImageIndex + 1}/{categoryImages.length})
               {fromScreen === 'Home' && ' - 最近照片'}
+              {fromScreen === 'StagingBox' && ' - 暂存箱'}
               {similarityGroupId && ' - 相似组'}
               {city && ` - ${city}`}
-              {category && !similarityGroupId && !city && fromScreen !== 'Home' && ` - ${UnifiedDataService.getCategoryDisplayName(category)}`}
+              {category && category !== 'stagingBox' && !similarityGroupId && !city && fromScreen !== 'Home' && fromScreen !== 'StagingBox' && ` - ${UnifiedDataService.getCategoryDisplayName(category)}`}
             </Text>
           )}
         </Text>
-        <View style={styles.headerActions}>
-          {/* 照片创玩按钮（仅在暂存箱显示） */}
-          {currentImage?.category === 'tobecleaned' && (
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={openEnhancePanel}>
-              <Text style={styles.headerActionButtonText}>✨</Text>
-            </TouchableOpacity>
-          )}
-          
-          {/* 分享按钮 */}
-          <TouchableOpacity
-            style={styles.headerActionButton}
-            onPress={handleShare}>
-            <Text style={styles.headerActionButtonText}>📤</Text>
-          </TouchableOpacity>
-          
-          {/* 删除/暂存按钮 */}
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={handleDelete}>
-            <Text style={[
-              styles.deleteButtonText,
-              currentImage?.category === 'tobecleaned' ? 
-                styles.deleteButtonDanger : 
-                styles.deleteButtonPrimary
-            ]}>
-              {currentImage?.category === 'tobecleaned' ? '🗑️' : '📌'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {/* 顶部操作栏已移除，所有操作都在底部操作栏 */}
       </View>
 
       {/* 主内容区域 - 使用Flex布局，避免滚动条 */}
@@ -1403,59 +1520,64 @@ const ImagePreviewScreen = ({
 
           {/* 操作区 */}
           <View style={styles.actionBar}>
-            {currentImage?.category === 'tobecleaned' ? (
-              // tobecleaned分类：清除、设置分类、照片创玩、分享
-              <>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDelete}>
-                  <Text style={styles.actionButtonText}>🗑️ 清除</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    expandedAction === 'category' && styles.actionButtonActive
-                  ]}
-                  onPress={openCategorySelector}>
-                  <Text style={styles.actionButtonText}>🏷️ 设置分类</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    expandedAction === 'enhance' && styles.actionButtonActive
-                  ]}
-                  onPress={openEnhancePanel}>
-                  <Text style={styles.actionButtonText}>✨ 照片创玩</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleShare}>
-                  <Text style={styles.actionButtonText}>📤 分享</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              // 非tobecleaned分类：暂存、设置分类、分享
-              <>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDelete}>
-                  <Text style={styles.actionButtonText}>📌 暂存</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    expandedAction === 'category' && styles.actionButtonActive
-                  ]}
-                  onPress={openCategorySelector}>
-                  <Text style={styles.actionButtonText}>🏷️ 设置分类</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleShare}>
-                  <Text style={styles.actionButtonText}>📤 分享</Text>
-                </TouchableOpacity>
-              </>
+            {/* 删除按钮（所有图片都可以删除） */}
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleDelete}>
+              <Text style={[styles.actionButtonText, styles.actionButtonTextDanger]}>❌ 删除</Text>
+            </TouchableOpacity>
+            
+            {/* 暂存按钮（只在不在暂存箱时显示） */}
+            {!isInStagingBox && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleAddToStagingBox}>
+                <Text style={styles.actionButtonText}>🗑️ 暂存</Text>
+              </TouchableOpacity>
             )}
+            
+            {/* 从暂存箱移除按钮（只在暂存箱中时显示） */}
+            {isInStagingBox && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleRemoveFromStagingBox}>
+                <Text style={styles.actionButtonText}>📤 从暂存箱移除</Text>
+              </TouchableOpacity>
+            )}
+            
+            {/* 设置分类按钮（所有图片都可以设置分类） */}
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                expandedAction === 'category' && styles.actionButtonActive
+              ]}
+              onPress={openCategorySelector}>
+              <Text style={styles.actionButtonText}>🏷️ 设置分类</Text>
+            </TouchableOpacity>
+            
+            {/* 照片创玩按钮（所有图片都可以创玩） */}
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                expandedAction === 'enhance' && styles.actionButtonActive
+              ]}
+              onPress={openEnhancePanel}>
+              <Text style={styles.actionButtonText}>✨ 照片创玩</Text>
+            </TouchableOpacity>
+            
+            {/* 复制到剪贴板 */}
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleCopyToClipboard}>
+              <Text style={styles.actionButtonText}>📋 复制到剪贴板</Text>
+            </TouchableOpacity>
+            
+            {/* 复制到文件管理器 */}
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleCopyToFileManager}>
+              <Text style={styles.actionButtonText}>📂 复制到文件管理器</Text>
+            </TouchableOpacity>
           </View>
 
           {/* 二级选项面板 */}
@@ -2079,6 +2201,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontWeight: '500',
+  },
+  actionButtonTextDanger: {
+    color: '#FF3B30', // 红色 - 删除按钮
   },
   // 二级选项面板样式
   secondaryPanel: {

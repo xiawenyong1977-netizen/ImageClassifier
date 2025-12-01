@@ -178,16 +178,18 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
     try {
       if ('indexedDB' in window) {
         const db = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('ImageClassifierDB', 3); // 使用当前版本号
+          const request = indexedDB.open('ImageClassifierDB', 4); // 版本 4：添加 stagingBox 对象存储
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });
         
         // 获取所有对象存储的大小
         let totalSize = 0;
-        const transaction = db.transaction(['images', 'stats', 'settings'], 'readonly');
+        // 获取所有对象存储名称
+        const storeNames = Array.from(db.objectStoreNames);
+        const transaction = db.transaction(storeNames, 'readonly');
         
-        for (const storeName of ['images', 'stats', 'settings']) {
+        for (const storeName of storeNames) {
           const store = transaction.objectStore(storeName);
           const request = store.getAll();
           await new Promise((resolve, reject) => {
@@ -578,6 +580,41 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                   </TouchableOpacity>
                 </View>
               ))}
+            </View>
+          </View>
+
+          {/* 显示设置 */}
+          <View style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>显示设置</Text>
+            
+            {/* 显示颜色分类 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🎨 显示颜色分类</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示按颜色分类的卡片
+                </Text>
+              </View>
+              <Switch
+                value={settings.showColorCategories !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showColorCategories', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
+            {/* 显示相似照片 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🔗 显示相似照片</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示相似照片组
+                </Text>
+              </View>
+              <Switch
+                value={settings.showSimilarityGroups !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
             </View>
           </View>
         </View>

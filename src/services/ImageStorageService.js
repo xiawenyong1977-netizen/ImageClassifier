@@ -170,7 +170,9 @@ class SQLiteAdapter {
         generalDetections TEXT,
         mobileNetV3Detections TEXT,
         imageDimensions TEXT,
-        message TEXT
+        message TEXT,
+        -- 背景颜色
+        background_color TEXT
       );
 
       -- 索引优化
@@ -202,6 +204,16 @@ class SQLiteAdapter {
         imageIds TEXT,
         created_at TEXT
       );
+
+      -- 暂存箱表
+      CREATE TABLE IF NOT EXISTS staging_box (
+        imageId TEXT PRIMARY KEY,
+        addedAt TEXT NOT NULL,
+        FOREIGN KEY (imageId) REFERENCES images(id) ON DELETE CASCADE
+      );
+
+      -- 暂存箱索引
+      CREATE INDEX IF NOT EXISTS idx_staging_box_addedAt ON staging_box(addedAt DESC);
     `;
 
     // 分割SQL语句并执行
@@ -214,7 +226,123 @@ class SQLiteAdapter {
       await this.db.executeSql(sql);
     }
     
+    // 迁移：添加 background_color 字段（如果不存在）
+    await this.migrateAddBackgroundColor();
+    
+    // 迁移：将现有的 tobecleaned 分类迁移到 staging_box 表
+    await this.migrateStagingBox();
+    
     logger.debug('✅ SQLite 表结构创建完成');
+  }
+
+  /**
+   * 迁移：添加 background_color 字段
+   * 如果字段已存在则跳过
+   */
+  async migrateAddBackgroundColor() {
+    try {
+      // 检查字段是否存在
+      const pragmaResult = await this.db.executeSql('PRAGMA table_info(images)');
+      const tableInfo = pragmaResult && pragmaResult.length > 0 ? pragmaResult[0] : null;
+      
+      if (tableInfo && tableInfo.rows) {
+        let hasBackgroundColor = false;
+        for (let i = 0; i < tableInfo.rows.length; i++) {
+          const column = tableInfo.rows.item(i);
+          if (column.name === 'background_color') {
+            hasBackgroundColor = true;
+            break;
+          }
+        }
+        
+        if (!hasBackgroundColor) {
+          logger.debug('🔄 迁移：添加 background_color 字段到 images 表');
+          await this.db.executeSql('ALTER TABLE images ADD COLUMN background_color TEXT');
+          logger.debug('✅ 迁移完成：background_color 字段已添加');
+        } else {
+          logger.debug('✅ background_color 字段已存在，跳过迁移');
+        }
+      }
+    } catch (error) {
+      // 如果字段已存在，SQLite 会抛出错误，这是正常的
+      if (error.message && error.message.includes('duplicate column')) {
+        logger.debug('✅ background_color 字段已存在，跳过迁移');
+      } else {
+        logger.warn('⚠️ 迁移 background_color 字段时出错（可能字段已存在）:', error.message);
+      }
+    }
+  }
+
+  /**
+   * 迁移：将现有的 tobecleaned 分类迁移到 staging_box 表
+   * 如果 staging_box 表已有数据，则跳过迁移
+   */
+  async migrateStagingBox() {
+    try {
+      // 检查 staging_box 表是否已有数据
+      const [checkResult] = await this.db.executeSql('SELECT COUNT(*) as count FROM staging_box');
+      const existingCount = checkResult.rows.item(0).count;
+      
+      if (existingCount > 0) {
+        logger.debug(`✅ staging_box 表已有 ${existingCount} 条数据，跳过迁移`);
+        return;
+      }
+      
+      // 查找所有 category = 'tobecleaned' 的图片
+      const [result] = await this.db.executeSql(
+        'SELECT id FROM images WHERE category = ?',
+        ['tobecleaned']
+      );
+      
+      if (!result || !result.rows) {
+        logger.debug('✅ 没有找到 tobecleaned 分类的图片，跳过迁移');
+        return;
+      }
+      
+      const tobecleanedImages = [];
+      for (let i = 0; i < result.rows.length; i++) {
+        tobecleanedImages.push(result.rows.item(i).id);
+      }
+      
+      if (tobecleanedImages.length === 0) {
+        logger.debug('✅ 没有找到 tobecleaned 分类的图片，跳过迁移');
+        return;
+      }
+      
+      logger.debug(`🔄 迁移：将 ${tobecleanedImages.length} 张 tobecleaned 分类的图片迁移到 staging_box 表`);
+      
+      // 批量插入到 staging_box 表
+      const now = new Date().toISOString();
+      for (const imageId of tobecleanedImages) {
+        try {
+          await this.db.executeSql(
+            'INSERT OR IGNORE INTO staging_box (imageId, addedAt) VALUES (?, ?)',
+            [imageId, now]
+          );
+        } catch (error) {
+          logger.warn(`迁移图片 ${imageId} 到 staging_box 失败:`, error.message);
+        }
+      }
+      
+      // 将迁移的图片的 category 修改为 'NA'
+      if (tobecleanedImages.length > 0) {
+        const placeholders = tobecleanedImages.map(() => '?').join(',');
+        try {
+          await this.db.executeSql(
+            `UPDATE images SET category = 'NA' WHERE id IN (${placeholders})`,
+            tobecleanedImages
+          );
+          logger.debug(`✅ 已将 ${tobecleanedImages.length} 张图片的分类修改为 NA`);
+        } catch (error) {
+          logger.warn('修改图片分类为 NA 失败:', error.message);
+        }
+      }
+      
+      logger.debug(`✅ 迁移完成：${tobecleanedImages.length} 张图片已迁移到 staging_box 表，分类已修改为 NA`);
+      
+    } catch (error) {
+      logger.error('迁移 staging_box 失败:', error.message);
+    }
   }
 
   async getItem(key) {
@@ -564,8 +692,8 @@ class SQLiteAdapter {
         size, mimeType, width, height, createdAt, updatedAt,
         latitude, longitude, altitude, accuracy,
         address, city, country, province, district, street, locationSource, cityDistance,
-        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message, background_color
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
     await this.db.executeSql(sql, [
@@ -598,7 +726,8 @@ class SQLiteAdapter {
       imageData.generalDetections ? JSON.stringify(imageData.generalDetections) : null,
       imageData.mobileNetV3Detections ? JSON.stringify(imageData.mobileNetV3Detections) : null,
       imageData.imageDimensions ? JSON.stringify(imageData.imageDimensions) : null,
-      imageData.message
+      imageData.message,
+      imageData.background_color || null
     ]);
     
     return true;
@@ -616,6 +745,9 @@ class SQLiteAdapter {
       await this.db.executeSql('DELETE FROM similarity_data');
     } else if (key === 'similarityGroupIndex') {
       await this.db.executeSql('DELETE FROM similarity_group_index');
+    } else if (key === 'stagingBox') {
+      await this.db.executeSql('DELETE FROM staging_box');
+      logger.debug('✅ SQLite清空staging_box表');
     }
     
     return true;
@@ -628,7 +760,7 @@ class SQLiteAdapter {
       this.db.transaction((tx) => {
         let completed = 0;
         let hasError = false;
-        const totalOperations = 4;
+        const totalOperations = 5; // 增加暂存箱
 
         const checkComplete = () => {
           if (completed === totalOperations && !hasError) {
@@ -675,6 +807,16 @@ class SQLiteAdapter {
             reject(error);
           }
         });
+
+        tx.executeSql('DELETE FROM staging_box', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
       }, (error) => {
         if (error) {
           reject(error);
@@ -682,7 +824,7 @@ class SQLiteAdapter {
       });
     });
     
-    logger.debug('✅ SQLite数据库已清空');
+    logger.debug('✅ SQLite数据库已清空（包括暂存箱）');
     return true;
   }
 
@@ -833,7 +975,7 @@ class SQLiteAdapter {
 class IndexedDBAdapter {
   constructor() {
     this.dbName = 'ImageClassifierDB';
-    this.version = 3; // 增加版本号以支持相似度相关的对象存储
+    this.version = 4; // 版本 4：添加 stagingBox 对象存储
     this.db = null;
     this.isInitialized = false;
   }
@@ -891,11 +1033,19 @@ class IndexedDBAdapter {
         reject(request.error);
       };
 
-      request.onsuccess = () => {
+      request.onsuccess = async () => {
         clearTimeout(timeout);
         this.db = request.result;
         this.isInitialized = true;
         logger.debug('IndexedDB 初始化成功');
+        
+        // 迁移：将现有的 tobecleaned 分类迁移到 staging_box
+        try {
+          await this.migrateStagingBoxIndexedDB();
+        } catch (error) {
+          logger.warn('IndexedDB 暂存箱迁移失败:', error);
+        }
+        
         resolve(this.db);
       };
 
@@ -968,6 +1118,16 @@ class IndexedDBAdapter {
             logger.debug(' similarityGroupIndex 对象存储已存在');
           }
           
+          // 创建暂存箱表
+          if (!db.objectStoreNames.contains('stagingBox')) {
+            logger.debug(' 创建 stagingBox 对象存储...');
+            const stagingBoxStore = db.createObjectStore('stagingBox', { keyPath: 'imageId' });
+            stagingBoxStore.createIndex('addedAt', 'addedAt', { unique: false });
+            logger.debug(' stagingBox 对象存储创建完成');
+          } else {
+            logger.debug(' stagingBox 对象存储已存在');
+          }
+          
           logger.debug(' IndexedDB 数据库结构创建完成');
           logger.debug('升级完成后的对象存储:', Array.from(db.objectStoreNames));
         } catch (upgradeError) {
@@ -975,6 +1135,59 @@ class IndexedDBAdapter {
           logger.error(' 升级错误堆栈:', upgradeError.stack);
           clearTimeout(timeout);
           reject(upgradeError);
+        }
+      };
+      
+      // 迁移：将现有的 tobecleaned 分类迁移到 staging_box（在初始化完成后执行）
+      this.migrateStagingBoxIndexedDB = async () => {
+        try {
+          // 检查 stagingBox objectStore 是否存在
+          if (!this.db.objectStoreNames.contains('stagingBox')) {
+            logger.warn('⚠️ stagingBox objectStore 不存在，跳过迁移（可能需要刷新页面触发数据库升级）');
+            return;
+          }
+          
+          // 检查 staging_box 是否已有数据
+          const stagingBoxData = await this.getItem('stagingBox') || [];
+          if (stagingBoxData.length > 0) {
+            logger.debug(`✅ staging_box 已有 ${stagingBoxData.length} 条数据，跳过迁移`);
+            return;
+          }
+          
+          // 查找所有 category = 'tobecleaned' 的图片
+          const allImagesData = await this.getItem('images') || [];
+          const tobecleanedImages = allImagesData.filter(img => img.category === 'tobecleaned');
+          
+          if (tobecleanedImages.length === 0) {
+            logger.debug('✅ 没有找到 tobecleaned 分类的图片，跳过迁移');
+            return;
+          }
+          
+          logger.debug(`🔄 迁移：将 ${tobecleanedImages.length} 张 tobecleaned 分类的图片迁移到 staging_box`);
+          
+          // 批量添加到 staging_box
+          const now = new Date().toISOString();
+          const stagingBoxItems = tobecleanedImages.map(img => ({
+            imageId: img.id,
+            addedAt: now
+          }));
+          
+          await this.setItem('stagingBox', stagingBoxItems);
+          
+          // 将迁移的图片的 category 修改为 'NA'
+          const updatedImages = allImagesData.map(img => {
+            if (tobecleanedImages.some(ti => ti.id === img.id)) {
+              return { ...img, category: 'NA' };
+            }
+            return img;
+          });
+          
+          await this.setItem('images', updatedImages);
+          
+          logger.debug(`✅ 迁移完成：${tobecleanedImages.length} 张图片已迁移到 staging_box，分类已修改为 NA`);
+          
+        } catch (error) {
+          logger.error('IndexedDB 迁移 staging_box 失败:', error);
         }
       };
     });
@@ -994,16 +1207,20 @@ class IndexedDBAdapter {
         if (results.length === 0) {
           logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 结果为空，返回 null`);
           resolve(null);
-        } else if (key === 'images') {
-          // 对于图片数据，返回数组
-          logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回图片数组，数量=${results.length}`);
-          // 🔍 诊断：检查第一条记录的 category
-          if (results.length > 0) {
-            const firstItem = results[0];
-            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 第一条记录 category="${firstItem.category}", id="${firstItem.id}"`);
-            const naCount = results.filter(img => img.category === 'NA').length;
-            const screenshotCount = results.filter(img => img.category === 'screenshot').length;
-            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: NA=${naCount}, screenshot=${screenshotCount}`);
+        } else if (key === 'images' || key === 'stagingBox') {
+          // 对于图片数据和暂存箱数据，返回数组（因为它们都是数组结构，不是键值对）
+          if (key === 'images') {
+            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回图片数组，数量=${results.length}`);
+            // 🔍 诊断：检查第一条记录的 category
+            if (results.length > 0) {
+              const firstItem = results[0];
+              logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 第一条记录 category="${firstItem.category}", id="${firstItem.id}"`);
+              const naCount = results.filter(img => img.category === 'NA').length;
+              const screenshotCount = results.filter(img => img.category === 'screenshot').length;
+              logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: NA=${naCount}, screenshot=${screenshotCount}`);
+            }
+          } else {
+            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回暂存箱数组，数量=${results.length}`);
           }
           resolve(results);
         } else {
@@ -1031,6 +1248,16 @@ class IndexedDBAdapter {
         if (Array.isArray(value)) {
           value.forEach(item => {
             store.add(item);
+          });
+        }
+      } else if (key === 'stagingBox') {
+        // 对于暂存箱数据，清空后批量插入（每个对象都有 imageId 字段作为 keyPath）
+        store.clear();
+        if (Array.isArray(value)) {
+          value.forEach(item => {
+            if (item && item.imageId) {
+              store.add(item);
+            }
           });
         }
       } else {
@@ -1152,8 +1379,8 @@ class IndexedDBAdapter {
       const transaction = this.db.transaction([key], 'readwrite');
       const store = transaction.objectStore(key);
       
-      if (key === 'images') {
-        // 对于图片数据，清空整个表
+      if (key === 'images' || key === 'stagingBox') {
+        // 对于图片数据和暂存箱数据，清空整个表（因为它们是数组结构，不是键值对）
         store.clear();
       } else {
         // 对于其他数据，删除键值对
@@ -1267,6 +1494,7 @@ class ImageStorageService {
       classificationRules: 'classificationRules',
       similarityData: 'similarityData', // 新增：相似度数据表
       similarityGroupIndex: 'similarityGroupIndex', // 新增：相似组索引
+      stagingBox: 'stagingBox', // 新增：暂存箱
     };
     this.isInitialized = false;
     // 添加保存锁，防止并发保存导致数据丢失
@@ -1495,6 +1723,7 @@ class ImageStorageService {
               generalDetections: classificationData.generalDetections !== undefined ? classificationData.generalDetections : existingImage.generalDetections,
               mobileNetV3Detections: classificationData.mobileNetV3Detections !== undefined ? classificationData.mobileNetV3Detections : existingImage.mobileNetV3Detections,
               message: classificationData.message !== undefined ? classificationData.message : existingImage.message,
+              background_color: classificationData.background_color !== undefined ? classificationData.background_color : existingImage.background_color,
               updatedAt: new Date().toISOString()
             };
             
@@ -1577,6 +1806,11 @@ class ImageStorageService {
           if (classificationData.message !== undefined) {
             setParts.push('message = ?');
             params.push(classificationData.message);
+          }
+          
+          if (classificationData.background_color !== undefined) {
+            setParts.push('background_color = ?');
+            params.push(classificationData.background_color);
           }
           
           // 始终更新 updatedAt
@@ -1705,6 +1939,7 @@ class ImageStorageService {
           mobileNetV3Detections: imageData.mobileNetV3Detections || null,
           imageDimensions: imageData.imageDimensions || null,
           message: imageData.message || null,
+          background_color: imageData.background_color || null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -1885,6 +2120,7 @@ class ImageStorageService {
         mobileNetV3Detections: imageData.mobileNetV3Detections || null,  // MobileNetV3模型检测结果
         imageDimensions: imageData.imageDimensions || null,  // 图像尺寸信息
         message: imageData.message || null,  // 大模型推理描述
+        background_color: imageData.background_color || null,  // 背景颜色
         createdAt: existingIndex >= 0 ? existingImages[existingIndex].createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -2266,6 +2502,7 @@ class ImageStorageService {
           fileName: img.fileName,
           uri: img.uri,
           size: img.size,
+          background_color: img.background_color || null, // 背景颜色字段
           // 只保留界面显示必需字段，其他按需加载
         };
       });
@@ -3032,6 +3269,8 @@ class ImageStorageService {
       // 清空相似度数据
       await this.storage.removeItem(this.storageKeys.similarityData);
       await this.storage.removeItem(this.storageKeys.similarityGroupIndex);
+      // 清空暂存箱
+      await this.storage.removeItem(this.storageKeys.stagingBox);
       logger.debug(' IndexedDB 数据已清空');
       
       // 同时清空 localStorage（防止数据重新迁移）
@@ -3042,7 +3281,7 @@ class ImageStorageService {
         logger.debug(' localStorage 数据已清空');
       }
       
-      logger.debug(' 所有存储数据已清空（包括相似度数据）');
+      logger.debug(' 所有存储数据已清空（包括相似度数据和暂存箱）');
     } catch (error) {
       console.error('Failed to clear all images:', error);
       throw error;
@@ -4473,6 +4712,238 @@ class ImageStorageService {
     } catch (error) {
       logger.error(' 获取时间窗口图片失败:', error);
       return [];
+    }
+  }
+
+  // ==================== 暂存箱相关方法 ====================
+
+  /**
+   * 添加图片到暂存箱
+   * @param {Array<string>} imageIds - 图片ID数组
+   * @returns {Promise<{success: boolean, added: number, errors: Array}>}
+   */
+  async addToStagingBox(imageIds) {
+    try {
+      await this.ensureInitialized();
+      
+      if (!imageIds || imageIds.length === 0) {
+        return { success: true, added: 0, errors: [] };
+      }
+      
+      const now = new Date().toISOString();
+      let added = 0;
+      const errors = [];
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        try {
+          const stagingBoxData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+          logger.debug(`📦 暂存箱当前数据: ${stagingBoxData.length} 条`, stagingBoxData.map(item => item.imageId));
+          const existingIds = new Set(stagingBoxData.map(item => item.imageId));
+          logger.debug(`📦 现有图片ID集合:`, Array.from(existingIds));
+          logger.debug(`📦 准备添加的图片ID:`, imageIds);
+          
+          for (const imageId of imageIds) {
+            if (!existingIds.has(imageId)) {
+              stagingBoxData.push({
+                imageId,
+                addedAt: now
+              });
+              added++;
+              logger.debug(`✅ 添加图片到暂存箱: ${imageId}`);
+            } else {
+              logger.debug(`⏭️ 图片已在暂存箱中，跳过: ${imageId}`);
+            }
+          }
+          
+          logger.debug(`📦 更新后的暂存箱数据: ${stagingBoxData.length} 条`, stagingBoxData.map(item => item.imageId));
+          await this.storage.setItem(this.storageKeys.stagingBox, stagingBoxData);
+          
+          // 验证保存结果
+          const verifyData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+          logger.debug(`🔍 验证：保存后暂存箱数据: ${verifyData.length} 条`, verifyData.map(item => item.imageId));
+        } catch (error) {
+          logger.error('添加图片到暂存箱失败（IndexedDB）:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
+        }
+      } else {
+        // 移动端：SQLite - 批量插入
+        try {
+          if (imageIds.length > 0) {
+            // 构建批量插入 SQL：INSERT OR IGNORE INTO staging_box (imageId, addedAt) VALUES (?, ?), (?, ?), ...
+            const valuesPlaceholders = imageIds.map(() => '(?, ?)').join(', ');
+            const sql = `INSERT OR IGNORE INTO staging_box (imageId, addedAt) VALUES ${valuesPlaceholders}`;
+            
+            // 构建参数数组：[id1, now, id2, now, id3, now, ...]
+            const params = imageIds.flatMap(imageId => [imageId, now]);
+            
+            const [result] = await this.db.executeSql(sql, params);
+            added = result.rowsAffected || imageIds.length; // rowsAffected 可能不准确，使用传入的数量
+          }
+        } catch (error) {
+          logger.error('批量添加图片到暂存箱失败（SQLite）:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
+        }
+      }
+      
+      logger.debug(`✅ 添加 ${added} 张图片到暂存箱`);
+      return { success: errors.length === 0, added, errors };
+      
+    } catch (error) {
+      logger.error('添加图片到暂存箱失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 从暂存箱移除图片
+   * @param {Array<string>} imageIds - 图片ID数组
+   * @returns {Promise<{success: boolean, removed: number, errors: Array}>}
+   */
+  async removeFromStagingBox(imageIds) {
+    try {
+      await this.ensureInitialized();
+      
+      if (!imageIds || imageIds.length === 0) {
+        return { success: true, removed: 0, errors: [] };
+      }
+      
+      let removed = 0;
+      const errors = [];
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        try {
+          const stagingBoxData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+          const imageIdSet = new Set(imageIds);
+          const filteredData = stagingBoxData.filter(item => !imageIdSet.has(item.imageId));
+          removed = stagingBoxData.length - filteredData.length;
+          
+          await this.storage.setItem(this.storageKeys.stagingBox, filteredData);
+        } catch (error) {
+          logger.error('从暂存箱移除图片失败（IndexedDB）:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
+        }
+      } else {
+        // 移动端：SQLite
+        const placeholders = imageIds.map(() => '?').join(',');
+        try {
+          const [result] = await this.db.executeSql(
+            `DELETE FROM staging_box WHERE imageId IN (${placeholders})`,
+            imageIds
+          );
+          removed = result.rowsAffected || 0;
+        } catch (error) {
+          logger.error('从暂存箱移除图片失败（SQLite）:', error);
+          errors.push({ imageId: 'bulk_operation', error: error.message });
+        }
+      }
+      
+      logger.debug(`✅ 从暂存箱移除 ${removed} 张图片`);
+      return { success: errors.length === 0, removed, errors };
+      
+    } catch (error) {
+      logger.error('从暂存箱移除图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取暂存箱所有图片ID
+   * @returns {Promise<Array<string>>} 图片ID数组
+   */
+  async getStagingBoxImageIds() {
+    try {
+      await this.ensureInitialized();
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        const stagingBoxData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+        return stagingBoxData.map(item => item.imageId);
+      } else {
+        // 移动端：SQLite
+        const [result] = await this.db.executeSql(
+          'SELECT imageId FROM staging_box ORDER BY addedAt DESC'
+        );
+        
+        if (!result || !result.rows) {
+          return [];
+        }
+        
+        const imageIds = [];
+        for (let i = 0; i < result.rows.length; i++) {
+          imageIds.push(result.rows.item(i).imageId);
+        }
+        return imageIds;
+      }
+    } catch (error) {
+      logger.error('获取暂存箱图片ID失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 检查图片是否在暂存箱
+   * @param {string} imageId - 图片ID
+   * @returns {Promise<boolean>}
+   */
+  async isInStagingBox(imageId) {
+    try {
+      await this.ensureInitialized();
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        const stagingBoxData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+        return stagingBoxData.some(item => item.imageId === imageId);
+      } else {
+        // 移动端：SQLite
+        const [result] = await this.db.executeSql(
+          'SELECT COUNT(*) as count FROM staging_box WHERE imageId = ?',
+          [imageId]
+        );
+        return result.rows.item(0).count > 0;
+      }
+    } catch (error) {
+      logger.error('检查图片是否在暂存箱失败:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 获取暂存箱所有图片（完整信息）
+   * @returns {Promise<Array>} 图片数组
+   */
+  async getStagingBoxImages() {
+    try {
+      const imageIds = await this.getStagingBoxImageIds();
+      if (imageIds.length === 0) {
+        return [];
+      }
+      
+      const imagesMap = await this.getImagesByIds(imageIds);
+      // 按照 addedAt 排序（最新的在前）
+      const images = imageIds
+        .map(id => imagesMap.get(id))
+        .filter(img => img !== undefined);
+      
+      return images;
+    } catch (error) {
+      logger.error('获取暂存箱图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取暂存箱图片数量
+   * @returns {Promise<number>}
+   */
+  async getStagingBoxCount() {
+    try {
+      const imageIds = await this.getStagingBoxImageIds();
+      return imageIds.length;
+    } catch (error) {
+      logger.error('获取暂存箱数量失败:', error);
+      return 0;
     }
   }
 

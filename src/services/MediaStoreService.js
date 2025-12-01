@@ -23,7 +23,12 @@ class MediaStoreService {
     this.isAvailable = Platform.OS === 'android' && MediaStoreModule != null;
     
     if (!this.isAvailable) {
-      logger.warn('⚠️ MediaStoreModule 不可用，可能是在非Android平台或模块未正确注册');
+      // WEB 环境下不输出警告（这是正常的），只在 Android 环境下输出警告
+      if (Platform.OS === 'android') {
+        logger.warn('⚠️ MediaStoreModule 不可用，可能是在非Android平台或模块未正确注册');
+      } else {
+        logger.debug('MediaStoreModule 不可用（非Android平台，这是正常的）');
+      }
     } else {
       logger.info('✅ MediaStoreService 初始化成功');
     }
