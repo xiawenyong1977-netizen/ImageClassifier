@@ -37,7 +37,7 @@ const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 
 const CategoryScreen = ({ route, navigation }) => {
   // ==================== 路由参数 ====================
-  const { category, city, similarityGroupId, color, fromScreen } = route.params || {};
+  const { category, city, similarityGroupId, color, filterType, filterValue, fromScreen } = route.params || {};
   
   // ==================== 状态管理 ====================
   const [images, setImages] = useState([]);
@@ -84,12 +84,21 @@ const CategoryScreen = ({ route, navigation }) => {
   const ITEMS_PER_PAGE = 50;
 
   // ==================== 页面类型判断 ====================
-  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : color ? 'color' : null;
+  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : color ? 'color' : filterType === 'directory' ? 'directory' : null;
   const isStaging = category === 'stagingBox';
 
   // 照片创玩（增强方案）
   const [showEnhancePresets, setShowEnhancePresets] = useState(false);
   const [enhancePresets, setEnhancePresets] = useState({});
+
+  /**
+   * 截断过长的文本，添加省略号
+   */
+  const truncateText = (text, maxLength = 20) => {
+    if (!text || typeof text !== 'string') return text;
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  };
 
   /**
    * 获取页面标题（与 PC 端格式一致）
@@ -100,6 +109,13 @@ const CategoryScreen = ({ route, navigation }) => {
     
     if (similarityGroupId) {
       return `相似照片组 (${count}张)`;
+    }
+    if (filterType === 'directory' && filterValue) {
+      // 提取目录名（最后一个路径段）
+      const directoryName = filterValue.split('/').pop() || filterValue;
+      // 截断过长的目录名
+      const truncatedName = truncateText(directoryName, 20);
+      return `${truncatedName} (${count}张)`;
     }
     if (city) {
       return `${city} (${count}张)`;
@@ -156,6 +172,12 @@ const CategoryScreen = ({ route, navigation }) => {
         // 城市页面：获取城市的选中图片数量
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.length;
+      } else if (filterType === 'directory' && filterValue) {
+        // 目录页面：从所有选中图片中过滤出当前目录的图片（与颜色页面一致）
+        const allSelected = UnifiedDataService.getSelectedImages();
+        const directoryImageIds = new Set(images.map(img => img.id));
+        const selectedInDirectory = allSelected.filter(img => directoryImageIds.has(img.id));
+        return selectedInDirectory.length;
       } else if (color) {
         // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
         const allSelected = UnifiedDataService.getSelectedImages();
@@ -503,6 +525,9 @@ const CategoryScreen = ({ route, navigation }) => {
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         filteredImages = groupData.images || [];
         // 移除过滤 tobecleaned 的逻辑
+      } else if (filterType === 'directory' && filterValue) {
+        // 🆕 按目录加载图片
+        filteredImages = await UnifiedDataService.readImagesByDirectory(filterValue);
       } else if (city) {
         filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
         // 移除过滤 tobecleaned 的逻辑
@@ -582,8 +607,8 @@ const CategoryScreen = ({ route, navigation }) => {
    * 下拉刷新
    */
   const onRefresh = async () => {
-    // 界面只负责调用服务层的刷新接口，不直接构建缓存
-    await UnifiedDataService.forceRefreshCache();
+    // 只重新加载数据（从缓存读取），不重建缓存
+    // 缓存只在数据真正变化时（扫描、删除）才重建
     await loadImages(true);
   };
 
@@ -631,6 +656,8 @@ const CategoryScreen = ({ route, navigation }) => {
         city,
         color,
         similarityGroupId,
+        filterType,
+        filterValue,
         fromScreen: pageType,
       });
     } else {
@@ -693,6 +720,12 @@ const CategoryScreen = ({ route, navigation }) => {
       } else if (city) {
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.map(img => img.id);
+      } else if (filterType === 'directory' && filterValue) {
+        // 目录页面：从所有选中图片中过滤出当前目录的图片（与颜色页面一致）
+        const allSelected = UnifiedDataService.getSelectedImages();
+        const directoryImageIds = new Set(images.map(img => img.id));
+        const selectedInDirectory = allSelected.filter(img => directoryImageIds.has(img.id));
+        return selectedInDirectory.map(img => img.id);
       } else if (color) {
         // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
         const allSelected = UnifiedDataService.getSelectedImages();
@@ -1552,7 +1585,9 @@ const CategoryScreen = ({ route, navigation }) => {
                           city,
                           color,
                           similarityGroupId,
-                          fromScreen: 'CategoryScreen'
+                          filterType,
+                          filterValue,
+                          fromScreen: pageType,
                         });
                       }
                     }}

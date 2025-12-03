@@ -388,6 +388,277 @@ class UnifiedDataService {
   }
 
   /**
+   * 读取新发现的照片（从上次扫描时间之后，相册中新发现的照片）
+   * @param {number} limit - 限制返回数量，默认12（用于显示）
+   * @returns {Promise<{total: number, images: Array}>} 返回总数和图片列表（最多limit张）
+   */
+  async readNewDiscoveredImages(limit = 12) {
+    try {
+      // 获取上次扫描时间
+      const settings = await this.readSettings();
+      const lastScanTime = settings?.lastScanTime;
+      
+      if (!lastScanTime) {
+        // 如果没有扫描记录，返回空结果
+        logger.debug('没有扫描记录，返回空结果');
+        return { total: 0, images: [] };
+      }
+      
+      // 将 lastScanTime 转换为毫秒时间戳
+      const sinceTime = new Date(lastScanTime).getTime();
+      
+      if (isNaN(sinceTime)) {
+        logger.error(`❌ lastScanTime 格式错误: ${lastScanTime}`);
+        return { total: 0, images: [] };
+      }
+      
+      // 根据平台选择不同的实现方式
+      const { Platform } = require('../adapters/WebAdapters');
+      
+      if (Platform.OS === 'web') {
+        // PC端：遍历文件系统，查找 mtime >= lastScanTime 的图片文件
+        return await this._readNewDiscoveredImagesFromFileSystem(sinceTime, limit, settings.scanPaths || []);
+      } else {
+        // 移动端：使用 MediaStore API
+        const mediaStoreService = require('./MediaStoreService').default;
+        
+        if (!mediaStoreService.checkAvailability()) {
+          logger.warn('MediaStore 不可用，无法查询新发现的照片');
+          return { total: 0, images: [] };
+        }
+        
+        // 先查询所有新照片（不限制数量）以获取总数
+        const allResult = await mediaStoreService.getImagesSinceTime({
+          sinceTime: sinceTime,
+          limit: 0, // 0表示不限制
+          offset: 0
+        });
+        
+        const allImages = mediaStoreService.convertBatchToCompatibleFormat(allResult.images || []);
+        const total = allImages.length;
+        
+        // 只返回前limit张用于显示
+        const images = allImages.slice(0, limit);
+        
+        return { total, images };
+      }
+      
+    } catch (error) {
+      logger.error('读取新发现的照片失败:', error);
+      // 出错时返回空结果，不影响主流程
+      return { total: 0, images: [] };
+    }
+  }
+
+  /**
+   * PC端：从文件系统查找新发现的照片（mtime >= lastScanTime）
+   * @param {number} sinceTime - 起始时间戳（毫秒）
+   * @param {number} limit - 限制返回数量（用于显示）
+   * @param {Array<string>} scanPaths - 扫描目录列表
+   * @returns {Promise<{total: number, images: Array}>} 返回总数和图片列表（最多limit张）
+   */
+  async _readNewDiscoveredImagesFromFileSystem(sinceTime, limit, scanPaths) {
+    try {
+      const { RNFS, Platform, pathToFileUri } = require('../adapters/WebAdapters');
+      
+      if (!RNFS) {
+        logger.warn('RNFS 不可用，无法查询新发现的照片');
+        return [];
+      }
+      
+      if (!scanPaths || scanPaths.length === 0) {
+        return [];
+      }
+      
+      const newImages = [];
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+      
+      // 递归遍历目录，查找新照片（不限制数量，统计所有）
+      const scanDirectory = async (dirPath) => {
+        try {
+          const exists = await RNFS.exists(dirPath);
+          if (!exists) {
+            return;
+          }
+          
+          const items = await RNFS.readDir(dirPath);
+          
+          for (const item of items) {
+            
+            if (item.isDirectory()) {
+              // 递归扫描子目录
+              await scanDirectory(item.path);
+            } else {
+              // 检查是否是图片文件
+              const lowerFileName = item.name.toLowerCase();
+              const isImage = imageExtensions.some(ext => lowerFileName.endsWith(ext));
+              
+              if (isImage) {
+                try {
+                  // 获取文件统计信息
+                  const stats = await RNFS.stat(item.path);
+                  
+                  // Windows上：birthtime 是真正的创建时间，ctime 实际上是状态更改时间（通常等于 mtime）
+                  // 优先使用 birthtime，如果没有则使用 mtime（修改时间）
+                  // 因为复制文件时，birthtime 会更新为复制时间
+                  let fileTime = null;
+                  let timeField = null;
+                  
+                  // 尝试获取 birthtime（创建时间）
+                  if (stats.birthtime) {
+                    fileTime = stats.birthtime;
+                    timeField = 'birthtime';
+                  } else if (stats.ctime) {
+                    // Windows上 ctime 通常等于 mtime，但可以作为备选
+                    fileTime = stats.ctime;
+                    timeField = 'ctime';
+                  } else if (stats.mtime) {
+                    // 最后使用 mtime（修改时间）
+                    fileTime = stats.mtime;
+                    timeField = 'mtime';
+                  }
+                  
+                  if (fileTime) {
+                    // 处理时间：可能是 Date 对象或时间戳
+                    let timeValue = fileTime;
+                    if (timeValue instanceof Date) {
+                      // 如果是 Date 对象，直接转换为时间戳（已经是UTC时间）
+                      timeValue = timeValue.getTime();
+                    } else if (typeof timeValue === 'number') {
+                      // 如果是数字，检查是否是微秒时间戳
+                      if (timeValue > 9999999999999) {
+                        timeValue = Math.floor(timeValue / 1000); // 转换为毫秒级
+                      }
+                    } else {
+                      // 其他类型，尝试转换为 Date 再获取时间戳
+                      timeValue = new Date(timeValue).getTime();
+                    }
+                    
+                    const fileTimeMs = timeValue;
+                    
+                    // 检查文件创建/复制时间是否在 lastScanTime 之后
+                    if (fileTimeMs >= sinceTime) {
+                      // 构建图片信息（简化版，只包含必要字段）
+                      const fileUri = pathToFileUri(item.path);
+                      newImages.push({
+                        id: `new_${item.path}_${fileTimeMs}`, // 临时ID
+                        uri: fileUri,
+                        fileName: item.name,
+                        path: item.path,
+                        size: stats.size || 0,
+                        ctime: fileTimeMs, // 保持字段名不变，但实际是 birthtime 或 mtime
+                        // 其他字段可以后续补充
+                      });
+                    }
+                  }
+                } catch (statError) {
+                  // 忽略单个文件的错误，继续处理其他文件
+                }
+              }
+            }
+          }
+        } catch (error) {
+          // 忽略单个目录的错误，继续处理其他目录
+        }
+      };
+      
+      // 遍历所有扫描目录（不限制，统计所有新照片）
+      for (const scanPath of scanPaths) {
+        await scanDirectory(scanPath);
+      }
+      
+      // 按创建/复制时间降序排序
+      newImages.sort((a, b) => (b.ctime || 0) - (a.ctime || 0));
+      
+      // 统计总数
+      const total = newImages.length;
+      
+      // 只返回前limit张用于显示
+      const images = newImages.slice(0, limit);
+      
+      return { total, images };
+      
+    } catch (error) {
+      logger.error('PC端读取新发现的照片失败:', error);
+      return { total: 0, images: [] };
+    }
+  }
+
+  /**
+   * 读取目录统计
+   */
+  async readDirectoryCounts() {
+    try {
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
+      const cache = this.imageCache.getCache();
+      if (cache.directoryCounts && Object.keys(cache.directoryCounts).length > 0) {
+        logger.debug('从缓存读取目录统计');
+        // 过滤掉无效目录
+        const filteredDirectoryCounts = {};
+        Object.entries(cache.directoryCounts).forEach(([directory, count]) => {
+          if (directory && 
+              typeof directory === 'string' && 
+              directory.trim() !== '' && 
+              directory !== 'null' && 
+              directory !== 'undefined') {
+            filteredDirectoryCounts[directory] = count;
+          }
+        });
+        return filteredDirectoryCounts;
+      }
+      
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有目录统计，返回空对象');
+      return {};
+      
+    } catch (error) {
+      logger.error('读取目录统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 根据目录获取图片
+   * 优先从缓存读取，缓存没有则从数据库读取
+   */
+  async readImagesByDirectory(directory, limit = null) {
+    try {
+      // 确保缓存已加载
+      await this.imageCache.buildCache();
+      
+      // 从缓存获取所有图片
+      const directoryImages = this.imageCache.getImagesByDirectory(directory);
+      
+      // 按时间排序
+      const sortedImages = directoryImages.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      
+      // 如果指定了限制，只返回前N张
+      if (limit && limit > 0) {
+        return sortedImages.slice(0, limit);
+      }
+      
+      return sortedImages;
+    } catch (error) {
+      logger.error('读取目录图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取目录的最近图片
+   */
+  async readRecentImagesByDirectory(directory, limit = 4) {
+    return await this.readImagesByDirectory(directory, limit);
+  }
+
+  /**
    * 根据城市/地区获取图片
    * 优先从缓存读取，缓存没有则从数据库读取
    */
@@ -1187,6 +1458,150 @@ class UnifiedDataService {
       return selectedImages;
     } catch (error) {
       console.error('❌ 获取暂存箱选中图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🆕 根据 filterType 和 filterValue 统一获取图片数据
+   * @param {string} filterType - 过滤类型: 'category', 'city', 'color', 'directory', 'similarityGroup'
+   * @param {string} filterValue - 过滤值
+   * @returns {Promise<Array>} 图片数组
+   */
+  async readImagesByFilter(filterType, filterValue) {
+    if (!filterType) {
+      logger.error('readImagesByFilter: filterType 不能为空');
+      return [];
+    }
+
+    try {
+      switch (filterType) {
+        case 'similarityGroup': {
+          if (!filterValue) {
+            logger.error('readImagesByFilter: similarityGroup 需要 filterValue');
+            return [];
+          }
+          const groupData = await this.getSimilarityGroupImages(filterValue);
+          return groupData.images || [];
+        }
+        
+        case 'directory':
+          if (!filterValue) {
+            logger.error('readImagesByFilter: directory 需要 filterValue');
+            return [];
+          }
+          return await this.readImagesByDirectory(filterValue);
+        
+        case 'color':
+          if (!filterValue) {
+            logger.error('readImagesByFilter: color 需要 filterValue');
+            return [];
+          }
+          return await this.readImagesByColor(filterValue);
+        
+        case 'city':
+          if (!filterValue) {
+            logger.error('readImagesByFilter: city 需要 filterValue');
+            return [];
+          }
+          return await this.readImagesByLocation(filterValue, null);
+        
+        case 'stagingBox':
+          // 🆕 stagingBox 是独立的 filterType，不需要 filterValue
+          return await this.getStagingBoxImages();
+        
+        case 'category':
+          if (!filterValue) {
+            logger.error('readImagesByFilter: category 需要 filterValue');
+            return [];
+          }
+          return await this.readImagesByCategory(filterValue);
+        
+        default:
+          logger.error(`readImagesByFilter: 未知的 filterType: ${filterType}`);
+          return [];
+      }
+    } catch (error) {
+      logger.error(`readImagesByFilter 失败: filterType=${filterType}, filterValue=${filterValue}`, error);
+      return [];
+    }
+  }
+
+  /**
+   * 🆕 根据 filterType 和 filterValue 统一获取当前分类的选中图片
+   * 数据服务自己从缓存获取图片数据，无需外部传递
+   * @param {string} filterType - 过滤类型: 'category', 'city', 'color', 'directory', 'similarityGroup', 'stagingBox'
+   * @param {string} filterValue - 过滤值（stagingBox 不需要 filterValue）
+   * @returns {Promise<Array>} 选中的图片数组（异步，因为暂存箱需要从数据库获取）
+   */
+  async getSelectedImagesByFilter(filterType, filterValue) {
+    if (!filterType) {
+      logger.error('getSelectedImagesByFilter: filterType 不能为空');
+      return [];
+    }
+
+    try {
+      switch (filterType) {
+        case 'similarityGroup':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: similarityGroup 需要 filterValue');
+            return [];
+          }
+          return this.getSelectedImagesBySimilarityGroup(filterValue);
+        
+        case 'city':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: city 需要 filterValue');
+            return [];
+          }
+          return this.getSelectedImagesByCity(filterValue);
+        
+        case 'stagingBox':
+          // 🆕 stagingBox 是独立的 filterType，不需要 filterValue
+          // 先获取所有选中图片，然后检查是否在暂存箱中
+          const allSelected = this.getSelectedImages();
+          
+          // 从数据库获取暂存箱图片ID列表
+          const stagingBoxImageIds = await this.imageStorageService.getStagingBoxImageIds();
+          const stagingBoxImageIdSet = new Set(stagingBoxImageIds);
+          
+          // 从所有选中图片中过滤出在暂存箱中的
+          return allSelected.filter(img => stagingBoxImageIdSet.has(img.id));
+        
+        case 'category':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: category 需要 filterValue');
+            return [];
+          }
+          const normalizedCategory = this.getCategoryId(filterValue);
+          return this.getSelectedImagesByCategory(normalizedCategory);
+        
+        case 'color':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: color 需要 filterValue');
+            return [];
+          }
+          // 颜色：从缓存获取当前颜色的图片，然后过滤出选中的
+          const colorImages = this.imageCache.getCache().allImages.filter(
+            img => img.background_color === filterValue
+          );
+          return colorImages.filter(img => img.selected === true);
+        
+        case 'directory':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: directory 需要 filterValue');
+            return [];
+          }
+          // 目录：从缓存获取当前目录的图片，然后过滤出选中的
+          const directoryImages = this.imageCache.getImagesByDirectory(filterValue);
+          return directoryImages.filter(img => img.selected === true);
+        
+        default:
+          logger.error(`getSelectedImagesByFilter: 未知的 filterType: ${filterType}`);
+          return [];
+      }
+    } catch (error) {
+      logger.error(`getSelectedImagesByFilter 失败: filterType=${filterType}, filterValue=${filterValue}`, error);
       return [];
     }
   }

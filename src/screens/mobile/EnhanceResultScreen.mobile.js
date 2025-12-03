@@ -156,8 +156,8 @@ export default function EnhanceResultScreen({ route, navigation }) {
         ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions }),
       };
 
-      await UnifiedDataService.writeImageDetailedInfo([completeImageData], false);
-      await UnifiedDataService.imageCache.refreshCache();
+      // 使用 writeImageDetailedInfo 保存图片数据（服务层会自动刷新缓存）
+      await UnifiedDataService.writeImageDetailedInfo([completeImageData], true);
 
       // 4) 标记本地结果为已保存
       Animated.sequence([

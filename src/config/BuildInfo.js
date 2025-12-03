@@ -3,5 +3,5 @@
 // 构建版本号格式与 android/app/build.gradle 中的 versionCode 规则一致
 
 export const BUILD_VERSION = '1.0.0'; // 版本名（例如：1.0.0）
-export const BUILD_VERSION_CODE = '11281710'; // 构建版本号（MMddHHmm格式，例如：11251430）
-export const BUILD_DATE = '2025-11-28 17:10'; // 构建时间（易读格式：YYYY-MM-DD HH:mm）
+export const BUILD_VERSION_CODE = '12031641'; // 构建版本号（MMddHHmm格式，例如：11251430）
+export const BUILD_DATE = '2025-12-03 16:41'; // 构建时间（易读格式：YYYY-MM-DD HH:mm）

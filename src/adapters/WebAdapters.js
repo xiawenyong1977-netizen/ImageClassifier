@@ -823,6 +823,7 @@ export const RNFS = {
           isDirectory: () => stats.isDirectory(),
           mtime: stats.mtime,
           ctime: stats.ctime,
+          birthtime: stats.birthtime, // Windows上这是真正的创建时间
         };
       } catch (error) {
         logger.debug(`[Web] File stat failed: ${error.message}`);

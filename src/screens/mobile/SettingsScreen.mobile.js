@@ -903,6 +903,21 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                 trackColor={{ false: '#ccc', true: '#4CAF50' }}
               />
             </View>
+
+            {/* 显示存储分类 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>📁 显示存储分类</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示按存储目录分类的卡片
+                </Text>
+              </View>
+              <Switch
+                value={settings.showDirectoryCategories !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
           </View>
         </View>
 

@@ -1390,10 +1390,27 @@ public class GalleryScanService {
                                         classificationData.put("message", messageObj.toString());
                                     }
                                     
+                                    // 保存背景颜色字段
+                                    Object backgroundColorObj = cacheData.get("background_color");
+                                    if (backgroundColorObj != null) {
+                                        String backgroundColor = backgroundColorObj.toString();
+                                        classificationData.put("background_color", backgroundColor);
+                                        Log.d(TAG, "🎨 [缓存查询] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                    } else {
+                                        Log.d(TAG, "⚠️ [缓存查询] 未找到背景颜色字段, 图片: " + image.fileName + ", cacheData keys: " + cacheData.keySet());
+                                    }
+                                    
                                     // 缓存命中时没有小模型检测结果，设置为空
                                     classificationData.put("idCardDetections", new ArrayList<>());
                                     classificationData.put("generalDetections", new ArrayList<>());
                                     classificationData.put("mobileNetV3Detections", null);
+                                    
+                                    // 调试日志：检查 classificationData 中是否包含 background_color
+                                    if (classificationData.containsKey("background_color")) {
+                                        Log.d(TAG, "✅ [缓存查询-批次更新前] 确认包含 background_color: " + classificationData.get("background_color") + ", 图片: " + image.fileName);
+                                    } else {
+                                        Log.d(TAG, "⚠️ [缓存查询-批次更新前] classificationData 不包含 background_color, 图片: " + image.fileName + ", keys: " + classificationData.keySet());
+                                    }
                                     
                                     batchUpdateData.add(classificationData);
                                     result.hitImages.add(image);
@@ -1582,6 +1599,24 @@ public class GalleryScanService {
                         data.put("confidence", dataObj.optDouble("confidence", 0.9));
                         data.put("description", dataObj.optString("description", null));
                         data.put("message", dataObj.optString("message", null));
+                        // 🆕 添加 background_color 字段的解析
+                        String backgroundColor = dataObj.optString("background_color", null);
+                        if (backgroundColor != null && !backgroundColor.isEmpty()) {
+                            data.put("background_color", backgroundColor);
+                            Log.d(TAG, "🎨 [JSON解析-缓存查询] 从响应中解析到 background_color: " + backgroundColor);
+                        } else {
+                            // 尝试获取所有键来调试
+                            JSONArray names = dataObj.names();
+                            if (names != null) {
+                                List<String> keys = new ArrayList<>();
+                                for (int j = 0; j < names.length(); j++) {
+                                    keys.add(names.getString(j));
+                                }
+                                Log.d(TAG, "⚠️ [JSON解析-缓存查询] 响应中未找到 background_color 字段, dataObj keys: " + keys);
+                            } else {
+                                Log.d(TAG, "⚠️ [JSON解析-缓存查询] 响应中未找到 background_color 字段, dataObj 为空或没有键");
+                            }
+                        }
                         item.put("data", data);
                     }
                     
@@ -1788,6 +1823,24 @@ public class GalleryScanService {
                         data.put("confidence", dataObj.optDouble("confidence", 0.9));
                         data.put("description", dataObj.optString("description", null));
                         data.put("message", dataObj.optString("message", null));
+                        // 🆕 添加 background_color 字段的解析
+                        String backgroundColor = dataObj.optString("background_color", null);
+                        if (backgroundColor != null && !backgroundColor.isEmpty()) {
+                            data.put("background_color", backgroundColor);
+                            Log.d(TAG, "🎨 [JSON解析-远程推理] 从响应中解析到 background_color: " + backgroundColor);
+                        } else {
+                            // 尝试获取所有键来调试
+                            JSONArray names = dataObj.names();
+                            if (names != null) {
+                                List<String> keys = new ArrayList<>();
+                                for (int j = 0; j < names.length(); j++) {
+                                    keys.add(names.getString(j));
+                                }
+                                Log.d(TAG, "⚠️ [JSON解析-远程推理] 响应中未找到 background_color 字段, dataObj keys: " + keys);
+                            } else {
+                                Log.d(TAG, "⚠️ [JSON解析-远程推理] 响应中未找到 background_color 字段, dataObj 为空或没有键");
+                            }
+                        }
                         
                         // 处理小模型推理结果
                         // 使用 optJSONObject 安全地获取 local_inference_result 字段（如果为 null 则返回 null，不会抛出异常）
@@ -1961,6 +2014,24 @@ public class GalleryScanService {
                                 // 推理成功
                                 Map<String, Object> inferenceData = (Map<String, Object>) item.get("data");
                                 
+                                // 🔍 调试日志：打印完整的 inferenceData 内容
+                                Log.d(TAG, "🔍 [调试] 完整的 inferenceData 内容: " + inferenceData);
+                                Log.d(TAG, "🔍 [调试] inferenceData 的所有键: " + inferenceData.keySet());
+                                
+                                // 检查 background_color 字段（尝试多种可能的字段名）
+                                Object bgColor1 = inferenceData.get("background_color");
+                                Object bgColor2 = inferenceData.get("backgroundColor");
+                                Object bgColor3 = inferenceData.get("backgroundColor");
+                                if (bgColor1 != null) {
+                                    Log.d(TAG, "✅ [调试] 找到 background_color: " + bgColor1);
+                                } else if (bgColor2 != null) {
+                                    Log.d(TAG, "✅ [调试] 找到 backgroundColor: " + bgColor2);
+                                } else if (bgColor3 != null) {
+                                    Log.d(TAG, "✅ [调试] 找到 backgroundColor (驼峰): " + bgColor3);
+                                } else {
+                                    Log.d(TAG, "⚠️ [调试] 未找到任何背景颜色字段，inferenceData 完整内容: " + inferenceData);
+                                }
+                                
                                 // 判断是大模型还是小模型推理
                                 String category = (String) inferenceData.get("category");
                                 Map<String, Object> localInferenceResult = (Map<String, Object>) inferenceData.get("local_inference_result");
@@ -1997,6 +2068,16 @@ public class GalleryScanService {
                                         classificationData.put("message", messageObj.toString());
                                     }
                                     
+                                    // 保存背景颜色字段
+                                    Object backgroundColorObj = inferenceData.get("background_color");
+                                    if (backgroundColorObj != null) {
+                                        String backgroundColor = backgroundColorObj.toString();
+                                        classificationData.put("background_color", backgroundColor);
+                                        Log.d(TAG, "🎨 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                    } else {
+                                        Log.d(TAG, "⚠️ 未找到背景颜色字段, 图片: " + image.fileName + ", inferenceData keys: " + inferenceData.keySet());
+                                    }
+                                    
                                     // 大模型推理没有小模型检测结果
                                     classificationData.put("idCardDetections", new ArrayList<>());
                                     classificationData.put("generalDetections", new ArrayList<>());
@@ -2027,6 +2108,16 @@ public class GalleryScanService {
                                     classificationData.put("mobileNetV3Detections", mobileNetV3Detections);
                                     classificationData.put("message", null);
                                     
+                                    // 保存背景颜色字段（如果存在）
+                                    Object backgroundColorObj = inferenceData.get("background_color");
+                                    if (backgroundColorObj != null) {
+                                        String backgroundColor = backgroundColorObj.toString();
+                                        classificationData.put("background_color", backgroundColor);
+                                        Log.d(TAG, "🎨 [小模型推理] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                    } else {
+                                        Log.d(TAG, "⚠️ [小模型推理] 未找到背景颜色字段, 图片: " + image.fileName + ", inferenceData keys: " + inferenceData.keySet());
+                                    }
+                                    
                                     // 注意：小模型推理结果暂时保存为NA，JS层会在后续阶段进行映射
                                     // 这样可以避免在原生层维护复杂的映射逻辑和配置文件
                                 } else {
@@ -2036,6 +2127,13 @@ public class GalleryScanService {
                                     result.failedCount++;
                                     processedThisPhase++;
                                     continue;
+                                }
+                                
+                                // 调试日志：检查 classificationData 中是否包含 background_color
+                                if (classificationData.containsKey("background_color")) {
+                                    Log.d(TAG, "✅ [批次更新前] 确认包含 background_color: " + classificationData.get("background_color") + ", 图片: " + image.fileName);
+                                } else {
+                                    Log.d(TAG, "⚠️ [批次更新前] classificationData 不包含 background_color, 图片: " + image.fileName + ", keys: " + classificationData.keySet());
                                 }
                                 
                                 batchUpdateData.add(classificationData);
@@ -2120,7 +2218,7 @@ public class GalleryScanService {
      * 保存图片分类结果到数据库
      */
     private void saveImageClassification(ImageInfo image, String category, double confidence, 
-                                        Map<String, Object> detections, String message, ExifData exifData) {
+                                        Map<String, Object> detections, String message, ExifData exifData, String backgroundColor) {
         try {
             Map<String, Object> imageData = new HashMap<>();
             imageData.put("uri", image.uri);
@@ -2191,6 +2289,10 @@ public class GalleryScanService {
             }
             if (message != null) {
                 imageData.put("message", message);
+            }
+            // 保存背景颜色字段
+            if (backgroundColor != null && !backgroundColor.isEmpty()) {
+                imageData.put("background_color", backgroundColor);
             }
             
             List<Map<String, Object>> imageDataList = new ArrayList<>();

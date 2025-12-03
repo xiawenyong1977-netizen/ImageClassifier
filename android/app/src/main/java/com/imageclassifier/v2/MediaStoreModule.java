@@ -434,6 +434,165 @@ public class MediaStoreModule extends ReactContextBaseJavaModule {
     }
 
     /**
+     * 获取指定时间之后的图片清单（用于查询新发现的照片）
+     * @param sinceTime 起始时间戳（毫秒），查询 DATE_TAKEN >= sinceTime 的图片
+     * @param limit 限制返回数量，0表示不限制
+     * @param offset 偏移量，用于分页
+     * @param promise Promise对象
+     */
+    @ReactMethod
+    public void getImagesSinceTime(double sinceTime, int limit, int offset, Promise promise) {
+        try {
+            // 将 double 转换为 long（React Native 不支持 long 类型参数）
+            long sinceTimeLong = (long) sinceTime;
+            Log.d(TAG, "开始获取指定时间之后的图片清单, sinceTime=" + sinceTimeLong + ", limit=" + limit + ", offset=" + offset);
+            
+            ContentResolver contentResolver = reactContext.getContentResolver();
+            
+            // 查询字段（与 getAllImages 保持一致）
+            String[] projection = new String[]{
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Images.Media.DATE_MODIFIED,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.WIDTH,
+                MediaStore.Images.Media.HEIGHT,
+                MediaStore.Images.Media.MIME_TYPE,
+                MediaStore.Images.Media.DATA,  // 绝对路径（优先使用，可能为null）
+                MediaStore.Images.Media.RELATIVE_PATH  // 相对路径（如果DATA为空，使用此路径）
+            };
+            
+            // 查询条件：DATE_TAKEN >= sinceTime
+            String selection = MediaStore.Images.Media.DATE_TAKEN + " >= ?";
+            String[] selectionArgs = new String[]{String.valueOf(sinceTimeLong)};
+            
+            // 排序：按拍摄时间降序
+            String sortOrder = MediaStore.Images.Media.DATE_TAKEN + " DESC";
+            
+            Cursor cursor = contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            );
+            
+            WritableArray imageArray = Arguments.createArray();
+            int count = 0;
+            int skipped = 0;
+            
+            if (cursor != null) {
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+                int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
+                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE);
+                int dateTakenColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN);
+                int dateModifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED);
+                int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED);
+                int widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH);
+                int heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT);
+                int mimeTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE);
+                int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
+                
+                // 尝试获取 RELATIVE_PATH 列索引（可能不存在，使用 getColumnIndex）
+                int relativePathColumn = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH);
+                
+                // 手动实现分页：跳过 offset 个结果
+                if (offset > 0 && cursor.moveToPosition(offset - 1)) {
+                    // 移动到起始位置
+                } else if (offset > 0) {
+                    // offset 超出范围
+                    cursor.close();
+                    WritableMap result = Arguments.createMap();
+                    result.putArray("images", imageArray);
+                    result.putInt("count", 0);
+                    result.putInt("offset", offset);
+                    result.putBoolean("hasMore", false);
+                    promise.resolve(result);
+                    return;
+                }
+                
+                // 读取指定数量的结果
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idColumn);
+                    String displayName = cursor.getString(nameColumn);
+                    long size = cursor.getLong(sizeColumn);
+                    long dateTaken = cursor.getLong(dateTakenColumn);
+                    long dateModified = cursor.getLong(dateModifiedColumn);
+                    long dateAdded = cursor.getLong(dateAddedColumn);
+                    int width = cursor.getInt(widthColumn);
+                    int height = cursor.getInt(heightColumn);
+                    String mimeType = cursor.getString(mimeTypeColumn);
+                    String path = cursor.getString(dataColumn);  // 绝对路径（可能为null）
+                    
+                    // 读取 RELATIVE_PATH（如果列存在）
+                    String relativePath = null;
+                    if (relativePathColumn >= 0) {
+                        relativePath = cursor.getString(relativePathColumn);
+                    }
+                    
+                    // 构建Content URI
+                    Uri contentUri = ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id
+                    );
+                    
+                    WritableMap imageInfo = Arguments.createMap();
+                    imageInfo.putString("id", String.valueOf(id));
+                    imageInfo.putString("uri", contentUri.toString());
+                    imageInfo.putString("fileName", displayName);
+                    
+                    // 优先使用绝对路径（path），如果为空则使用相对路径（relativePath）
+                    if (path != null && !path.isEmpty()) {
+                        imageInfo.putString("path", path);
+                    } else if (relativePath != null && !relativePath.isEmpty()) {
+                        // 绝对路径为空，使用相对路径
+                        imageInfo.putString("path", relativePath);
+                    }
+                    // 如果两者都为空，则不设置path字段
+                    
+                    // 同时保存 relativePath（如果有），用于后续处理
+                    if (relativePath != null && !relativePath.isEmpty()) {
+                        imageInfo.putString("relativePath", relativePath);
+                    }
+                    
+                    imageInfo.putDouble("size", size);
+                    imageInfo.putDouble("dateTaken", dateTaken);
+                    imageInfo.putDouble("dateModified", dateModified * 1000); // 转换为毫秒
+                    imageInfo.putDouble("dateAdded", dateAdded * 1000); // 转换为毫秒
+                    imageInfo.putInt("width", width);
+                    imageInfo.putInt("height", height);
+                    imageInfo.putString("mimeType", mimeType);
+                    
+                    imageArray.pushMap(imageInfo);
+                    count++;
+                    
+                    // 如果设置了 limit，达到 limit 后停止
+                    if (limit > 0 && count >= limit) {
+                        break;
+                    }
+                }
+                
+                cursor.close();
+            }
+            
+            WritableMap result = Arguments.createMap();
+            result.putArray("images", imageArray);
+            result.putInt("count", count);
+            result.putInt("offset", offset);
+            result.putBoolean("hasMore", count == limit);
+            
+            Log.d(TAG, "成功获取 " + count + " 张指定时间之后的图片");
+            promise.resolve(result);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "获取指定时间之后的图片清单失败: " + e.getMessage(), e);
+            promise.reject("GET_IMAGES_SINCE_TIME_ERROR", e.getMessage());
+        }
+    }
+
+    /**
      * 提取图片的EXIF信息
      * @param uriString 图片URI
      * @param promise Promise对象

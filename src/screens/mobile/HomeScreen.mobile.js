@@ -30,7 +30,7 @@ import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import WakeLockService from '../../services/WakeLockService';
-import { logger, getUri } from '../../adapters/WebAdapters';
+import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -52,8 +52,13 @@ const HomeScreen = ({ navigation }) => {
   const [colorCounts, setColorCounts] = useState({});
   const [colorRecentImages, setColorRecentImages] = useState({});
   
+  // 目录分类数据
+  const [directoryCounts, setDirectoryCounts] = useState({});
+  const [directoryRecentImages, setDirectoryRecentImages] = useState({});
+  
   // 最近照片
   const [recentImages, setRecentImages] = useState([]);
+  const [recentImagesTotal, setRecentImagesTotal] = useState(0); // 新发现照片的总数
   
   // 扫描状态
   const [isScanning, setIsScanning] = useState(false);
@@ -70,6 +75,7 @@ const HomeScreen = ({ navigation }) => {
   const [showColorCategories, setShowColorCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
+  const [showDirectoryCategories, setShowDirectoryCategories] = useState(true);
 
   // ==================== 初始化加载 ====================
   useEffect(() => {
@@ -87,12 +93,14 @@ const HomeScreen = ({ navigation }) => {
       const detail = eventData?.detail || eventData;
       const { key, settings: newSettings } = detail || {};
       if (key === 'showCityCategories' || key === 'showColorCategories' || 
-          key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
+          key === 'showSimilarityGroups' || key === 'showRecentPhotos' || 
+          key === 'showDirectoryCategories') {
         if (newSettings) {
           setShowCityCategories(newSettings.showCityCategories !== false);
           setShowColorCategories(newSettings.showColorCategories !== false);
           setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
           setShowRecentPhotos(newSettings.showRecentPhotos !== false);
+          setShowDirectoryCategories(newSettings.showDirectoryCategories !== false);
         }
       }
     };
@@ -205,6 +213,7 @@ const HomeScreen = ({ navigation }) => {
       setShowColorCategories(settings.showColorCategories !== false);
       setShowSimilarityGroups(settings.showSimilarityGroups !== false);
       setShowRecentPhotos(settings.showRecentPhotos !== false);
+      setShowDirectoryCategories(settings.showDirectoryCategories !== false);
     } catch (error) {
       logger.error('加载显示设置失败:', error);
       // 出错时默认全部显示
@@ -258,6 +267,7 @@ const HomeScreen = ({ navigation }) => {
         loadCities();
         loadSimilarityGroups();
         loadColors();
+        loadDirectories();
         }, 100);
         
           } catch (error) {
@@ -398,6 +408,40 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 加载目录分类数据
+   */
+  const loadDirectories = async () => {
+    try {
+      // 加载目录统计
+      const directoryCountsData = await UnifiedDataService.readDirectoryCounts();
+      setDirectoryCounts(directoryCountsData);
+      
+      // 加载各目录的最近图片（按数量排序取前10个）
+      const sortedDirectories = Object.entries(directoryCountsData).sort(([,a], [,b]) => b - a);
+      const directoryIds = sortedDirectories.slice(0, 10).map(([dirName]) => dirName);
+      
+      const directoryImagesPromises = directoryIds.map(async (dirName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
+          return { dirName, images };
+        } catch (error) {
+          logger.error(`加载目录 ${dirName} 的图片失败:`, error);
+          return { dirName, images: [] };
+        }
+      });
+      
+      const directoryImagesResults = await Promise.all(directoryImagesPromises);
+      const directoryImagesMap = {};
+      directoryImagesResults.forEach(({ dirName, images }) => {
+        directoryImagesMap[dirName] = images;
+      });
+      setDirectoryRecentImages(directoryImagesMap);
+    } catch (error) {
+      logger.error('❌ 加载目录分类失败:', error);
+    }
+  };
+
+  /**
    * 加载相似组
    */
   const loadSimilarityGroups = async () => {
@@ -415,17 +459,18 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 加载最近照片
+   * 加载新发现的照片（从上次扫描之后新发现的照片）
    */
   const loadRecentImages = async () => {
     try {
-      const cache = GlobalImageCache.getCache();
-      const recent = (cache.recentImages || []).slice(0, 12);
-      
-      setRecentImages(recent);
-      
+      // 改为调用 readNewDiscoveredImages 获取从上次扫描之后新发现的照片
+      const result = await UnifiedDataService.readNewDiscoveredImages(12);
+      setRecentImages(result.images || []);
+      setRecentImagesTotal(result.total || 0);
     } catch (error) {
-      logger.error('❌ 加载最近照片失败:', error);
+      logger.error('❌ 加载新发现照片失败:', error);
+      setRecentImages([]);
+      setRecentImagesTotal(0);
     }
   };
 
@@ -542,6 +587,9 @@ const HomeScreen = ({ navigation }) => {
       // 只重新加载数据（从缓存读取），不重建缓存
       // 缓存只在数据真正变化时（扫描、删除）才重建
       await loadAllData();
+      
+      // 显式重新加载新发现照片（确保刷新时重新查询 MediaStore）
+      await loadRecentImages();
       
       // 重新加载扫描信息（如果失败则保持当前消息不变）
       await loadLastScanTime(true); // 传入 true，失败时保持当前消息
@@ -976,6 +1024,86 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 渲染目录卡片
+   */
+  const renderDirectoryCard = (directory) => {
+    const count = directoryCounts[directory] || 0;
+    const recentImages = directoryRecentImages[directory] || [];
+    // 提取目录名（最后一个路径段）
+    const directoryName = directory.split('/').pop() || directory;
+    
+    return (
+      <TouchableOpacity
+        key={directory}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!directory || !navigation) {
+              logger.warn('❌ 目录数据无效或导航对象为空:', { directory, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📁 点击目录卡片:', directory);
+            navigation.navigate('Category', {
+              filterType: 'directory',
+              filterValue: directory,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 目录卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>📁</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示目录信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName} numberOfLines={1}>{directoryName}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染目录分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderDirectoriesSection = () => {
+    // 过滤掉无效目录
+    const filteredDirectoryCounts = Object.entries(directoryCounts).filter(([directory]) => {
+      return directory && 
+             typeof directory === 'string' && 
+             directory.trim() !== '' && 
+             directory !== 'null' && 
+             directory !== 'undefined';
+    });
+    
+    if (filteredDirectoryCounts.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📁 按存储</Text>
+        <View style={styles.categoriesGrid}>
+          {filteredDirectoryCounts
+            .sort(([,a], [,b]) => b - a)
+            .map(([directory]) => renderDirectoryCard(directory))}
+        </View>
+      </View>
+    );
+  };
+
+  /**
    * 渲染城市卡片（与"按内容"保持一致：4列网格布局）
    */
   const renderCityCard = (city) => (
@@ -1038,53 +1166,68 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 渲染最近照片
+   * 渲染新发现的照片（从上次扫描之后新发现的照片）
    */
   const renderRecentPhotos = () => {
+    // 从图片对象中提取目录名的辅助函数
+    const getDirectoryName = (image) => {
+      if (!image) return '未知目录';
+      
+      // 使用 getLocalPath 提取路径（支持 contentUri||path 格式）
+      const path = getLocalPath(image);
+      if (!path) {
+        return '未知目录';
+      }
+      
+      // 从路径中提取目录名（倒数第二级目录）
+      // 例如：/storage/emulated/0/DCIM/Camera/IMG_001.jpg -> Camera
+      // 或者：DCIM/Camera/IMG_001.jpg -> Camera
+      const pathParts = path.split('/').filter(p => p && p.trim());
+      if (pathParts.length >= 2) {
+        // 取倒数第二级目录
+        return pathParts[pathParts.length - 2];
+      } else if (pathParts.length === 1) {
+        return pathParts[0];
+      }
+      return '未知目录';
+    };
+    
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 16, paddingHorizontal: 16 }]}>📸 最近照片</Text>
+        <Text style={[styles.sectionTitle, { marginBottom: 16, paddingHorizontal: 16 }]}>
+          📸 新发现照片 {recentImagesTotal > 0 ? `(${recentImagesTotal})` : ''}
+        </Text>
         
         {recentImages.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>📷</Text>
-            <Text style={styles.emptyStateText}>暂无照片</Text>
+            <Text style={styles.emptyStateText}>暂无新照片</Text>
             <Text style={styles.emptyStateSubtext}>请点击右下角扫描按钮开始扫描相册</Text>
           </View>
         ) : (
           <View style={styles.recentGrid}>
-            {recentImages.map((image, index) => (
-              <TouchableOpacity
-                key={image.id || index}
-                style={styles.recentGridItem}
-                onPress={() => {
-                  try {
-                    // 🆕 添加空值检查
-                    const imageUri = getUri(image);
-                    if (!image || !imageUri || !navigation) {
-                      logger.warn('❌ 图片数据无效或导航对象为空:', { image, imageUri, navigation: !!navigation });
-                      return;
-                    }
-                    
-                    logger.debug('📸 点击最近照片:', image.id || index);
-                    navigation.navigate('ImagePreview', {
-                      image: image,
-                      allImages: recentImages,
-                      currentIndex: index,
-                      fromScreen: 'Home',
-                    });
-                  } catch (error) {
-                    logger.error('❌ 最近照片点击失败:', error);
-                  }
-                }}
-              >
-                <Image
-                  source={{ uri: getUri(image) || image?.uri }}
-                  style={styles.recentGridImage}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            ))}
+            {recentImages.map((image, index) => {
+              const directoryName = getDirectoryName(image);
+              
+              return (
+                <View
+                  key={image.id || image.uri || index}
+                  style={styles.recentGridItem}
+                >
+                  <Image
+                    source={{ uri: getUri(image) || image?.uri }}
+                    style={styles.recentGridImage}
+                    resizeMode="cover"
+                  />
+                  {/* 目录标签覆盖层 */}
+                  <View style={styles.categoryOverlay}>
+                    <Text style={styles.categoryName} numberOfLines={1}>
+                      {directoryName}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         )}
       </View>
@@ -1156,6 +1299,7 @@ const HomeScreen = ({ navigation }) => {
         {renderCategoriesSection()}
         {showCityCategories && renderCitiesSection()}
         {showColorCategories && renderColorsSection()}
+        {showDirectoryCategories && renderDirectoriesSection()}
         {showSimilarityGroups && renderSimilarityGroupsSection()}
         {showRecentPhotos && renderRecentPhotos()}
       </ScrollView>
@@ -1394,6 +1538,7 @@ const styles = StyleSheet.create({
   recentGridItem: {
     width: (SCREEN_WIDTH - 40) / 3, // 3列布局
     height: (SCREEN_WIDTH - 40) / 3,
+    position: 'relative', // 添加相对定位，用于覆盖层
   },
   recentGridImage: {
     width: '100%',

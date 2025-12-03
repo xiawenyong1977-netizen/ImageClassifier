@@ -84,6 +84,41 @@ class MediaStoreService {
   }
 
   /**
+   * 获取指定时间之后的图片清单（用于查询新发现的照片）
+   * @param {Object} options - 选项
+   * @param {number} options.sinceTime - 起始时间戳（毫秒），查询 DATE_TAKEN >= sinceTime 的图片
+   * @param {number} options.limit - 限制返回数量，0表示不限制（默认：0）
+   * @param {number} options.offset - 偏移量，用于分页（默认：0）
+   * @returns {Promise<{images: Array, count: number, offset: number, hasMore: boolean}>}
+   */
+  async getImagesSinceTime(options = {}) {
+    if (!this.isAvailable) {
+      throw new Error('MediaStore 不可用');
+    }
+
+    const { sinceTime, limit = 0, offset = 0 } = options;
+
+    if (!sinceTime || typeof sinceTime !== 'number') {
+      throw new Error('sinceTime 参数必须是一个有效的时间戳（毫秒）');
+    }
+
+    try {
+      logger.debug(`📱 MediaStore: 开始获取指定时间之后的图片清单 (sinceTime=${new Date(sinceTime).toISOString()}, limit=${limit}, offset=${offset})`);
+      const startTime = Date.now();
+
+      const result = await MediaStoreModule.getImagesSinceTime(sinceTime, limit, offset);
+
+      const duration = Date.now() - startTime;
+      logger.info(`✅ MediaStore: 获取了 ${result.count} 张新照片，耗时 ${duration}ms`);
+
+      return result;
+    } catch (error) {
+      logger.error('❌ MediaStore: 获取指定时间之后的图片清单失败', error);
+      throw error;
+    }
+  }
+
+  /**
    * 分批获取所有图片（避免一次性加载过多数据）
    * @param {number} batchSize - 每批大小（默认：500）
    * @param {Function} onBatch - 每批数据回调 (images, batchNumber, totalCount) => void

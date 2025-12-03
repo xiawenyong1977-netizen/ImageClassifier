@@ -1,6 +1,6 @@
 // 全局图片缓存服务 - 单例模式，避免重复加载
 import configService from './ConfigService.js';
-import { logger } from '../adapters/WebAdapters';
+import { logger, getLocalPath } from '../adapters/WebAdapters';
 
 class GlobalImageCache {
   constructor() {
@@ -9,6 +9,7 @@ class GlobalImageCache {
       categoryCounts: {},
       cityCounts: {},
       colorCounts: {},
+      directoryCounts: {}, // 目录统计
       recentImages: [],
       selectedCategoryCounts: {}, // 选中图片的分类统计
       selectedCityCounts: {}, // 选中图片的城市统计
@@ -131,6 +132,7 @@ class GlobalImageCache {
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
       this._rebuildColorCounts();
+      this._rebuildDirectoryCounts();
       
       // 加载相似组数据到图片对象中
       await this._loadSimilarityGroupData();
@@ -199,6 +201,11 @@ class GlobalImageCache {
           image.background_color.trim() !== '') {
         this.cache.colorCounts[image.background_color] = (this.cache.colorCounts[image.background_color] || 0) + 1;
       }
+      // 目录统计
+      const dirPath = this._extractDirectoryPath(image);
+      if (dirPath) {
+        this.cache.directoryCounts[dirPath] = (this.cache.directoryCounts[dirPath] || 0) + 1;
+      }
       
       // 更新最近图片列表（保持前20张）
       this.cache.recentImages = this.cache.allImages
@@ -261,6 +268,7 @@ class GlobalImageCache {
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
       this._rebuildColorCounts();
+      this._rebuildDirectoryCounts();
     
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
@@ -564,6 +572,7 @@ class GlobalImageCache {
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
       this._rebuildColorCounts();
+      this._rebuildDirectoryCounts();
       this._rebuildRecentImages();
       
       logger.debug(`✅ 图片删除完成: ${imageToDelete.fileName}`);
@@ -606,6 +615,74 @@ class GlobalImageCache {
           img.background_color.trim() !== '') {
         this.cache.colorCounts[img.background_color] = (this.cache.colorCounts[img.background_color] || 0) + 1;
       }
+    });
+  }
+
+  // 从图片URI中提取目录路径
+  _extractDirectoryPath(image) {
+    try {
+      const localPath = getLocalPath(image);
+      if (!localPath || typeof localPath !== 'string') {
+        return null;
+      }
+      
+      // 规范化路径（统一使用正斜杠）
+      const normalizedPath = localPath.replace(/\\/g, '/');
+      
+      // 找到最后一个路径分隔符的位置
+      const lastSeparatorIndex = normalizedPath.lastIndexOf('/');
+      if (lastSeparatorIndex === -1) {
+        // 没有路径分隔符，说明是根目录或文件名
+        return null;
+      }
+      
+      // 提取目录路径
+      const dirPath = normalizedPath.substring(0, lastSeparatorIndex);
+      
+      // 如果目录路径为空，返回 null
+      if (!dirPath || dirPath.trim() === '') {
+        return null;
+      }
+      
+      return dirPath;
+    } catch (error) {
+      logger.debug('提取目录路径失败:', error);
+      return null;
+    }
+  }
+
+  // 重新构建目录统计
+  _rebuildDirectoryCounts() {
+    this.cache.directoryCounts = {};
+    
+    this.cache.allImages.forEach(img => {
+      const dirPath = this._extractDirectoryPath(img);
+      if (dirPath) {
+        this.cache.directoryCounts[dirPath] = (this.cache.directoryCounts[dirPath] || 0) + 1;
+      }
+    });
+  }
+
+  // 根据目录获取图片
+  getImagesByDirectory(directory) {
+    if (!directory || typeof directory !== 'string') {
+      return [];
+    }
+    
+    // 规范化目录路径（统一使用正斜杠）
+    const normalizedDir = directory.replace(/\\/g, '/');
+    
+    return this.cache.allImages.filter(img => {
+      const imgDir = this._extractDirectoryPath(img);
+      if (!imgDir) {
+        return false;
+      }
+      
+      // 规范化图片目录路径
+      const normalizedImgDir = imgDir.replace(/\\/g, '/');
+      
+      // 精确匹配：只返回直接属于该目录的图片（不包含子目录）
+      return normalizedImgDir === normalizedDir;
     });
   }
   
@@ -651,6 +728,7 @@ class GlobalImageCache {
       this._rebuildCategoryCounts();
       this._rebuildCityCounts();
       this._rebuildColorCounts();
+      this._rebuildDirectoryCounts();
       this._rebuildSelectedStats();
       this._rebuildRecentImages();
       

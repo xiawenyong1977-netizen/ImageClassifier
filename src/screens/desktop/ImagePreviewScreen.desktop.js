@@ -69,24 +69,62 @@ const ImagePreviewScreen = ({
   navigation = {}, 
   imageId, 
   onBack, 
-  fromScreen = 'Home', 
+  fromScreen = null, // 🆕 改为可选，优先从 filterType 推导
   onDataChange,
-  // 添加上下文参数
+  // 🆕 统一使用 filterType 和 filterValue
+  filterType = null,
+  filterValue = null,
+  // 向后兼容的旧参数（逐步废弃）
   category = null,
   city = null,
   similarityGroupId = null
 }) => {
   
-  // 直接从URL参数获取图片ID
-  const getImageIdFromURL = () => {
+  // 从URL参数获取参数
+  const getParamsFromURL = () => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
-      return urlParams.get('imageId');
+      return {
+        imageId: urlParams.get('imageId'),
+        filterType: urlParams.get('filterType'),
+        filterValue: urlParams.get('filterValue'),
+        // 向后兼容
+        category: urlParams.get('category'),
+        city: urlParams.get('city'),
+        similarityGroupId: urlParams.get('similarityGroupId')
+      };
     }
-    return null;
+    return {};
   };
   
-  const finalImageId = imageId || route.params?.imageId || getImageIdFromURL();
+  const urlParams = getParamsFromURL();
+  
+  // 🆕 统一使用 filterType 和 filterValue（优先从 props，然后从 URL，最后从旧参数推导）
+  const finalFilterType = filterType || urlParams.filterType || (() => {
+    if (similarityGroupId || urlParams.similarityGroupId) return 'similarityGroup';
+    if (city || urlParams.city) return 'city';
+    if (category || urlParams.category) return 'category';
+    return null;
+  })();
+  
+  const finalFilterValue = filterValue || urlParams.filterValue || (() => {
+    if (finalFilterType === 'similarityGroup') return similarityGroupId || urlParams.similarityGroupId;
+    if (finalFilterType === 'city') return city || urlParams.city;
+    if (finalFilterType === 'category') return category || urlParams.category;
+    return null;
+  })();
+  
+  // 🆕 根据 filterType 推导 fromScreen（如果没有提供）
+  const derivedFromScreen = fromScreen || (() => {
+    if (!finalFilterType) return 'Home';
+    if (finalFilterType === 'similarityGroup') return 'SimilarityGroup';
+    if (finalFilterType === 'city') return 'City';
+    if (finalFilterType === 'stagingBox') return 'StagingBox';
+    if (finalFilterType === 'category') return 'Category';
+    return 'Home';
+  })();
+  
+  const finalImageId = imageId || route.params?.imageId || urlParams.imageId;
   const [currentImage, setCurrentImage] = useState(null);
   const [imageDimensions, setImageDimensions] = useState(null);
   const [showDeleteProgress, setShowDeleteProgress] = useState(false);
@@ -167,55 +205,78 @@ const ImagePreviewScreen = ({
     loadImageDetails();
   }, [finalImageId]);
 
-  // 加载当前上下文的所有图片（支持分类、城市、相似组、最近照片）
+  // 🆕 加载当前上下文的所有图片（基于 filterType 和 filterValue）
   const loadContextImages = async (currentImageData) => {
     try {
       let images = [];
       let contextType = '';
       let contextValue = '';
       
-      // 根据页面来源决定加载方式
-      // 如果props中的参数都是null，尝试从图片对象本身获取上下文信息
-      let actualCategory = category;
-      let actualCity = city;
-      let actualSimilarityGroupId = similarityGroupId;
-      
-      if (!actualCategory && !actualCity && !actualSimilarityGroupId && currentImageData) {
-        actualCategory = currentImageData.category;
-        actualCity = currentImageData.city;
-        actualSimilarityGroupId = currentImageData.similarityGroupId;
-      }
-      
-      if (fromScreen === 'Home') {
-        // 从HomeScreen的最近照片进入，加载最近照片列表
-        contextType = '最近照片';
-        contextValue = 'Home';
-        images = await UnifiedDataService.readRecentImages(50); // 加载最近50张照片
-      } else if (fromScreen === 'StagingBox' || actualCategory === 'stagingBox') {
-        // 从暂存箱进入
+      // 🆕 统一基于 filterType 和 filterValue 加载图片
+      if (!finalFilterType || !finalFilterValue) {
+        // 如果没有 filterType，尝试从图片对象本身获取上下文信息
+        if (currentImageData) {
+          if (currentImageData.similarityGroupId) {
+            const groupData = await UnifiedDataService.getSimilarityGroupImages(currentImageData.similarityGroupId);
+            images = groupData.images || [];
+            contextType = '相似组';
+            contextValue = currentImageData.similarityGroupId;
+          } else if (currentImageData.city) {
+            images = await UnifiedDataService.readImagesByLocation(currentImageData.city, null);
+            contextType = '城市';
+            contextValue = currentImageData.city;
+          } else if (currentImageData.category) {
+            if (currentImageData.category === 'stagingBox') {
+              images = await UnifiedDataService.getStagingBoxImages();
+              contextType = '暂存箱';
+              contextValue = 'StagingBox';
+            } else {
+              images = await UnifiedDataService.readImagesByCategory(currentImageData.category);
+              contextType = '分类';
+              contextValue = currentImageData.category;
+            }
+          } else {
+            // 默认加载最近照片
+            images = await UnifiedDataService.readRecentImages(50);
+            contextType = '最近照片';
+            contextValue = 'Home';
+          }
+        } else {
+          // 没有图片数据，默认加载最近照片
+          images = await UnifiedDataService.readRecentImages(50);
+          contextType = '最近照片';
+          contextValue = 'Home';
+        }
+      } else if (finalFilterType === 'similarityGroup') {
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(finalFilterValue);
+        images = groupData.images || [];
+        contextType = '相似组';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'city') {
+        images = await UnifiedDataService.readImagesByLocation(finalFilterValue, null);
+        contextType = '城市';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'stagingBox') {
+        images = await UnifiedDataService.getStagingBoxImages();
         contextType = '暂存箱';
         contextValue = 'StagingBox';
-        images = await UnifiedDataService.getStagingBoxImages();
-      } else if (actualSimilarityGroupId) {
-        // 从相似组进入
-        contextType = '相似组';
-        contextValue = actualSimilarityGroupId;
-        const groupData = await UnifiedDataService.getSimilarityGroupImages(actualSimilarityGroupId);
-        images = groupData.images || [];
-      } else if (actualCity) {
-        // 从城市进入
-        contextType = '城市';
-        contextValue = actualCity;
-        images = await UnifiedDataService.readImagesByLocation(actualCity, null);
-      } else if (actualCategory) {
-        // 从分类进入
+      } else if (finalFilterType === 'category') {
+        images = await UnifiedDataService.readImagesByCategory(finalFilterValue);
         contextType = '分类';
-        contextValue = actualCategory;
-        images = await UnifiedDataService.readImagesByCategory(actualCategory);
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'directory') {
+        images = await UnifiedDataService.readImagesByDirectory(finalFilterValue);
+        contextType = '目录';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'color') {
+        images = await UnifiedDataService.readImagesByColor(finalFilterValue);
+        contextType = '颜色';
+        contextValue = finalFilterValue;
       } else {
-        setCategoryImages([]);
-        setCurrentImageIndex(-1);
-        return;
+        // 默认加载最近照片
+        images = await UnifiedDataService.readRecentImages(50);
+        contextType = '最近照片';
+        contextValue = 'Home';
       }
       
       setCategoryImages(images);
@@ -231,35 +292,37 @@ const ImagePreviewScreen = ({
     }
   };
 
-  // 重新加载图片列表（当图片被移出当前列表时）
+  // 🆕 重新加载图片列表（基于 filterType 和 filterValue）
   const reloadImageList = async () => {
     try {
-      logger.debug('🔄 重新加载图片列表...', { category, city, similarityGroupId, fromScreen });
+      logger.debug('🔄 重新加载图片列表...', { filterType: finalFilterType, filterValue: finalFilterValue });
       
       let updatedImages = [];
       
-      // 根据来源重新加载
-      if (fromScreen === 'Home') {
-        // 从首页最近照片进入
+      // 🆕 统一基于 filterType 和 filterValue 重新加载
+      if (!finalFilterType || !finalFilterValue) {
+        // 没有 filterType，默认加载最近照片
         logger.debug('从最近照片重新加载...');
         updatedImages = await UnifiedDataService.readRecentImages(50);
-      } else if (fromScreen === 'StagingBox' || category === 'stagingBox') {
-        // 来自暂存箱
+      } else if (finalFilterType === 'similarityGroup') {
+        logger.debug('从相似组重新加载...');
+        const groupData = await UnifiedDataService.getSimilarityGroupImages(finalFilterValue);
+        updatedImages = groupData.images || [];
+      } else if (finalFilterType === 'city') {
+        logger.debug('从城市分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByLocation(finalFilterValue, null);
+      } else if (finalFilterType === 'stagingBox') {
         logger.debug('从暂存箱重新加载...');
         updatedImages = await UnifiedDataService.getStagingBoxImages();
-      } else if (similarityGroupId) {
-        // 来自相似组
-        logger.debug('从相似组重新加载...');
-        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
-        updatedImages = groupData.images || [];
-      } else if (city) {
-        // 来自城市分类
-        logger.debug('从城市分类重新加载...');
-        updatedImages = await UnifiedDataService.readImagesByLocation(city, null);
-      } else if (category) {
-        // 来自普通分类
+      } else if (finalFilterType === 'category') {
         logger.debug('从分类重新加载...');
-        updatedImages = await UnifiedDataService.readImagesByCategory(category);
+        updatedImages = await UnifiedDataService.readImagesByCategory(finalFilterValue);
+      } else if (finalFilterType === 'directory') {
+        logger.debug('从目录重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByDirectory(finalFilterValue);
+      } else if (finalFilterType === 'color') {
+        logger.debug('从颜色重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByColor(finalFilterValue);
       } else {
         logger.warn('⚠️ 无法确定来源，无法重新加载');
         return false;
@@ -1297,8 +1360,8 @@ const ImagePreviewScreen = ({
         ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions })
       };
       
-      // 使用 writeImageDetailedInfo 保存图片数据
-      await UnifiedDataService.writeImageDetailedInfo([completeImageData], false);
+      // 使用 writeImageDetailedInfo 保存图片数据（服务层会自动刷新缓存）
+      await UnifiedDataService.writeImageDetailedInfo([completeImageData], true);
       
       // 如果当前图片在暂存箱，将新图片也添加到暂存箱
       if (isInStagingBox && currentImage?.id) {
@@ -1329,8 +1392,7 @@ const ImagePreviewScreen = ({
         }
       }
       
-      // 强制刷新缓存（确保新图片能立即显示）
-      await UnifiedDataService.imageCache.refreshCache();
+      // 缓存刷新已由 writeImageDetailedInfo 处理，不需要手动刷新
       
       // 标记为已保存
       setEnhanceResults(prevResults => 
@@ -1446,11 +1508,13 @@ const ImagePreviewScreen = ({
           {categoryImages.length > 0 && currentImageIndex >= 0 && (
             <Text style={styles.imageCounter}>
               {' '}({currentImageIndex + 1}/{categoryImages.length})
-              {fromScreen === 'Home' && ' - 最近照片'}
-              {fromScreen === 'StagingBox' && ' - 暂存箱'}
-              {similarityGroupId && ' - 相似组'}
-              {city && ` - ${city}`}
-              {category && category !== 'stagingBox' && !similarityGroupId && !city && fromScreen !== 'Home' && fromScreen !== 'StagingBox' && ` - ${UnifiedDataService.getCategoryDisplayName(category)}`}
+              {derivedFromScreen === 'Home' && ' - 最近照片'}
+              {derivedFromScreen === 'StagingBox' && ' - 暂存箱'}
+              {finalFilterType === 'similarityGroup' && ' - 相似组'}
+              {finalFilterType === 'city' && ` - ${finalFilterValue}`}
+              {finalFilterType === 'color' && ` - ${finalFilterValue}`}
+              {finalFilterType === 'directory' && ` - ${finalFilterValue.split('/').pop()}`}
+              {finalFilterType === 'category' && ` - ${UnifiedDataService.getCategoryDisplayName(finalFilterValue)}`}
             </Text>
           )}
         </Text>

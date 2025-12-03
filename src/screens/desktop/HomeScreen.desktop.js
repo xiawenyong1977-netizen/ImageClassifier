@@ -28,12 +28,15 @@ const HomeScreen = () => {
   
   // 数据状态
   const [recentImages, setRecentImages] = useState([]);
+  const [recentImagesTotal, setRecentImagesTotal] = useState(0); // 新发现照片的总数
   const [categoryCounts, setCategoryCounts] = useState({});
   const [cityCounts, setCityCounts] = useState({});
   const [colorCounts, setColorCounts] = useState({});
+  const [directoryCounts, setDirectoryCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
   const [colorRecentImages, setColorRecentImages] = useState({});
+  const [directoryRecentImages, setDirectoryRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
@@ -41,6 +44,7 @@ const HomeScreen = () => {
   // 显示设置
   const [showCityCategories, setShowCityCategories] = useState(true);
   const [showColorCategories, setShowColorCategories] = useState(true);
+  const [showDirectoryCategories, setShowDirectoryCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
@@ -63,11 +67,12 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesData, categoryCountsData, cityCountsData, colorCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
-        UnifiedDataService.readRecentImages(20),
+      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
+        UnifiedDataService.readNewDiscoveredImages(12),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
         UnifiedDataService.readColorCounts(),
+        UnifiedDataService.readDirectoryCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
         UnifiedDataService.readSettings(),
         UnifiedDataService.readAllImages(),
@@ -134,13 +139,35 @@ const HomeScreen = () => {
         colorImagesMap[colorName] = images;
       });
       
+      // 加载各目录的最近图片（按数量排序取前10个）
+      const sortedDirectories = Object.entries(directoryCountsData).sort(([,a], [,b]) => b - a);
+      const directoryIds = sortedDirectories.slice(0, 10).map(([dirName]) => dirName);
+      const directoryImagesPromises = directoryIds.map(async (dirName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
+          return { dirName, images };
+        } catch (error) {
+          logger.error(`加载目录 ${dirName} 最近图片失败:`, error);
+          return { dirName, images: [] };
+        }
+      });
+      
+      const directoryImagesResults = await Promise.all(directoryImagesPromises);
+      const directoryImagesMap = {};
+      directoryImagesResults.forEach(({ dirName, images }) => {
+        directoryImagesMap[dirName] = images;
+      });
+      
+      // 处理新发现照片的结果（包含总数和图片列表）
+      const recentImagesData = recentImagesResult.images || [];
+      const recentImagesTotalCount = recentImagesResult.total || 0;
+      
       // 更新状态
       logger.debug('准备更新状态 - 分类统计:', categoryCountsData);
       logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
       logger.debug('准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
-      
-      
       setRecentImages(recentImagesData);
+      setRecentImagesTotal(recentImagesTotalCount);
       setCategoryCounts(categoryCountsData);
       setCityCounts(cityCountsData);
       setColorCounts(colorCountsData);
@@ -149,6 +176,8 @@ const HomeScreen = () => {
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
       setColorRecentImages(colorImagesMap);
+      setDirectoryCounts(directoryCountsData);
+      setDirectoryRecentImages(directoryImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
       // 只有当用户明确设置为 false 时才显示空分类
       const shouldHide = settings.hideEmptyCategories !== false;
@@ -158,10 +187,12 @@ const HomeScreen = () => {
       // 读取显示设置（默认为 true）
       const shouldShowCities = settings.showCityCategories !== false;
       const shouldShowColors = settings.showColorCategories !== false;
+      const shouldShowDirectories = settings.showDirectoryCategories !== false;
       const shouldShowSimilarity = settings.showSimilarityGroups !== false;
       const shouldShowRecent = settings.showRecentPhotos !== false;
       setShowCityCategories(shouldShowCities);
       setShowColorCategories(shouldShowColors);
+      setShowDirectoryCategories(shouldShowDirectories);
       setShowSimilarityGroups(shouldShowSimilarity);
       setShowRecentPhotos(shouldShowRecent);
       
@@ -430,10 +461,11 @@ const HomeScreen = () => {
       const { key, settings: newSettings } = event.detail || {};
       // 如果更新了显示相关的设置，立即更新状态
       if (key === 'showCityCategories' || key === 'showColorCategories' || 
-          key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
+          key === 'showDirectoryCategories' || key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
         if (newSettings) {
           setShowCityCategories(newSettings.showCityCategories !== false);
           setShowColorCategories(newSettings.showColorCategories !== false);
+          setShowDirectoryCategories(newSettings.showDirectoryCategories !== false);
           setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
           setShowRecentPhotos(newSettings.showRecentPhotos !== false);
         }
@@ -466,51 +498,26 @@ const HomeScreen = () => {
     }
   }, [currentScreen, loadScreenComponent]);
 
-  // 处理分类点击
-  const handleCategoryPress = (category) => {
-    logger.debug('点击分类:', category);
+  // 处理目录点击
+  // 🆕 统一的过滤处理函数
+  const handleFilterPress = (filterType, filterValue) => {
+    logger.debug(`点击${filterType}:`, filterValue);
     setCurrentScreen('Category');
     setScreenProps(prev => ({
       ...prev,
-      category, 
-      city: null,
-      similarityGroupId: null,
-      fromScreen: 'Category',
-      currentImageId: null, // 清除返回时的图片ID
-      currentPage: null, // 清除返回时的页码
-      viewMode: null // 清除返回时的视图模式
+      filterType,
+      filterValue,
+      currentImageId: null,
+      currentPage: null,
+      viewMode: null
     }));
   };
 
-  // 处理颜色点击
-  const handleColorPress = (color) => {
-    logger.debug('点击颜色:', color);
-    setCurrentScreen('Category');
-    setScreenProps(prev => ({
-      ...prev,
-      category: null,
-      city: null,
-      color,
-      currentPage: null, // 清除返回时的页码
-      viewMode: null // 清除返回时的视图模式
-    }));
-  };
-
-  // 处理城市点击
-  const handleCityPress = (city) => {
-    logger.debug('点击城市:', city);
-    setCurrentScreen('Category');
-    setScreenProps(prev => ({
-      ...prev,
-      category: null, 
-      city,
-      similarityGroupId: null,
-      fromScreen: 'City',
-      currentImageId: null, // 清除返回时的图片ID
-      currentPage: null, // 清除返回时的页码
-      viewMode: null // 清除返回时的视图模式
-    }));
-  };
+  // 兼容性包装函数（保持向后兼容）
+  const handleDirectoryPress = (directory) => handleFilterPress('directory', directory);
+  const handleCategoryPress = (category) => handleFilterPress('category', category);
+  const handleColorPress = (color) => handleFilterPress('color', color);
+  const handleCityPress = (city) => handleFilterPress('city', city);
 
   // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
   const handleImagePress = useCallback((image, fromScreen = 'Home', additionalProps = {}) => {
@@ -531,22 +538,31 @@ const HomeScreen = () => {
     // 进入 ImagePreview 时重置强制刷新标志
     setCategoryDataChanged(false);
     
+    // 🆕 统一使用 filterType 和 filterValue（不推导 fromScreen，由 ImagePreviewScreen 推导）
+    const filterType = additionalProps.filterType || null;
+    const filterValue = additionalProps.filterValue || null;
+    
     // 设置screenProps，包含上下文信息
     setScreenProps(prev => ({
       ...prev,
-      category: additionalProps.category || null,
-      city: additionalProps.city || null,
-      similarityGroupId: additionalProps.similarityGroupId || null,
-      fromScreen: fromScreen,
+      filterType,
+      filterValue,
       currentImageId: null // 清除之前的currentImageId
     }));
     
     // 直接设置URL参数，不依赖screenProps
     const urlParams = new URLSearchParams();
     urlParams.set('imageId', imageId);
-    urlParams.set('fromScreen', fromScreen);
     
-    // 保存上下文信息到URL参数
+    // 🆕 保存 filterType 和 filterValue 到URL参数
+    if (filterType) {
+      urlParams.set('filterType', filterType);
+    }
+    if (filterValue) {
+      urlParams.set('filterValue', filterValue);
+    }
+    
+    // 向后兼容：保存旧参数（如果存在）
     if (additionalProps.category) {
       urlParams.set('category', additionalProps.category);
     }
@@ -569,7 +585,7 @@ const HomeScreen = () => {
     }
     
     setCurrentScreen('ImagePreview');
-    logger.debug('设置URL参数，imageId:', imageId, '上下文:', additionalProps);
+    logger.debug('设置URL参数，imageId:', imageId, 'filterType:', filterType, 'filterValue:', filterValue);
   }, []);
 
 
@@ -666,6 +682,17 @@ const HomeScreen = () => {
       throw error;
     }
   }, [handleScanProgress, isScanning, loadData]);
+
+  // 刷新新发现照片
+  const refreshNewDiscoveredImages = useCallback(async () => {
+    try {
+      const result = await UnifiedDataService.readNewDiscoveredImages(12);
+      setRecentImages(result.images || []);
+      setRecentImagesTotal(result.total || 0);
+    } catch (error) {
+      logger.error('刷新新发现照片失败:', error);
+    }
+  }, []);
 
   // 开始旋转动画
   const startRotation = useCallback(() => {
@@ -1073,6 +1100,47 @@ const HomeScreen = () => {
           );
         })()}
 
+        {/* 目录分类卡片 - 根据设置显示 */}
+        {showDirectoryCategories && (() => {
+          // 过滤掉无效目录
+          const filteredDirectoryCounts = directoryCounts ? Object.entries(directoryCounts).filter(([directory]) => {
+            return directory && 
+                   typeof directory === 'string' && 
+                   directory.trim() !== '' && 
+                   directory !== 'null' && 
+                   directory !== 'undefined';
+          }) : [];
+          
+          if (filteredDirectoryCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📁 按存储</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredDirectoryCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([directory, count]) => {
+                    const recentImages = directoryRecentImages[directory] || [];
+                    // 提取目录名（最后一个路径段）
+                    const directoryName = directory.split('/').pop() || directory;
+                    return (
+                      <DirectoryCard
+                        key={directory}
+                        directory={directory}
+                        directoryName={directoryName}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleDirectoryPress}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
         {/* 相似照片板块 - 根据设置显示，且只有当有相似照片组时才显示 */}
         {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
           <View style={styles.categoriesSection}>
@@ -1085,16 +1153,8 @@ const HomeScreen = () => {
                   key={group.groupId}
                   group={group}
                   onPress={(group) => {
-                    // 导航到相似照片详情页面
-                    logger.debug('点击相似照片组:', group.groupId);
-                    setCurrentScreen('Category');
-                    setScreenProps(prev => ({
-                      ...prev,
-                      category: null, 
-                      city: null, 
-                      similarityGroupId: group.groupId,
-                      fromScreen: 'SimilarityGroup'
-                    }));
+                    // 🆕 使用统一的过滤处理函数
+                    handleFilterPress('similarityGroup', group.groupId);
                   }}
                 />
               ))}
@@ -1102,10 +1162,21 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* 最近照片 - 根据设置显示 */}
+        {/* 最新发现照片 - 根据设置显示 */}
         {showRecentPhotos && (
           <View style={styles.recentSection}>
-            <Text style={styles.sectionTitle}>📸 最近照片</Text>
+            <View style={styles.recentSectionHeader}>
+              <Text style={styles.sectionTitle}>
+                📸 最新发现照片 {recentImagesTotal > 0 ? `(${recentImagesTotal})` : ''}
+              </Text>
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={refreshNewDiscoveredImages}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.refreshButtonText}>🔄</Text>
+              </TouchableOpacity>
+            </View>
             <RecentImagesGrid 
               images={stableRecentImages} 
               onImagePress={handleImagePress}
@@ -1140,9 +1211,7 @@ const HomeScreen = () => {
             <TouchableOpacity 
               style={styles.titleBarStagingButton}
               onPress={() => {
-                logger.debug('标题栏暂存箱按钮被点击');
-                setCurrentScreen('Category');
-                setScreenProps({ category: 'stagingBox' });
+                handleFilterPress('stagingBox', null);
               }}
             >
               <Text style={styles.titleBarStagingIcon}>📦</Text>
@@ -1251,36 +1320,31 @@ const HomeScreen = () => {
                   const urlParams = new URLSearchParams(window.location.search);
                   const fromScreen = urlParams.get('fromScreen') || 'Home';
                   const imageId = returnedImageId || urlParams.get('imageId');
-                  const category = urlParams.get('category');
-                  const city = urlParams.get('city');
-                  const similarityGroupId = urlParams.get('similarityGroupId');
+                  const filterType = urlParams.get('filterType');
+                  const filterValue = urlParams.get('filterValue');
                   const savedCurrentPage = urlParams.get('currentPage');
                   const savedViewMode = urlParams.get('viewMode');
                   
-                  
-                  if (fromScreen === 'Category' || fromScreen === 'SimilarityGroup' || fromScreen === 'City' || fromScreen === 'StagingBox') {
-                    logger.debug('从分类/相似组/城市/暂存箱页面返回', { 
+                  // 🆕 根据 filterType 判断是否从 CategoryScreen 返回
+                  if (filterType && filterType !== 'Home') {
+                    logger.debug('从分类页面返回', { 
                       imageId, 
                       currentPage: savedCurrentPage, 
                       viewMode: savedViewMode,
-                      category,
-                      fromScreen
+                      filterType,
+                      filterValue
                     });
                     
                     setCurrentScreen('Category');
                     
-                    // 恢复上下文信息到screenProps，包括页码、视图模式和当前图片ID
-                    // 对于暂存箱，确保 category 设置为 'stagingBox'
-                    const finalCategory = fromScreen === 'StagingBox' ? 'stagingBox' : (category || null);
+                    // 恢复上下文信息到screenProps
                     setScreenProps(prev => ({
                       ...prev,
-                      category: finalCategory,
-                      city: city || null,
-                      similarityGroupId: similarityGroupId || null,
-                      fromScreen: fromScreen,
-                      currentImageId: imageId || null, // 传递当前图片ID
-                      currentPage: savedCurrentPage ? parseInt(savedCurrentPage, 10) : null, // 恢复页码
-                      viewMode: savedViewMode || null // 恢复视图模式
+                      filterType,
+                      filterValue,
+                      currentImageId: imageId || null,
+                      currentPage: savedCurrentPage ? parseInt(savedCurrentPage, 10) : null,
+                      viewMode: savedViewMode || null
                     }));
                   } else {
                     logger.debug('从首页返回');
@@ -1289,11 +1353,9 @@ const HomeScreen = () => {
                     await loadData();
                   }
                 }}
-                // 传递上下文参数
-                category={screenProps.category}
-                city={screenProps.city}
-                similarityGroupId={screenProps.similarityGroupId}
-                fromScreen={screenProps.fromScreen || 'Home'}
+                // 🆕 统一传递 filterType 和 filterValue
+                filterType={screenProps.filterType}
+                filterValue={screenProps.filterValue}
               />
             ) : <View style={styles.loadingContainer}><Text>Loading Preview...</Text></View>}
           </View>
@@ -1363,6 +1425,42 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
       {/* 覆盖层显示分类信息 */}
       <View style={styles.categoryOverlay}>
         <Text style={styles.categoryName}>{category.name}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// 渲染目录卡片组件
+const DirectoryCard = React.memo(({ directory, directoryName, count, recentImages, onPress }) => {
+  // 稳定化图片源对象，避免不必要的重新渲染
+  const imageSource = useMemo(() => {
+    if (recentImages.length === 0) return null;
+    const imageUri = getUri(recentImages[0]);
+    return imageUri ? { uri: imageUri } : null;
+  }, [recentImages[0]]);
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(directory)}
+    >
+      {/* 缩略图占满整个卡片 */}
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+          <Text style={styles.emptyThumbnailText}>📁</Text>
+        </View>
+      )}
+      
+      {/* 覆盖层显示目录信息 */}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName} numberOfLines={1}>{directoryName}</Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
     </TouchableOpacity>
@@ -1628,7 +1726,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
-    paddingHorizontal: 16,
   },
   sectionTitle: {
     fontSize: 20,
@@ -1645,6 +1742,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     fontWeight: '500',
+  },
+  recentSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  refreshButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+    marginLeft: 8,
+    minWidth: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  refreshButtonText: {
+    fontSize: 16,
+    lineHeight: 16,
   },
   categoriesContainer: {
     flexDirection: 'row',

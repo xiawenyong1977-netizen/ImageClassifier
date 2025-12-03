@@ -3377,6 +3377,14 @@ class ImageStorageService {
       
       logger.debug(`🗑️ 批量删除数据库记录: ${imageIds.length} 张图片`);
       
+      // 先删除暂存箱中的记录（在删除图片记录之前）
+      try {
+        await this.removeFromStagingBox(imageIds);
+        logger.debug(`✅ 已从暂存箱移除 ${imageIds.length} 张图片的记录`);
+      } catch (error) {
+        logger.warn(`⚠️ 从暂存箱移除记录失败（继续删除图片记录）:`, error);
+      }
+      
       let filesDeleted = 0;
       let filesFailed = 0;
       
@@ -3399,7 +3407,20 @@ class ImageStorageService {
             });
           } else {
             // 移动端：使用SQLite删除
+            // 注意：SQLite 有外键约束 ON DELETE CASCADE，应该会自动删除暂存箱记录
+            // 但为了确保一致性，我们也显式删除（即使外键约束可能已经处理了）
             await this.storage.deleteImageById(imageIds[i]);
+            
+            // 显式删除暂存箱记录（即使有 CASCADE，也确保删除）
+            try {
+              await this.storage.db.executeSql(
+                'DELETE FROM staging_box WHERE imageId = ?',
+                [imageIds[i]]
+              );
+            } catch (stagingError) {
+              // 如果记录不存在或已通过 CASCADE 删除，忽略错误
+              logger.debug(`暂存箱记录删除（可能已通过CASCADE删除）: ${imageIds[i]}`);
+            }
           }
           filesDeleted++;
           logger.debug(`🗑️ 数据库记录删除: ${i + 1}/${imageIds.length}: ${imageIds[i]}`);
@@ -4770,6 +4791,12 @@ class ImageStorageService {
         // 移动端：SQLite - 批量插入
         try {
           if (imageIds.length > 0) {
+            // 确保 storage 已初始化
+            if (!this.storage || !this.storage.db) {
+              logger.error('❌ SQLite 数据库未初始化');
+              throw new Error('数据库未初始化');
+            }
+            
             // 构建批量插入 SQL：INSERT OR IGNORE INTO staging_box (imageId, addedAt) VALUES (?, ?), (?, ?), ...
             const valuesPlaceholders = imageIds.map(() => '(?, ?)').join(', ');
             const sql = `INSERT OR IGNORE INTO staging_box (imageId, addedAt) VALUES ${valuesPlaceholders}`;
@@ -4777,7 +4804,7 @@ class ImageStorageService {
             // 构建参数数组：[id1, now, id2, now, id3, now, ...]
             const params = imageIds.flatMap(imageId => [imageId, now]);
             
-            const [result] = await this.db.executeSql(sql, params);
+            const [result] = await this.storage.db.executeSql(sql, params);
             added = result.rowsAffected || imageIds.length; // rowsAffected 可能不准确，使用传入的数量
           }
         } catch (error) {
@@ -4828,7 +4855,13 @@ class ImageStorageService {
         // 移动端：SQLite
         const placeholders = imageIds.map(() => '?').join(',');
         try {
-          const [result] = await this.db.executeSql(
+          // 确保 storage 已初始化
+          if (!this.storage || !this.storage.db) {
+            logger.error('❌ SQLite 数据库未初始化');
+            throw new Error('数据库未初始化');
+          }
+          
+          const [result] = await this.storage.db.executeSql(
             `DELETE FROM staging_box WHERE imageId IN (${placeholders})`,
             imageIds
           );
@@ -4862,7 +4895,13 @@ class ImageStorageService {
         return stagingBoxData.map(item => item.imageId);
       } else {
         // 移动端：SQLite
-        const [result] = await this.db.executeSql(
+        // 确保 storage 已初始化
+        if (!this.storage || !this.storage.db) {
+          logger.error('❌ SQLite 数据库未初始化');
+          return [];
+        }
+        
+        const [result] = await this.storage.db.executeSql(
           'SELECT imageId FROM staging_box ORDER BY addedAt DESC'
         );
         
@@ -4897,7 +4936,13 @@ class ImageStorageService {
         return stagingBoxData.some(item => item.imageId === imageId);
       } else {
         // 移动端：SQLite
-        const [result] = await this.db.executeSql(
+        // 确保 storage 已初始化
+        if (!this.storage || !this.storage.db) {
+          logger.error('❌ SQLite 数据库未初始化');
+          return false;
+        }
+        
+        const [result] = await this.storage.db.executeSql(
           'SELECT COUNT(*) as count FROM staging_box WHERE imageId = ?',
           [imageId]
         );

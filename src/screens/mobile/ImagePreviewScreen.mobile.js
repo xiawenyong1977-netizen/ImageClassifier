@@ -39,7 +39,10 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     currentIndex = 0,
     category,
     city,
+    color,
     similarityGroupId,
+    filterType,
+    filterValue,
     fromScreen,
   } = route.params || {};
 
@@ -254,7 +257,13 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const reloadImageList = async () => {
     try {
-      logger.debug('🔄 重新加载图片列表...', { category, city, similarityGroupId });
+      logger.debug('🔄 重新加载图片列表...', { category, city, color, similarityGroupId, filterType, filterValue, fromScreen });
+      
+      // 如果是从首页进入的，删除后直接返回首页，不需要重新加载列表
+      if (fromScreen === 'Home') {
+        logger.debug('从首页进入，删除后直接返回首页');
+        return false; // 返回 false 会触发返回上一页的逻辑
+      }
       
       let updatedImages = [];
       
@@ -272,6 +281,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         const cityImages = await UnifiedDataService.readImagesByLocation(city);
         // 🆕 移除过滤 tobecleaned 的逻辑
         updatedImages = cityImages;
+      } else if (color) {
+        // 来自颜色分类
+        logger.debug('从颜色分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByColor(color);
+      } else if (filterType === 'directory' && filterValue) {
+        // 来自目录分类
+        logger.debug('从目录分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByDirectory(filterValue);
       } else if (category === 'stagingBox') {
         // 🆕 来自暂存箱
         logger.debug('从暂存箱重新加载...');
@@ -523,6 +540,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               logger.debug('删除结果:', result);
               if (result.success) {
                 logger.debug('删除成功，准备更新列表...');
+                
+                // 如果是从首页进入的，删除后直接返回首页
+                if (fromScreen === 'Home') {
+                  Alert.alert('成功', '图片已删除', [
+                    { text: '确定', onPress: goBack }
+                  ]);
+                  return;
+                }
                 
                 // 重新加载图片列表并处理索引调整
                 const reloadSuccess = await reloadImageListWithIndexAdjustment('删除');
@@ -897,13 +922,31 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   // ==================== 渲染函数 ====================
 
   /**
+   * 截断过长的文本，添加省略号
+   */
+  const truncateText = (text, maxLength = 20) => {
+    if (!text || typeof text !== 'string') return text;
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  };
+
+  /**
    * 渲染顶部导航栏
    */
   const renderHeader = () => {
     const { displayIndex, displayTotal } = getDisplayNumbers();
     
+    // 从 route.params 获取最新的参数（确保使用最新值）
+    const currentParams = route.params || {};
+    const currentFilterType = currentParams.filterType || filterType;
+    const currentFilterValue = currentParams.filterValue || filterValue;
+    const currentCity = currentParams.city || city;
+    const currentColor = currentParams.color || color;
+    const currentCategory = currentParams.category || category;
+    const currentSimilarityGroupId = currentParams.similarityGroupId || similarityGroupId;
+    
     // 如果是暂存箱，显示"暂存箱 (6/20)"格式
-    if (category === 'stagingBox') {
+    if (currentCategory === 'stagingBox') {
       return (
         <View style={styles.header}>
           <TouchableOpacity onPress={goBack} style={styles.headerButton}>
@@ -921,8 +964,47 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       );
     }
     
-    // 其他分类：显示序号和分类名称
-    const categoryName = currentImage?.category ? getCategoryDisplayName(currentImage.category) : '';
+    // 优先显示来源分类（城市、颜色、目录），而不是内容类别
+    let displayName = '';
+    
+    // 调试：记录参数值
+    logger.debug('📋 ImagePreview 标题显示参数:', {
+      city: currentCity,
+      color: currentColor,
+      filterType: currentFilterType,
+      filterValue: currentFilterValue,
+      similarityGroupId: currentSimilarityGroupId,
+      category: currentCategory,
+      fromScreen
+    });
+    
+    // 注意：判断顺序很重要，优先显示来源分类（filterType），而不是内容分类（category）
+    if (currentCity) {
+      // 从城市分类进入，显示城市名
+      displayName = currentCity;
+      logger.debug('✅ 使用城市名作为标题:', currentCity);
+    } else if (currentColor) {
+      // 从颜色分类进入，显示颜色名
+      displayName = currentColor;
+      logger.debug('✅ 使用颜色名作为标题:', currentColor);
+    } else if (currentFilterType === 'directory' && currentFilterValue) {
+      // 从目录分类进入，显示目录名（最后一个路径段）
+      // 注意：即使 category 有值，也要优先显示目录名
+      const directoryName = currentFilterValue.split('/').pop() || currentFilterValue;
+      displayName = truncateText(directoryName, 20);
+      logger.debug('✅ 使用目录名作为标题:', { filterValue: currentFilterValue, directoryName, displayName });
+    } else if (currentSimilarityGroupId) {
+      // 从相似组进入，显示"相似照片组"
+      displayName = '相似照片组';
+      logger.debug('✅ 使用相似组作为标题');
+    } else if (currentCategory && currentCategory !== 'stagingBox') {
+      // 从内容分类进入，显示分类名称
+      // 注意：排除 stagingBox，因为已经在上面处理了
+      displayName = currentImage?.category ? UnifiedDataService.getCategoryDisplayName(currentImage.category) : '';
+      logger.debug('✅ 使用内容分类作为标题:', displayName);
+    } else {
+      logger.debug('⚠️ 未找到匹配的标题显示条件');
+    }
 
     return (
       <View style={styles.header}>
@@ -933,9 +1015,9 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           <Text style={styles.headerTitle}>
             {displayIndex} / {displayTotal}
           </Text>
-          {categoryName && (
+          {displayName && (
             <Text style={styles.headerCategory}>
-              {categoryName}
+              {displayName}
             </Text>
           )}
         </View>

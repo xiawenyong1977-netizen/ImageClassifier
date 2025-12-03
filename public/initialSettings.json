@@ -55,11 +55,8 @@
     "NA": {
       "chinese": "待分类",
       "english": "to be classified"
-    },
-    "tobecleaned": {
-      "chinese": "暂存箱",
-      "english": "To Be Cleaned"
     }
+   
   },
   "categoryDisplayOrder": [
     "single_person",
@@ -70,8 +67,7 @@
     "idcard",
     "screenshot",
     "other",
-    "NA",
-    "tobecleaned"
+    "NA"
   ],
   "objectMappings": {
     "animals": "pets", 

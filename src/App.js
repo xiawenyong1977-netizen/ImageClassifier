@@ -33,7 +33,7 @@ const Tab = createBottomTabNavigator();
 console.log('📦 App.js: Tab Navigator 创建成功');
 
 // 主标签导航器
-const MainTabNavigator = () => (
+const MainTabNavigator = ({ stagingBoxCount }) => (
   <Tab.Navigator
     screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
@@ -45,6 +45,37 @@ const MainTabNavigator = () => (
           iconName = '📦';
         } else if (route.name === 'Settings') {
           iconName = '⚙️';
+        }
+
+        // 如果是暂存箱且有数量，显示带 badge 的图标
+        if (route.name === 'StagingBox' && stagingBoxCount > 0) {
+          return (
+            <View style={{ position: 'relative', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 24, color: color }}>{iconName}</Text>
+              <View style={{
+                position: 'absolute',
+                top: -4,
+                right: -8,
+                backgroundColor: '#FF3B30',
+                borderRadius: 10,
+                minWidth: 20,
+                height: 20,
+                paddingHorizontal: 6,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: '#FFFFFF',
+              }}>
+                <Text style={{
+                  color: '#FFFFFF',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                }}>
+                  {stagingBoxCount > 99 ? '99+' : stagingBoxCount}
+                </Text>
+              </View>
+            </View>
+          );
         }
 
         return <Text style={{ fontSize: 24, color: color }}>{iconName}</Text>;
@@ -83,13 +114,15 @@ const MainTabNavigator = () => (
         tabBarStyle: { display: 'none' }, // 隐藏底部导航栏
       }}
     >
-      {({ navigation }) => (
+      {({ navigation, route: tabRoute }) => (
         <CategoryScreen 
           navigation={navigation}
           route={{ 
             params: { 
-              category: 'tobecleaned',
-              fromScreen: 'StagingBox' 
+              category: 'stagingBox',
+              fromScreen: 'StagingBox',
+              // 合并 Tab 路由参数（如果有 returnedImageId）
+              ...(tabRoute?.params || {})
             } 
           }} 
         />
@@ -145,11 +178,35 @@ export default function App() {
   console.log('📦 App.js: App 组件开始渲染');
   
   const [isServiceReady, setIsServiceReady] = React.useState(false);
+  const [stagingBoxCount, setStagingBoxCount] = React.useState(0);
   
   useEffect(() => {
     console.log('📦 App.js: App useEffect 运行');
     initializeApp();
   }, []);
+
+  // 加载暂存箱数量
+  useEffect(() => {
+    if (!isServiceReady) return;
+
+    const loadStagingBoxCount = async () => {
+      try {
+        const UnifiedDataService = require('./services/UnifiedDataService.js').default;
+        const count = await UnifiedDataService.getStagingBoxCount();
+        setStagingBoxCount(count);
+      } catch (error) {
+        console.error('获取暂存箱数量失败:', error);
+        setStagingBoxCount(0);
+      }
+    };
+
+    loadStagingBoxCount();
+
+    // 定期刷新暂存箱数量（每5秒）
+    const interval = setInterval(loadStagingBoxCount, 5000);
+
+    return () => clearInterval(interval);
+  }, [isServiceReady]);
   
   const initializeApp = async () => {
     try {
@@ -208,7 +265,9 @@ export default function App() {
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+          <Stack.Screen name="MainTabs">
+            {() => <MainTabNavigator stagingBoxCount={stagingBoxCount} />}
+          </Stack.Screen>
           <Stack.Screen name="Category" component={CategoryScreen} />
           <Stack.Screen name="ImagePreview" component={ImagePreviewScreen} />
           <Stack.Screen name="EnhanceResult" component={EnhanceResultScreen} options={{ presentation: 'modal' }} />

@@ -1,7 +1,7 @@
 import React, { useState, memo, useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
-import { logger, getUri } from '../../adapters/WebAdapters';
+import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
 // 优化的图片组件，避免不必要的重新渲染
 const MemoizedImage = memo(({ uri, imageId, onError, onLoad }) => {
@@ -41,10 +41,33 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
     });
   }, []);
 
+  // 从图片对象中提取目录名的辅助函数（与移动端一致）
+  const getDirectoryName = useCallback((image) => {
+    if (!image) return '未知目录';
+    
+    // 使用 getLocalPath 提取路径（支持 contentUri||path 格式）
+    const path = getLocalPath(image);
+    if (!path) {
+      return '未知目录';
+    }
+    
+    // 从路径中提取目录名（倒数第二级目录）
+    // 例如：/storage/emulated/0/DCIM/Camera/IMG_001.jpg -> Camera
+    // 或者：DCIM/Camera/IMG_001.jpg -> Camera
+    const pathParts = path.split('/').filter(p => p && p.trim());
+    if (pathParts.length >= 2) {
+      // 取倒数第二级目录
+      return pathParts[pathParts.length - 2];
+    } else if (pathParts.length === 1) {
+      return pathParts[0];
+    }
+    return '未知目录';
+  }, []);
+
   if (!images || images.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>暂无照片</Text>
+        <Text style={styles.emptyText}>暂无新照片</Text>
       </View>
     );
   }
@@ -107,14 +130,12 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
               return null;
             })()}
             
-            {/* 分类标签 - 显示中文名称 */}
-            {image.category && (
-              <View style={styles.categoryBadge}>
-                <Text style={styles.categoryText}>
-                  {UnifiedDataService.getCategoryDisplayName(image.category)}
-                </Text>
-              </View>
-            )}
+            {/* 目录标签覆盖层 - 显示目录名（与移动端一致） */}
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryText} numberOfLines={1}>
+                {getDirectoryName(image)}
+              </Text>
+            </View>
           </TouchableOpacity>
         );
       })}
