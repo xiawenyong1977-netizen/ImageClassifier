@@ -733,6 +733,13 @@ class GalleryScannerService {
           const totalScanDurationSeconds = Math.round(totalScanDuration / 1000);
           
           logger.info(`⏱️ 扫描完成，总耗时: ${totalScanDurationSeconds}秒 (${Math.round(totalScanDuration / 1000 / 60)}分钟)`);
+          
+          // 异步保存扫描完成时间和耗时信息
+          this.saveScanCompletionInfo(totalScanDuration).then(() => {
+            logger.debug(`✅ 扫描完成信息保存成功: ${new Date().toISOString()}`);
+          }).catch(error => {
+            logger.error('❌ 保存扫描完成信息失败:', error);
+          });
         }
         break;
         
@@ -797,6 +804,29 @@ class GalleryScannerService {
       isComplete: stage === 'completed',
       shouldRefresh // 返回刷新标记
     };
+  }
+
+  /**
+   * 保存扫描完成信息（时间和耗时）
+   */
+  async saveScanCompletionInfo(totalScanDuration) {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      
+      // 检查之前的设置
+      logger.debug(`🔍 保存前检查: 之前耗时=${settings.lastScanDurationSeconds}秒`);
+      
+      settings.lastScanTime = new Date().toISOString();
+      settings.lastScanDuration = totalScanDuration; // 毫秒
+      settings.lastScanDurationSeconds = Math.round(totalScanDuration / 1000); // 秒
+      settings.lastScanDurationMinutes = Math.round(totalScanDuration / 1000 / 60); // 分钟
+      
+      await UnifiedDataService.writeSettings(settings);
+      logger.info(`💾 已保存扫描完成信息: 耗时 ${settings.lastScanDurationSeconds}秒`);
+      logger.debug(`🔍 保存详情: 总耗时=${totalScanDuration}ms, 秒数=${settings.lastScanDurationSeconds}, 分钟数=${settings.lastScanDurationMinutes}`);
+    } catch (error) {
+      logger.error('❌ 保存扫描完成信息失败:', error);
+    }
   }
 }
 

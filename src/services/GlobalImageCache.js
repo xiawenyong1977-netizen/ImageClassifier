@@ -193,8 +193,10 @@ class GlobalImageCache {
       if (image.city) {
         this.cache.cityCounts[image.city] = (this.cache.cityCounts[image.city] || 0) + 1;
       }
-      // 颜色统计
-      if (image.background_color) {
+      // 颜色统计（排除 null、undefined 和空字符串）
+      if (image.background_color && 
+          typeof image.background_color === 'string' && 
+          image.background_color.trim() !== '') {
         this.cache.colorCounts[image.background_color] = (this.cache.colorCounts[image.background_color] || 0) + 1;
       }
       
@@ -598,7 +600,10 @@ class GlobalImageCache {
     
     this.cache.allImages.forEach(img => {
       // 只统计有背景颜色的图片（排除 null、undefined 和空字符串）
-      if (img.background_color && img.background_color.trim() !== '') {
+      // 检查 background_color 是否存在且不为空
+      if (img.background_color && 
+          typeof img.background_color === 'string' && 
+          img.background_color.trim() !== '') {
         this.cache.colorCounts[img.background_color] = (this.cache.colorCounts[img.background_color] || 0) + 1;
       }
     });

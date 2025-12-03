@@ -323,7 +323,18 @@ class UnifiedDataService {
       const cache = this.imageCache.getCache();
       if (cache.colorCounts && Object.keys(cache.colorCounts).length > 0) {
         logger.debug('从缓存读取颜色统计');
-        return cache.colorCounts;
+        // 过滤掉 null、undefined 和空字符串
+        const filteredColorCounts = {};
+        Object.entries(cache.colorCounts).forEach(([color, count]) => {
+          if (color && 
+              typeof color === 'string' && 
+              color.trim() !== '' && 
+              color !== 'null' && 
+              color !== 'undefined') {
+            filteredColorCounts[color] = count;
+          }
+        });
+        return filteredColorCounts;
       }
       
       // 如果缓存中仍然没有，说明数据库中也没有数据
@@ -753,8 +764,7 @@ class UnifiedDataService {
   async addToStagingBox(imageIds) {
     try {
       const result = await this.imageStorageService.addToStagingBox(imageIds);
-      // 刷新缓存
-      await this.imageCache.refreshCache();
+      // 暂存箱是独立表，不影响图片列表，不需要刷新缓存
       return result;
     } catch (error) {
       logger.error('添加图片到暂存箱失败:', error);
@@ -770,8 +780,7 @@ class UnifiedDataService {
   async removeFromStagingBox(imageIds) {
     try {
       const result = await this.imageStorageService.removeFromStagingBox(imageIds);
-      // 刷新缓存
-      await this.imageCache.refreshCache();
+      // 暂存箱是独立表，不影响图片列表，不需要刷新缓存
       return result;
     } catch (error) {
       logger.error('从暂存箱移除图片失败:', error);
@@ -1599,8 +1608,8 @@ class UnifiedDataService {
       // 从相似组中移除图片
       await this.imageStorageService.removeImageFromSimilarityGroup(imageId);
       
-      // 重建缓存以同步所有数据
-      await this.imageCache.buildCache();
+      // 只移除关联关系，不删除图片，不影响图片列表和统计，不需要刷新缓存
+      // 如果是在删除图片流程中调用，删除操作本身已经 refreshCache
       
       logger.debug(`✅ 成功从相似组移除图片: ${imageId}`);
       return true;

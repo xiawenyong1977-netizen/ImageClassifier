@@ -432,7 +432,7 @@ const HomeScreen = ({ navigation }) => {
   /**
    * 加载最近扫描时间和信息
    */
-  const loadLastScanTime = async () => {
+  const loadLastScanTime = async (preserveCurrentMessage = false) => {
     try {
       const settings = await UnifiedDataService.readSettings();
       logger.debug('🔍 检查扫描完成信息:', {
@@ -476,12 +476,19 @@ const HomeScreen = ({ navigation }) => {
         
         setGlobalMessage(`上次扫描: ${formattedTime} | 共 ${totalImages} 张 | ${formattedSize}${durationText}`);
       } else {
-        logger.debug('⚠️ 没有扫描完成记录，显示默认消息');
-        setGlobalMessage('图片分类应用已就绪');
+        logger.debug('⚠️ 没有扫描完成记录');
+        // 如果 preserveCurrentMessage 为 true，不更新消息，保持当前消息
+        if (!preserveCurrentMessage) {
+          setGlobalMessage('图片分类应用已就绪');
+        }
       }
     } catch (error) {
       logger.error('加载最近扫描时间失败:', error);
-      setGlobalMessage('图片分类应用已就绪');
+      // 如果 preserveCurrentMessage 为 true，不更新消息，保持当前消息
+      if (!preserveCurrentMessage) {
+        setGlobalMessage('图片分类应用已就绪');
+      }
+      throw error; // 重新抛出错误，让调用方知道失败了
     }
   };
 
@@ -532,12 +539,12 @@ const HomeScreen = ({ navigation }) => {
     
     setRefreshing(true);
     try {
-      // 重建缓存
-      await GlobalImageCache.buildCache();
-      // 重新加载数据
+      // 只重新加载数据（从缓存读取），不重建缓存
+      // 缓存只在数据真正变化时（扫描、删除）才重建
       await loadAllData();
-      // 重新加载扫描信息
-      await loadLastScanTime();
+      
+      // 重新加载扫描信息（如果失败则保持当前消息不变）
+      await loadLastScanTime(true); // 传入 true，失败时保持当前消息
     } catch (error) {
       logger.error('❌ 刷新失败:', error);
       Alert.alert('刷新失败', error.message);
@@ -945,14 +952,22 @@ const HomeScreen = ({ navigation }) => {
    * 渲染颜色分类区（与"按内容"保持一致：4列网格布局）
    */
   const renderColorsSection = () => {
-    const colorKeys = Object.keys(colorCounts);
-    if (colorKeys.length === 0) return null;
+    // 过滤掉 null、undefined 和空字符串
+    const filteredColorCounts = Object.entries(colorCounts).filter(([color]) => {
+      return color && 
+             typeof color === 'string' && 
+             color.trim() !== '' && 
+             color !== 'null' && 
+             color !== 'undefined';
+    });
+    
+    if (filteredColorCounts.length === 0) return null;
     
     return (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🎨 按颜色</Text>
         <View style={styles.categoriesGrid}>
-          {Object.entries(colorCounts)
+          {filteredColorCounts
             .sort(([,a], [,b]) => b - a)
             .map(([color]) => renderColorCard(color))}
         </View>

@@ -585,12 +585,8 @@ const HomeScreen = () => {
     
     // 移除setRefreshing(true)，避免UI闪烁
     try {
-      // 先重建缓存（确保数据是最新的）
-      logger.debug('🔄 开始重建缓存...');
-      await UnifiedDataService.forceRefreshCache();
-      logger.debug('✅ 缓存重建完成');
-      
-      // 重新加载数据
+      // 只重新加载数据（从缓存读取），不重建缓存
+      // 缓存只在数据真正变化时（扫描、删除）才重建
       await loadData();
     } catch (error) {
       logger.error('刷新数据失败:', error);
@@ -1038,33 +1034,44 @@ const HomeScreen = () => {
         )}
 
         {/* 颜色分类卡片 - 根据设置显示 */}
-        {showColorCategories && (
-          <View style={styles.categoriesSection}>
-            <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🎨 按颜色</Text>
+        {showColorCategories && (() => {
+          // 过滤掉 null、undefined 和空字符串
+          const filteredColorCounts = colorCounts ? Object.entries(colorCounts).filter(([color]) => {
+            return color && 
+                   typeof color === 'string' && 
+                   color.trim() !== '' && 
+                   color !== 'null' && 
+                   color !== 'undefined';
+          }) : [];
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>🎨 按颜色</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredColorCounts.length > 0 ? (
+                filteredColorCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([color, count]) => {
+                    const recentImages = colorRecentImages[color] || [];
+                    return (
+                      <ColorCard
+                        key={color}
+                        color={color}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleColorPress}
+                      />
+                    );
+                  })
+              ) : (
+                  <Text style={styles.emptyMessage}>暂无颜色数据</Text>
+                )}
+              </View>
             </View>
-            <View style={styles.categoriesContainer}>
-              {colorCounts && Object.keys(colorCounts).length > 0 ? (
-              Object.entries(colorCounts)
-                .sort(([,a], [,b]) => b - a)
-                .map(([color, count]) => {
-                  const recentImages = colorRecentImages[color] || [];
-                  return (
-                    <ColorCard
-                      key={color}
-                      color={color}
-                      count={count}
-                      recentImages={recentImages}
-                      onPress={handleColorPress}
-                    />
-                  );
-                })
-            ) : (
-                <Text style={styles.emptyMessage}>暂无颜色数据</Text>
-              )}
-            </View>
-          </View>
-        )}
+          );
+        })()}
 
         {/* 相似照片板块 - 根据设置显示，且只有当有相似照片组时才显示 */}
         {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
