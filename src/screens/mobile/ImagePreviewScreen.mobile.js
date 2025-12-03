@@ -52,6 +52,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const [showEnhancePresets, setShowEnhancePresets] = useState(false);
   const [enhancePresets, setEnhancePresets] = useState({});
   const flatListRef = useRef(null);
+  const [isInStagingBox, setIsInStagingBox] = useState(false);
+  const isNavigatingBackRef = useRef(false); // 防止递归循环的标志
 
   // 使用 getUri 统一获取图片 URI
   const resolveImageUri = useCallback((image) => {
@@ -160,6 +162,91 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     loadImageDetails();
   }, [currentImageIndex, allImagesState]);
 
+  // 检查图片是否在暂存箱中
+  React.useEffect(() => {
+    const checkStagingBoxStatus = async () => {
+      if (currentImage?.id) {
+        try {
+          const inStagingBox = await UnifiedDataService.isInStagingBox(currentImage.id);
+          setIsInStagingBox(inStagingBox);
+        } catch (error) {
+          logger.error('检查暂存箱状态失败:', error);
+          setIsInStagingBox(false);
+        }
+      } else {
+        setIsInStagingBox(false);
+      }
+    };
+    checkStagingBoxStatus();
+  }, [currentImage?.id]);
+
+  // 监听页面移除事件（包括手势返回和按钮返回）
+  // 这样无论是点击返回按钮还是手势返回，都能正确传递 returnedImageId
+  React.useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // 防止递归循环：如果已经在处理返回，直接返回
+      if (isNavigatingBackRef.current) {
+        logger.debug('🔄 已经在处理返回，跳过...');
+        return;
+      }
+      
+      // 在页面被移除之前，设置前一个屏幕的参数
+      logger.debug('🔄 ImagePreview 即将被移除（手势或按钮返回），设置返回参数...', {
+        category,
+        fromScreen,
+        currentImageId: currentImage?.id
+      });
+      
+      // 如果是从暂存箱进入的，需要特殊处理
+      if (category === 'stagingBox' || fromScreen === 'StagingBox') {
+        // 设置标志，防止递归
+        isNavigatingBackRef.current = true;
+        
+        // 阻止默认的返回行为
+        e.preventDefault();
+        
+        // 先移除监听器，避免循环
+        unsubscribe();
+        
+        // 导航回暂存箱 Tab，并传递 returnedImageId
+        navigation.navigate('MainTabs', {
+          screen: 'StagingBox',
+          params: {
+            category: 'stagingBox',
+            fromScreen: 'StagingBox',
+            returnedImageId: currentImage?.id,
+          },
+        });
+        return;
+      }
+      
+      // 对于其他情况，设置前一个屏幕的参数
+      if (navigation.canGoBack() && currentImage?.id) {
+        const routes = navigation.getState()?.routes;
+        const prevRoute = routes?.[routes.length - 2];
+        
+        if (prevRoute) {
+          // 设置标志，防止递归
+          isNavigatingBackRef.current = true;
+          
+          // 阻止默认的返回行为
+          e.preventDefault();
+          
+          // 先移除监听器，避免循环
+          unsubscribe();
+          
+          // 设置前一个屏幕的参数并导航
+          navigation.navigate(prevRoute.name, {
+            ...prevRoute.params,
+            returnedImageId: currentImage.id,
+          });
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, currentImage?.id, category, fromScreen]);
+
   // ==================== 工具函数 ====================
 
   /**
@@ -177,14 +264,18 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         logger.debug('从相似组重新加载...');
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         const groupImages = groupData.images || [];
-        // 过滤掉 tobecleaned 分类的照片（保持与相似组页面一致）
-        updatedImages = groupImages.filter(img => img.category !== 'tobecleaned');
+        // 🆕 移除过滤 tobecleaned 的逻辑
+        updatedImages = groupImages;
       } else if (city) {
         // 来自城市分类
         logger.debug('从城市分类重新加载...');
         const cityImages = await UnifiedDataService.readImagesByLocation(city);
-        // 过滤掉 tobecleaned 分类的照片（保持与城市页面一致）
-        updatedImages = cityImages.filter(img => img.category !== 'tobecleaned');
+        // 🆕 移除过滤 tobecleaned 的逻辑
+        updatedImages = cityImages;
+      } else if (category === 'stagingBox') {
+        // 🆕 来自暂存箱
+        logger.debug('从暂存箱重新加载...');
+        updatedImages = await UnifiedDataService.getStagingBoxImages();
       } else if (category) {
         // 来自普通分类
         logger.debug('从分类重新加载...');
@@ -362,6 +453,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 返回（携带当前图片 ID，用于高亮）
    */
   const goBack = () => {
+    // 如果是从暂存箱进入的，需要特殊处理
+    // 注意：从暂存箱进入时，fromScreen 可能是 'category'（因为 pageType 是 'category'），所以需要检查 category === 'stagingBox'
+    if (category === 'stagingBox' || fromScreen === 'StagingBox') {
+      // 导航回暂存箱 Tab，并传递 returnedImageId
+      // 使用 navigate 到 MainTabs，然后设置 StagingBox Tab 的参数
+      navigation.navigate('MainTabs', {
+        screen: 'StagingBox',
+        params: {
+          category: 'stagingBox',
+          fromScreen: 'StagingBox',
+          returnedImageId: currentImage?.id,
+        },
+      });
+      return;
+    }
+    
     // 使用 setParams 更新当前路由的参数，然后返回
     if (navigation.canGoBack()) {
       // 先获取前一个屏幕的 key
@@ -446,7 +553,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 暂存图片（移动到待处置分类）
+   * 暂存图片（移动到暂存箱）
    */
   const handleStaging = () => {
     if (!currentImage || !currentImage.id) {
@@ -454,41 +561,48 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       return;
     }
     
-    logger.debug('标记为待处置...');
+    logger.debug('放入暂存箱...');
     Alert.alert(
-      '标记为待处置',
-      '确定要将这张图片标记为待处置吗？\n\n图片将被移动到"待处置"分类中。',
+      '放入暂存箱',
+      '确定要将这张图片放入暂存箱吗？\n\n图片将被移动到暂存箱中。',
       [
         { 
           text: '取消', 
           style: 'cancel',
-          onPress: () => logger.debug('用户取消标记为待处置')
+          onPress: () => logger.debug('用户取消放入暂存箱')
         },
         {
-          text: '标记',
+          text: '确定',
           onPress: async () => {
-            logger.debug('用户确认标记为待处置，开始更新分类...');
+            logger.debug('用户确认放入暂存箱，开始操作...');
             try {
-              // 更新分类为 tobecleaned（服务层会自动清理相似组信息）
-              await UnifiedDataService.updateImagesCategory([currentImage.id], 'tobecleaned', 'manual');
+              // 🆕 使用 UnifiedDataService.addToStagingBox 添加到暂存箱
+              // 注意：addToStagingBox 内部已经会刷新缓存，不需要再次刷新
+              const result = await UnifiedDataService.addToStagingBox([currentImage.id]);
               
-              // 更新本地状态
-              setCurrentImage(prev => ({ 
-                ...prev, 
-                category: 'tobecleaned',
-                confidence: 'manual',
-                similarityGroupIndex: null,
-                similarityScore: null,
-                similarityGroupType: null
-              }));
-              
-              logger.debug('标记为待处置成功');
-              
-              // 重新加载图片列表并处理索引调整
-              await reloadImageListWithIndexAdjustment('标记为待处置');
+              if (result.success) {
+                logger.debug('放入暂存箱成功');
+                
+                // 更新本地状态（移除相似组信息，因为暂存箱中的图片不应该有相似组信息）
+                setCurrentImage(prev => ({ 
+                  ...prev, 
+                  similarityGroupIndex: null,
+                  similarityScore: null,
+                  similarityGroupType: null
+                }));
+                
+                // 更新暂存箱状态
+                setIsInStagingBox(true);
+                
+                // 图片保留在当前列表中，不需要重新加载
+                Alert.alert('成功', '图片已放入暂存箱');
+              } else {
+                logger.error('放入暂存箱失败:', result);
+                Alert.alert('错误', '放入暂存箱失败，请重试');
+              }
             } catch (error) {
-              logger.error('标记为待处置失败:', error);
-              Alert.alert('错误', '标记为待处置失败，请重试');
+              logger.error('放入暂存箱失败:', error);
+              Alert.alert('错误', '放入暂存箱失败，请重试');
             }
           },
         },
@@ -497,15 +611,72 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 获取所有分类（排除 tobecleaned）
+   * 从暂存箱移除图片
+   */
+  const handleRemoveFromStagingBox = () => {
+    if (!currentImage || !currentImage.id) {
+      Alert.alert('错误', '图片信息不完整，无法操作');
+      return;
+    }
+    
+    logger.debug('从暂存箱移除...');
+    Alert.alert(
+      '移出暂存箱',
+      '确定要从暂存箱移除这张图片吗？\n\n图片将从暂存箱中移除，但不会删除文件。',
+      [
+        { 
+          text: '取消', 
+          style: 'cancel',
+          onPress: () => logger.debug('用户取消移出暂存箱')
+        },
+        {
+          text: '移除',
+          onPress: async () => {
+            logger.debug('用户确认移出暂存箱，开始操作...');
+            try {
+              // 使用 UnifiedDataService.removeFromStagingBox 从暂存箱移除
+              const result = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
+              
+              if (result.success) {
+                logger.debug('从暂存箱移除成功');
+                
+                // 更新暂存箱状态
+                setIsInStagingBox(false);
+                
+                // 如果当前是从暂存箱进入的，重新加载图片列表
+                if (category === 'stagingBox') {
+                  const reloadSuccess = await reloadImageList();
+                  if (!reloadSuccess) {
+                    // 列表为空，reloadImageList 已经处理了返回逻辑
+                    return;
+                  }
+                }
+                
+                Alert.alert('成功', '图片已从暂存箱移除');
+              } else {
+                logger.error('从暂存箱移除失败:', result);
+                Alert.alert('错误', '从暂存箱移除失败，请重试');
+              }
+            } catch (error) {
+              logger.error('从暂存箱移除失败:', error);
+              Alert.alert('错误', '从暂存箱移除失败，请重试');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  /**
+   * 获取所有分类（排除暂存箱）
    */
   const getAllCategories = () => {
     if (!configService || !configService.isConfigLoaded()) {
       return [];
     }
     
+    // 注意：暂存箱不是分类，不会出现在 getAllCategoriesWithUI() 返回的列表中，所以不需要过滤
     return configService.getAllCategoriesWithUI()
-      .filter(category => category.id !== 'tobecleaned')
       .map(category => {
         let name = category.chinese || category.english || category.id;
         // 将名称改为两行显示（每行2个字）
@@ -528,7 +699,12 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 切换分类选择器显示
    */
   const toggleCategorySelector = () => {
-    setShowActions(!showActions);
+    const newShowActions = !showActions;
+    setShowActions(newShowActions);
+    // 打开分类选择器时，关闭照片创玩面板
+    if (newShowActions && showEnhancePresets) {
+      setShowEnhancePresets(false);
+    }
   };
 
   /**
@@ -619,6 +795,10 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       if (showEnhancePresets) {
         setShowEnhancePresets(false);
         return;
+      }
+      // 打开照片创玩面板时，关闭分类选择器
+      if (showActions) {
+        setShowActions(false);
       }
       const settings = await UnifiedDataService.readSettings();
       const presets = settings?.aiEnhancePresets || {};
@@ -721,9 +901,30 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const renderHeader = () => {
     const { displayIndex, displayTotal } = getDisplayNumbers();
+    
+    // 如果是暂存箱，显示"暂存箱 (6/20)"格式
+    if (category === 'stagingBox') {
+      return (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={goBack} style={styles.headerButton}>
+            <Text style={styles.headerIcon}>‹</Text>
+          </TouchableOpacity>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>
+              暂存箱 ({displayIndex} / {displayTotal})
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setShowInfo(!showInfo)} style={styles.headerButton}>
+            <Text style={styles.headerIcon}>ℹ️</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
+    // 其他分类：显示序号和分类名称
     const categoryName = currentImage?.category ? getCategoryDisplayName(currentImage.category) : '';
 
-  return (
+    return (
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={styles.headerButton}>
           <Text style={styles.headerIcon}>‹</Text>
@@ -985,12 +1186,23 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 渲染底部操作栏
    */
   const renderActions = () => {
-    const isToBeCleanedCategory = currentImage?.category === 'tobecleaned';
-    
     return (
       <View style={styles.actionsBar}>
         {/* 照片创玩面板 */}
-        {isToBeCleanedCategory && renderEnhancePanel()}
+        {isInStagingBox && renderEnhancePanel()}
+        
+        {/* 暂存/移出按钮 */}
+        {!isInStagingBox ? (
+          <TouchableOpacity style={styles.actionButton} onPress={handleStaging}>
+            <Text style={styles.actionIcon}>📦</Text>
+            <Text style={styles.actionLabel}>暂存</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.actionButton} onPress={handleRemoveFromStagingBox}>
+            <Text style={styles.actionIcon}>📤</Text>
+            <Text style={styles.actionLabel}>移出</Text>
+          </TouchableOpacity>
+        )}
         
         {/* 删除按钮（所有分类都显示） */}
         <TouchableOpacity style={styles.actionButton} onPress={handleDelete}>
@@ -998,26 +1210,17 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           <Text style={styles.actionLabel}>删除</Text>
         </TouchableOpacity>
         
-        {/* 暂存按钮（非暂存箱分类显示） */}
-        {!isToBeCleanedCategory && (
-          <TouchableOpacity style={styles.actionButton} onPress={handleStaging}>
-            <Text style={styles.actionIcon}>📦</Text>
-            <Text style={styles.actionLabel}>暂存</Text>
-          </TouchableOpacity>
-        )}
+        {/* 照片创玩按钮（所有分类都显示） */}
+        <TouchableOpacity style={styles.actionButton} onPress={openEnhancePanel}>
+          <Text style={styles.actionIcon}>✨</Text>
+          <Text style={styles.actionLabel}>创玩</Text>
+        </TouchableOpacity>
         
+        {/* 分类按钮 */}
         <TouchableOpacity style={styles.actionButton} onPress={toggleCategorySelector}>
           <Text style={styles.actionIcon}>🏷️</Text>
           <Text style={styles.actionLabel}>分类</Text>
         </TouchableOpacity>
-        
-        {/* 照片创玩按钮（仅在暂存箱显示） */}
-        {isToBeCleanedCategory && (
-          <TouchableOpacity style={styles.actionButton} onPress={openEnhancePanel}>
-            <Text style={styles.actionIcon}>✨</Text>
-            <Text style={styles.actionLabel}>照片创玩</Text>
-          </TouchableOpacity>
-        )}
         
         {/* 分享按钮 */}
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>

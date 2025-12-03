@@ -3,7 +3,7 @@
  * 
  * 支持4种形态：
  * 1. 普通分类页 (category参数)
- * 2. 暂存箱页 (category='tobecleaned')
+ * 2. 暂存箱页 (category='stagingBox')
  * 3. 城市分类页 (city参数)
  * 4. 相似组详情页 (similarityGroupId参数)
  */
@@ -74,6 +74,10 @@ const CategoryScreen = ({ route, navigation }) => {
   // 高亮图片（从 ImagePreview 返回时使用）
   const [highlightedImageId, setHighlightedImageId] = useState(null);
   const flatListRef = useRef(null);
+  const hasProcessedReturnedImageIdRef = useRef(false); // 用于防止重复处理 returnedImageId
+  
+  // 暂存箱图片ID集合（用于快速检查图片是否在暂存箱中）
+  const [stagingBoxImageIds, setStagingBoxImageIds] = useState(new Set());
   
   // 照片创玩任务相关（任务提交已移到结果页，不再需要状态跟踪）
   
@@ -81,7 +85,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // ==================== 页面类型判断 ====================
   const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : null;
-  const isStaging = category === 'tobecleaned';
+  const isStaging = category === 'stagingBox';
 
   // 照片创玩（增强方案）
   const [showEnhancePresets, setShowEnhancePresets] = useState(false);
@@ -101,6 +105,10 @@ const CategoryScreen = ({ route, navigation }) => {
       return `${city} (${count}张)`;
     }
     if (category) {
+      // 暂存箱特殊处理，显示中文"暂存箱"
+      if (category === 'stagingBox') {
+        return `暂存箱 (${count}张)`;
+      }
       const categoryName = UnifiedDataService.getCategoryDisplayName(category);
       return `${categoryName} (${count}张)`;
     }
@@ -112,20 +120,23 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const getActionButtons = () => {
     if (isStaging) {
-      // 暂存箱（tobecleaned）：删除 + 修改分类 + 照片创玩 + 分享
+      // 暂存箱（stagingBox）：移出、删除、创玩、分类、分享
       return [
-        { id: 'delete', label: '永久删除', icon: '🗑️', color: '#FF3B30' },
-        { id: 'changeCategory', label: '修改分类', icon: '📁', color: '#007AFF' },
-        { id: 'enhance', label: '照片创玩', icon: '✨', color: '#9C27B0' },
+        { id: 'removeFromStaging', label: '移出', icon: '📤', color: '#FF9500' },
+        { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
+        { id: 'enhance', label: '创玩', icon: '✨', color: '#9C27B0' },
+        { id: 'changeCategory', label: '分类', icon: '📁', color: '#007AFF' },
         { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
       ];
     }
     
-    // 所有非 tobecleaned 的情况（普通分类、城市、相似组）：删除 + 放入暂存箱 + 修改分
+    // 所有非暂存箱的情况（普通分类、城市、相似组）：暂存、删除、创玩、分类、分享
     return [
-      { id: 'delete', label: '永久删除', icon: '🗑️', color: '#FF3B30' },
-      { id: 'staging', label: '放入暂存箱', icon: '📦', color: '#FF9500' },
-      { id: 'changeCategory', label: '修改分类', icon: '📁', color: '#007AFF' },
+      { id: 'staging', label: '暂存', icon: '📦', color: '#FF9500' },
+      { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
+      { id: 'enhance', label: '创玩', icon: '✨', color: '#9C27B0' },
+      { id: 'changeCategory', label: '分类', icon: '📁', color: '#007AFF' },
+      { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
     ];
   };
 
@@ -142,6 +153,12 @@ const CategoryScreen = ({ route, navigation }) => {
         // 城市页面：获取城市的选中图片数量
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.length;
+      } else if (category === 'stagingBox') {
+        // 暂存箱页面：从所有选中图片中过滤出暂存箱中的图片
+        const allSelected = UnifiedDataService.getSelectedImages();
+        const stagingBoxImageIds = new Set(images.map(img => img.id));
+        const selectedInStagingBox = allSelected.filter(img => stagingBoxImageIds.has(img.id));
+        return selectedInStagingBox.length;
       } else if (category) {
         // 分类页面：获取分类的选中图片数量
         const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
@@ -362,21 +379,45 @@ const CategoryScreen = ({ route, navigation }) => {
         // 重新计算选中数量 - 现在可以安全地使用最新的数据
         setSelectedCount(calculateSelectedCount());
         
-        // 检查是否从 ImagePreview 返回，并初始化高亮图片ID
+        // 统一处理高亮逻辑
         const returnedImageId = route.params?.returnedImageId;
-        if (returnedImageId) {
-          logger.debug('🎯 从 ImagePreview 返回，初始化高亮图片ID:', returnedImageId);
-          // 验证图片是否在当前列表中
-          const imageExists = images.some(img => img.id === returnedImageId);
-          if (imageExists) {
-            setHighlightedImageId(returnedImageId);
-          } else {
-            logger.debug('🎯 返回的图片ID不在当前列表中，跳过滚动:', returnedImageId);
-          }
-          
-          // 清除 navigation 参数，避免重复触发
-          navigation.setParams({ returnedImageId: undefined });
+        
+        // 先检查路由参数：如果 returnedImageId 为空，立即清除高亮并跳过后续逻辑
+        if (!returnedImageId) {
+          // 直接进入（如从底部导航栏或 HomeScreen）：立即清除之前的高亮
+          setHighlightedImageId(null);
+          logger.debug('🎯 直接进入页面（无 returnedImageId），清除高亮');
+          // 重置标记
+          hasProcessedReturnedImageIdRef.current = false;
+          return; // 跳过后续的高亮设置逻辑
         }
+        
+        // 如果有 returnedImageId，检查是否已经处理过（防止重复触发）
+        if (hasProcessedReturnedImageIdRef.current === returnedImageId) {
+          logger.debug('🎯 已经处理过这个 returnedImageId，跳过:', returnedImageId);
+          return;
+        }
+        
+        // 从 ImagePreview 返回：等待 1 秒后设置高亮（确保 images 状态已更新）
+        setTimeout(() => {
+          // 标记为已处理
+          hasProcessedReturnedImageIdRef.current = returnedImageId;
+          
+          // 设置高亮（直接更新状态，不调用 navigation.setParams）
+          logger.debug('🎯 从 ImagePreview 返回，检查并设置高亮:', returnedImageId);
+          setImages(currentImages => {
+            const imageExists = currentImages.some(img => img.id === returnedImageId);
+            if (imageExists) {
+              logger.debug('🎯 图片存在于列表中，设置高亮:', returnedImageId);
+              setHighlightedImageId(returnedImageId);
+            } else {
+              logger.debug('🎯 返回的图片ID不在当前列表中，跳过高亮:', returnedImageId);
+              // 图片不存在时也不清除高亮，保持之前的高亮状态
+            }
+            return currentImages; // 不修改 images，只是读取
+          });
+          // 注意：不在这里清除 navigation 参数和 highligh，让高亮一直保持直到用户点击新照片
+        }, 1000); // 等待 1 秒，确保 FlatList 完全渲染和测量
       };
       
       initData();
@@ -506,10 +547,14 @@ const CategoryScreen = ({ route, navigation }) => {
       if (similarityGroupId) {
         const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
         filteredImages = groupData.images || [];
-        filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
+        // 移除过滤 tobecleaned 的逻辑
       } else if (city) {
         filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
-        filteredImages = filteredImages.filter(img => img.category !== 'tobecleaned');
+        // 移除过滤 tobecleaned 的逻辑
+      } else if (category === 'stagingBox') {
+        // 🆕 使用 UnifiedDataService 的暂存箱接口
+        filteredImages = await UnifiedDataService.getStagingBoxImages();
+        logger.debug('🔍 暂存箱图片加载完成:', filteredImages.length);
       } else if (category) {
         logger.debug('🔍 开始加载分类图片:', category);
         filteredImages = await UnifiedDataService.readImagesByCategory(category);
@@ -544,6 +589,22 @@ const CategoryScreen = ({ route, navigation }) => {
       } else {
         logger.debug('🔍 groupImagesByDate 清空分组');
         setGroupedImages({});
+      }
+      
+      // 如果不是暂存箱页面，加载暂存箱图片ID列表（用于显示"已暂存"标签）
+      if (!isStaging) {
+        try {
+          const stagingBoxImages = await UnifiedDataService.getStagingBoxImages();
+          const stagingBoxIds = new Set(stagingBoxImages.map(img => img.id));
+          setStagingBoxImageIds(stagingBoxIds);
+          logger.debug('🔍 暂存箱图片ID加载完成:', stagingBoxIds.size, '张');
+        } catch (error) {
+          logger.error('❌ 加载暂存箱图片ID失败:', error);
+          setStagingBoxImageIds(new Set());
+        }
+      } else {
+        // 暂存箱页面不需要加载
+        setStagingBoxImageIds(new Set());
       }
       
       // 检查选中状态
@@ -607,6 +668,7 @@ const CategoryScreen = ({ route, navigation }) => {
   const handlePress = (image) => {
     if (!selectionMode) {
       // 普通模式：跳转到预览页
+      // 注意：不需要在这里更新高亮，因为返回时会通过 returnedImageId 自动设置高亮
       const index = images.findIndex(img => img.id === image.id);
       
       // ✅ 使用 FlatList 懒加载，支持任意数量图片
@@ -631,6 +693,17 @@ const CategoryScreen = ({ route, navigation }) => {
   };
 
   /**
+   * 清除选中状态
+   */
+  const clearSelections = () => {
+    const selectedIds = getSelectedImageIds();
+    selectedIds.forEach(id => {
+      UnifiedDataService.setImageSelection(id, false);
+    });
+    setSelectedCount(calculateSelectedCount());
+  };
+
+  /**
    * 退出选择模式（保持选中状态不变）
    */
   function exitSelectionMode() {
@@ -638,6 +711,22 @@ const CategoryScreen = ({ route, navigation }) => {
     setShowActionMenu(false);
     // 不改变任何选中状态，保持用户的选中结果
   }
+
+  /**
+   * 处理取消按钮点击
+   * - 当有选中图片时：清除选中状态
+   * - 当没有选中图片时：退出选择模式
+   */
+  const handleCancelPress = () => {
+    const currentSelectedCount = calculateSelectedCount();
+    if (currentSelectedCount > 0) {
+      // 有选中图片时，清除选中状态
+      clearSelections();
+    } else {
+      // 没有选中图片时，退出选择模式
+      exitSelectionMode();
+    }
+  };
 
   // ==================== 批量操作 ====================
 
@@ -652,6 +741,12 @@ const CategoryScreen = ({ route, navigation }) => {
       } else if (city) {
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.map(img => img.id);
+      } else if (category === 'stagingBox') {
+        // 暂存箱页面：从所有选中图片中过滤出暂存箱中的图片
+        const allSelected = UnifiedDataService.getSelectedImages();
+        const stagingBoxImageIds = new Set(images.map(img => img.id));
+        const selectedInStagingBox = allSelected.filter(img => stagingBoxImageIds.has(img.id));
+        return selectedInStagingBox.map(img => img.id);
       } else if (category) {
         const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
         return selectedImages.map(img => img.id);
@@ -682,6 +777,9 @@ const CategoryScreen = ({ route, navigation }) => {
       switch (actionId) {
         case 'staging':
           await batchMoveToStaging(selectedIds);
+          break;
+        case 'removeFromStaging':
+          await batchRemoveFromStagingBox(selectedIds);
           break;
         case 'changeCategory':
           await showCategorySelector(selectedIds);
@@ -1005,29 +1103,16 @@ const CategoryScreen = ({ route, navigation }) => {
   const batchMoveToStaging = async (imageIds) => {
     Alert.alert(
       '暂存',
-      `确定要将选中的 ${imageIds.length} 张图片暂存到待处置吗？\n\n这些图片将被移动到"待处置"分类中。`,
+      `确定要将选中的 ${imageIds.length} 张图片暂存到待处置吗？\n\n这些图片将被移动到暂存箱中。`,
       [
         { text: '取消', style: 'cancel' },
         {
           text: '标记',
           onPress: async () => {
             try {
-              // 1. 先更新UI（立即响应用户操作）
+              // 1. 清除选中状态（图片保留在当前分类中）
               imageIds.forEach(id => {
                 UnifiedDataService.setImageSelection(id, false);
-              });
-              setImages(prevImages => {
-                const newImages = prevImages.filter(img => !imageIds.includes(img.id));
-                
-                // 同时更新分组图片
-                if (newImages.length > 0) {
-                  const grouped = groupImagesByDate(newImages);
-                  setGroupedImages(grouped);
-                } else {
-                  setGroupedImages({});
-                }
-                
-                return newImages;
               });
               setSelectionMode(false);
               
@@ -1036,18 +1121,91 @@ const CategoryScreen = ({ route, navigation }) => {
               setUpdateOperationType('moveToStaging');
               setUpdateProgress({ filesProcessed: imageIds.length, filesFailed: 0, total: imageIds.length });
               
-              // 3. 执行数据库操作（后台进行）
-              const result = await UnifiedDataService.updateImagesCategory(imageIds, 'tobecleaned', 'manual');
+              // 3. 🆕 使用 UnifiedDataService.addToStagingBox 添加到暂存箱
+              // 注意：addToStagingBox 内部已经会刷新缓存，不需要再次刷新
+              const result = await UnifiedDataService.addToStagingBox(imageIds);
               
               // 4. 更新失败数量（如果有）
-              setUpdateProgress({ filesProcessed: result.processed, filesFailed: result.errors?.length || 0, total: imageIds.length });
+              setUpdateProgress({ 
+                filesProcessed: result.added || imageIds.length, 
+                filesFailed: result.errors?.length || 0, 
+                total: imageIds.length 
+              });
               
-              // 5. 关闭进度提示
+              // 5. 更新暂存箱图片ID集合（用于显示"已暂存"标签）
+              if (!isStaging) {
+                setStagingBoxImageIds(prev => {
+                  const newSet = new Set(prev);
+                  imageIds.forEach(id => newSet.add(id));
+                  return newSet;
+                });
+              }
+              
+              // 6. 关闭进度提示
               setShowUpdateProgress(false);
             } catch (error) {
               logger.error('❌ 批量暂存失败:', error);
               setShowUpdateProgress(false);
               Alert.alert('操作失败', '暂存时发生错误，请重试');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  /**
+   * 批量从暂存箱移除
+   */
+  const batchRemoveFromStagingBox = async (imageIds) => {
+    Alert.alert(
+      '移出暂存箱',
+      `确定要从暂存箱移除选中的 ${imageIds.length} 张图片吗？\n\n这些图片将从暂存箱中移除，但不会删除文件。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '移除',
+          onPress: async () => {
+            try {
+              // 1. 清除选中状态（图片保留在当前分类中）
+              imageIds.forEach(id => {
+                UnifiedDataService.setImageSelection(id, false);
+              });
+              setSelectionMode(false);
+              
+              // 2. 显示进度提示
+              setShowUpdateProgress(true);
+              setUpdateOperationType('removeFromStaging');
+              setUpdateProgress({ filesProcessed: imageIds.length, filesFailed: 0, total: imageIds.length });
+              
+              // 3. 使用 UnifiedDataService.removeFromStagingBox 从暂存箱移除
+              const result = await UnifiedDataService.removeFromStagingBox(imageIds);
+              
+              // 4. 更新失败数量（如果有）
+              setUpdateProgress({ 
+                filesProcessed: result.removed || imageIds.length, 
+                filesFailed: result.errors?.length || 0, 
+                total: imageIds.length 
+              });
+              
+              // 5. 更新暂存箱图片ID集合（用于显示"已暂存"标签）
+              if (!isStaging) {
+                setStagingBoxImageIds(prev => {
+                  const newSet = new Set(prev);
+                  imageIds.forEach(id => newSet.delete(id));
+                  return newSet;
+                });
+              }
+              
+              // 6. 关闭进度提示
+              setShowUpdateProgress(false);
+              
+              // 7. 刷新图片列表（因为图片已从暂存箱移除）
+              await loadImages();
+            } catch (error) {
+              logger.error('❌ 批量从暂存箱移除失败:', error);
+              setShowUpdateProgress(false);
+              Alert.alert('操作失败', '从暂存箱移除时发生错误，请重试');
             }
           },
         },
@@ -1253,7 +1411,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
     return (
       <View style={styles.selectionBar}>
-        <TouchableOpacity onPress={exitSelectionMode}>
+        <TouchableOpacity onPress={handleCancelPress}>
           <Text style={styles.selectionCancel}>取消</Text>
           </TouchableOpacity>
           <Text style={styles.selectionCount}>
@@ -1434,18 +1592,28 @@ const CategoryScreen = ({ route, navigation }) => {
                   return null;
                 }
                 
+                // 检查是否应该高亮
+                const isHighlighted = highlightedImageId === image.id;
+                if (isHighlighted) {
+                  logger.debug('🎨 渲染高亮图片:', image.id, 'highlightedImageId:', highlightedImageId);
+                }
+                
+                // 检查图片是否在暂存箱中（只在非暂存箱页面显示标签）
+                const isImageInStagingBox = !isStaging && stagingBoxImageIds.has(image.id);
+                
                 return (
                   <TouchableOpacity
                     key={image.id}
                     style={[
                       styles.timelineItem,
                       UnifiedDataService.isImageSelected(image.id) && styles.timelineItemSelected,
-                      highlightedImageId === image.id && styles.timelineItemHighlighted
+                      isHighlighted && styles.timelineItemHighlighted
                     ]}
                     onPress={() => {
                       if (selectionMode) {
                         toggleImageSelection(image.id);
                       } else {
+                        // 注意：不需要在这里更新高亮，因为返回时会通过 returnedImageId 自动设置高亮
                         const allImages = Object.values(groupedImages).flat();
                         const currentIndex = allImages.findIndex(img => img.id === image.id);
                         navigation.navigate('ImagePreview', {
@@ -1480,6 +1648,12 @@ const CategoryScreen = ({ route, navigation }) => {
                           {UnifiedDataService.isImageSelected(image.id) ? '✓' : ''}
                         </Text>
                     </View>
+                    )}
+                    {/* 已暂存标签（只在非暂存箱分类中显示） */}
+                    {isImageInStagingBox && (
+                      <View style={styles.stagingBoxBadge}>
+                        <Text style={styles.stagingBoxBadgeText}>已暂存</Text>
+                      </View>
                     )}
                   </TouchableOpacity>
                 );
@@ -1519,7 +1693,8 @@ const CategoryScreen = ({ route, navigation }) => {
         console.warn('⚠️ 发现无效的分类对象:', cat);
         return false;
       }
-      return cat.id !== 'tobecleaned';
+      // 注意：暂存箱不是分类，不会出现在 getAllCategoriesWithUI() 返回的列表中，所以不需要过滤
+      return true;
     });
 
     return (
@@ -1658,6 +1833,8 @@ const CategoryScreen = ({ route, navigation }) => {
                 ? `正在修改${updateProgress.total}张图片的分类`
                 : updateOperationType === 'moveToStaging'
                 ? `正在将${updateProgress.total}张图片放入暂存箱`
+                : updateOperationType === 'removeFromStaging'
+                ? `正在从暂存箱移除${updateProgress.total}张图片`
                 : '正在处理图片'
               }
             </Text>
@@ -1986,6 +2163,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  stagingBoxBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  stagingBoxBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
   },
   
   // 分类选择器模态框样式
