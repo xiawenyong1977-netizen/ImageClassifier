@@ -37,7 +37,7 @@ const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 
 const CategoryScreen = ({ route, navigation }) => {
   // ==================== 路由参数 ====================
-  const { category, city, similarityGroupId, fromScreen } = route.params || {};
+  const { category, city, similarityGroupId, color, fromScreen } = route.params || {};
   
   // ==================== 状态管理 ====================
   const [images, setImages] = useState([]);
@@ -84,7 +84,7 @@ const CategoryScreen = ({ route, navigation }) => {
   const ITEMS_PER_PAGE = 50;
 
   // ==================== 页面类型判断 ====================
-  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : null;
+  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : color ? 'color' : null;
   const isStaging = category === 'stagingBox';
 
   // 照片创玩（增强方案）
@@ -104,6 +104,9 @@ const CategoryScreen = ({ route, navigation }) => {
     if (city) {
       return `${city} (${count}张)`;
     }
+    if (color) {
+      return `${color} (${count}张)`;
+    }
     if (category) {
       // 暂存箱特殊处理，显示中文"暂存箱"
       if (category === 'stagingBox') {
@@ -122,10 +125,10 @@ const CategoryScreen = ({ route, navigation }) => {
     if (isStaging) {
       // 暂存箱（stagingBox）：移出、删除、创玩、分类、分享
       return [
-        { id: 'removeFromStaging', label: '移出', icon: '📤', color: '#FF9500' },
+        { id: 'removeFromStaging', label: '移出', icon: '➡️', color: '#FF9500' },
         { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
         { id: 'enhance', label: '创玩', icon: '✨', color: '#9C27B0' },
-        { id: 'changeCategory', label: '分类', icon: '📁', color: '#007AFF' },
+        { id: 'changeCategory', label: '分类', icon: '🏷️', color: '#007AFF' },
         { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
       ];
     }
@@ -153,11 +156,16 @@ const CategoryScreen = ({ route, navigation }) => {
         // 城市页面：获取城市的选中图片数量
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.length;
-      } else if (category === 'stagingBox') {
-        // 暂存箱页面：从所有选中图片中过滤出暂存箱中的图片
+      } else if (color) {
+        // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
         const allSelected = UnifiedDataService.getSelectedImages();
-        const stagingBoxImageIds = new Set(images.map(img => img.id));
-        const selectedInStagingBox = allSelected.filter(img => stagingBoxImageIds.has(img.id));
+        const colorImageIds = new Set(images.map(img => img.id));
+        const selectedInColor = allSelected.filter(img => colorImageIds.has(img.id));
+        return selectedInColor.length;
+      } else if (category === 'stagingBox') {
+        // 暂存箱页面：直接获取暂存箱图片ID，然后只检查这些图片的选中状态
+        const stagingBoxImageIds = images.map(img => img.id);
+        const selectedInStagingBox = UnifiedDataService.getSelectedImagesByStagingBox(stagingBoxImageIds);
         return selectedInStagingBox.length;
       } else if (category) {
         // 分类页面：获取分类的选中图片数量
@@ -372,8 +380,6 @@ const CategoryScreen = ({ route, navigation }) => {
     useCallback(() => {
       const initData = async () => {
         // 每次获得焦点时都刷新数据，确保数据同步
-        logger.debug('🔄 页面获得焦点，刷新数据...');
-        
         await loadImages(); // 等待数据加载和状态更新完成
         
         // 重新计算选中数量 - 现在可以安全地使用最新的数据
@@ -386,7 +392,6 @@ const CategoryScreen = ({ route, navigation }) => {
         if (!returnedImageId) {
           // 直接进入（如从底部导航栏或 HomeScreen）：立即清除之前的高亮
           setHighlightedImageId(null);
-          logger.debug('🎯 直接进入页面（无 returnedImageId），清除高亮');
           // 重置标记
           hasProcessedReturnedImageIdRef.current = false;
           return; // 跳过后续的高亮设置逻辑
@@ -394,7 +399,6 @@ const CategoryScreen = ({ route, navigation }) => {
         
         // 如果有 returnedImageId，检查是否已经处理过（防止重复触发）
         if (hasProcessedReturnedImageIdRef.current === returnedImageId) {
-          logger.debug('🎯 已经处理过这个 returnedImageId，跳过:', returnedImageId);
           return;
         }
         
@@ -404,15 +408,10 @@ const CategoryScreen = ({ route, navigation }) => {
           hasProcessedReturnedImageIdRef.current = returnedImageId;
           
           // 设置高亮（直接更新状态，不调用 navigation.setParams）
-          logger.debug('🎯 从 ImagePreview 返回，检查并设置高亮:', returnedImageId);
           setImages(currentImages => {
             const imageExists = currentImages.some(img => img.id === returnedImageId);
             if (imageExists) {
-              logger.debug('🎯 图片存在于列表中，设置高亮:', returnedImageId);
               setHighlightedImageId(returnedImageId);
-            } else {
-              logger.debug('🎯 返回的图片ID不在当前列表中，跳过高亮:', returnedImageId);
-              // 图片不存在时也不清除高亮，保持之前的高亮状态
             }
             return currentImages; // 不修改 images，只是读取
           });
@@ -426,45 +425,23 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // 监听数据变化，执行滚动和高亮操作
   useEffect(() => {
-    logger.debug('📜 useEffect 触发:', {
-      groupedImagesLength: Object.keys(groupedImages).length,
-      highlightedImageId: highlightedImageId,
-      hasData: Object.keys(groupedImages).length > 0,
-      hasHighlight: !!highlightedImageId
-    });
-    
     if (Object.keys(groupedImages).length > 0 && highlightedImageId) {
-      logger.debug('📜 数据已加载，准备滚动到图片:', highlightedImageId);
-      
       // 直接等待1秒，确保 FlatList 完全渲染和测量
       setTimeout(() => {
         scrollToHighlightedImage(highlightedImageId);
       }, 1000); // 直接等待1秒
       
       // 不再自动取消高亮，让图片一直保持高亮状态
-    } else {
-      logger.debug('📜 滚动条件不满足:', {
-        hasData: Object.keys(groupedImages).length > 0,
-        hasHighlight: !!highlightedImageId
-      });
     }
   }, [groupedImages, highlightedImageId]); // 依赖两个状态，确保数据和高亮都准备好
 
   // 滚动到高亮图片所在的日期组
   const scrollToHighlightedImage = (imageId) => {
     if (!imageId) {
-      // 如果没有图片ID，直接返回，不输出日志
       return;
     }
     
-    logger.debug('📜 开始滚动到图片:', imageId);
-    
     if (!flatListRef.current || Object.keys(groupedImages).length === 0) {
-      logger.debug('📜 滚动条件不满足:', { 
-        hasRef: !!flatListRef.current, 
-        groupedImagesLength: Object.keys(groupedImages).length,
-        imageId
-      });
       return;
     }
     
@@ -474,7 +451,6 @@ const CategoryScreen = ({ route, navigation }) => {
     // 根据图片ID获取图片数据，然后根据时间找到日期组索引
     const targetImage = images.find(img => img.id === imageId);
     if (!targetImage) {
-      logger.debug('📜 未找到目标图片，可能已从列表中移除:', imageId);
       // 清除无效的高亮ID
       setHighlightedImageId(null);
       return;
@@ -483,7 +459,6 @@ const CategoryScreen = ({ route, navigation }) => {
     // 获取图片的时间，优先使用takenAt，没有则使用timestamp
     const imageTime = targetImage.takenAt || targetImage.timestamp;
     if (!imageTime) {
-      logger.warn('📜 图片没有时间信息:', imageId);
       return;
     }
     
@@ -494,16 +469,7 @@ const CategoryScreen = ({ route, navigation }) => {
     // 在日期组中找到对应的索引
     const targetDateIndex = dateKeys.indexOf(targetDateKey);
     
-    logger.debug('📜 查找图片在日期组中的位置:', { 
-      imageId, 
-      targetDateKey,
-      targetDateIndex,
-      totalGroups: dateKeys.length
-    });
-    
     if (targetDateIndex >= 0 && targetDateIndex < dateKeys.length) {
-      logger.debug(`📜 准备滚动到日期组索引: ${targetDateIndex}, 总组数: ${dateKeys.length}`);
-      
       // 直接滚动到目标日期组
       try {
         flatListRef.current.scrollToIndex({
@@ -511,19 +477,10 @@ const CategoryScreen = ({ route, navigation }) => {
           animated: true,
           viewPosition: 0.3, // 将目标组滚动到屏幕上方 30% 的位置
         });
-        logger.debug('📜 滚动命令执行成功');
       } catch (error) {
-        logger.debug('📜 滚动失败，使用回退方案:', error);
         // 简单回退：滚动到顶部
         flatListRef.current.scrollToOffset({ offset: 0, animated: true });
       }
-    } else {
-      logger.debug('📜 未找到目标图片或索引无效:', { 
-        imageId, 
-        targetDateIndex, 
-        totalGroups: dateKeys.length,
-        dateKeys: dateKeys.slice(0, 5) // 只显示前5个日期键
-      });
     }
   };
 
@@ -533,8 +490,6 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const loadImages = async (isRefresh = false) => {
     try {
-      logger.debug('🔍 loadImages 开始执行:', { isRefresh, category, city, similarityGroupId });
-      
       if (isRefresh) {
         setRefreshing(true);
         setPage(1);
@@ -551,14 +506,14 @@ const CategoryScreen = ({ route, navigation }) => {
       } else if (city) {
         filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
         // 移除过滤 tobecleaned 的逻辑
+      } else if (color) {
+        // 🆕 按颜色加载图片
+        filteredImages = await UnifiedDataService.readImagesByColor(color);
       } else if (category === 'stagingBox') {
         // 🆕 使用 UnifiedDataService 的暂存箱接口
         filteredImages = await UnifiedDataService.getStagingBoxImages();
-        logger.debug('🔍 暂存箱图片加载完成:', filteredImages.length);
       } else if (category) {
-        logger.debug('🔍 开始加载分类图片:', category);
         filteredImages = await UnifiedDataService.readImagesByCategory(category);
-        logger.debug('🔍 分类图片加载完成:', category, filteredImages.length);
       } else {
         logger.error('没有有效的上下文参数');
         filteredImages = [];
@@ -582,12 +537,9 @@ const CategoryScreen = ({ route, navigation }) => {
       
       // 同时设置分组图片
       if (filteredImages.length > 0) {
-        logger.debug('🔍 groupImagesByDate 开始分组...');
         const grouped = groupImagesByDate(filteredImages);
-        logger.debug('🔍 groupImagesByDate 分组完成:', Object.keys(grouped).length, '个日期组');
         setGroupedImages(grouped);
       } else {
-        logger.debug('🔍 groupImagesByDate 清空分组');
         setGroupedImages({});
       }
       
@@ -597,7 +549,6 @@ const CategoryScreen = ({ route, navigation }) => {
           const stagingBoxImages = await UnifiedDataService.getStagingBoxImages();
           const stagingBoxIds = new Set(stagingBoxImages.map(img => img.id));
           setStagingBoxImageIds(stagingBoxIds);
-          logger.debug('🔍 暂存箱图片ID加载完成:', stagingBoxIds.size, '张');
         } catch (error) {
           logger.error('❌ 加载暂存箱图片ID失败:', error);
           setStagingBoxImageIds(new Set());
@@ -678,6 +629,7 @@ const CategoryScreen = ({ route, navigation }) => {
         currentIndex: index,
         category,
         city,
+        color,
         similarityGroupId,
         fromScreen: pageType,
       });
@@ -741,11 +693,16 @@ const CategoryScreen = ({ route, navigation }) => {
       } else if (city) {
         const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
         return selectedImages.map(img => img.id);
-      } else if (category === 'stagingBox') {
-        // 暂存箱页面：从所有选中图片中过滤出暂存箱中的图片
+      } else if (color) {
+        // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
         const allSelected = UnifiedDataService.getSelectedImages();
-        const stagingBoxImageIds = new Set(images.map(img => img.id));
-        const selectedInStagingBox = allSelected.filter(img => stagingBoxImageIds.has(img.id));
+        const colorImageIds = new Set(images.map(img => img.id));
+        const selectedInColor = allSelected.filter(img => colorImageIds.has(img.id));
+        return selectedInColor.map(img => img.id);
+      } else if (category === 'stagingBox') {
+        // 暂存箱页面：直接获取暂存箱图片ID，然后只检查这些图片的选中状态
+        const stagingBoxImageIds = images.map(img => img.id);
+        const selectedInStagingBox = UnifiedDataService.getSelectedImagesByStagingBox(stagingBoxImageIds);
         return selectedInStagingBox.map(img => img.id);
       } else if (category) {
         const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
@@ -888,8 +845,6 @@ const CategoryScreen = ({ route, navigation }) => {
   // 执行增强（占位函数：后续可接入真正的提交逻辑）
   const performEnhance = async (presetId, presetDisplayName, imageIds) => {
     try {
-      logger.debug('准备提交增强任务', { presetId, count: imageIds.length });
-      
       // 读取选中图片的最新URI（使用 getUri 获取正确的 URI）
       const selectedItems = [];
       for (const id of imageIds) {
@@ -983,7 +938,6 @@ const CategoryScreen = ({ route, navigation }) => {
       setUpdateProgress({ filesProcessed: result.processed, filesFailed: result.errors?.length || 0, total: imageIds.length });
       
       if (result.success) {
-        logger.debug('✅ 批量更新分类成功:', result.processed, '张');
       } else {
         logger.warn('⚠️ 批量更新分类部分失败:', result.errors);
       }
@@ -1036,23 +990,11 @@ const CategoryScreen = ({ route, navigation }) => {
           return;
         }
         
-        // 调试：打印图片URI信息
-        logger.debug('准备分享的图片URIs:', urls);
-        selectedImages.forEach((img, index) => {
-          const uri = getUri(img);
-          logger.debug(`图片${index + 1}:`, {
-            id: img.id,
-            uri: uri,
-            originalUri: img.uri
-          });
-        });
-        
         // 优先尝试使用原生模块分享（支持单张和多张）
         const { MultiImageShareModule } = NativeModules;
         if (MultiImageShareModule && MultiImageShareModule.shareMultipleImages) {
           // 使用原生模块分享（支持单张和多张）
           await MultiImageShareModule.shareMultipleImages(urls);
-          logger.debug(`✅ 原生模块分享 ${urls.length} 张图片成功`);
           if (urls.length > 1) {
             Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
           }
@@ -1067,9 +1009,7 @@ const CategoryScreen = ({ route, navigation }) => {
             });
             
             if (result.action === Share.sharedAction) {
-              logger.debug('✅ 分享成功');
-            } else if (result.action === Share.dismissedAction) {
-              logger.debug('用户取消分享');
+              // 分享成功
             }
           } else {
             // 多张图片：使用urls参数（不传message）
@@ -1080,10 +1020,7 @@ const CategoryScreen = ({ route, navigation }) => {
             });
             
             if (result.action === Share.sharedAction) {
-              logger.debug(`✅ React Native分享 ${urls.length} 张图片成功`);
               Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
-            } else if (result.action === Share.dismissedAction) {
-              logger.debug('用户取消分享');
             }
           }
         }
@@ -1373,7 +1310,6 @@ const CategoryScreen = ({ route, navigation }) => {
       return null;
     }
     
-    logger.debug('🔍 renderImageItem 渲染图片:', item.id);
     const isSelected = UnifiedDataService.isImageSelected(item.id);
     
     return (
@@ -1515,14 +1451,10 @@ const CategoryScreen = ({ route, navigation }) => {
         data={Object.keys(groupedImages)}
         keyExtractor={(dateKey) => dateKey}
         onScrollToIndexFailed={(info) => {
-          // 使用debug级别日志，避免在release版本中显示告警
-          logger.debug('📜 滚动失败，使用回退方案:', info);
-          
           // 智能回退方案
           if (info.index >= 0 && info.index < Object.keys(groupedImages).length) {
             // 如果目标索引有效，尝试滚动到接近的位置
             const safeIndex = Math.min(info.index, Object.keys(groupedImages).length - 1);
-            logger.debug(`📜 回退到安全索引: ${safeIndex}`);
             
             setTimeout(() => {
               try {
@@ -1532,7 +1464,6 @@ const CategoryScreen = ({ route, navigation }) => {
                   viewPosition: 0.5,
                 });
               } catch (retryError) {
-                logger.debug('📜 回退滚动也失败，滚动到顶部');
                 flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               }
             }, 200);
@@ -1594,9 +1525,6 @@ const CategoryScreen = ({ route, navigation }) => {
                 
                 // 检查是否应该高亮
                 const isHighlighted = highlightedImageId === image.id;
-                if (isHighlighted) {
-                  logger.debug('🎨 渲染高亮图片:', image.id, 'highlightedImageId:', highlightedImageId);
-                }
                 
                 // 检查图片是否在暂存箱中（只在非暂存箱页面显示标签）
                 const isImageInStagingBox = !isStaging && stagingBoxImageIds.has(image.id);
@@ -1622,6 +1550,7 @@ const CategoryScreen = ({ route, navigation }) => {
                           currentIndex: currentIndex,
                           category,
                           city,
+                          color,
                           similarityGroupId,
                           fromScreen: 'CategoryScreen'
                         });
@@ -1722,7 +1651,7 @@ const CategoryScreen = ({ route, navigation }) => {
                   style={styles.categoryItem}
                   onPress={() => selectCategory(cat.id)}
                 >
-                  <Text style={styles.categoryIcon}>{cat.icon || '📁'}</Text>
+                  <Text style={styles.categoryIcon}>{cat.icon || '🏷️'}</Text>
                   <Text style={styles.categoryName}>{cat.chinese}</Text>
                 </TouchableOpacity>
               ))}
@@ -1743,10 +1672,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
   // ==================== 主渲染 ====================
 
-  logger.debug('🔍 CategoryScreen 开始渲染:', { loading, imagesLength: images?.length });
-
   if (loading) {
-    logger.debug('🔍 CategoryScreen 渲染加载状态');
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -1756,11 +1682,6 @@ const CategoryScreen = ({ route, navigation }) => {
     );
   }
 
-  logger.debug('🔍 CategoryScreen 渲染主要内容');
-  
-  // 🆕 添加调试日志
-  logger.debug('🔍 CategoryScreen 开始渲染各个组件...');
-  
   return (
     <SafeAreaView style={styles.container}>
       {/* 顶部导航栏 */}

@@ -98,6 +98,38 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   };
 
   /**
+   * 更新设置
+   */
+  const updateSetting = async (key, value) => {
+    try {
+      const newSettings = { ...settings, [key]: value };
+      await UnifiedDataService.writeSettings(newSettings);
+      setSettings(newSettings);
+      
+      // 通知首页设置已更新（使用多种方式确保兼容性）
+      // 方式1: Web环境的CustomEvent
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { 
+          detail: { key, value, settings: newSettings } 
+        }));
+      }
+      
+      // 方式2: React Native的DeviceEventEmitter（如果可用）
+      try {
+        const { DeviceEventEmitter } = require('react-native');
+        if (DeviceEventEmitter && DeviceEventEmitter.emit) {
+          DeviceEventEmitter.emit('settingsUpdated', { key, value, settings: newSettings });
+        }
+      } catch (e) {
+        // DeviceEventEmitter不可用，忽略
+      }
+    } catch (error) {
+      logger.error('保存设置失败:', error);
+      Alert.alert('错误', '保存设置失败');
+    }
+  };
+
+  /**
    * 保存照片目录配置
    */
   const saveGalleryPaths = async (paths) => {
@@ -806,6 +838,71 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                 </TouchableOpacity>
               </View>
             ))}
+          </View>
+
+          {/* 显示设置 */}
+          <View style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>显示设置</Text>
+            
+            {/* 显示城市分类 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🏙️ 显示城市分类</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示按城市分类的卡片
+                </Text>
+              </View>
+              <Switch
+                value={settings.showCityCategories !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showCityCategories', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
+            {/* 显示颜色分类 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🎨 显示颜色分类</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示按颜色分类的卡片
+                </Text>
+              </View>
+              <Switch
+                value={settings.showColorCategories !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showColorCategories', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
+            {/* 显示相似照片 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🔗 显示相似照片</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示相似照片组
+                </Text>
+              </View>
+              <Switch
+                value={settings.showSimilarityGroups !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
+            {/* 显示最近照片 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>📸 显示最近照片</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示最近照片区域
+                </Text>
+              </View>
+              <Switch
+                value={settings.showRecentPhotos !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showRecentPhotos', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
           </View>
         </View>
 
@@ -1623,6 +1720,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: '#007AFF',
+  },
+  // 显示设置样式
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  settingInfo: {
+    flex: 1,
+    marginRight: 16,
+  },
+  settingLabel: {
+    fontSize: 16,
+    color: '#000000',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#8E8E93',
   },
 });
 

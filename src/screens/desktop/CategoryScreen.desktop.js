@@ -2176,7 +2176,7 @@ const CategoryScreen = ({
                   }}
                 >
                   <View style={styles.actionMenuItemWithSubmenu}>
-                    <Text style={styles.actionMenuItemText}>🏷️ 设置分类 ›</Text>
+                    <Text style={styles.actionMenuItemText}>🏷️ 分类 ›</Text>
                     
                     {/* 二级菜单：分类列表 */}
                     {showCategorySubmenu && availableCategories.length > 0 && (
@@ -2219,7 +2219,7 @@ const CategoryScreen = ({
                   }}
                 >
                   <View style={styles.actionMenuItemWithSubmenu}>
-                    <Text style={styles.actionMenuItemText}>✨ 照片创玩 ›</Text>
+                    <Text style={styles.actionMenuItemText}>✨ 创玩 ›</Text>
                     
                     {/* 二级菜单：增强方案列表 */}
                     {showEnhanceSubmenu && availableEnhancePresets.length > 0 && (
@@ -2258,7 +2258,7 @@ const CategoryScreen = ({
                     handleBatchDelete();
                   }}>
                   <Text style={[styles.actionMenuItemText, styles.actionMenuItemTextDanger]}>
-                    ❌ 删除
+                    🗑️ 删除
                   </Text>
                 </TouchableOpacity>
                 
@@ -2270,7 +2270,7 @@ const CategoryScreen = ({
                     setShowCategorySubmenu(false);
                     handleCopyToClipboard();
                   }}>
-                  <Text style={styles.actionMenuItemText}>📋 复制到剪贴板</Text>
+                  <Text style={styles.actionMenuItemText}>📋 内容复制</Text>
                 </TouchableOpacity>
                 
                 {/* 复制到文件管理器 - 所有分类都显示 */}
@@ -2281,7 +2281,7 @@ const CategoryScreen = ({
                     setShowCategorySubmenu(false);
                     handleCopyToFileManager();
                   }}>
-                  <Text style={styles.actionMenuItemText}>📂 复制到文件管理器</Text>
+                  <Text style={styles.actionMenuItemText}>📂 文件复制</Text>
                 </TouchableOpacity>
                 
                 {/* 暂存 - 只有非暂存箱显示 */}
@@ -2293,7 +2293,7 @@ const CategoryScreen = ({
                       setShowCategorySubmenu(false);
                       handleBatchAddToStagingBox();
                     }}>
-                    <Text style={styles.actionMenuItemText}>🗑️ 暂存</Text>
+                    <Text style={styles.actionMenuItemText}>📦 暂存</Text>
                   </TouchableOpacity>
                 )}
                 
@@ -2306,7 +2306,7 @@ const CategoryScreen = ({
                       setShowCategorySubmenu(false);
                       handleBatchRemoveFromStagingBox();
                     }}>
-                    <Text style={styles.actionMenuItemText}>📤 从暂存箱移除</Text>
+                    <Text style={styles.actionMenuItemText}>➡️ 移出</Text>
                   </TouchableOpacity>
                 )}
               </View>

@@ -587,6 +587,21 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           <View style={styles.actionButton}>
             <Text style={styles.actionButtonText}>显示设置</Text>
             
+            {/* 显示城市分类 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>🏙️ 显示城市分类</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示按城市分类的卡片
+                </Text>
+              </View>
+              <Switch
+                value={settings.showCityCategories !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showCityCategories', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
             {/* 显示颜色分类 */}
             <View style={styles.settingItem}>
               <View style={styles.settingInfo}>
@@ -613,6 +628,21 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               <Switch
                 value={settings.showSimilarityGroups !== false} // 默认为 true
                 onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
+                trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              />
+            </View>
+
+            {/* 显示最近照片 */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>📸 显示最近照片</Text>
+                <Text style={styles.settingDescription}>
+                  在首页显示最近照片区域
+                </Text>
+              </View>
+              <Switch
+                value={settings.showRecentPhotos !== false} // 默认为 true
+                onValueChange={(value) => updateSetting('showRecentPhotos', value)}
                 trackColor={{ false: '#ccc', true: '#4CAF50' }}
               />
             </View>

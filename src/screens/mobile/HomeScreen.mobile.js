@@ -48,6 +48,10 @@ const HomeScreen = ({ navigation }) => {
   // 相似组数据
   const [similarityGroups, setSimilarityGroups] = useState([]);
   
+  // 颜色分类数据
+  const [colorCounts, setColorCounts] = useState({});
+  const [colorRecentImages, setColorRecentImages] = useState({});
+  
   // 最近照片
   const [recentImages, setRecentImages] = useState([]);
   
@@ -60,15 +64,63 @@ const HomeScreen = ({ navigation }) => {
   
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
+  
+  // 显示设置
+  const [showCityCategories, setShowCityCategories] = useState(true);
+  const [showColorCategories, setShowColorCategories] = useState(true);
+  const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
+  const [showRecentPhotos, setShowRecentPhotos] = useState(true);
 
   // ==================== 初始化加载 ====================
   useEffect(() => {
     initializeData();
     loadLastScanTime();
     loadHideEmptyCategoriesSetting();
+    loadDisplaySettings();
     
     // 调试：检查当前权限状态
     checkCurrentPermissionStatus();
+    
+    // 监听设置更新事件（使用多种方式确保兼容性）
+    const handleSettingsUpdate = (eventData) => {
+      // 处理Web环境的CustomEvent
+      const detail = eventData?.detail || eventData;
+      const { key, settings: newSettings } = detail || {};
+      if (key === 'showCityCategories' || key === 'showColorCategories' || 
+          key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
+        if (newSettings) {
+          setShowCityCategories(newSettings.showCityCategories !== false);
+          setShowColorCategories(newSettings.showColorCategories !== false);
+          setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
+          setShowRecentPhotos(newSettings.showRecentPhotos !== false);
+        }
+      }
+    };
+    
+    // 方式1: Web环境的CustomEvent
+    if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+      window.addEventListener('settingsUpdated', handleSettingsUpdate);
+    }
+    
+    // 方式2: React Native的DeviceEventEmitter
+    let deviceEventSubscription = null;
+    try {
+      const { DeviceEventEmitter } = require('react-native');
+      if (DeviceEventEmitter && DeviceEventEmitter.addListener) {
+        deviceEventSubscription = DeviceEventEmitter.addListener('settingsUpdated', handleSettingsUpdate);
+      }
+    } catch (e) {
+      // DeviceEventEmitter不可用，忽略
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+        window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+      }
+      if (deviceEventSubscription) {
+        deviceEventSubscription.remove();
+      }
+    };
   }, []);
 
   /**
@@ -119,6 +171,8 @@ const HomeScreen = ({ navigation }) => {
         logger.debug('🔄 首页获得焦点，刷新数据...');
         loadAllData();
         loadLastScanTime();
+        // 重新加载显示设置，确保从设置页面返回时立即生效
+        loadDisplaySettings();
       }
     }, [loading, isScanning])
   );
@@ -138,6 +192,26 @@ const HomeScreen = ({ navigation }) => {
       logger.error('加载隐藏空分类设置失败:', error);
       // 出错时默认隐藏空分类
       setHideEmptyCategories(true);
+    }
+  };
+
+  /**
+   * 加载显示设置
+   */
+  const loadDisplaySettings = async () => {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      setShowCityCategories(settings.showCityCategories !== false);
+      setShowColorCategories(settings.showColorCategories !== false);
+      setShowSimilarityGroups(settings.showSimilarityGroups !== false);
+      setShowRecentPhotos(settings.showRecentPhotos !== false);
+    } catch (error) {
+      logger.error('加载显示设置失败:', error);
+      // 出错时默认全部显示
+      setShowCityCategories(true);
+      setShowColorCategories(true);
+      setShowSimilarityGroups(true);
+      setShowRecentPhotos(true);
     }
   };
   
@@ -183,6 +257,7 @@ const HomeScreen = ({ navigation }) => {
       setTimeout(() => {
         loadCities();
         loadSimilarityGroups();
+        loadColors();
         }, 100);
         
           } catch (error) {
@@ -204,13 +279,10 @@ const HomeScreen = ({ navigation }) => {
       const allCategories = configService.getAllCategoriesWithUI();
       
       // 按配置文件顺序构建分类列表
+      // 注意：暂存箱不是分类，不会出现在 getAllCategoriesWithUI() 返回的列表中
       const categoryList = allCategories
         .filter(categoryConfig => {
           const count = categoryCounts[categoryConfig.id] || 0;
-          // 暂存箱不显示在分类列表中，因为底部导航有专门入口
-          if (categoryConfig.id === 'tobecleaned') {
-            return false;
-          }
           // 如果开启了隐藏空分类且该分类数量为0，则不显示
           if (hideEmptyCategories && count === 0) {
             return false;
@@ -268,9 +340,9 @@ const HomeScreen = ({ navigation }) => {
       const cityList = Object.keys(cityCounts)
         .map(cityName => {
           // 找到这个城市最近的一张照片（按时间戳降序）
-          // 排除 tobecleaned 分类的图片
+          // 暂存箱图片不通过 category 标记，所以不需要过滤
           const cityImages = allImages
-            .filter(img => img.city === cityName && img.category !== 'tobecleaned')
+            .filter(img => img.city === cityName)
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           
           const latestImage = cityImages.length > 0 ? cityImages[0] : null;
@@ -287,6 +359,41 @@ const HomeScreen = ({ navigation }) => {
       
     } catch (error) {
       logger.error('❌ 加载城市列表失败:', error);
+    }
+  };
+
+  /**
+   * 加载颜色分类数据
+   */
+  const loadColors = async () => {
+    try {
+      // 加载颜色统计
+      const colorCountsData = await UnifiedDataService.readColorCounts();
+      setColorCounts(colorCountsData);
+      
+      // 加载各颜色的最近图片（按数量排序取前10个）
+      const sortedColors = Object.entries(colorCountsData).sort(([,a], [,b]) => b - a);
+      const colorIds = sortedColors.slice(0, 10).map(([colorName]) => colorName);
+      const colorImagesPromises = colorIds.map(async (colorName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByColor(colorName, 1);
+          return { colorName, images };
+        } catch (error) {
+          logger.error(`加载颜色 ${colorName} 最近图片失败:`, error);
+          return { colorName, images: [] };
+        }
+      });
+      
+      const colorImagesResults = await Promise.all(colorImagesPromises);
+      const colorImagesMap = {};
+      colorImagesResults.forEach(({ colorName, images }) => {
+        colorImagesMap[colorName] = images;
+      });
+      
+      setColorRecentImages(colorImagesMap);
+      
+    } catch (error) {
+      logger.error('❌ 加载颜色分类失败:', error);
     }
   };
 
@@ -651,14 +758,11 @@ const HomeScreen = ({ navigation }) => {
           }
           
           logger.debug('📁 点击分类卡片:', category.id);
-          if (category.id === 'tobecleaned') {
-            navigation.navigate('StagingBox');
-          } else {
-            navigation.navigate('Category', {
-              category: category.id,
-              fromScreen: 'Home',
-            });
-          }
+          // 注意：暂存箱不是分类，不会出现在分类列表中，所以这里不需要判断 stagingBox
+          navigation.navigate('Category', {
+            category: category.id,
+            fromScreen: 'Home',
+          });
         } catch (error) {
           logger.error('❌ 分类卡片点击失败:', error);
         }
@@ -784,6 +888,75 @@ const HomeScreen = ({ navigation }) => {
           {similarityGroups.map(renderSimilarityGroupCard)}
         </View>
         </View>
+    );
+  };
+
+  /**
+   * 渲染颜色卡片（与PC端保持一致）
+   */
+  const renderColorCard = (color) => {
+    const count = colorCounts[color] || 0;
+    const recentImages = colorRecentImages[color] || [];
+    
+    return (
+      <TouchableOpacity
+        key={color}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!color || !navigation) {
+              logger.warn('❌ 颜色数据无效或导航对象为空:', { color, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('🎨 点击颜色卡片:', color);
+            navigation.navigate('Category', {
+              color: color,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 颜色卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: color || '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>🎨</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示颜色信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>{color}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染颜色分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderColorsSection = () => {
+    const colorKeys = Object.keys(colorCounts);
+    if (colorKeys.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🎨 按颜色</Text>
+        <View style={styles.categoriesGrid}>
+          {Object.entries(colorCounts)
+            .sort(([,a], [,b]) => b - a)
+            .map(([color]) => renderColorCard(color))}
+        </View>
+      </View>
     );
   };
 
@@ -966,9 +1139,10 @@ const HomeScreen = ({ navigation }) => {
         }
       >
         {renderCategoriesSection()}
-        {renderCitiesSection()}
-        {renderSimilarityGroupsSection()}
-        {renderRecentPhotos()}
+        {showCityCategories && renderCitiesSection()}
+        {showColorCategories && renderColorsSection()}
+        {showSimilarityGroups && renderSimilarityGroupsSection()}
+        {showRecentPhotos && renderRecentPhotos()}
       </ScrollView>
 
       {/* FAB扫描按钮 */}

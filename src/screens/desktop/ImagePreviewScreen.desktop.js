@@ -1524,7 +1524,7 @@ const ImagePreviewScreen = ({
             <TouchableOpacity
               style={styles.actionButton}
               onPress={handleDelete}>
-              <Text style={[styles.actionButtonText, styles.actionButtonTextDanger]}>❌ 删除</Text>
+              <Text style={[styles.actionButtonText, styles.actionButtonTextDanger]}>🗑️ 删除</Text>
             </TouchableOpacity>
             
             {/* 暂存按钮（只在不在暂存箱时显示） */}
@@ -1532,7 +1532,7 @@ const ImagePreviewScreen = ({
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleAddToStagingBox}>
-                <Text style={styles.actionButtonText}>🗑️ 暂存</Text>
+                <Text style={styles.actionButtonText}>📦 暂存</Text>
               </TouchableOpacity>
             )}
             
@@ -1541,7 +1541,7 @@ const ImagePreviewScreen = ({
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleRemoveFromStagingBox}>
-                <Text style={styles.actionButtonText}>📤 从暂存箱移除</Text>
+                <Text style={styles.actionButtonText}>➡️ 移出</Text>
               </TouchableOpacity>
             )}
             
@@ -1552,7 +1552,7 @@ const ImagePreviewScreen = ({
                 expandedAction === 'category' && styles.actionButtonActive
               ]}
               onPress={openCategorySelector}>
-              <Text style={styles.actionButtonText}>🏷️ 设置分类</Text>
+              <Text style={styles.actionButtonText}>🏷️ 分类</Text>
             </TouchableOpacity>
             
             {/* 照片创玩按钮（所有图片都可以创玩） */}
@@ -1562,21 +1562,21 @@ const ImagePreviewScreen = ({
                 expandedAction === 'enhance' && styles.actionButtonActive
               ]}
               onPress={openEnhancePanel}>
-              <Text style={styles.actionButtonText}>✨ 照片创玩</Text>
+              <Text style={styles.actionButtonText}>✨ 创玩</Text>
             </TouchableOpacity>
             
             {/* 复制到剪贴板 */}
             <TouchableOpacity
               style={styles.actionButton}
               onPress={handleCopyToClipboard}>
-              <Text style={styles.actionButtonText}>📋 复制到剪贴板</Text>
+              <Text style={styles.actionButtonText}>📋 内容复制</Text>
             </TouchableOpacity>
             
             {/* 复制到文件管理器 */}
             <TouchableOpacity
               style={styles.actionButton}
               onPress={handleCopyToFileManager}>
-              <Text style={styles.actionButtonText}>📂 复制到文件管理器</Text>
+              <Text style={styles.actionButtonText}>📂 文件复制</Text>
             </TouchableOpacity>
           </View>
 

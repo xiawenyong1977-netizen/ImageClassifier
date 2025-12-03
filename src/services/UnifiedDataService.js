@@ -1156,6 +1156,32 @@ class UnifiedDataService {
     }
   }
 
+  /**
+   * 获取暂存箱的选中图片（同步版本）
+   * 优化：从给定的图片ID列表中，只检查这些图片的选中状态
+   * @param {Array<string>} stagingBoxImageIds - 暂存箱的图片ID列表
+   * @returns {Array} 选中的图片数组
+   */
+  getSelectedImagesByStagingBox(stagingBoxImageIds) {
+    try {
+      if (!stagingBoxImageIds || stagingBoxImageIds.length === 0) {
+        return [];
+      }
+      
+      // 从缓存中获取这些图片的精简信息（包含选中状态）
+      const cache = this.imageCache.getCache();
+      const stagingBoxImageIdSet = new Set(stagingBoxImageIds);
+      const stagingBoxImages = cache.allImages.filter(img => stagingBoxImageIdSet.has(img.id));
+      
+      // 过滤出选中的图片
+      const selectedImages = stagingBoxImages.filter(img => img.selected === true);
+      return selectedImages;
+    } catch (error) {
+      console.error('❌ 获取暂存箱选中图片失败:', error);
+      return [];
+    }
+  }
+
   // ==================== 监听器接口 ====================
   
   /**

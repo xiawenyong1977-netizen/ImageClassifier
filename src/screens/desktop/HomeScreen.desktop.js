@@ -39,8 +39,10 @@ const HomeScreen = () => {
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
   // 显示设置
+  const [showCityCategories, setShowCityCategories] = useState(true);
   const [showColorCategories, setShowColorCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
+  const [showRecentPhotos, setShowRecentPhotos] = useState(true);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
   const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
@@ -154,10 +156,14 @@ const HomeScreen = () => {
       hideEmptyCategoriesRef.current = shouldHide;
       
       // 读取显示设置（默认为 true）
+      const shouldShowCities = settings.showCityCategories !== false;
       const shouldShowColors = settings.showColorCategories !== false;
       const shouldShowSimilarity = settings.showSimilarityGroups !== false;
+      const shouldShowRecent = settings.showRecentPhotos !== false;
+      setShowCityCategories(shouldShowCities);
       setShowColorCategories(shouldShowColors);
       setShowSimilarityGroups(shouldShowSimilarity);
+      setShowRecentPhotos(shouldShowRecent);
       
       const totalCount = Array.isArray(allImages) ? allImages.length : 0;
       setTotalImagesCount(totalCount);
@@ -423,10 +429,13 @@ const HomeScreen = () => {
       logger.debug('收到设置更新事件，重新加载数据');
       const { key, settings: newSettings } = event.detail || {};
       // 如果更新了显示相关的设置，立即更新状态
-      if (key === 'showColorCategories' || key === 'showSimilarityGroups') {
+      if (key === 'showCityCategories' || key === 'showColorCategories' || 
+          key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
         if (newSettings) {
+          setShowCityCategories(newSettings.showCityCategories !== false);
           setShowColorCategories(newSettings.showColorCategories !== false);
           setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
+          setShowRecentPhotos(newSettings.showRecentPhotos !== false);
         }
       }
       // 重新加载数据以应用所有设置
@@ -999,32 +1008,34 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* 城市分类卡片 */}
-        <View style={styles.categoriesSection}>
-          <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏙️ 按城市</Text>
+        {/* 城市分类卡片 - 根据设置显示 */}
+        {showCityCategories && (
+          <View style={styles.categoriesSection}>
+            <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>🏙️ 按城市</Text>
+            </View>
+            <View style={styles.categoriesContainer}>
+              {cityCounts && Object.keys(cityCounts).length > 0 ? (
+                Object.entries(cityCounts)
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([city, count]) => {
+                    const recentImages = cityRecentImages[city] || [];
+                    return (
+                      <CityCard
+                        key={city}
+                        city={city}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleCityPress}
+                      />
+                    );
+                  })
+              ) : (
+                <Text style={styles.emptyMessage}>暂无城市数据</Text>
+              )}
+            </View>
           </View>
-          <View style={styles.categoriesContainer}>
-            {cityCounts && Object.keys(cityCounts).length > 0 ? (
-              Object.entries(cityCounts)
-                .sort(([,a], [,b]) => b - a)
-                .map(([city, count]) => {
-                  const recentImages = cityRecentImages[city] || [];
-                  return (
-                    <CityCard
-                      key={city}
-                      city={city}
-                      count={count}
-                      recentImages={recentImages}
-                      onPress={handleCityPress}
-                    />
-                  );
-                })
-            ) : (
-              <Text style={styles.emptyMessage}>暂无城市数据</Text>
-            )}
-          </View>
-        </View>
+        )}
 
         {/* 颜色分类卡片 - 根据设置显示 */}
         {showColorCategories && (
@@ -1084,14 +1095,16 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* 最近照片 */}
-        <View style={styles.recentSection}>
-          <Text style={styles.sectionTitle}>📸 最近照片</Text>
-          <RecentImagesGrid 
-            images={stableRecentImages} 
-            onImagePress={handleImagePress}
-          />
-        </View>
+        {/* 最近照片 - 根据设置显示 */}
+        {showRecentPhotos && (
+          <View style={styles.recentSection}>
+            <Text style={styles.sectionTitle}>📸 最近照片</Text>
+            <RecentImagesGrid 
+              images={stableRecentImages} 
+              onImagePress={handleImagePress}
+            />
+          </View>
+        )}
       </ScrollView>
     );
   };
@@ -1125,7 +1138,7 @@ const HomeScreen = () => {
                 setScreenProps({ category: 'stagingBox' });
               }}
             >
-              <Text style={styles.titleBarStagingIcon}>🗑️</Text>
+              <Text style={styles.titleBarStagingIcon}>📦</Text>
               {stagingBoxCount > 0 && (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{stagingBoxCount > 99 ? '99+' : stagingBoxCount}</Text>
