@@ -16,6 +16,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Image,
   RefreshControl,
   StyleSheet,
@@ -416,11 +417,10 @@ const HomeScreen = ({ navigation }) => {
       const directoryCountsData = await UnifiedDataService.readDirectoryCounts();
       setDirectoryCounts(directoryCountsData);
       
-      // 加载各目录的最近图片（按数量排序取前10个）
-      const sortedDirectories = Object.entries(directoryCountsData).sort(([,a], [,b]) => b - a);
-      const directoryIds = sortedDirectories.slice(0, 10).map(([dirName]) => dirName);
+      // 加载所有目录的最近图片（每个目录只加载1张用于缩略图）
+      const allDirectoryIds = Object.keys(directoryCountsData);
       
-      const directoryImagesPromises = directoryIds.map(async (dirName) => {
+      const directoryImagesPromises = allDirectoryIds.map(async (dirName) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
           return { dirName, images };
@@ -473,6 +473,19 @@ const HomeScreen = ({ navigation }) => {
       setRecentImagesTotal(0);
     }
   };
+
+  /**
+   * 刷新新发现照片
+   */
+  const refreshNewDiscoveredImages = useCallback(async () => {
+    try {
+      const result = await UnifiedDataService.readNewDiscoveredImages(12);
+      setRecentImages(result.images || []);
+      setRecentImagesTotal(result.total || 0);
+    } catch (error) {
+      logger.error('刷新新发现照片失败:', error);
+    }
+  }, []);
 
   /**
    * 加载最近扫描时间和信息
@@ -815,7 +828,8 @@ const HomeScreen = ({ navigation }) => {
           logger.debug('📁 点击分类卡片:', category.id);
           // 注意：暂存箱不是分类，不会出现在分类列表中，所以这里不需要判断 stagingBox
           navigation.navigate('Category', {
-            category: category.id,
+            filterType: 'category',
+            filterValue: category.id,
             fromScreen: 'Home',
           });
         } catch (error) {
@@ -894,7 +908,8 @@ const HomeScreen = ({ navigation }) => {
           
           logger.debug('🔗 点击相似组卡片:', group.groupId);
           navigation.navigate('Category', {
-            similarityGroupId: group.groupId,
+            filterType: 'similarityGroup',
+            filterValue: group.groupId,
             fromScreen: 'SimilarityGroup',
           });
         } catch (error) {
@@ -966,7 +981,8 @@ const HomeScreen = ({ navigation }) => {
             
             logger.debug('🎨 点击颜色卡片:', color);
             navigation.navigate('Category', {
-              color: color,
+              filterType: 'color',
+              filterValue: color,
               fromScreen: 'Home',
             });
           } catch (error) {
@@ -1120,7 +1136,8 @@ const HomeScreen = ({ navigation }) => {
           
           logger.debug('🏙️ 点击城市卡片:', city.name);
           navigation.navigate('Category', {
-            city: city.name,
+            filterType: 'city',
+            filterValue: city.name,
             fromScreen: 'Home',
           });
         } catch (error) {
@@ -1194,9 +1211,22 @@ const HomeScreen = ({ navigation }) => {
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 16, paddingHorizontal: 16 }]}>
-          📸 新发现照片 {recentImagesTotal > 0 ? `(${recentImagesTotal})` : ''}
-        </Text>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>📸 新发现照片</Text>
+            {recentImagesTotal > 0 && (
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>{recentImagesTotal}</Text>
+              </View>
+            )}
+          </View>
+          <TouchableOpacity 
+            style={styles.toggleButton}
+            onPress={refreshNewDiscoveredImages}
+          >
+            <Text style={styles.toggleButtonText}>重新检测</Text>
+          </TouchableOpacity>
+        </View>
         
         {recentImages.length === 0 ? (
           <View style={styles.emptyState}>
@@ -1371,12 +1401,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16, // 增加标题和卡片的间距
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#000000',
     // 注意：当 sectionTitle 在 sectionHeader 内部时，不需要额外的 padding
     // 当单独使用时，需要通过内联样式添加 paddingHorizontal: 16
+  },
+  countBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
   },
   toggleButton: {
     paddingHorizontal: 8,

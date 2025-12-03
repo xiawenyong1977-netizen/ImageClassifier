@@ -53,7 +53,6 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   // 微信授权相关状态
   const [wechatStatus, setWechatStatus] = useState('checking'); // checking, member, not_member
   const [qrCode, setQrCode] = useState('');
-  const [qrContent, setQrContent] = useState(''); // 二维码内容（URL）
   const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
   const [checkingFollow, setCheckingFollow] = useState(false);
 
@@ -441,7 +440,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   };
   
   /**
-   * 点击二维码：保存到相册并调起微信
+   * 点击二维码：保存二维码到相册，然后打开微信主界面
+   * 注意：微信限制了直接打开扫一扫的功能，只能打开微信主界面，用户需要手动进入扫一扫
    */
   const openWeChatScan = async () => {
     if (!qrCode) {
@@ -452,60 +452,56 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     try {
       logger.debug('🖼️ 开始保存二维码到相册...');
       
-      // 使用 WebAdapters 封装的 RNFS 接口保存图片到相册
+      // 先保存二维码到相册
       let saveResult = null;
       if (RNFS && typeof RNFS.saveImageToGallery === 'function') {
         try {
-          // 保存二维码图片到相册
           const fileName = `微信二维码_${Date.now()}.png`;
           saveResult = await RNFS.saveImageToGallery(qrCode, fileName);
           logger.debug('✅ 二维码已保存到相册:', saveResult);
         } catch (saveError) {
           logger.error('❌ 保存二维码到相册失败:', saveError);
-          // 继续尝试调起微信
+          // 即使保存失败，也继续尝试打开微信
         }
       } else {
         logger.warn('⚠️ RNFS.saveImageToGallery 方法不可用');
       }
 
-      // 先显示提示，用户确认后再调起微信
+      // 保存成功后，弹出提示
       if (saveResult) {
         Alert.alert(
           '保存成功',
-          '二维码已保存到相册，现在打开微信扫一扫？',
+          '二维码已保存到相册，现在打开微信？',
           [
             { text: '取消', style: 'cancel' },
-            { 
-              text: '打开微信', 
+            {
+              text: '打开微信',
               style: 'default',
               onPress: async () => {
-                // 用户确认后调起微信（不传 saveResult，避免重复提示）
-                await openWeChatDirectly();
+                await openWeChatApp();
               }
             }
           ]
         );
       } else {
+        // 保存失败，直接尝试打开微信
         Alert.alert(
           '提示',
-          '请手动打开微信，在右上角"+"菜单中选择"扫一扫"，然后扫描上方二维码',
+          '二维码保存失败，是否继续打开微信？',
           [
-            { text: '知道了', style: 'default' },
+            { text: '取消', style: 'cancel' },
             {
               text: '打开微信',
               style: 'default',
               onPress: async () => {
-                await openWeChatDirectly();
+                await openWeChatApp();
               }
             }
           ]
         );
       }
-
     } catch (error) {
       logger.error('❌ 操作失败:', error);
-      // 即使保存失败，也尝试调起微信
-      await openWeChatDirectly();
       Alert.alert(
         '提示',
         '操作时出现问题，请手动打开微信扫描上方的二维码',
@@ -515,29 +511,34 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   };
 
   /**
-   * 调起微信扫一扫
+   * 打开微信应用
    */
-  const openWeChatDirectly = async () => {
+  const openWeChatApp = async () => {
     try {
-      logger.debug('📱 正在调起微信主界面...');
+      logger.debug('📱 正在打开微信...');
       const weixinMain = 'weixin://';
-      const supportedMain = await Linking.canOpenURL(weixinMain);
-      if (supportedMain) {
+      const supported = await Linking.canOpenURL(weixinMain);
+      if (supported) {
         await Linking.openURL(weixinMain);
-        logger.debug('✅ 已调起微信主界面');
-      } else {
-        logger.warn('⚠️ 无法调起微信');
+        logger.debug('✅ 已打开微信主界面');
         Alert.alert(
           '提示',
-          '无法自动打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
+          '已打开微信，请在右上角"+"菜单中选择"扫一扫"，然后扫描已保存的二维码',
+          [{ text: '知道了', style: 'default' }]
+        );
+      } else {
+        logger.warn('⚠️ 无法打开微信');
+        Alert.alert(
+          '提示',
+          '无法自动打开微信，请手动打开微信，在"扫一扫"中扫描已保存的二维码',
           [{ text: '知道了', style: 'default' }]
         );
       }
     } catch (error) {
-      logger.error('❌ 调起微信失败:', error);
+      logger.error('❌ 打开微信失败:', error);
       Alert.alert(
         '提示',
-        '无法打开微信，请手动打开微信，在"扫一扫"中扫描二维码',
+        '无法打开微信，请手动打开微信，在"扫一扫"中扫描已保存的二维码',
         [{ text: '知道了', style: 'default' }]
       );
     }
@@ -1058,7 +1059,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   </TouchableOpacity>
                 )}
                 <Text style={styles.membershipQrHint}>
-                  {qrCode ? '点击二维码打开微信扫一扫' : '微信扫码关注"芯图相册"，开通会员'}
+                  {qrCode ? '点击二维码打开微信，然后手动进入扫一扫' : '微信扫码关注"芯图相册"，开通会员'}
                 </Text>
               </View>
             )}

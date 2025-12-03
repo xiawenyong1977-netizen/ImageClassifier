@@ -77,6 +77,7 @@ TempProject/
 temp_cert.der
 temp_cert.pem
 aliyun-filing-info.txt
+deploy-temp/
 
 # Backup files
 backup_*/

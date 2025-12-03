@@ -1825,13 +1825,13 @@ const CategoryScreen = ({
     
     if (actualSelectedCount === 0) return;
 
-    Alert.alert(
+      Alert.alert(
       '从暂存箱移除',
       `确定要从暂存箱移除选中的 ${actualSelectedCount} 张图片吗？\n\n这些图片将从暂存箱中移除，但不会删除文件。`,
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '移除',
+          text: '移出',
           style: 'default',
           onPress: async () => {
             try {

@@ -1166,9 +1166,14 @@ const HomeScreen = () => {
         {showRecentPhotos && (
           <View style={styles.recentSection}>
             <View style={styles.recentSectionHeader}>
-              <Text style={styles.sectionTitle}>
-                📸 最新发现照片 {recentImagesTotal > 0 ? `(${recentImagesTotal})` : ''}
-              </Text>
+              <View style={styles.sectionTitleContainer}>
+                <Text style={styles.sectionTitle}>📸 最新发现照片</Text>
+                {recentImagesTotal > 0 && (
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>{recentImagesTotal}</Text>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity
                 style={styles.refreshButton}
                 onPress={refreshNewDiscoveredImages}
@@ -1727,10 +1732,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+  },
+  countBadge: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
   },
   toggleButton: {
     paddingHorizontal: 12,

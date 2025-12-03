@@ -1390,14 +1390,15 @@ public class GalleryScanService {
                                         classificationData.put("message", messageObj.toString());
                                     }
                                     
-                                    // 保存背景颜色字段
+                                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
                                     Object backgroundColorObj = cacheData.get("background_color");
                                     if (backgroundColorObj != null) {
                                         String backgroundColor = backgroundColorObj.toString();
-                                        classificationData.put("background_color", backgroundColor);
-                                        Log.d(TAG, "🎨 [缓存查询] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
-                                    } else {
-                                        Log.d(TAG, "⚠️ [缓存查询] 未找到背景颜色字段, 图片: " + image.fileName + ", cacheData keys: " + cacheData.keySet());
+                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
+                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                                            classificationData.put("background_color", backgroundColor);
+                                            Log.d(TAG, "🎨 [缓存查询] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                        }
                                     }
                                     
                                     // 缓存命中时没有小模型检测结果，设置为空
@@ -2068,14 +2069,15 @@ public class GalleryScanService {
                                         classificationData.put("message", messageObj.toString());
                                     }
                                     
-                                    // 保存背景颜色字段
+                                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
                                     Object backgroundColorObj = inferenceData.get("background_color");
                                     if (backgroundColorObj != null) {
                                         String backgroundColor = backgroundColorObj.toString();
-                                        classificationData.put("background_color", backgroundColor);
-                                        Log.d(TAG, "🎨 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
-                                    } else {
-                                        Log.d(TAG, "⚠️ 未找到背景颜色字段, 图片: " + image.fileName + ", inferenceData keys: " + inferenceData.keySet());
+                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
+                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                                            classificationData.put("background_color", backgroundColor);
+                                            Log.d(TAG, "🎨 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                        }
                                     }
                                     
                                     // 大模型推理没有小模型检测结果
@@ -2108,14 +2110,15 @@ public class GalleryScanService {
                                     classificationData.put("mobileNetV3Detections", mobileNetV3Detections);
                                     classificationData.put("message", null);
                                     
-                                    // 保存背景颜色字段（如果存在）
+                                    // 保存背景颜色字段（如果存在，跳过 null 和 "null" 字符串）
                                     Object backgroundColorObj = inferenceData.get("background_color");
                                     if (backgroundColorObj != null) {
                                         String backgroundColor = backgroundColorObj.toString();
-                                        classificationData.put("background_color", backgroundColor);
-                                        Log.d(TAG, "🎨 [小模型推理] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
-                                    } else {
-                                        Log.d(TAG, "⚠️ [小模型推理] 未找到背景颜色字段, 图片: " + image.fileName + ", inferenceData keys: " + inferenceData.keySet());
+                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
+                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                                            classificationData.put("background_color", backgroundColor);
+                                            Log.d(TAG, "🎨 [小模型推理] 解析到背景颜色字段: " + backgroundColor + ", 图片: " + image.fileName);
+                                        }
                                     }
                                     
                                     // 注意：小模型推理结果暂时保存为NA，JS层会在后续阶段进行映射
@@ -2290,8 +2293,8 @@ public class GalleryScanService {
             if (message != null) {
                 imageData.put("message", message);
             }
-            // 保存背景颜色字段
-            if (backgroundColor != null && !backgroundColor.isEmpty()) {
+            // 保存背景颜色字段（跳过 null 和 "null" 字符串）
+            if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
                 imageData.put("background_color", backgroundColor);
             }
             

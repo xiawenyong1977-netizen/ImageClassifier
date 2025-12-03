@@ -320,14 +320,16 @@ public class ImageDataService {
                     if (classificationData.get("message") != null) {
                         values.put("message", classificationData.get("message").toString());
                     }
-                    // 保存背景颜色字段
+                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
                     Object backgroundColorObj = classificationData.get("background_color");
                     if (backgroundColorObj != null) {
                         String backgroundColor = backgroundColorObj.toString();
-                        values.put("background_color", backgroundColor);
-                        Log.d(TAG, "🎨 [数据库更新] 保存背景颜色字段: " + backgroundColor + ", 图片ID: " + id);
-                    } else {
-                        Log.d(TAG, "⚠️ [数据库更新] 未找到背景颜色字段, 图片ID: " + id + ", classificationData keys: " + classificationData.keySet());
+                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
+                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                            values.put("background_color", backgroundColor);
+                            Log.d(TAG, "🎨 [数据库更新] 保存背景颜色字段: " + backgroundColor + ", 图片ID: " + id);
+                        }
+                        // 如果为 null 或 "null"，不更新数据库，保持原有值
                     }
                     
                     values.put("updatedAt", dateFormat.format(new Date()));

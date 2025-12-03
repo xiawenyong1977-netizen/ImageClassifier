@@ -37,7 +37,33 @@ const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 
 const CategoryScreen = ({ route, navigation }) => {
   // ==================== 路由参数 ====================
-  const { category, city, similarityGroupId, color, filterType, filterValue, fromScreen } = route.params || {};
+  // 统一使用 filterType 和 filterValue，从旧参数推导（过渡期）
+  const { filterType: propFilterType, filterValue: propFilterValue, fromScreen } = route.params || {};
+  
+  // 从旧参数推导 filterType 和 filterValue（向后兼容，但优先使用新参数）
+  const { category, city, similarityGroupId, color } = route.params || {};
+  let filterType = propFilterType;
+  let filterValue = propFilterValue;
+  
+  // 如果没有新参数，从旧参数推导
+  if (!filterType) {
+    if (category === 'stagingBox') {
+      filterType = 'stagingBox';
+      filterValue = null;
+    } else if (category) {
+      filterType = 'category';
+      filterValue = category;
+    } else if (city) {
+      filterType = 'city';
+      filterValue = city;
+    } else if (similarityGroupId) {
+      filterType = 'similarityGroup';
+      filterValue = similarityGroupId;
+    } else if (color) {
+      filterType = 'color';
+      filterValue = color;
+    }
+  }
   
   // ==================== 状态管理 ====================
   const [images, setImages] = useState([]);
@@ -84,8 +110,9 @@ const CategoryScreen = ({ route, navigation }) => {
   const ITEMS_PER_PAGE = 50;
 
   // ==================== 页面类型判断 ====================
-  const pageType = category ? 'category' : city ? 'city' : similarityGroupId ? 'similarity' : color ? 'color' : filterType === 'directory' ? 'directory' : null;
-  const isStaging = category === 'stagingBox';
+  // 统一基于 filterType 判断
+  const pageType = filterType || null;
+  const isStaging = filterType === 'stagingBox';
 
   // 照片创玩（增强方案）
   const [showEnhancePresets, setShowEnhancePresets] = useState(false);
@@ -107,31 +134,37 @@ const CategoryScreen = ({ route, navigation }) => {
     // 🆕 添加空值检查
     const count = Array.isArray(images) ? images.length : 0;
     
-    if (similarityGroupId) {
-      return `相似照片组 (${count}张)`;
+    if (!filterType) {
+      return '图片列表';
     }
-    if (filterType === 'directory' && filterValue) {
-      // 提取目录名（最后一个路径段）
-      const directoryName = filterValue.split('/').pop() || filterValue;
-      // 截断过长的目录名
-      const truncatedName = truncateText(directoryName, 20);
-      return `${truncatedName} (${count}张)`;
-    }
-    if (city) {
-      return `${city} (${count}张)`;
-    }
-    if (color) {
-      return `${color} (${count}张)`;
-    }
-    if (category) {
-      // 暂存箱特殊处理，显示中文"暂存箱"
-      if (category === 'stagingBox') {
+    
+    switch (filterType) {
+      case 'similarityGroup':
+        return `相似照片组 (${count}张)`;
+      case 'directory':
+        if (filterValue) {
+          // 提取目录名（最后一个路径段）
+          const directoryName = filterValue.split('/').pop() || filterValue;
+          // 截断过长的目录名
+          const truncatedName = truncateText(directoryName, 20);
+          return `${truncatedName} (${count}张)`;
+        }
+        return `目录 (${count}张)`;
+      case 'city':
+        return `${filterValue || '城市'} (${count}张)`;
+      case 'color':
+        return `${filterValue || '颜色'} (${count}张)`;
+      case 'stagingBox':
         return `暂存箱 (${count}张)`;
-      }
-      const categoryName = UnifiedDataService.getCategoryDisplayName(category);
-      return `${categoryName} (${count}张)`;
+      case 'category':
+        if (filterValue) {
+          const categoryName = UnifiedDataService.getCategoryDisplayName(filterValue);
+          return `${categoryName} (${count}张)`;
+        }
+        return `分类 (${count}张)`;
+      default:
+        return '图片列表';
     }
-    return '图片列表';
   };
 
   /**
@@ -162,39 +195,15 @@ const CategoryScreen = ({ route, navigation }) => {
   // ==================== 选择模式相关函数 ====================
   
   // 计算选中数量的函数
-  const calculateSelectedCount = () => {
+  const calculateSelectedCount = async () => {
     try {
-      if (similarityGroupId) {
-        // 相似组页面：获取相似组的选中图片数量
-        const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
-        return selectedImages.length;
-      } else if (city) {
-        // 城市页面：获取城市的选中图片数量
-        const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
-        return selectedImages.length;
-      } else if (filterType === 'directory' && filterValue) {
-        // 目录页面：从所有选中图片中过滤出当前目录的图片（与颜色页面一致）
-        const allSelected = UnifiedDataService.getSelectedImages();
-        const directoryImageIds = new Set(images.map(img => img.id));
-        const selectedInDirectory = allSelected.filter(img => directoryImageIds.has(img.id));
-        return selectedInDirectory.length;
-      } else if (color) {
-        // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
-        const allSelected = UnifiedDataService.getSelectedImages();
-        const colorImageIds = new Set(images.map(img => img.id));
-        const selectedInColor = allSelected.filter(img => colorImageIds.has(img.id));
-        return selectedInColor.length;
-      } else if (category === 'stagingBox') {
-        // 暂存箱页面：直接获取暂存箱图片ID，然后只检查这些图片的选中状态
-        const stagingBoxImageIds = images.map(img => img.id);
-        const selectedInStagingBox = UnifiedDataService.getSelectedImagesByStagingBox(stagingBoxImageIds);
-        return selectedInStagingBox.length;
-      } else if (category) {
-        // 分类页面：获取分类的选中图片数量
-        const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
-        return selectedImages.length;
+      if (!filterType) {
+        return 0;
       }
-      return 0;
+      
+      // 统一使用 UnifiedDataService.getSelectedImagesByFilter
+      const selectedImages = await UnifiedDataService.getSelectedImagesByFilter(filterType, filterValue);
+      return selectedImages.length;
     } catch (error) {
       logger.error('获取选中数量失败:', error);
       return 0;
@@ -202,9 +211,9 @@ const CategoryScreen = ({ route, navigation }) => {
   };
   
   // 全选/取消全选（与 PC 端同步到 UnifiedDataService）
-  const toggleSelectAll = () => {
+  const toggleSelectAll = async () => {
     // 实时获取当前状态，不依赖状态变量
-    const currentSelectedCount = calculateSelectedCount();
+    const currentSelectedCount = await calculateSelectedCount();
     
     if (currentSelectedCount === images.length && images.length > 0) {
       // 全部选中，则取消全选
@@ -229,16 +238,18 @@ const CategoryScreen = ({ route, navigation }) => {
     }
     
     // 更新选中数量
-    setSelectedCount(calculateSelectedCount());
+    const newCount = await calculateSelectedCount();
+    setSelectedCount(newCount);
   };
 
   // 切换图片选择状态（直接使用 UnifiedDataService，与 PC 端一致）
-  const toggleImageSelection = (imageId) => {
+  const toggleImageSelection = async (imageId) => {
     const isCurrentlySelected = UnifiedDataService.isImageSelected(imageId);
     UnifiedDataService.setImageSelection(imageId, !isCurrentlySelected);
     
     // 更新选中数量
-    setSelectedCount(calculateSelectedCount());
+    const newCount = await calculateSelectedCount();
+    setSelectedCount(newCount);
   };
 
   // 进入选择模式
@@ -250,7 +261,7 @@ const CategoryScreen = ({ route, navigation }) => {
   // 批量修改分类
   const handleBatchChangeCategory = async (newCategory) => {
     // 实时获取选中数量，不依赖状态变量
-    const currentSelectedCount = calculateSelectedCount();
+    const currentSelectedCount = await calculateSelectedCount();
     if (currentSelectedCount === 0) return;
     
     try {
@@ -306,14 +317,15 @@ const CategoryScreen = ({ route, navigation }) => {
   // ==================== 时间轴分组相关函数 ====================
   
   // 时间轴标题点击处理 - 全选/取消全选该时间段的所有图片（与 PC 端一致）
-  const handleTimelineHeaderPress = (imagesForDate) => {
+  const handleTimelineHeaderPress = async (imagesForDate) => {
     if (!selectionMode) {
       // 非选择模式下，进入选择模式并全选该组
       setSelectionMode(true);
       imagesForDate.forEach(img => {
         UnifiedDataService.setImageSelection(img.id, true);
       });
-      setSelectedCount(calculateSelectedCount());
+      const newCount = await calculateSelectedCount();
+      setSelectedCount(newCount);
       return;
     }
     
@@ -337,10 +349,11 @@ const CategoryScreen = ({ route, navigation }) => {
     }
     
     // 更新选中数量
-    setSelectedCount(calculateSelectedCount());
+    const newCount = await calculateSelectedCount();
+    setSelectedCount(newCount);
     
     // 检查是否还有选中的图片，如果没有则退出选择模式
-    if (calculateSelectedCount() === 0) {
+    if (newCount === 0) {
       setSelectionMode(false);
     }
   };
@@ -405,7 +418,8 @@ const CategoryScreen = ({ route, navigation }) => {
         await loadImages(); // 等待数据加载和状态更新完成
         
         // 重新计算选中数量 - 现在可以安全地使用最新的数据
-        setSelectedCount(calculateSelectedCount());
+        const newCount = await calculateSelectedCount();
+        setSelectedCount(newCount);
         
         // 统一处理高亮逻辑
         const returnedImageId = route.params?.returnedImageId;
@@ -521,27 +535,12 @@ const CategoryScreen = ({ route, navigation }) => {
 
       let filteredImages = [];
       
-      if (similarityGroupId) {
-        const groupData = await UnifiedDataService.getSimilarityGroupImages(similarityGroupId);
-        filteredImages = groupData.images || [];
-        // 移除过滤 tobecleaned 的逻辑
-      } else if (filterType === 'directory' && filterValue) {
-        // 🆕 按目录加载图片
-        filteredImages = await UnifiedDataService.readImagesByDirectory(filterValue);
-      } else if (city) {
-        filteredImages = await UnifiedDataService.readImagesByLocation(city, null);
-        // 移除过滤 tobecleaned 的逻辑
-      } else if (color) {
-        // 🆕 按颜色加载图片
-        filteredImages = await UnifiedDataService.readImagesByColor(color);
-      } else if (category === 'stagingBox') {
-        // 🆕 使用 UnifiedDataService 的暂存箱接口
-        filteredImages = await UnifiedDataService.getStagingBoxImages();
-      } else if (category) {
-        filteredImages = await UnifiedDataService.readImagesByCategory(category);
-      } else {
+      if (!filterType) {
         logger.error('没有有效的上下文参数');
         filteredImages = [];
+      } else {
+        // 统一使用 UnifiedDataService.readImagesByFilter
+        filteredImages = await UnifiedDataService.readImagesByFilter(filterType, filterValue);
       }
 
       // 按时间排序
@@ -641,7 +640,7 @@ const CategoryScreen = ({ route, navigation }) => {
   /**
    * 点击选择/取消选择
    */
-  const handlePress = (image) => {
+  const handlePress = async (image) => {
     if (!selectionMode) {
       // 普通模式：跳转到预览页
       // 注意：不需要在这里更新高亮，因为返回时会通过 returnedImageId 自动设置高亮
@@ -652,20 +651,17 @@ const CategoryScreen = ({ route, navigation }) => {
         image: image,
         allImages: images,
         currentIndex: index,
-        category,
-        city,
-        color,
-        similarityGroupId,
         filterType,
         filterValue,
         fromScreen: pageType,
       });
     } else {
       // 选择模式：切换选中状态
-      toggleImageSelection(image.id);
+      await toggleImageSelection(image.id);
       
       // 如果没有选中任何图片，退出选择模式
-      if (calculateSelectedCount() === 0) {
+      const newCount = await calculateSelectedCount();
+      if (newCount === 0) {
         setSelectionMode(false);
       }
     }
@@ -674,12 +670,13 @@ const CategoryScreen = ({ route, navigation }) => {
   /**
    * 清除选中状态
    */
-  const clearSelections = () => {
-    const selectedIds = getSelectedImageIds();
+  const clearSelections = async () => {
+    const selectedIds = await getSelectedImageIds();
     selectedIds.forEach(id => {
       UnifiedDataService.setImageSelection(id, false);
     });
-    setSelectedCount(calculateSelectedCount());
+    const newCount = await calculateSelectedCount();
+    setSelectedCount(newCount);
   };
 
   /**
@@ -696,11 +693,11 @@ const CategoryScreen = ({ route, navigation }) => {
    * - 当有选中图片时：清除选中状态
    * - 当没有选中图片时：退出选择模式
    */
-  const handleCancelPress = () => {
-    const currentSelectedCount = calculateSelectedCount();
+  const handleCancelPress = async () => {
+    const currentSelectedCount = await calculateSelectedCount();
     if (currentSelectedCount > 0) {
       // 有选中图片时，清除选中状态
-      clearSelections();
+      await clearSelections();
     } else {
       // 没有选中图片时，退出选择模式
       exitSelectionMode();
@@ -712,36 +709,15 @@ const CategoryScreen = ({ route, navigation }) => {
   /**
    * 获取当前选中的图片ID列表
    */
-  const getSelectedImageIds = () => {
+  const getSelectedImageIds = async () => {
     try {
-      if (similarityGroupId) {
-        const selectedImages = UnifiedDataService.getSelectedImagesBySimilarityGroup(similarityGroupId);
-        return selectedImages.map(img => img.id);
-      } else if (city) {
-        const selectedImages = UnifiedDataService.getSelectedImagesByCity(city);
-        return selectedImages.map(img => img.id);
-      } else if (filterType === 'directory' && filterValue) {
-        // 目录页面：从所有选中图片中过滤出当前目录的图片（与颜色页面一致）
-        const allSelected = UnifiedDataService.getSelectedImages();
-        const directoryImageIds = new Set(images.map(img => img.id));
-        const selectedInDirectory = allSelected.filter(img => directoryImageIds.has(img.id));
-        return selectedInDirectory.map(img => img.id);
-      } else if (color) {
-        // 颜色页面：从所有选中图片中过滤出当前颜色的图片（与PC端一致）
-        const allSelected = UnifiedDataService.getSelectedImages();
-        const colorImageIds = new Set(images.map(img => img.id));
-        const selectedInColor = allSelected.filter(img => colorImageIds.has(img.id));
-        return selectedInColor.map(img => img.id);
-      } else if (category === 'stagingBox') {
-        // 暂存箱页面：直接获取暂存箱图片ID，然后只检查这些图片的选中状态
-        const stagingBoxImageIds = images.map(img => img.id);
-        const selectedInStagingBox = UnifiedDataService.getSelectedImagesByStagingBox(stagingBoxImageIds);
-        return selectedInStagingBox.map(img => img.id);
-      } else if (category) {
-        const selectedImages = UnifiedDataService.getSelectedImagesByCategory(category);
-        return selectedImages.map(img => img.id);
+      if (!filterType) {
+        return [];
       }
-      return [];
+      
+      // 统一使用 UnifiedDataService.getSelectedImagesByFilter
+      const selectedImages = await UnifiedDataService.getSelectedImagesByFilter(filterType, filterValue);
+      return selectedImages.map(img => img.id);
     } catch (error) {
       logger.error('获取选中图片ID失败:', error);
       return [];
@@ -757,7 +733,7 @@ const CategoryScreen = ({ route, navigation }) => {
       if (showEnhancePresets) {
         setShowEnhancePresets(false);
       }
-      const selectedIds = getSelectedImageIds();
+      const selectedIds = await getSelectedImageIds();
       
       if (selectedIds.length === 0) {
         Alert.alert('提示', '请先选择图片');
@@ -822,7 +798,7 @@ const CategoryScreen = ({ route, navigation }) => {
   // 点击增强方案：数量与额度检查
   const handleEnhancePresetPress = async (presetId) => {
     try {
-      const selectedIds = getSelectedImageIds();
+      const selectedIds = await getSelectedImageIds();
       const count = selectedIds.length;
       if (count === 0 || count > 9) {
         Alert.alert('提示', '请先选择1-9张照片再使用“照片创玩”。');
@@ -1134,7 +1110,7 @@ const CategoryScreen = ({ route, navigation }) => {
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '移除',
+          text: '移出',
           onPress: async () => {
             try {
               // 1. 清除选中状态（图片保留在当前分类中）
@@ -1581,10 +1557,6 @@ const CategoryScreen = ({ route, navigation }) => {
                           image: image,
                           allImages: allImages,
                           currentIndex: currentIndex,
-                          category,
-                          city,
-                          color,
-                          similarityGroupId,
                           filterType,
                           filterValue,
                           fromScreen: pageType,

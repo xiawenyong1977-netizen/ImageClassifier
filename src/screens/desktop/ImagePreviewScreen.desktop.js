@@ -634,7 +634,7 @@ const ImagePreviewScreen = ({
           onPress: () => logger.debug('用户取消从暂存箱移除')
         },
         {
-          text: '移除',
+          text: '移出',
           style: 'default',
           onPress: async () => {
             logger.debug('用户确认从暂存箱移除，开始操作...');

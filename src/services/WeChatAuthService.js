@@ -141,7 +141,7 @@ class WeChatAuthService {
   
   /**
    * 生成二维码
-   * @returns {Promise<{qrcode: string, qrContent?: string}>} qrContent为二维码内容（URL），如果后端提供的话
+   * @returns {Promise<{qrcode: string, ticket: string}>}
    */
   async generateQrCode() {
     try {
