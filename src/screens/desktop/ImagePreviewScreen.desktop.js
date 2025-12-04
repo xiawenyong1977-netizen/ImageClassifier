@@ -69,7 +69,6 @@ const ImagePreviewScreen = ({
   navigation = {}, 
   imageId, 
   onBack, 
-  fromScreen = null, // 🆕 改为可选，优先从 filterType 推导
   onDataChange,
   // 🆕 统一使用 filterType 和 filterValue
   filterType = null,
@@ -112,16 +111,6 @@ const ImagePreviewScreen = ({
     if (finalFilterType === 'city') return city || urlParams.city;
     if (finalFilterType === 'category') return category || urlParams.category;
     return null;
-  })();
-  
-  // 🆕 根据 filterType 推导 fromScreen（如果没有提供）
-  const derivedFromScreen = fromScreen || (() => {
-    if (!finalFilterType) return 'Home';
-    if (finalFilterType === 'similarityGroup') return 'SimilarityGroup';
-    if (finalFilterType === 'city') return 'City';
-    if (finalFilterType === 'stagingBox') return 'StagingBox';
-    if (finalFilterType === 'category') return 'Category';
-    return 'Home';
   })();
   
   const finalImageId = imageId || route.params?.imageId || urlParams.imageId;
@@ -213,7 +202,12 @@ const ImagePreviewScreen = ({
       let contextValue = '';
       
       // 🆕 统一基于 filterType 和 filterValue 加载图片
-      if (!finalFilterType || !finalFilterValue) {
+      // 注意：暂存箱不需要 filterValue，需要优先判断
+      if (finalFilterType === 'stagingBox') {
+        images = await UnifiedDataService.getStagingBoxImages();
+        contextType = '暂存箱';
+        contextValue = 'StagingBox';
+      } else if (!finalFilterType || !finalFilterValue) {
         // 如果没有 filterType，尝试从图片对象本身获取上下文信息
         if (currentImageData) {
           if (currentImageData.similarityGroupId) {
@@ -256,10 +250,6 @@ const ImagePreviewScreen = ({
         images = await UnifiedDataService.readImagesByLocation(finalFilterValue, null);
         contextType = '城市';
         contextValue = finalFilterValue;
-      } else if (finalFilterType === 'stagingBox') {
-        images = await UnifiedDataService.getStagingBoxImages();
-        contextType = '暂存箱';
-        contextValue = 'StagingBox';
       } else if (finalFilterType === 'category') {
         images = await UnifiedDataService.readImagesByCategory(finalFilterValue);
         contextType = '分类';
@@ -271,6 +261,18 @@ const ImagePreviewScreen = ({
       } else if (finalFilterType === 'color') {
         images = await UnifiedDataService.readImagesByColor(finalFilterValue);
         contextType = '颜色';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'format') {
+        images = await UnifiedDataService.readImagesByFormat(finalFilterValue);
+        contextType = '格式';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'resolution') {
+        images = await UnifiedDataService.readImagesByResolution(finalFilterValue);
+        contextType = '分辨率';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'orientation') {
+        images = await UnifiedDataService.readImagesByOrientation(finalFilterValue);
+        contextType = '方向';
         contextValue = finalFilterValue;
       } else {
         // 默认加载最近照片
@@ -300,7 +302,11 @@ const ImagePreviewScreen = ({
       let updatedImages = [];
       
       // 🆕 统一基于 filterType 和 filterValue 重新加载
-      if (!finalFilterType || !finalFilterValue) {
+      // 注意：暂存箱不需要 filterValue，需要优先判断
+      if (finalFilterType === 'stagingBox') {
+        logger.debug('从暂存箱重新加载...');
+        updatedImages = await UnifiedDataService.getStagingBoxImages();
+      } else if (!finalFilterType || !finalFilterValue) {
         // 没有 filterType，默认加载最近照片
         logger.debug('从最近照片重新加载...');
         updatedImages = await UnifiedDataService.readRecentImages(50);
@@ -311,9 +317,6 @@ const ImagePreviewScreen = ({
       } else if (finalFilterType === 'city') {
         logger.debug('从城市分类重新加载...');
         updatedImages = await UnifiedDataService.readImagesByLocation(finalFilterValue, null);
-      } else if (finalFilterType === 'stagingBox') {
-        logger.debug('从暂存箱重新加载...');
-        updatedImages = await UnifiedDataService.getStagingBoxImages();
       } else if (finalFilterType === 'category') {
         logger.debug('从分类重新加载...');
         updatedImages = await UnifiedDataService.readImagesByCategory(finalFilterValue);
@@ -323,6 +326,15 @@ const ImagePreviewScreen = ({
       } else if (finalFilterType === 'color') {
         logger.debug('从颜色重新加载...');
         updatedImages = await UnifiedDataService.readImagesByColor(finalFilterValue);
+      } else if (finalFilterType === 'format') {
+        logger.debug('从格式重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByFormat(finalFilterValue);
+      } else if (finalFilterType === 'resolution') {
+        logger.debug('从分辨率重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByResolution(finalFilterValue);
+      } else if (finalFilterType === 'orientation') {
+        logger.debug('从方向重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByOrientation(finalFilterValue);
       } else {
         logger.warn('⚠️ 无法确定来源，无法重新加载');
         return false;
@@ -1504,19 +1516,43 @@ const ImagePreviewScreen = ({
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
-          {getDisplayFileName()}
-          {categoryImages.length > 0 && currentImageIndex >= 0 && (
-            <Text style={styles.imageCounter}>
-              {' '}({currentImageIndex + 1}/{categoryImages.length})
-              {derivedFromScreen === 'Home' && ' - 最近照片'}
-              {derivedFromScreen === 'StagingBox' && ' - 暂存箱'}
-              {finalFilterType === 'similarityGroup' && ' - 相似组'}
-              {finalFilterType === 'city' && ` - ${finalFilterValue}`}
-              {finalFilterType === 'color' && ` - ${finalFilterValue}`}
-              {finalFilterType === 'directory' && ` - ${finalFilterValue.split('/').pop()}`}
-              {finalFilterType === 'category' && ` - ${UnifiedDataService.getCategoryDisplayName(finalFilterValue)}`}
-            </Text>
-          )}
+          {(() => {
+            const fileName = getDisplayFileName();
+            let categoryText = '';
+            
+            // 确定分类文本
+            if (finalFilterType === 'similarityGroup') {
+              categoryText = '相似组';
+            } else if (finalFilterType === 'city') {
+              categoryText = finalFilterValue || '';
+            } else if (finalFilterType === 'color') {
+              categoryText = finalFilterValue || '';
+            } else if (finalFilterType === 'directory') {
+              categoryText = finalFilterValue ? finalFilterValue.split('/').pop() : '';
+            } else if (finalFilterType === 'category') {
+              categoryText = UnifiedDataService.getCategoryDisplayName(finalFilterValue) || '';
+            } else if (finalFilterType === 'format') {
+              categoryText = finalFilterValue || '';
+            } else if (finalFilterType === 'resolution') {
+              categoryText = finalFilterValue || '';
+            } else if (finalFilterType === 'orientation') {
+              categoryText = finalFilterValue || '';
+            } else if (finalFilterType === 'stagingBox') {
+              categoryText = '暂存箱';
+            }
+            
+            // 构建标题：文件名（序号/总数）-当前分类
+            if (categoryImages.length > 0 && currentImageIndex >= 0) {
+              const indexText = `(${currentImageIndex + 1}/${categoryImages.length})`;
+              if (categoryText) {
+                return `${fileName} ${indexText} - ${categoryText}`;
+              } else {
+                return `${fileName} ${indexText}`;
+              }
+            } else {
+              return fileName;
+            }
+          })()}
         </Text>
         {/* 顶部操作栏已移除，所有操作都在底部操作栏 */}
       </View>

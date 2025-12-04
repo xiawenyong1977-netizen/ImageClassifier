@@ -275,93 +275,166 @@ public class ImageDataService {
         int updatedCount = 0;
         int failedCount = 0;
         
-        try {
-            db.beginTransaction();
+        // 重试机制：最多重试3次，处理数据库锁定
+        int maxRetries = 3;
+        int retryDelayMs = 50; // 每次重试延迟50ms
+        
+        for (int retry = 0; retry < maxRetries; retry++) {
+            boolean transactionStarted = false;
             
-            for (Map<String, Object> classificationData : classificationDataList) {
-                try {
-                    String uri = (String) classificationData.get("uri");
-                    if (uri == null || uri.isEmpty()) {
-                        failedCount++;
-                        continue;
-                    }
-                    
-                    String id = (String) classificationData.get("id");
-                    // 如果ID为空，或者是MediaStore ID（纯数字），则使用URI生成正确的ID
-                    if (id == null || id.isEmpty() || id.matches("^\\d+$")) {
-                        // MediaStore ID是纯数字，但数据库使用基于URI的哈希ID
-                        // 所以忽略MediaStore ID，使用URI生成正确的ID
-                        id = generateStableId(uri);
-                    }
-                    
-                    ContentValues values = new ContentValues();
-                    
-                    // 分类字段（必需）
-                    String category = (String) classificationData.get("category");
-                    if (category == null || category.isEmpty()) {
-                        failedCount++;
-                        continue;
-                    }
-                    values.put("category", category);
-                    
-                    // 可选字段
-                    if (classificationData.get("confidence") != null) {
-                        values.put("confidence", getDoubleValue(classificationData.get("confidence")));
-                    }
-                    if (classificationData.get("idCardDetections") != null) {
-                        values.put("idCardDetections", jsonToString(classificationData.get("idCardDetections")));
-                    }
-                    if (classificationData.get("generalDetections") != null) {
-                        values.put("generalDetections", jsonToString(classificationData.get("generalDetections")));
-                    }
-                    if (classificationData.get("mobileNetV3Detections") != null) {
-                        values.put("mobileNetV3Detections", jsonToString(classificationData.get("mobileNetV3Detections")));
-                    }
-                    if (classificationData.get("message") != null) {
-                        values.put("message", classificationData.get("message").toString());
-                    }
-                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
-                    Object backgroundColorObj = classificationData.get("background_color");
-                    if (backgroundColorObj != null) {
-                        String backgroundColor = backgroundColorObj.toString();
-                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
-                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
-                            values.put("background_color", backgroundColor);
-                            Log.d(TAG, "🎨 [数据库更新] 保存背景颜色字段: " + backgroundColor + ", 图片ID: " + id);
+            try {
+                // 尝试开始事务
+                db.beginTransaction();
+                transactionStarted = true;
+                
+                for (Map<String, Object> classificationData : classificationDataList) {
+                    try {
+                        String uri = (String) classificationData.get("uri");
+                        if (uri == null || uri.isEmpty()) {
+                            failedCount++;
+                            continue;
                         }
-                        // 如果为 null 或 "null"，不更新数据库，保持原有值
-                    }
-                    
-                    values.put("updatedAt", dateFormat.format(new Date()));
-                    
-                    int rowsAffected = db.update("images", values, "id = ?", new String[]{id});
-                    
-                    if (rowsAffected > 0) {
-                        updatedCount++;
-                    } else {
+                        
+                        String id = (String) classificationData.get("id");
+                        // 如果ID为空，或者是MediaStore ID（纯数字），则使用URI生成正确的ID
+                        if (id == null || id.isEmpty() || id.matches("^\\d+$")) {
+                            // MediaStore ID是纯数字，但数据库使用基于URI的哈希ID
+                            // 所以忽略MediaStore ID，使用URI生成正确的ID
+                            id = generateStableId(uri);
+                        }
+                        
+                        ContentValues values = new ContentValues();
+                        
+                        // 分类字段（必需）
+                        String category = (String) classificationData.get("category");
+                        if (category == null || category.isEmpty()) {
+                            failedCount++;
+                            continue;
+                        }
+                        values.put("category", category);
+                        
+                        // 可选字段
+                        if (classificationData.get("confidence") != null) {
+                            values.put("confidence", getDoubleValue(classificationData.get("confidence")));
+                        }
+                        if (classificationData.get("idCardDetections") != null) {
+                            values.put("idCardDetections", jsonToString(classificationData.get("idCardDetections")));
+                        }
+                        if (classificationData.get("generalDetections") != null) {
+                            values.put("generalDetections", jsonToString(classificationData.get("generalDetections")));
+                        }
+                        if (classificationData.get("mobileNetV3Detections") != null) {
+                            values.put("mobileNetV3Detections", jsonToString(classificationData.get("mobileNetV3Detections")));
+                        }
+                        if (classificationData.get("message") != null) {
+                            values.put("message", classificationData.get("message").toString());
+                        }
+                        // 保存背景颜色字段（跳过 null 和 "null" 字符串）
+                        Object backgroundColorObj = classificationData.get("background_color");
+                        if (backgroundColorObj != null) {
+                            String backgroundColor = backgroundColorObj.toString();
+                            // 只有当背景颜色不为空且不是 "null" 字符串时才保存
+                            if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                                values.put("background_color", backgroundColor);
+                            }
+                            // 如果为 null 或 "null"，不更新数据库，保持原有值
+                        }
+                        
+                        values.put("updatedAt", dateFormat.format(new Date()));
+                        
+                        int rowsAffected = db.update("images", values, "id = ?", new String[]{id});
+                        
+                        if (rowsAffected > 0) {
+                            updatedCount++;
+                        } else {
+                            failedCount++;
+                            Log.e(TAG, "更新失败，未找到图片: id=" + id + ", uri=" + uri);
+                            // 不降级，直接报错，避免在其他地方出错
+                        }
+                        
+                    } catch (Exception e) {
+                        Log.e(TAG, "更新单条分类数据失败", e);
                         failedCount++;
-                        Log.e(TAG, "更新失败，未找到图片: id=" + id + ", uri=" + uri);
-                        // 不降级，直接报错，避免在其他地方出错
                     }
-                    
-                } catch (Exception e) {
-                    Log.e(TAG, "更新单条分类数据失败", e);
-                    failedCount++;
+                }
+                
+                // 标记事务成功
+                db.setTransactionSuccessful();
+                
+                // 成功执行，退出重试循环
+                break;
+                
+            } catch (android.database.sqlite.SQLiteDatabaseLockedException e) {
+                // 数据库锁定异常，需要重试
+                Log.w(TAG, "数据库锁定，重试 " + (retry + 1) + "/" + maxRetries + ": " + e.getMessage());
+                
+                // 确保在重试前结束事务（如果已开始）
+                if (transactionStarted) {
+                    try {
+                        if (db.inTransaction()) {
+                            db.endTransaction();
+                        }
+                    } catch (Exception ex) {
+                        // 忽略结束事务时的异常
+                        Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
+                    }
+                    transactionStarted = false;
+                }
+                
+                // 如果不是最后一次重试，等待后继续
+                if (retry < maxRetries - 1) {
+                    try {
+                        Thread.sleep(retryDelayMs * (retry + 1)); // 递增延迟
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else {
+                    // 最后一次重试失败
+                    Log.e(TAG, "批量更新分类失败：数据库锁定，已重试 " + maxRetries + " 次", e);
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", false);
+                    result.put("updatedCount", 0);
+                    result.put("failedCount", classificationDataList.size());
+                    result.put("error", "数据库锁定，重试失败: " + e.getMessage());
+                    return result;
+                }
+                
+            } catch (Exception e) {
+                // 其他异常，不重试
+                Log.e(TAG, "批量更新分类失败", e);
+                
+                // 确保结束事务（如果已开始）
+                if (transactionStarted) {
+                    try {
+                        if (db.inTransaction()) {
+                            db.endTransaction();
+                        }
+                    } catch (Exception ex) {
+                        // 忽略结束事务时的异常
+                        Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
+                    }
+                }
+                
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", false);
+                result.put("updatedCount", 0);
+                result.put("failedCount", classificationDataList.size());
+                result.put("error", e.getMessage());
+                return result;
+            } finally {
+                // 确保结束事务（如果已开始且未在catch中处理）
+                if (transactionStarted) {
+                    try {
+                        if (db.inTransaction()) {
+                            db.endTransaction();
+                        }
+                    } catch (Exception e) {
+                        // 忽略结束事务时的异常（可能已经在catch中处理过）
+                        Log.w(TAG, "结束事务时出错（可忽略）: " + e.getMessage());
+                    }
                 }
             }
-            
-            db.setTransactionSuccessful();
-            
-        } catch (Exception e) {
-            Log.e(TAG, "批量更新分类失败", e);
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", false);
-            result.put("updatedCount", 0);
-            result.put("failedCount", classificationDataList.size());
-            result.put("error", e.getMessage());
-            return result;
-        } finally {
-            db.endTransaction();
         }
         
         Map<String, Object> result = new HashMap<>();

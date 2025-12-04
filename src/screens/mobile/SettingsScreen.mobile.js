@@ -841,83 +841,98 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             ))}
           </View>
 
-          {/* 显示设置 */}
-          <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>显示设置</Text>
+          {/* 显示设置 - 开关面板样式 */}
+          <View style={styles.switchPanel}>
+            <Text style={styles.switchPanelTitle}>显示设置</Text>
             
-            {/* 显示城市分类 */}
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>🏙️ 显示城市分类</Text>
-                <Text style={styles.settingDescription}>
-                  在首页显示按城市分类的卡片
-                </Text>
+            <View style={styles.switchGrid}>
+              {/* 显示城市分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>🏙️ 城市分类</Text>
+                <Switch
+                  value={settings.showCityCategories !== false}
+                  onValueChange={(value) => updateSetting('showCityCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showCityCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
               </View>
-              <Switch
-                value={settings.showCityCategories !== false} // 默认为 true
-                onValueChange={(value) => updateSetting('showCityCategories', value)}
-                trackColor={{ false: '#ccc', true: '#4CAF50' }}
-              />
-            </View>
 
-            {/* 显示颜色分类 */}
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>🎨 显示颜色分类</Text>
-                <Text style={styles.settingDescription}>
-                  在首页显示按颜色分类的卡片
-                </Text>
+              {/* 显示颜色分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>🎨 颜色分类</Text>
+                <Switch
+                  value={settings.showColorCategories !== false}
+                  onValueChange={(value) => updateSetting('showColorCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showColorCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
               </View>
-              <Switch
-                value={settings.showColorCategories !== false} // 默认为 true
-                onValueChange={(value) => updateSetting('showColorCategories', value)}
-                trackColor={{ false: '#ccc', true: '#4CAF50' }}
-              />
-            </View>
 
-            {/* 显示相似照片 */}
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>🔗 显示相似照片</Text>
-                <Text style={styles.settingDescription}>
-                  在首页显示相似照片组
-                </Text>
+              {/* 显示存储分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📁 存储分类</Text>
+                <Switch
+                  value={settings.showDirectoryCategories !== false}
+                  onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showDirectoryCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
               </View>
-              <Switch
-                value={settings.showSimilarityGroups !== false} // 默认为 true
-                onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
-                trackColor={{ false: '#ccc', true: '#4CAF50' }}
-              />
-            </View>
 
-            {/* 显示最近照片 */}
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>📸 显示最近照片</Text>
-                <Text style={styles.settingDescription}>
-                  在首页显示最近照片区域
-                </Text>
+              {/* 显示格式分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📄 格式分类</Text>
+                <Switch
+                  value={settings.showFormatCategories !== false}
+                  onValueChange={(value) => updateSetting('showFormatCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showFormatCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
               </View>
-              <Switch
-                value={settings.showRecentPhotos !== false} // 默认为 true
-                onValueChange={(value) => updateSetting('showRecentPhotos', value)}
-                trackColor={{ false: '#ccc', true: '#4CAF50' }}
-              />
-            </View>
 
-            {/* 显示存储分类 */}
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>📁 显示存储分类</Text>
-                <Text style={styles.settingDescription}>
-                  在首页显示按存储目录分类的卡片
-                </Text>
+              {/* 显示分辨率分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📏 分辨率分类</Text>
+                <Switch
+                  value={settings.showResolutionCategories !== false}
+                  onValueChange={(value) => updateSetting('showResolutionCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showResolutionCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
               </View>
-              <Switch
-                value={settings.showDirectoryCategories !== false} // 默认为 true
-                onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
-                trackColor={{ false: '#ccc', true: '#4CAF50' }}
-              />
+
+              {/* 显示方向分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>🧭 方向分类</Text>
+                <Switch
+                  value={settings.showOrientationCategories !== false}
+                  onValueChange={(value) => updateSetting('showOrientationCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showOrientationCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示相似照片 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>🔗 相似照片</Text>
+                <Switch
+                  value={settings.showSimilarityGroups !== false}
+                  onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showSimilarityGroups !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示最近照片 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📸 最近照片</Text>
+                <Switch
+                  value={settings.showRecentPhotos !== false}
+                  onValueChange={(value) => updateSetting('showRecentPhotos', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showRecentPhotos !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
             </View>
           </View>
         </View>
@@ -1737,27 +1752,44 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#007AFF',
   },
-  // 显示设置样式
-  settingItem: {
+  // 显示设置样式 - 开关面板
+  switchPanel: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchPanelTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 12,
+  },
+  switchGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  switchItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F7',
+    width: '48%',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 8,
   },
-  settingInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  settingLabel: {
-    fontSize: 16,
+  switchLabel: {
+    fontSize: 15,
     color: '#000000',
-    marginBottom: 4,
-  },
-  settingDescription: {
-    fontSize: 14,
-    color: '#8E8E93',
+    flex: 1,
   },
 });
 

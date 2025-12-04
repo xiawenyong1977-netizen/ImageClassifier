@@ -621,6 +621,90 @@ class UnifiedDataService {
   }
 
   /**
+   * 获取格式统计
+   * 优先从缓存读取，缓存没有则从数据库读取
+   */
+  async readFormatCounts() {
+    try {
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
+      const cache = this.imageCache.getCache();
+      if (cache.formatCounts && Object.keys(cache.formatCounts).length > 0) {
+        logger.debug('从缓存读取格式统计');
+        return cache.formatCounts;
+      }
+      
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有格式统计，返回空对象');
+      return {};
+      
+    } catch (error) {
+      logger.error('读取格式统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取分辨率统计
+   * 只返回前7个最多的分辨率，其他合并为"其他"
+   */
+  async readResolutionCounts() {
+    try {
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 先检查原始统计数据
+      const cache = this.imageCache.getCache();
+      const rawCounts = cache.resolutionCounts || {};
+      logger.debug(`📐 原始分辨率统计: ${Object.keys(rawCounts).length} 种分辨率`, rawCounts);
+      
+      // 使用 getTopResolutions(7) 只返回前7个最多的，其他合并为"其他"
+      const topResolutions = this.imageCache.getTopResolutions(7);
+      
+      if (Object.keys(topResolutions).length > 0) {
+        logger.debug('从缓存读取分辨率统计（前7个）:', topResolutions);
+        return topResolutions;
+      }
+      
+      // 如果缓存中仍然没有，说明数据库中也没有数据（刚启动app时没有数据是正常情况）
+      logger.debug('缓存中没有分辨率统计，返回空对象');
+      return {};
+      
+    } catch (error) {
+      logger.error('读取分辨率统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取方向统计
+   * 返回横屏、竖屏、全景、正方形等方向统计
+   */
+  async readOrientationCounts() {
+    try {
+      // 确保缓存已加载（等待初始化完成）
+      await this.imageCache.buildCache();
+      
+      // 从缓存读取
+      const cache = this.imageCache.getCache();
+      if (cache.orientationCounts && Object.keys(cache.orientationCounts).length > 0) {
+        logger.debug('从缓存读取方向统计');
+        return cache.orientationCounts;
+      }
+      
+      // 如果缓存中仍然没有，说明数据库中也没有数据
+      logger.debug('缓存中没有方向统计，返回空对象');
+      return {};
+      
+    } catch (error) {
+      logger.error('读取方向统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 根据目录获取图片
    * 优先从缓存读取，缓存没有则从数据库读取
    */
@@ -649,6 +733,104 @@ class UnifiedDataService {
       logger.error('读取目录图片失败:', error);
       throw error;
     }
+  }
+
+  /**
+   * 根据格式获取图片
+   * 优先从缓存读取
+   */
+  async readImagesByFormat(format, limit = null) {
+    try {
+      // 确保缓存已加载
+      await this.imageCache.buildCache();
+      
+      // 从缓存获取格式图片
+      const formatImages = this.imageCache.getImagesByFormat(format);
+      
+      // 按时间排序
+      const sortedImages = formatImages.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      
+      return limit ? sortedImages.slice(0, limit) : sortedImages;
+    } catch (error) {
+      logger.error('读取格式图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 根据分辨率获取图片
+   * 优先从缓存读取
+   */
+  async readImagesByResolution(resolution, limit = null) {
+    try {
+      // 确保缓存已加载
+      await this.imageCache.buildCache();
+      
+      // 从缓存获取分辨率图片
+      const resolutionImages = this.imageCache.getImagesByResolution(resolution);
+      
+      // 按时间排序
+      const sortedImages = resolutionImages.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      
+      return limit ? sortedImages.slice(0, limit) : sortedImages;
+    } catch (error) {
+      logger.error('读取分辨率图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定格式的最近图片
+   */
+  async readRecentImagesByFormat(format, limit = 4) {
+    return await this.readImagesByFormat(format, limit);
+  }
+
+  /**
+   * 获取指定分辨率的最近图片
+   */
+  async readRecentImagesByResolution(resolution, limit = 4) {
+    return await this.readImagesByResolution(resolution, limit);
+  }
+
+  /**
+   * 根据方向获取图片
+   */
+  async readImagesByOrientation(orientation, limit = null) {
+    try {
+      // 确保缓存已加载
+      await this.imageCache.buildCache();
+      
+      // 从缓存获取方向图片
+      const orientationImages = this.imageCache.getImagesByOrientation(orientation);
+      
+      // 按时间排序
+      const sortedImages = orientationImages.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      
+      return limit ? sortedImages.slice(0, limit) : sortedImages;
+    } catch (error) {
+      logger.error('读取方向图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取指定方向的最近图片
+   */
+  async readRecentImagesByOrientation(orientation, limit = 4) {
+    return await this.readImagesByOrientation(orientation, limit);
   }
 
   /**
@@ -1517,6 +1699,27 @@ class UnifiedDataService {
           }
           return await this.readImagesByCategory(filterValue);
         
+        case 'format':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: format 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByFormat(filterValue);
+        
+        case 'resolution':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: resolution 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByResolution(filterValue);
+        
+        case 'orientation':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: orientation 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByOrientation(filterValue);
+        
         default:
           logger.error(`readImagesByFilter: 未知的 filterType: ${filterType}`);
           return [];
@@ -1595,6 +1798,33 @@ class UnifiedDataService {
           // 目录：从缓存获取当前目录的图片，然后过滤出选中的
           const directoryImages = this.imageCache.getImagesByDirectory(filterValue);
           return directoryImages.filter(img => img.selected === true);
+        
+        case 'format':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: format 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          // 格式：从缓存获取当前格式的图片，然后过滤出选中的
+          const formatImages = this.imageCache.getImagesByFormat(filterValue);
+          return formatImages.filter(img => img.selected === true);
+        
+        case 'resolution':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: resolution 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          // 分辨率：从缓存获取当前分辨率的图片，然后过滤出选中的
+          const resolutionImages = this.imageCache.getImagesByResolution(filterValue);
+          return resolutionImages.filter(img => img.selected === true);
+        
+        case 'orientation':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: orientation 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          // 方向：从缓存获取当前方向的图片，然后过滤出选中的
+          const orientationImages = this.imageCache.getImagesByOrientation(filterValue);
+          return orientationImages.filter(img => img.selected === true);
         
         default:
           logger.error(`getSelectedImagesByFilter: 未知的 filterType: ${filterType}`);

@@ -255,6 +255,18 @@ const CategoryScreen = ({
 
   const loadImages = useCallback(async () => {
     try {
+      // 🆕 防御性检查：某些 filterType 需要 filterValue
+      if (filterType && filterType !== 'stagingBox') {
+        // stagingBox 不需要 filterValue，其他类型都需要
+        if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+          logger.warn(`filterType=${filterType} 需要 filterValue，但 filterValue 为空，返回空数组`);
+          setAllImages([]);
+          setSelectedImages([]);
+          setStagingBoxImageIds(new Set());
+          return;
+        }
+      }
+      
       // 🆕 使用统一的接口获取图片数据
       const images = await UnifiedDataService.readImagesByFilter(filterType, filterValue);
       logger.debug(`从 ${filterType}(${filterValue}) 获取图片: 总数=${images.length}`);
@@ -760,14 +772,14 @@ const CategoryScreen = ({
   const handleImagePress = useCallback((image) => {
     // 跳转到图片预览页面，传递图片对象和上下文信息
     if (navigation?.onImagePress) {
-      // 🆕 统一传递 filterType 和 filterValue，不推导 fromScreen
+      // 统一传递 filterType 和 filterValue
       const contextProps = {
         filterType,
         filterValue,
         currentPage // 保存当前页码，返回时恢复
       };
          
-      navigation.onImagePress(image, null, contextProps); // fromScreen 传 null，由接收方根据 filterType 推导
+      navigation.onImagePress(image, null, contextProps);
     }
   }, [navigation, filterType, filterValue, currentPage]);
 
@@ -1983,6 +1995,12 @@ const CategoryScreen = ({
           ? `🗑️ 暂存箱 (${allImages.length}张)`
           : filterType === 'category'
           ? `${UnifiedDataService.getCategoryDisplayName(filterValue)} (${allImages.length}张)`
+          : filterType === 'format'
+          ? `📄 ${filterValue} (${allImages.length}张)`
+          : filterType === 'resolution'
+          ? `📏 ${filterValue} (${allImages.length}张)`
+          : filterType === 'orientation'
+          ? `🔄 ${filterValue} (${allImages.length}张)`
           : '图片列表'
         }
       </Text>

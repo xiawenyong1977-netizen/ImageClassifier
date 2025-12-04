@@ -44,7 +44,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   } = route.params || {};
   
   // 从旧参数推导（向后兼容，但优先使用新参数）
-  const { category, city, color, similarityGroupId } = route.params || {};
+  const { category, city, color, similarityGroupId, format, resolution, orientation } = route.params || {};
   
   // 如果没有新参数，从旧参数推导
   let finalFilterType = filterType;
@@ -66,6 +66,15 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     } else if (color) {
       finalFilterType = 'color';
       finalFilterValue = color;
+    } else if (format) {
+      finalFilterType = 'format';
+      finalFilterValue = format;
+    } else if (resolution) {
+      finalFilterType = 'resolution';
+      finalFilterValue = resolution;
+    } else if (orientation) {
+      finalFilterType = 'orientation';
+      finalFilterValue = orientation;
     }
   }
 
@@ -295,6 +304,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       if (!finalFilterType) {
         logger.warn('⚠️ 无法确定来源，无法重新加载');
         return false;
+      }
+      
+      // 🆕 防御性检查：某些 filterType 需要 filterValue
+      if (finalFilterType !== 'stagingBox') {
+        if (!finalFilterValue || (typeof finalFilterValue === 'string' && finalFilterValue.trim() === '')) {
+          logger.warn(`filterType=${finalFilterType} 需要 filterValue，但 filterValue 为空，返回空数组`);
+          return false;
+        }
       }
       
       updatedImages = await UnifiedDataService.readImagesByFilter(finalFilterType, finalFilterValue);
@@ -587,7 +604,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     logger.debug('放入暂存箱...');
     Alert.alert(
       '放入暂存箱',
-      '确定要将这张图片放入暂存箱吗？\n\n图片将被移动到暂存箱中。',
+      '确定要将这张图片放入暂存箱吗？\n\n图片将被放入暂存箱中。',
       [
         { 
           text: '取消', 
@@ -987,6 +1004,18 @@ const ImagePreviewScreen = ({ route, navigation }) => {
             displayName = truncateText(directoryName, 20);
             logger.debug('✅ 使用目录名作为标题:', { filterValue: currentFilterValue, directoryName, displayName });
           }
+          break;
+        case 'format':
+          displayName = currentFilterValue || '格式';
+          logger.debug('✅ 使用格式名作为标题:', displayName);
+          break;
+        case 'resolution':
+          displayName = currentFilterValue || '分辨率';
+          logger.debug('✅ 使用分辨率名作为标题:', displayName);
+          break;
+        case 'orientation':
+          displayName = currentFilterValue || '方向';
+          logger.debug('✅ 使用方向名作为标题:', displayName);
           break;
         case 'similarityGroup':
           displayName = '相似照片组';

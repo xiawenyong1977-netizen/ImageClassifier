@@ -10,6 +10,9 @@ class GlobalImageCache {
       cityCounts: {},
       colorCounts: {},
       directoryCounts: {}, // 目录统计
+      formatCounts: {}, // 格式统计
+      resolutionCounts: {}, // 分辨率统计（完整数据，包含所有分辨率）
+      orientationCounts: {}, // 方向统计（横屏、竖屏、全景）
       recentImages: [],
       selectedCategoryCounts: {}, // 选中图片的分类统计
       selectedCityCounts: {}, // 选中图片的城市统计
@@ -100,8 +103,33 @@ class GlobalImageCache {
         logger.warn('allImages 不是数组，初始化为空数组');
         this.cache.allImages = [];
       } else {
-        // 直接使用ImageStorageService返回的数据，避免重复转换
-        this.cache.allImages = allImages;
+        // 🆕 在构建缓存时，从 imageDimensions 提取 width 和 height 到精简信息中
+        this.cache.allImages = allImages.map(img => {
+          // 从 imageDimensions 字段提取尺寸信息，赋值到 width 和 height
+          if (img.imageDimensions) {
+            // imageDimensions 可能是对象或 JSON 字符串
+            let dimensions = img.imageDimensions;
+            if (typeof dimensions === 'string') {
+              try {
+                dimensions = JSON.parse(dimensions);
+              } catch (e) {
+                logger.debug('解析 imageDimensions JSON 失败:', e);
+                dimensions = null;
+              }
+            }
+            
+            if (dimensions && typeof dimensions === 'object') {
+              return {
+                ...img,
+                width: dimensions.width || img.width || null,
+                height: dimensions.height || img.height || null
+              };
+            }
+          }
+          
+          // 如果没有 imageDimensions，保持原有数据（可能已经有 width/height）
+          return img;
+        });
       }
       
       // 验证数据完整性
@@ -133,6 +161,9 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       this._rebuildColorCounts();
       this._rebuildDirectoryCounts();
+      this._rebuildFormatCounts();
+      this._rebuildResolutionCounts();
+      this._rebuildOrientationCounts();
       
       // 加载相似组数据到图片对象中
       await this._loadSimilarityGroupData();
@@ -206,6 +237,44 @@ class GlobalImageCache {
       if (dirPath) {
         this.cache.directoryCounts[dirPath] = (this.cache.directoryCounts[dirPath] || 0) + 1;
       }
+      // 格式统计
+      const format = this._extractImageFormat(image);
+      if (format && format !== 'UNKNOWN') {
+        this.cache.formatCounts[format] = (this.cache.formatCounts[format] || 0) + 1;
+      }
+      // 分辨率统计
+      // 🆕 直接使用 width 和 height（如果新图片有 imageDimensions，需要先提取）
+      let width = image.width;
+      let height = image.height;
+      
+      // 如果 width/height 不存在，尝试从 imageDimensions 提取
+      if ((!width || !height) && image.imageDimensions) {
+        let dimensions = image.imageDimensions;
+        if (typeof dimensions === 'string') {
+          try {
+            dimensions = JSON.parse(dimensions);
+          } catch (e) {
+            dimensions = null;
+          }
+        }
+        if (dimensions && typeof dimensions === 'object') {
+          width = dimensions.width || width;
+          height = dimensions.height || height;
+        }
+      }
+      
+      if (width && height && width > 0 && height > 0) {
+        const resolution = this._getResolutionCategory(width, height);
+        if (resolution && resolution !== 'UNKNOWN') {
+          this.cache.resolutionCounts[resolution] = (this.cache.resolutionCounts[resolution] || 0) + 1;
+        }
+        
+        // 方向统计
+        const orientation = this._getOrientationCategory(width, height);
+        if (orientation && orientation !== 'UNKNOWN') {
+          this.cache.orientationCounts[orientation] = (this.cache.orientationCounts[orientation] || 0) + 1;
+        }
+      }
       
       // 更新最近图片列表（保持前20张）
       this.cache.recentImages = this.cache.allImages
@@ -269,6 +338,8 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       this._rebuildColorCounts();
       this._rebuildDirectoryCounts();
+      this._rebuildFormatCounts();
+      this._rebuildResolutionCounts();
     
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
@@ -396,23 +467,18 @@ class GlobalImageCache {
     const category = this._normalizeCategoryId(image.category);
     this.cache.selectedCategoryCounts[category] = (this.cache.selectedCategoryCounts[category] || 0) + 1;
     
-    logger.debug(`🔍 更新选中统计 - 添加图片: ${image.id}, city: ${image.city}, category: ${image.category}, similarityGroupIndex: ${image.similarityGroupIndex}`);
+    // 更新城市统计（如果有）
     if (image.city) {
       this.cache.selectedCityCounts[image.city] = (this.cache.selectedCityCounts[image.city] || 0) + 1;
-      logger.debug(`🔍 城市选中统计更新: ${image.city} = ${this.cache.selectedCityCounts[image.city]}`);
-    } else {
-      logger.debug(`⚠️ 图片 ${image.id} 没有城市信息，跳过城市统计更新`);
     }
     
+    // 更新相似组统计（如果有）
     if (image.similarityGroupIndex) {
       // 确保selectedSimilarityGroupCounts对象存在
       if (!this.cache.selectedSimilarityGroupCounts) {
         this.cache.selectedSimilarityGroupCounts = {};
       }
       this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] = (this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex] || 0) + 1;
-      logger.debug(`🔍 相似组选中统计更新: ${image.similarityGroupIndex} = ${this.cache.selectedSimilarityGroupCounts[image.similarityGroupIndex]}`);
-    } else {
-      logger.debug(`⚠️ 图片 ${image.id} 没有相似组信息，跳过相似组统计更新`);
     }
   }
 
@@ -573,6 +639,9 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       this._rebuildColorCounts();
       this._rebuildDirectoryCounts();
+      this._rebuildFormatCounts();
+      this._rebuildResolutionCounts();
+      this._rebuildOrientationCounts();
       this._rebuildRecentImages();
       
       logger.debug(`✅ 图片删除完成: ${imageToDelete.fileName}`);
@@ -663,6 +732,263 @@ class GlobalImageCache {
     });
   }
 
+  // 从图片中提取格式
+  _extractImageFormat(image) {
+    // 优先从 mimeType 提取
+    if (image.mimeType) {
+      const mimeType = image.mimeType.toLowerCase();
+      if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'JPEG';
+      if (mimeType.includes('png')) return 'PNG';
+      if (mimeType.includes('heic') || mimeType.includes('heif')) return 'HEIC';
+      if (mimeType.includes('webp')) return 'WEBP';
+      if (mimeType.includes('gif')) return 'GIF';
+      if (mimeType.includes('bmp')) return 'BMP';
+      // 提取通用格式
+      const parts = mimeType.split('/');
+      if (parts.length === 2 && parts[0] === 'image') {
+        return parts[1].toUpperCase();
+      }
+    }
+    
+    // 从 fileName 扩展名提取
+    if (image.fileName) {
+      const fileName = image.fileName.toLowerCase();
+      if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) return 'JPEG';
+      if (fileName.endsWith('.png')) return 'PNG';
+      if (fileName.endsWith('.heic') || fileName.endsWith('.heif')) return 'HEIC';
+      if (fileName.endsWith('.webp')) return 'WEBP';
+      if (fileName.endsWith('.gif')) return 'GIF';
+      if (fileName.endsWith('.bmp')) return 'BMP';
+    }
+    
+    return 'UNKNOWN';
+  }
+
+  // 重新构建格式统计
+  _rebuildFormatCounts() {
+    this.cache.formatCounts = {};
+    this.cache.allImages.forEach(img => {
+      const format = this._extractImageFormat(img);
+      if (format && format !== 'UNKNOWN') {
+        this.cache.formatCounts[format] = (this.cache.formatCounts[format] || 0) + 1;
+      }
+    });
+  }
+
+  // 获取分辨率分类
+  _getResolutionCategory(width, height) {
+    if (!width || !height || width <= 0 || height <= 0) {
+      return 'UNKNOWN';
+    }
+    
+    // 标准化分辨率（允许10%误差）
+    const tolerance = 0.1;
+    
+    // 4K: 3840x2160
+    if (Math.abs(width - 3840) / 3840 <= tolerance && 
+        Math.abs(height - 2160) / 2160 <= tolerance) {
+      return '4K';
+    }
+    
+    // 1080p: 1920x1080
+    if (Math.abs(width - 1920) / 1920 <= tolerance && 
+        Math.abs(height - 1080) / 1080 <= tolerance) {
+      return '1080p';
+    }
+    
+    // 720p: 1280x720
+    if (Math.abs(width - 1280) / 1280 <= tolerance && 
+        Math.abs(height - 720) / 720 <= tolerance) {
+      return '720p';
+    }
+    
+    // 根据像素数分类
+    const pixels = width * height;
+    if (pixels >= 8000000) return '4K+';  // 800万像素以上
+    if (pixels >= 2000000) return '1080p+'; // 200万像素以上
+    if (pixels >= 1000000) return '720p+';  // 100万像素以上
+    
+    // 其他情况返回具体分辨率
+    return `${Math.round(width)}x${Math.round(height)}`;
+  }
+
+  // 重新构建分辨率统计（统计所有分辨率）
+  _rebuildResolutionCounts() {
+    this.cache.resolutionCounts = {};
+    let imagesWithDimensions = 0;
+    let imagesWithoutDimensions = 0;
+    let sampleImageWithoutDimensions = null; // 用于调试
+    
+    this.cache.allImages.forEach(img => {
+      // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
+      if (img.width && img.height && img.width > 0 && img.height > 0) {
+        imagesWithDimensions++;
+        const resolution = this._getResolutionCategory(img.width, img.height);
+        if (resolution && resolution !== 'UNKNOWN') {
+          this.cache.resolutionCounts[resolution] = (this.cache.resolutionCounts[resolution] || 0) + 1;
+        }
+      } else {
+        imagesWithoutDimensions++;
+        // 记录第一个没有尺寸的图片用于调试
+        if (!sampleImageWithoutDimensions) {
+          sampleImageWithoutDimensions = {
+            id: img.id,
+            fileName: img.fileName,
+            hasImageDimensions: !!img.imageDimensions,
+            hasWidth: 'width' in img,
+            hasHeight: 'height' in img,
+            width: img.width,
+            height: img.height,
+            imageDimensions: img.imageDimensions
+          };
+        }
+      }
+    });
+    
+    logger.debug(`📐 分辨率统计完成: 有尺寸=${imagesWithDimensions}, 无尺寸=${imagesWithoutDimensions}, 分辨率种类=${Object.keys(this.cache.resolutionCounts).length}`);
+    if (imagesWithoutDimensions > 0 && sampleImageWithoutDimensions) {
+      logger.warn(`⚠️ 发现 ${imagesWithoutDimensions} 张图片缺少尺寸信息，示例:`, sampleImageWithoutDimensions);
+    }
+    if (Object.keys(this.cache.resolutionCounts).length > 0) {
+      logger.debug(`📐 分辨率统计详情:`, this.cache.resolutionCounts);
+    } else if (this.cache.allImages.length > 0) {
+      logger.warn(`⚠️ 所有 ${this.cache.allImages.length} 张图片都缺少尺寸信息，无法生成分辨率统计`);
+    }
+  }
+
+  // 获取前N个最多的分辨率（用于展示）
+  getTopResolutions(limit = 7) {
+    const allResolutions = Object.entries(this.cache.resolutionCounts || {});
+    
+    // 按数量降序排序
+    const sorted = allResolutions.sort(([, countA], [, countB]) => countB - countA);
+    
+    // 取前N个
+    const topResolutions = sorted.slice(0, limit);
+    
+    // 计算"其他"的数量
+    const otherCount = sorted.slice(limit).reduce((sum, [, count]) => sum + count, 0);
+    
+    // 构建返回对象
+    const result = {};
+    topResolutions.forEach(([resolution, count]) => {
+      result[resolution] = count;
+    });
+    
+    // 如果有"其他"，添加到结果中
+    if (otherCount > 0) {
+      result['其他'] = otherCount;
+    }
+    
+    return result;
+  }
+
+  // 获取前N个分辨率列表（用于查询"其他"时排除）
+  getTopResolutionList(limit = 7) {
+    const allResolutions = Object.entries(this.cache.resolutionCounts || {});
+    const sorted = allResolutions.sort(([, countA], [, countB]) => countB - countA);
+    return sorted.slice(0, limit).map(([resolution]) => resolution);
+  }
+
+  // 根据格式获取图片
+  getImagesByFormat(format) {
+    if (!format) return [];
+    return this.cache.allImages.filter(img => {
+      const imgFormat = this._extractImageFormat(img);
+      return imgFormat === format;
+    });
+  }
+
+  // 根据分辨率获取图片
+  getImagesByResolution(resolution) {
+    if (!resolution) return [];
+    
+    // 如果查询"其他"，返回所有不在前7个中的图片
+    if (resolution === '其他') {
+      const topResolutions = this.getTopResolutionList(7);
+      const topResolutionSet = new Set(topResolutions);
+      
+      return this.cache.allImages.filter(img => {
+        // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
+        if (!img.width || !img.height || img.width <= 0 || img.height <= 0) return false;
+        const imgResolution = this._getResolutionCategory(img.width, img.height);
+        return imgResolution !== 'UNKNOWN' && !topResolutionSet.has(imgResolution);
+      });
+    }
+    
+    // 正常查询指定分辨率
+    return this.cache.allImages.filter(img => {
+      // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
+      if (!img.width || !img.height || img.width <= 0 || img.height <= 0) return false;
+      const imgResolution = this._getResolutionCategory(img.width, img.height);
+      return imgResolution === resolution;
+    });
+  }
+
+  // 获取图片方向分类（横屏、竖屏、全景、正方形）
+  _getOrientationCategory(width, height) {
+    if (!width || !height || width <= 0 || height <= 0) {
+      return 'UNKNOWN';
+    }
+    
+    const aspectRatio = width / height;
+    
+    // 全景：宽高比 >= 2:1 或 <= 1:2（超宽或超高）
+    if (aspectRatio >= 2.0 || aspectRatio <= 0.5) {
+      return '全景';
+    }
+    
+    // 正方形：宽高比接近 1:1（允许5%误差）
+    if (Math.abs(aspectRatio - 1.0) < 0.05) {
+      return '正方形';
+    }
+    
+    // 横屏：width > height
+    if (width > height) {
+      return '横屏';
+    }
+    
+    // 竖屏：height > width
+    return '竖屏';
+  }
+
+  // 重新构建方向统计
+  _rebuildOrientationCounts() {
+    this.cache.orientationCounts = {};
+    let imagesWithDimensions = 0;
+    let imagesWithoutDimensions = 0;
+    
+    this.cache.allImages.forEach(img => {
+      // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
+      if (img.width && img.height && img.width > 0 && img.height > 0) {
+        imagesWithDimensions++;
+        const orientation = this._getOrientationCategory(img.width, img.height);
+        if (orientation && orientation !== 'UNKNOWN') {
+          this.cache.orientationCounts[orientation] = (this.cache.orientationCounts[orientation] || 0) + 1;
+        }
+      } else {
+        imagesWithoutDimensions++;
+      }
+    });
+    
+    logger.debug(`🔄 方向统计完成: 有尺寸=${imagesWithDimensions}, 无尺寸=${imagesWithoutDimensions}, 方向种类=${Object.keys(this.cache.orientationCounts).length}`);
+    if (Object.keys(this.cache.orientationCounts).length > 0) {
+      logger.debug(`🔄 方向统计详情:`, this.cache.orientationCounts);
+    }
+  }
+
+  // 根据方向获取图片
+  getImagesByOrientation(orientation) {
+    if (!orientation) return [];
+    
+    return this.cache.allImages.filter(img => {
+      // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
+      if (!img.width || !img.height || img.width <= 0 || img.height <= 0) return false;
+      const imgOrientation = this._getOrientationCategory(img.width, img.height);
+      return imgOrientation === orientation;
+    });
+  }
+
   // 根据目录获取图片
   getImagesByDirectory(directory) {
     if (!directory || typeof directory !== 'string') {
@@ -729,6 +1055,9 @@ class GlobalImageCache {
       this._rebuildCityCounts();
       this._rebuildColorCounts();
       this._rebuildDirectoryCounts();
+      this._rebuildFormatCounts();
+      this._rebuildResolutionCounts();
+      this._rebuildOrientationCounts();
       this._rebuildSelectedStats();
       this._rebuildRecentImages();
       
@@ -976,8 +1305,15 @@ class GlobalImageCache {
       allImages: [],
       categoryCounts: {},
       cityCounts: {},
+      colorCounts: {},
+      directoryCounts: {},
+      formatCounts: {},
+      resolutionCounts: {},
+      orientationCounts: {},
+      recentImages: [],
       selectedCategoryCounts: {},
       selectedCityCounts: {},
+      selectedSimilarityGroupCounts: {}
     };
     this.imageIdToIndex.clear();
     // 不要清空监听器，保持现有的监听器

@@ -154,6 +154,12 @@ const CategoryScreen = ({ route, navigation }) => {
         return `${filterValue || '城市'} (${count}张)`;
       case 'color':
         return `${filterValue || '颜色'} (${count}张)`;
+      case 'format':
+        return `📄 ${filterValue || '格式'} (${count}张)`;
+      case 'resolution':
+        return `📏 ${filterValue || '分辨率'} (${count}张)`;
+      case 'orientation':
+        return `🧭 ${filterValue || '方向'} (${count}张)`;
       case 'stagingBox':
         return `暂存箱 (${count}张)`;
       case 'category':
@@ -539,6 +545,20 @@ const CategoryScreen = ({ route, navigation }) => {
         logger.error('没有有效的上下文参数');
         filteredImages = [];
       } else {
+        // 🆕 防御性检查：某些 filterType 需要 filterValue
+        if (filterType !== 'stagingBox') {
+          // stagingBox 不需要 filterValue，其他类型都需要
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn(`filterType=${filterType} 需要 filterValue，但 filterValue 为空，返回空数组`);
+            filteredImages = [];
+            setImages([]);
+            setGroupedImages({});
+            setLoading(false);
+            setRefreshing(false);
+            return;
+          }
+        }
+        
         // 统一使用 UnifiedDataService.readImagesByFilter
         filteredImages = await UnifiedDataService.readImagesByFilter(filterType, filterValue);
       }
@@ -1049,7 +1069,7 @@ const CategoryScreen = ({ route, navigation }) => {
   const batchMoveToStaging = async (imageIds) => {
     Alert.alert(
       '暂存',
-      `确定要将选中的 ${imageIds.length} 张图片暂存到待处置吗？\n\n这些图片将被移动到暂存箱中。`,
+      `确定要将选中的 ${imageIds.length} 张图片暂存到待处置吗？\n\n这些图片将被放入暂存箱中。`,
       [
         { text: '取消', style: 'cancel' },
         {

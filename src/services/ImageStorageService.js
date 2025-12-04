@@ -2503,6 +2503,8 @@ class ImageStorageService {
           uri: img.uri,
           size: img.size,
           background_color: img.background_color || null, // 背景颜色字段
+          mimeType: img.mimeType || null, // 格式统计需要
+          imageDimensions: img.imageDimensions || null, // 保留原始 imageDimensions 字段
           // 只保留界面显示必需字段，其他按需加载
         };
       });
@@ -3027,8 +3029,13 @@ class ImageStorageService {
           }
         }
         // 默认隐藏空分类（true），只有用户主动设置为显示空分类时才是 false
+        // 注意：只有当值完全未定义时才设置默认值，不要覆盖用户已保存的 false 值
         if (result.hideEmptyCategories === undefined || result.hideEmptyCategories === null) {
           result.hideEmptyCategories = true;
+        }
+        // 确保 hideEmptyCategories 是布尔值（防止字符串等其他类型）
+        if (typeof result.hideEmptyCategories !== 'boolean') {
+          result.hideEmptyCategories = result.hideEmptyCategories === 'false' ? false : true;
         }
         if (result.scanInterval === undefined || result.scanInterval === null) {
           result.scanInterval = 5;
@@ -3770,6 +3777,22 @@ class ImageStorageService {
       
       // 🆕 移动端：使用SQLite专用方法
       if (Platform.OS !== 'web' && this.storage.deleteImagesByUris) {
+        // 先查询要删除的图片ID，用于清理暂存箱
+        const allImages = await this.getImages();
+        const urisSet = new Set(urisToRemove);
+        const imagesToRemove = allImages.filter(img => urisSet.has(img.uri));
+        const imageIdsToRemove = imagesToRemove.map(img => img.id);
+        
+        // 先删除暂存箱中的记录（在删除图片记录之前）
+        if (imageIdsToRemove.length > 0) {
+          try {
+            await this.removeFromStagingBox(imageIdsToRemove);
+            logger.debug(`✅ 已从暂存箱移除 ${imageIdsToRemove.length} 张图片的记录`);
+          } catch (error) {
+            logger.warn(`⚠️ 从暂存箱移除记录失败（继续删除图片记录）:`, error);
+          }
+        }
+        
         const result = await this.storage.deleteImagesByUris(urisToRemove);
         
         // 更新统计信息
@@ -3796,6 +3819,17 @@ class ImageStorageService {
       const imagesToRemove = allImages.filter(img => urisSet.has(img.uri));
       
       logger.debug(`Found ${imagesToRemove.length} images to remove out of ${allImages.length} total`);
+      
+      // 先删除暂存箱中的记录（在删除图片记录之前）
+      if (imagesToRemove.length > 0) {
+        try {
+          const imageIdsToRemove = imagesToRemove.map(img => img.id);
+          await this.removeFromStagingBox(imageIdsToRemove);
+          logger.debug(`✅ 已从暂存箱移除 ${imageIdsToRemove.length} 张图片的记录`);
+        } catch (error) {
+          logger.warn(`⚠️ 从暂存箱移除记录失败（继续删除图片记录）:`, error);
+        }
+      }
       
       // 在一个事务中批量删除图片记录
       const result = await new Promise((resolve, reject) => {
@@ -4980,12 +5014,15 @@ class ImageStorageService {
 
   /**
    * 获取暂存箱图片数量
+   * 返回实际存在的图片数量（过滤掉已删除的图片）
    * @returns {Promise<number>}
    */
   async getStagingBoxCount() {
     try {
-      const imageIds = await this.getStagingBoxImageIds();
-      return imageIds.length;
+      // 获取实际存在的图片，而不是只统计ID数量
+      // 这样可以确保数量与 getStagingBoxImages() 返回的数量一致
+      const images = await this.getStagingBoxImages();
+      return images.length;
     } catch (error) {
       logger.error('获取暂存箱数量失败:', error);
       return 0;

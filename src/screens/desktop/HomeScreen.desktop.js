@@ -33,10 +33,16 @@ const HomeScreen = () => {
   const [cityCounts, setCityCounts] = useState({});
   const [colorCounts, setColorCounts] = useState({});
   const [directoryCounts, setDirectoryCounts] = useState({});
+  const [formatCounts, setFormatCounts] = useState({});
+  const [resolutionCounts, setResolutionCounts] = useState({});
+  const [orientationCounts, setOrientationCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
   const [colorRecentImages, setColorRecentImages] = useState({});
   const [directoryRecentImages, setDirectoryRecentImages] = useState({});
+  const [formatRecentImages, setFormatRecentImages] = useState({});
+  const [resolutionRecentImages, setResolutionRecentImages] = useState({});
+  const [orientationRecentImages, setOrientationRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
@@ -45,6 +51,9 @@ const HomeScreen = () => {
   const [showCityCategories, setShowCityCategories] = useState(true);
   const [showColorCategories, setShowColorCategories] = useState(true);
   const [showDirectoryCategories, setShowDirectoryCategories] = useState(true);
+  const [showFormatCategories, setShowFormatCategories] = useState(true);
+  const [showResolutionCategories, setShowResolutionCategories] = useState(true);
+  const [showOrientationCategories, setShowOrientationCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
   const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
@@ -67,12 +76,15 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
+      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
         UnifiedDataService.readNewDiscoveredImages(12),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
         UnifiedDataService.readColorCounts(),
         UnifiedDataService.readDirectoryCounts(),
+        UnifiedDataService.readFormatCounts(),
+        UnifiedDataService.readResolutionCounts(),
+        UnifiedDataService.readOrientationCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
         UnifiedDataService.readSettings(),
         UnifiedDataService.readAllImages(),
@@ -158,6 +170,62 @@ const HomeScreen = () => {
         directoryImagesMap[dirName] = images;
       });
       
+      // 加载各格式的最近图片（按数量排序取前10个）
+      const sortedFormats = Object.entries(formatCountsData).sort(([,a], [,b]) => b - a);
+      const formatIds = sortedFormats.slice(0, 10).map(([formatName]) => formatName);
+      const formatImagesPromises = formatIds.map(async (formatName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByFormat(formatName, 1);
+          return { formatName, images };
+        } catch (error) {
+          logger.error(`加载格式 ${formatName} 最近图片失败:`, error);
+          return { formatName, images: [] };
+        }
+      });
+      
+      const formatImagesResults = await Promise.all(formatImagesPromises);
+      const formatImagesMap = {};
+      formatImagesResults.forEach(({ formatName, images }) => {
+        formatImagesMap[formatName] = images;
+      });
+      
+      // 加载各分辨率的最近图片（按数量排序取前10个）
+      const sortedResolutions = Object.entries(resolutionCountsData).sort(([,a], [,b]) => b - a);
+      const resolutionIds = sortedResolutions.slice(0, 10).map(([resolutionName]) => resolutionName);
+      const resolutionImagesPromises = resolutionIds.map(async (resolutionName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByResolution(resolutionName, 1);
+          return { resolutionName, images };
+        } catch (error) {
+          logger.error(`加载分辨率 ${resolutionName} 最近图片失败:`, error);
+          return { resolutionName, images: [] };
+        }
+      });
+      
+      const resolutionImagesResults = await Promise.all(resolutionImagesPromises);
+      const resolutionImagesMap = {};
+      resolutionImagesResults.forEach(({ resolutionName, images }) => {
+        resolutionImagesMap[resolutionName] = images;
+      });
+      
+      // 加载各方向的最近图片（所有方向）
+      const allOrientations = Object.keys(orientationCountsData);
+      const orientationImagesPromises = allOrientations.map(async (orientationName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByOrientation(orientationName, 1);
+          return { orientationName, images };
+        } catch (error) {
+          logger.error(`加载方向 ${orientationName} 最近图片失败:`, error);
+          return { orientationName, images: [] };
+        }
+      });
+      
+      const orientationImagesResults = await Promise.all(orientationImagesPromises);
+      const orientationImagesMap = {};
+      orientationImagesResults.forEach(({ orientationName, images }) => {
+        orientationImagesMap[orientationName] = images;
+      });
+      
       // 处理新发现照片的结果（包含总数和图片列表）
       const recentImagesData = recentImagesResult.images || [];
       const recentImagesTotalCount = recentImagesResult.total || 0;
@@ -171,13 +239,22 @@ const HomeScreen = () => {
       setCategoryCounts(categoryCountsData);
       setCityCounts(cityCountsData);
       setColorCounts(colorCountsData);
+      setDirectoryCounts(directoryCountsData);
+      setFormatCounts(formatCountsData);
+      setResolutionCounts(resolutionCountsData);
+      setOrientationCounts(orientationCountsData);
+      logger.debug('准备更新状态 - 格式统计:', formatCountsData);
+      logger.debug('准备更新状态 - 分辨率统计:', resolutionCountsData);
+      logger.debug('准备更新状态 - 方向统计:', orientationCountsData);
       setStagingBoxCount(stagingBoxCountData);
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
       setColorRecentImages(colorImagesMap);
-      setDirectoryCounts(directoryCountsData);
       setDirectoryRecentImages(directoryImagesMap);
+      setFormatRecentImages(formatImagesMap);
+      setResolutionRecentImages(resolutionImagesMap);
+      setOrientationRecentImages(orientationImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
       // 只有当用户明确设置为 false 时才显示空分类
       const shouldHide = settings.hideEmptyCategories !== false;
@@ -188,11 +265,17 @@ const HomeScreen = () => {
       const shouldShowCities = settings.showCityCategories !== false;
       const shouldShowColors = settings.showColorCategories !== false;
       const shouldShowDirectories = settings.showDirectoryCategories !== false;
+      const shouldShowFormats = settings.showFormatCategories !== false;
+      const shouldShowResolutions = settings.showResolutionCategories !== false;
+      const shouldShowOrientations = settings.showOrientationCategories !== false;
       const shouldShowSimilarity = settings.showSimilarityGroups !== false;
       const shouldShowRecent = settings.showRecentPhotos !== false;
       setShowCityCategories(shouldShowCities);
       setShowColorCategories(shouldShowColors);
       setShowDirectoryCategories(shouldShowDirectories);
+      setShowFormatCategories(shouldShowFormats);
+      setShowResolutionCategories(shouldShowResolutions);
+      setShowOrientationCategories(shouldShowOrientations);
       setShowSimilarityGroups(shouldShowSimilarity);
       setShowRecentPhotos(shouldShowRecent);
       
@@ -518,10 +601,13 @@ const HomeScreen = () => {
   const handleCategoryPress = (category) => handleFilterPress('category', category);
   const handleColorPress = (color) => handleFilterPress('color', color);
   const handleCityPress = (city) => handleFilterPress('city', city);
+  const handleFormatPress = (format) => handleFilterPress('format', format);
+  const handleResolutionPress = (resolution) => handleFilterPress('resolution', resolution);
+  const handleOrientationPress = (orientation) => handleFilterPress('orientation', orientation);
 
   // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
-  const handleImagePress = useCallback((image, fromScreen = 'Home', additionalProps = {}) => {
-    logger.debug('点击图片，接收到的参数:', image, '来源页面:', fromScreen, '额外属性:', additionalProps);
+  const handleImagePress = useCallback((image, fromScreen, additionalProps = {}) => {
+    logger.debug('点击图片，接收到的参数:', image, '额外属性:', additionalProps);
     
     // 处理不同的参数格式
     let imageId;
@@ -538,7 +624,7 @@ const HomeScreen = () => {
     // 进入 ImagePreview 时重置强制刷新标志
     setCategoryDataChanged(false);
     
-    // 🆕 统一使用 filterType 和 filterValue（不推导 fromScreen，由 ImagePreviewScreen 推导）
+    // 统一使用 filterType 和 filterValue
     const filterType = additionalProps.filterType || null;
     const filterValue = additionalProps.filterValue || null;
     
@@ -952,7 +1038,7 @@ const HomeScreen = () => {
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📁 按内容</Text>
+          <Text style={styles.sectionTitle}>🏷️ 按内容</Text>
             <TouchableOpacity
               style={styles.toggleButton}
               onPress={async () => {
@@ -1141,6 +1227,146 @@ const HomeScreen = () => {
           );
         })()}
 
+        {/* 格式分类卡片 */}
+        {showFormatCategories && (() => {
+          const filteredFormatCounts = formatCounts ? Object.entries(formatCounts).filter(([format]) => {
+            return format && 
+                   typeof format === 'string' && 
+                   format.trim() !== '' && 
+                   format !== 'null' && 
+                   format !== 'UNKNOWN';
+          }) : [];
+          
+          if (filteredFormatCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📄 按格式</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredFormatCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([format, count]) => {
+                    const recentImages = formatRecentImages[format] || [];
+                    return (
+                      <CategoryCard
+                        key={format}
+                        category={format}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleFormatPress}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 分辨率分类卡片 */}
+        {showResolutionCategories && (() => {
+          logger.debug('📐 检查分辨率统计显示:', {
+            resolutionCounts,
+            hasResolutionCounts: !!resolutionCounts,
+            resolutionCountsKeys: resolutionCounts ? Object.keys(resolutionCounts) : [],
+            resolutionCountsEntries: resolutionCounts ? Object.entries(resolutionCounts) : []
+          });
+          
+          // 如果没有分辨率统计数据，直接返回
+          if (!resolutionCounts || Object.keys(resolutionCounts).length === 0) {
+            logger.debug('📐 分辨率统计数据为空或未定义');
+            return null;
+          }
+          
+          const filteredResolutionCounts = Object.entries(resolutionCounts).filter(([resolution]) => {
+            const isValid = resolution && 
+                   typeof resolution === 'string' && 
+                   resolution.trim() !== '' && 
+                   resolution !== 'null' && 
+                   resolution !== 'UNKNOWN';
+            if (!isValid) {
+              logger.debug(`📐 过滤掉无效分辨率: "${resolution}"`);
+            }
+            return isValid;
+          });
+          
+          logger.debug('📐 过滤后的分辨率统计:', filteredResolutionCounts);
+          
+          if (filteredResolutionCounts.length === 0) {
+            logger.debug('📐 分辨率统计为空，不显示分辨率分类卡片');
+            return null;
+          }
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📏 按分辨率</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredResolutionCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([resolution, count]) => {
+                    const recentImages = resolutionRecentImages[resolution] || [];
+                    return (
+                      <CategoryCard
+                        key={resolution}
+                        category={resolution}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleResolutionPress}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 方向分类卡片 */}
+        {showOrientationCategories && (() => {
+          // 如果没有方向统计数据，直接返回
+          if (!orientationCounts || Object.keys(orientationCounts).length === 0) {
+            return null;
+          }
+          
+          const filteredOrientationCounts = Object.entries(orientationCounts).filter(([orientation]) => {
+            return orientation && 
+                   typeof orientation === 'string' && 
+                   orientation.trim() !== '' && 
+                   orientation !== 'null' && 
+                   orientation !== 'UNKNOWN';
+          });
+          
+          if (filteredOrientationCounts.length === 0) {
+            return null;
+          }
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>🧭 按方向</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredOrientationCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([orientation, count]) => {
+                    const recentImages = orientationRecentImages[orientation] || [];
+                    return (
+                      <CategoryCard
+                        key={orientation}
+                        category={orientation}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={handleOrientationPress}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
         {/* 相似照片板块 - 根据设置显示，且只有当有相似照片组时才显示 */}
         {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
           <View style={styles.categoriesSection}>
@@ -1321,9 +1547,8 @@ const HomeScreen = () => {
                 onBack={async (returnedImageId) => {
                   logger.debug('ImagePreview 返回按钮被点击，返回的图片ID:', returnedImageId);
                   
-                  // 从URL参数获取来源页面和图片ID
+                  // 从URL参数获取图片ID
                   const urlParams = new URLSearchParams(window.location.search);
-                  const fromScreen = urlParams.get('fromScreen') || 'Home';
                   const imageId = returnedImageId || urlParams.get('imageId');
                   const filterType = urlParams.get('filterType');
                   const filterValue = urlParams.get('filterValue');
@@ -1409,10 +1634,13 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
     return imageUri ? { uri: imageUri } : null;
   }, [recentImages[0]]);
 
+  // 🆕 处理 category 可能是对象（有 id 属性）或字符串（直接是值）的情况
+  const categoryValue = typeof category === 'object' && category !== null ? category.id : category;
+
   return (
     <TouchableOpacity
       style={styles.categoryCard}
-      onPress={() => onPress(category.id)}
+      onPress={() => onPress(categoryValue)}
     >
       {/* 缩略图占满整个卡片 */}
       {imageSource ? (
@@ -1422,14 +1650,16 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
           resizeMode="cover"
         />
       ) : (
-        <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
+        <View style={[styles.thumbnail, { backgroundColor: (typeof category === 'object' && category?.color) || '#607D8B' }]}>
           <Text style={styles.emptyThumbnailText}>📷</Text>
         </View>
       )}
       
       {/* 覆盖层显示分类信息 */}
       <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName}>{category.name}</Text>
+        <Text style={styles.categoryName}>
+          {typeof category === 'object' && category !== null ? (category.name || category.chinese || category.english || category.id) : category}
+        </Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
     </TouchableOpacity>
