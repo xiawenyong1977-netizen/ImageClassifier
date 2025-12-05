@@ -193,12 +193,11 @@ const HomeScreen = ({ navigation }) => {
       // 如果正在扫描，不要刷新（避免覆盖扫描进度消息）
       if (!loading && !isScanning) {
         logger.debug('🔄 首页获得焦点，刷新数据...');
+        // 只重新加载显示设置（其他页面可能修改了显示设置）
+        loadDisplaySettings();
+        // 重新加载数据（hideEmptyCategories 状态在内存中，不需要重新加载）
         loadAllData();
         loadLastScanTime();
-        // 重新加载显示设置，确保从设置页面返回时立即生效
-        loadDisplaySettings();
-        // 重新加载隐藏空分类设置，确保从设置页面返回时立即生效
-        loadHideEmptyCategoriesSetting();
       }
     }, [loading, isScanning])
   );
@@ -259,12 +258,9 @@ const HomeScreen = ({ navigation }) => {
   };
   
   /**
-   * 当 hideEmptyCategories 改变时，重新加载分类
+   * 当 hideEmptyCategories 改变时，不需要重新加载分类
+   * 因为过滤逻辑在渲染时进行，只需要触发重新渲染即可
    */
-  useEffect(() => {
-    if (loading) return; // 初始化时不重新加载
-    loadCategories();
-  }, [hideEmptyCategories]);
 
   /**
    * 初始化数据加载
@@ -325,24 +321,15 @@ const HomeScreen = ({ navigation }) => {
       // 获取所有分类配置（按配置文件中的显示顺序）
       const allCategories = configService.getAllCategoriesWithUI();
       
-      // 按配置文件顺序构建分类列表
-      // 注意：暂存箱不是分类，不会出现在 getAllCategoriesWithUI() 返回的列表中
-      const categoryList = allCategories
-        .filter(categoryConfig => {
-          const count = categoryCounts[categoryConfig.id] || 0;
-          // 如果开启了隐藏空分类且该分类数量为0，则不显示
-          if (hideEmptyCategories && count === 0) {
-            return false;
-          }
-          return true;
-        })
-        .map(categoryConfig => ({
-          id: categoryConfig.id,
-          name: categoryConfig.chinese || categoryConfig.english || categoryConfig.id,
-          count: categoryCounts[categoryConfig.id] || 0,
-          color: categoryConfig.color || '#666666',
-          recentImages: [], // 稍后加载
-        }));
+      // 构建所有分类列表（不过滤，保留所有分类）
+      // 注意：过滤逻辑在渲染时进行，使用 hideEmptyCategories 状态
+      const categoryList = allCategories.map(categoryConfig => ({
+        id: categoryConfig.id,
+        name: categoryConfig.chinese || categoryConfig.english || categoryConfig.id,
+        count: categoryCounts[categoryConfig.id] || 0,
+        color: categoryConfig.color || '#666666',
+        recentImages: [], // 稍后加载
+      }));
       
       // 并行加载每个分类的最近一张照片（只加载有照片的分类）
       const categoryWithImagesPromises = categoryList.map(async (category) => {
@@ -367,8 +354,8 @@ const HomeScreen = ({ navigation }) => {
       });
       
       const categoryWithImages = await Promise.all(categoryWithImagesPromises);
-      setCategories(categoryWithImages);
       
+      setCategories(categoryWithImages);
     } catch (error) {
       logger.error('❌ 加载分类列表失败:', error);
     }
@@ -700,21 +687,20 @@ const HomeScreen = ({ navigation }) => {
    */
   const toggleHideEmptyCategories = async () => {
     try {
-      logger.debug('切换隐藏空分类设置');
-      // 读取当前设置
-      const settings = await UnifiedDataService.readSettings();
-      // 切换设置
+      // 切换状态（同步更新，立即生效）
       const newValue = !hideEmptyCategories;
-      settings.hideEmptyCategories = newValue;
-      // 保存设置
-      await UnifiedDataService.writeSettings(settings);
-      // 更新状态
       setHideEmptyCategories(newValue);
-      // 重新加载分类列表
-      await loadCategories();
+      
+      // 异步保存到设置（不阻塞UI）
+      const settings = await UnifiedDataService.readSettings();
+      settings.hideEmptyCategories = newValue;
+      await UnifiedDataService.writeSettings(settings);
+      
       logger.debug('隐藏空分类设置已更新:', newValue);
     } catch (error) {
       logger.error('切换隐藏空分类设置失败:', error);
+      // 如果保存失败，恢复原状态
+      setHideEmptyCategories(hideEmptyCategories);
     }
   };
 
@@ -733,6 +719,7 @@ const HomeScreen = ({ navigation }) => {
     try {
       // 只重新加载数据（从缓存读取），不重建缓存
       // 缓存只在数据真正变化时（扫描、删除）才重建
+      // 注意：hideEmptyCategories 状态已经在内存中，不需要重新加载
       await loadAllData();
       
       // 显式重新加载新发现照片（确保刷新时重新查询 MediaStore）
@@ -996,6 +983,11 @@ const HomeScreen = ({ navigation }) => {
    * 渲染按内容分类区（4列网格）
    */
   const renderCategoriesSection = () => {
+    // 在渲染时根据 hideEmptyCategories 状态过滤分类（只用一个变量）
+    const filteredCategories = hideEmptyCategories 
+      ? categories.filter(cat => cat.count > 0)
+      : categories;
+    
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -1010,7 +1002,7 @@ const HomeScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         
-        {categories.length === 0 ? (
+        {filteredCategories.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>📷</Text>
             <Text style={styles.emptyStateText}>暂无分类图片</Text>
@@ -1018,7 +1010,7 @@ const HomeScreen = ({ navigation }) => {
           </View>
         ) : (
           <View style={styles.categoriesGrid}>
-            {categories.map(renderCategoryCard)}
+            {filteredCategories.map(renderCategoryCard)}
           </View>
         )}
         </View>
