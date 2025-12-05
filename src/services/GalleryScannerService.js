@@ -1183,16 +1183,26 @@ class GalleryScannerService {
     }
     
     // 调用进度回调（UI更新）
-    this.onProgress({
-      stage: progressData.stage,
-      message: progressData.message,
-      filesProcessed: processedThisPhase,
-      filesFound: totalFoundThisPhase,
-      imagesClassified,
-      totalImagesToBeClassified,
-      isComplete: progressData.isComplete,
-      shouldRefresh: progressData.shouldRefresh,
-    });
+    // 注意：在异步操作后再次检查 onProgress，因为它可能在异步期间被设置为 null
+    if (!this.onProgress) {
+      logger.warn(`⚠️ onProgress 回调未设置，跳过进度消息: ${stage}`);
+      return;
+    }
+    
+    try {
+      this.onProgress({
+        stage: progressData.stage,
+        message: progressData.message,
+        filesProcessed: processedThisPhase,
+        filesFound: totalFoundThisPhase,
+        imagesClassified,
+        totalImagesToBeClassified,
+        isComplete: progressData.isComplete,
+        shouldRefresh: progressData.shouldRefresh,
+      });
+    } catch (error) {
+      logger.error(`❌ 调用 onProgress 回调失败: ${error.message}`);
+    }
   }
 
   
@@ -1996,7 +2006,7 @@ class GalleryScannerService {
               confidence: 1.0
             };
           } else {
-            // 非截图：暂时设置为 NA
+            // 非截图：设置为 NA（二维码检测由后端服务完成）
             classification = {
               categoryId: 'NA',
               confidence: 0.0
@@ -2027,11 +2037,13 @@ class GalleryScannerService {
           const batchSaveResults = [];
           let naCount = 0;
           let screenshotCount = 0;
+          let qrcodeCount = 0;
           for (const result of batchResults) {
             if (result.success) {
               const categoryId = result.classification?.categoryId || result.classification?.category;
               if (categoryId === 'NA') naCount++;
               if (categoryId === 'screenshot') screenshotCount++;
+              if (categoryId === 'qrcode') qrcodeCount++;
               
               batchSaveResults.push({
                 imageData: result.imageData,
@@ -2045,7 +2057,7 @@ class GalleryScannerService {
           
           // 批量保存
           if (batchSaveResults.length > 0) {
-            logger.debug(`🔄 准备批量保存 ${batchSaveResults.length} 张图片到数据库 (NA: ${naCount}, screenshot: ${screenshotCount})...`);
+            logger.debug(`🔄 准备批量保存 ${batchSaveResults.length} 张图片到数据库 (NA: ${naCount}, screenshot: ${screenshotCount}, qrcode: ${qrcodeCount})...`);
             const batchSaveResult = await this.saveImageResults(batchSaveResults, false);
             if (batchSaveResult.success) {
               logger.debug(`✅ 批量保存成功: ${batchSaveResults.length} 张图片`);

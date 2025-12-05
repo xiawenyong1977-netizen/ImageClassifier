@@ -505,13 +505,19 @@ public class GalleryScanService {
                 // 2. 使用EXIF数据优化截图检测
                 boolean isScreenshot = isScreenshot(image, exifData);
                 
-                // 3. 收集数据，准备批量保存
-                // 确定分类和置信度
-                String category = isScreenshot ? "screenshot" : "NA";
-                double confidence = isScreenshot ? 1.0 : 0.0;
+                // 3. 如果不是截图，设置为 NA（二维码检测由后端服务完成）
+                String category;
+                double confidence;
+                if (isScreenshot) {
+                    category = "screenshot";
+                    confidence = 1.0;
+                } else {
+                    category = "NA";
+                    confidence = 0.0;
+                }
                 
                 // 统计（只有分类有差异）
-                if (isScreenshot) {
+                if ("screenshot".equals(category)) {
                     // 分类成功，累加计数器
                     imagesClassified++;
                 } else {

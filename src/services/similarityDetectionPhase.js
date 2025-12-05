@@ -2,6 +2,46 @@ import { logger } from '../adapters/WebAdapters';
 import UnifiedDataService from './UnifiedDataService';
 
 /**
+ * 判断图片是否应该被排除在相似度检测之外
+ * @param {Object} image - 图片对象
+ * @returns {boolean} 如果应该排除返回true，否则返回false
+ */
+function shouldExcludeFromSimilarityDetection(image) {
+  if (!image || !image.category) {
+    return false;
+  }
+  // 排除以下分类：手机截图、二维码、证件照、待分类（NA）
+  const excludedCategories = ['screenshot', 'qrcode', 'idcard', 'NA'];
+  return excludedCategories.includes(image.category);
+}
+
+/**
+ * 获取被排除分类的统计信息
+ * @param {Array} images - 图片数组
+ * @returns {Object} 统计信息对象
+ */
+function getExcludedCategoryStats(images) {
+  const stats = {
+    screenshot: 0,
+    qrcode: 0,
+    idcard: 0,
+    NA: 0,
+    total: 0
+  };
+  
+  images.forEach(img => {
+    if (img && img.category) {
+      if (stats.hasOwnProperty(img.category)) {
+        stats[img.category]++;
+        stats.total++;
+      }
+    }
+  });
+  
+  return stats;
+}
+
+/**
  * 相似度检测阶段（增量检测：只处理本次扫描更新的图片）
  * 共享函数，供 GalleryScannerService 和 GalleryScannerService.android 使用
  * 
@@ -37,16 +77,18 @@ export async function similarityDetectionPhase(context) {
       return;
     }
     
-    // 过滤掉暂存箱（tobecleaned）和手机截图（screenshot）分类的图片
+    // 过滤掉不需要进行相似度检测的分类（手机截图、二维码、证件照、待分类）
     const beforeFilterCount = imagesForSimilarity.length;
-    const tobecleanedCount = imagesForSimilarity.filter(img => img.category === 'tobecleaned').length;
-    const screenshotCount = imagesForSimilarity.filter(img => img.category === 'screenshot').length;
-    imagesForSimilarity = imagesForSimilarity.filter(image => {
-      return image.category !== 'tobecleaned' && image.category !== 'screenshot';
-    });
+    const excludedStats = getExcludedCategoryStats(imagesForSimilarity);
+    imagesForSimilarity = imagesForSimilarity.filter(image => !shouldExcludeFromSimilarityDetection(image));
     const filteredCount = beforeFilterCount - imagesForSimilarity.length;
     if (filteredCount > 0) {
-      logger.info(`📊 阶段6: 已排除 ${filteredCount} 张图片（tobecleaned: ${tobecleanedCount}, screenshot: ${screenshotCount}）`);
+      const statsParts = [];
+      if (excludedStats.screenshot > 0) statsParts.push(`screenshot: ${excludedStats.screenshot}`);
+      if (excludedStats.qrcode > 0) statsParts.push(`qrcode: ${excludedStats.qrcode}`);
+      if (excludedStats.idcard > 0) statsParts.push(`idcard: ${excludedStats.idcard}`);
+      if (excludedStats.NA > 0) statsParts.push(`NA: ${excludedStats.NA}`);
+      logger.info(`📊 阶段6: 已排除 ${filteredCount} 张图片（${statsParts.join(', ')}）`);
     }
     
     if (imagesForSimilarity.length === 0) {
@@ -59,10 +101,14 @@ export async function similarityDetectionPhase(context) {
     
     // 发送开始处理消息
     // Android 版本有额外的参数，PC 版本没有
-    if (totalImagesToBeClassified !== undefined) {
-      await sendProgressMessage('similarity_detection', 0, totalFoundThisPhase, 0, totalImagesToBeClassified);
-    } else {
-      sendProgressMessage('similarity_detection', 0, totalFoundThisPhase);
+    try {
+      if (totalImagesToBeClassified !== undefined) {
+        await sendProgressMessage('similarity_detection', 0, totalFoundThisPhase, 0, totalImagesToBeClassified);
+      } else {
+        await sendProgressMessage('similarity_detection', 0, totalFoundThisPhase);
+      }
+    } catch (error) {
+      logger.warn(`⚠️ 发送相似度检测开始消息失败: ${error.message}`);
     }
     
     // 批量进行相似度检测
@@ -79,14 +125,21 @@ export async function similarityDetectionPhase(context) {
         logger.debug(`🔍 相似度检测进度: processed=${processed}, total=${total}, groups=${groupsCount}`);
         // 发送进度消息
         // Android 版本有额外的参数，PC 版本没有
-        const progressPromise = totalImagesToBeClassified !== undefined
-          ? sendProgressMessage('similarity_detection', processed, total, groupsCount, totalImagesToBeClassified)
-          : sendProgressMessage('similarity_detection', processed, total);
-        
         // 注意：不等待完成，避免阻塞相似度检测进度回调
-        progressPromise.catch(err => {
-          logger.warn('⚠️ 发送相似度检测进度消息失败:', err);
-        });
+        try {
+          const progressPromise = totalImagesToBeClassified !== undefined
+            ? sendProgressMessage('similarity_detection', processed, total, groupsCount, totalImagesToBeClassified)
+            : sendProgressMessage('similarity_detection', processed, total);
+          
+          // 捕获可能的错误，但不阻塞进度回调
+          if (progressPromise && typeof progressPromise.catch === 'function') {
+            progressPromise.catch(err => {
+              logger.warn('⚠️ 发送相似度检测进度消息失败:', err);
+            });
+          }
+        } catch (error) {
+          logger.warn('⚠️ 发送相似度检测进度消息失败:', error);
+        }
       }
     });
     

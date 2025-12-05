@@ -603,16 +603,26 @@ class GalleryScannerService {
     );
     
     // 调用进度回调（UI更新）
-    this.onProgress({
-      stage: progressData.stage,
-      message: progressData.message,
-      filesProcessed: processedThisPhase,
-      filesFound: totalFoundThisPhase,
-      imagesClassified,
-      totalImagesToBeClassified,
-      isComplete: progressData.isComplete,
-      shouldRefresh: progressData.shouldRefresh, // 传递刷新标记，让UI知道是否需要刷新数据
-    });
+    // 注意：在异步操作后再次检查 onProgress，因为它可能在异步期间被设置为 null
+    if (!this.onProgress) {
+      logger.warn(`⚠️ onProgress 回调未设置，跳过进度消息: ${stage}`);
+      return;
+    }
+    
+    try {
+      this.onProgress({
+        stage: progressData.stage,
+        message: progressData.message,
+        filesProcessed: processedThisPhase,
+        filesFound: totalFoundThisPhase,
+        imagesClassified,
+        totalImagesToBeClassified,
+        isComplete: progressData.isComplete,
+        shouldRefresh: progressData.shouldRefresh,
+      });
+    } catch (error) {
+      logger.error(`❌ 调用 onProgress 回调失败: ${error.message}`);
+    }
   }
 
   /**

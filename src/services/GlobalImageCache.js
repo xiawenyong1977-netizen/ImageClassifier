@@ -458,6 +458,20 @@ class GlobalImageCache {
     return categoryInput;
   }
 
+  /**
+   * 判断图片是否为手机截图
+   * @param {Object} image - 图片对象
+   * @returns {boolean} 是否为手机截图
+   */
+  _isScreenshot(image) {
+    if (!image || !image.category) {
+      return false;
+    }
+    // 标准化分类ID后判断
+    const normalizedCategory = this._normalizeCategoryId(image.category);
+    return normalizedCategory === 'screenshot';
+  }
+
   // 更新选中统计 - 添加图片
   _updateSelectedStatsAdd(image) {
     if (!image.category) {
@@ -959,6 +973,11 @@ class GlobalImageCache {
     let imagesWithoutDimensions = 0;
     
     this.cache.allImages.forEach(img => {
+      // 🆕 过滤掉手机截图（方向分类只针对照片，手机截图没有意义）
+      if (this._isScreenshot(img)) {
+        return;
+      }
+      
       // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
       if (img.width && img.height && img.width > 0 && img.height > 0) {
         imagesWithDimensions++;
@@ -982,6 +1001,11 @@ class GlobalImageCache {
     if (!orientation) return [];
     
     return this.cache.allImages.filter(img => {
+      // 🆕 过滤掉手机截图（方向分类只针对照片，手机截图没有意义）
+      if (this._isScreenshot(img)) {
+        return false;
+      }
+      
       // 🆕 直接使用 width 和 height（已在 buildCache 时从 imageDimensions 提取）
       if (!img.width || !img.height || img.width <= 0 || img.height <= 0) return false;
       const imgOrientation = this._getOrientationCategory(img.width, img.height);

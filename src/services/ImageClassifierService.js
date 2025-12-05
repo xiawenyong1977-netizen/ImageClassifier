@@ -1308,7 +1308,6 @@ class ImageClassifierService {
     }
   }
 
-
   /**
    * 加载指定模型
    * @param {string} modelName - 模型名称 ('idCard' 或 'yolo8s')
