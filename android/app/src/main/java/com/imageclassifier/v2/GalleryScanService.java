@@ -116,7 +116,7 @@ public class GalleryScanService {
      * @param cacheApiUrl 远端缓存API地址
      * @return 扫描启动结果（包含scanId和totalImagesToBeClassified）
      */
-    public ScanStartResult startScan(List<String> scanPaths, int compareLimit, String remoteApiUrl, String cacheApiUrl) {
+    public ScanStartResult startScan(List<String> scanPaths, int compareLimit, String remoteApiUrl, String cacheApiUrl, String language) {
         currentScanId = "scan_" + System.currentTimeMillis();
         
         // 重置扫描状态计数器
@@ -175,9 +175,10 @@ public class GalleryScanService {
         // 注意：newImages 进入完整流程（截图检测 -> 缓存查询 -> 远程推理）
         //      naImages 只进入缓存查询阶段（跳过截图检测）
         final List<ImageInfo> finalNaImages = naImages; // 需要在 lambda 中使用，需要 final
+        final String finalLanguage = language != null ? language : "zh"; // 需要在 lambda 中使用，需要 final
         executorService.execute(() -> {
             try {
-                performScan(currentScanId, newImages, finalNaImages, remoteApiUrl, cacheApiUrl);
+                performScan(currentScanId, newImages, finalNaImages, remoteApiUrl, cacheApiUrl, finalLanguage);
             } catch (Exception e) {
                 Log.e(TAG, "扫描过程发生错误", e);
                 sendErrorEvent(currentScanId, "扫描失败: " + e.getMessage());
@@ -197,7 +198,7 @@ public class GalleryScanService {
      * @param cacheApiUrl 缓存查询API地址
      */
     private void performScan(String scanId, List<ImageInfo> newImages, List<ImageInfo> naImages,
-                            String remoteApiUrl, String cacheApiUrl) {
+                            String remoteApiUrl, String cacheApiUrl, String language) {
         long scanStartTime = System.currentTimeMillis();
         Log.d(TAG, "开始后续扫描阶段: " + scanId + ", 新增图片: " + newImages.size() + " 张, NA分类图片: " + (naImages != null ? naImages.size() : 0) + " 张");
         
@@ -206,7 +207,7 @@ public class GalleryScanService {
             List<ImageInfo> naImagesAfterScreenshot = new ArrayList<>();
             if (!newImages.isEmpty()) {
                 // 注意：进度事件在 detectScreenshots 函数内部发送（开始和完成事件）
-                naImagesAfterScreenshot = detectScreenshots(newImages, remoteApiUrl);
+                naImagesAfterScreenshot = detectScreenshots(newImages, remoteApiUrl, language);
                 Log.d(TAG, "阶段3a完成: 检测完成，剩余待处理: " + naImagesAfterScreenshot.size() + " 张");
                 
                 // 等待一小段时间，确保阶段3a的完成事件先被处理（避免事件顺序混乱）
@@ -458,7 +459,7 @@ public class GalleryScanService {
      * @param baseApiUrl API基础URL（用于位置信息获取，可为null）
      * @return 分类为NA的图片列表（需要继续处理的图片）
      */
-    private List<ImageInfo> detectScreenshots(List<ImageInfo> images, String baseApiUrl) {
+    private List<ImageInfo> detectScreenshots(List<ImageInfo> images, String baseApiUrl, String language) {
         // 初始化阶段级统计变量
         processedThisPhase = 0;
         totalFoundThisPhase = images.size();
@@ -555,7 +556,7 @@ public class GalleryScanService {
                 // 4. 批量保存（每批100张或最后一张）
                 if (batchSaveData.size() >= batchSize || i == images.size() - 1) {
                     if (!batchSaveData.isEmpty()) {
-                        batchSaveImages(batchSaveData, baseApiUrl);
+                        batchSaveImages(batchSaveData, baseApiUrl, language);
                         batchSaveData.clear();
                     }
                     
@@ -580,7 +581,7 @@ public class GalleryScanService {
         
         // 保存最后剩余的批次（如果还有）
         if (!batchSaveData.isEmpty()) {
-            batchSaveImages(batchSaveData, baseApiUrl);
+            batchSaveImages(batchSaveData, baseApiUrl, language);
         }
         
         // 🔥 输出统计信息
@@ -600,15 +601,16 @@ public class GalleryScanService {
      * @param imageDataList 图片数据列表
      */
     private void batchSaveImages(List<ImageDataWithExif> imageDataList) {
-        batchSaveImages(imageDataList, null);
+        batchSaveImages(imageDataList, null, "zh");
     }
     
     /**
      * 批量保存图片数据到数据库（带位置信息获取）
      * @param imageDataList 图片数据列表
      * @param baseApiUrl API基础URL（用于位置信息获取，可为null）
+     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
      */
-    private void batchSaveImages(List<ImageDataWithExif> imageDataList, String baseApiUrl) {
+    private void batchSaveImages(List<ImageDataWithExif> imageDataList, String baseApiUrl, String language) {
         try {
             List<Map<String, Object>> saveDataList = new ArrayList<>();
             
@@ -682,7 +684,7 @@ public class GalleryScanService {
             
             // 如果有API URL，尝试批量获取位置信息并补全到saveDataList中
             if (baseApiUrl != null && !baseApiUrl.isEmpty()) {
-                batchGetLocationInfo(baseApiUrl, saveDataList);
+                batchGetLocationInfo(baseApiUrl, saveDataList, language);
             }
             
             // 批量保存到数据库
@@ -701,8 +703,9 @@ public class GalleryScanService {
      * 直接修改传入的saveDataList，为有GPS坐标但没有位置信息的图片补全位置信息
      * @param baseApiUrl API基础URL
      * @param saveDataList 即将被存储的图片信息列表（会被直接修改，补全位置信息）
+     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
      */
-    private void batchGetLocationInfo(String baseApiUrl, List<Map<String, Object>> saveDataList) {
+    private void batchGetLocationInfo(String baseApiUrl, List<Map<String, Object>> saveDataList, String language) {
         if (baseApiUrl == null || baseApiUrl.isEmpty() || saveDataList.isEmpty()) {
             return;
         }
@@ -757,7 +760,7 @@ public class GalleryScanService {
                 }
                 
                 try {
-                    Map<String, String> location = getLocationInfoFromApi(apiUrl, latitude, longitude);
+                    Map<String, String> location = getLocationInfoFromApi(apiUrl, latitude, longitude, language);
                     if (location != null && !location.isEmpty()) {
                         // 直接将位置信息添加到imageData中
                         imageData.put("city", location.get("city"));
@@ -782,9 +785,10 @@ public class GalleryScanService {
      * @param apiUrl API完整URL
      * @param latitude 纬度
      * @param longitude 经度
+     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
      * @return 位置信息Map，包含city、country、province，如果获取失败返回null
      */
-    private Map<String, String> getLocationInfoFromApi(String apiUrl, double latitude, double longitude) throws Exception {
+    private Map<String, String> getLocationInfoFromApi(String apiUrl, double latitude, double longitude, String language) throws Exception {
         // 构建查询URL
         String queryUrl = apiUrl + "?latitude=" + latitude + "&longitude=" + longitude + "&limit=10&max_distance_km=50";
         
@@ -831,17 +835,27 @@ public class GalleryScanService {
                 return null;
             }
             
-            // 提取城市信息
-            String cityName = mainCity.optString("name_zh", mainCity.optString("name", ""));
-            // 标准化城市名称：移除"市"后缀
-            if (cityName.endsWith("市")) {
-                cityName = cityName.substring(0, cityName.length() - 1);
+            // 🔥 解耦：根据JS层传递的语言设置选择城市名称
+            String cityName;
+            String provinceName;
+            if ("en".equals(language)) {
+                // 英文：优先使用英文名，如果没有则使用中文名
+                cityName = mainCity.optString("name", mainCity.optString("name_zh", ""));
+                provinceName = mainCity.optString("name", mainCity.optString("name_zh", ""));
+            } else {
+                // 中文（默认）：优先使用中文名，如果没有则使用英文名
+                cityName = mainCity.optString("name_zh", mainCity.optString("name", ""));
+                provinceName = mainCity.optString("name_zh", mainCity.optString("name", ""));
+                // 标准化城市名称：移除"市"后缀（仅中文）
+                if (cityName.endsWith("市")) {
+                    cityName = cityName.substring(0, cityName.length() - 1);
+                }
             }
             
             Map<String, String> location = new HashMap<>();
             location.put("city", cityName);
-            location.put("country", "中国"); // 默认中国
-            location.put("province", mainCity.optString("name_zh", mainCity.optString("name", "")));
+            location.put("country", "en".equals(language) ? "China" : "中国"); // 根据语言设置国家名称
+            location.put("province", provinceName);
             
             return location;
             
@@ -2289,19 +2303,16 @@ public class GalleryScanService {
     
     /**
      * 发送进度事件（完整参数）
+     * 只传递阶段ID和进度数据，消息生成和国际化由JS层统一处理
      */
     private void sendProgressEvent(String stage, int filesProcessed, int filesFound, String scanId, 
                                   int totalImagesToBeClassified, int imagesClassified) {
-        // 🔥 优化：原生层直接更新前台服务通知，不依赖JS线程
-        // 这样即使JS线程被杀死，通知也能正常更新
-        updateForegroundServiceNotification(stage, filesProcessed, filesFound, totalImagesToBeClassified, imagesClassified);
-        
-        // 发送事件到JS层（如果JS线程存在）
+        // 发送事件到JS层，JS层统一处理消息生成、国际化和通知更新
         mainHandler.post(() -> {
             try {
                 WritableMap eventData = Arguments.createMap();
                 eventData.putString("type", "progress");
-                eventData.putString("stage", stage);
+                eventData.putString("stage", stage); // 阶段ID，JS层根据此ID生成国际化消息
                 eventData.putInt("filesProcessed", filesProcessed); // 当前阶段已处理的图片数量
                 eventData.putInt("filesFound", filesFound); // 当前阶段需要处理的图片数量
                 eventData.putInt("totalImagesToBeClassified", totalImagesToBeClassified); // 这次扫描任务一共需要分类的图片总数
@@ -2320,65 +2331,6 @@ public class GalleryScanService {
         });
     }
     
-    /**
-     * 更新前台服务通知（原生层直接更新，不依赖JS线程）
-     */
-    private void updateForegroundServiceNotification(String stage, int filesProcessed, int filesFound, 
-                                                    int totalImagesToBeClassified, int imagesClassified) {
-        try {
-            // 生成通知消息
-            String message = generateProgressMessage(stage, filesProcessed, filesFound, totalImagesToBeClassified, imagesClassified);
-            
-            // 发送Intent更新前台服务通知
-            Intent intent = new Intent(context, ScanForegroundService.class);
-            intent.setAction("UPDATE_PROGRESS");
-            intent.putExtra("message", message);
-            intent.putExtra("processed", filesProcessed);
-            intent.putExtra("total", filesFound);
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent);
-            } else {
-                context.startService(intent);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "更新前台服务通知失败", e);
-        }
-    }
-    
-    /**
-     * 生成进度消息（与JS层格式保持一致）
-     */
-    private String generateProgressMessage(String stage, int filesProcessed, int filesFound, 
-                                          int totalImagesToBeClassified, int imagesClassified) {
-        String stageName = getStageName(stage);
-        String message = stageName + ": " + filesProcessed + "/" + filesFound;
-        
-        // 添加总分类统计（如果有）
-        if (totalImagesToBeClassified > 0) {
-            message += " | 分类成功: " + imagesClassified + "/" + totalImagesToBeClassified;
-        }
-        
-        return message;
-    }
-    
-    /**
-     * 获取阶段名称（中文）
-     */
-    private String getStageName(String stage) {
-        switch (stage) {
-            case "screenshot_detection":
-                return "截图检测";
-            case "cache_check":
-                return "缓存查询";
-            case "remote_inference":
-                return "远程推理";
-            case "native_scan_completed":
-                return "原生扫描完成";
-            default:
-                return "扫描中";
-        }
-    }
     
     /**
      * 发送扫描完成事件

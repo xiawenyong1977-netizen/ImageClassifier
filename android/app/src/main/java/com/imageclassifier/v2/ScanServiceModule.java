@@ -48,7 +48,7 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
     }
     
     @ReactMethod
-    public void updateScanProgress(String message, int processed, int total) {
+    public void updateScanProgress(String message, int processed, int total, String title) {
         try {
             // 使用 ApplicationContext 而不是 Activity，避免 Activity 为 null 的问题
             // 小米手机可能在后台时 Activity 为 null，导致通知无法更新
@@ -56,9 +56,16 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
             if (context != null) {
                 Intent intent = new Intent(context, ScanForegroundService.class);
                 intent.setAction("UPDATE_PROGRESS");
-                intent.putExtra("message", message != null ? message : "扫描中...");
+                // 🔥 解耦：如果消息为null，使用硬编码的英文默认消息
+                // 通知的实际内容完全由JS层控制，原生层只提供fallback
+                String finalMessage = message != null ? message : "Scanning...";
+                intent.putExtra("message", finalMessage);
                 intent.putExtra("processed", processed);
                 intent.putExtra("total", total);
+                // 🔥 解耦：通知标题也由JS层传递，如果为null则使用资源文件的默认值（已国际化）
+                if (title != null) {
+                    intent.putExtra("title", title);
+                }
                 // 使用 startForegroundService 确保服务能正常启动（Android 8.0+）
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent);

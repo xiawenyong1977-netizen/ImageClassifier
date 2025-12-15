@@ -23,6 +23,8 @@ import {
   Share,
   NativeModules,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { getDefaultPresets, getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
 import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
@@ -32,6 +34,8 @@ import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const ImagePreviewScreen = ({ route, navigation }) => {
+  const { t, i18n } = useTranslation('common');
+  
   // ==================== 路由参数 ====================
   // 统一使用 filterType 和 filterValue
   const {
@@ -83,7 +87,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const [currentImage, setCurrentImage] = useState(initialImage); // 当前图片完整信息
   const [allImagesState, setAllImagesState] = useState(allImages); // 可变的图片列表
   const [showInfo, setShowInfo] = useState(false);
-  const [showActions, setShowActions] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showEnhancePresets, setShowEnhancePresets] = useState(false);
   const [enhancePresets, setEnhancePresets] = useState({});
   const flatListRef = useRef(null);
@@ -321,8 +325,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       // 如果列表为空，返回上一页
       if (updatedImages.length === 0) {
         logger.debug('列表已空，返回上一页');
-        Alert.alert('提示', '当前分类已无图片', [
-          { text: '确定', onPress: goBack }
+        Alert.alert(t('common.tip') || t('common.confirm'), t('imagePreview.noImagesInCategory'), [
+          { text: t('common.confirm'), onPress: goBack }
         ]);
         return false;
       }
@@ -416,7 +420,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 格式化文件大小
    */
   const formatFileSize = (bytes) => {
-    if (!bytes) return '未知';
+    if (!bytes) return t('imagePreview.unknown');
     const mb = bytes / (1024 * 1024);
     if (mb < 1) {
       return `${(bytes / 1024).toFixed(1)} KB`;
@@ -428,7 +432,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    * 格式化日期
    */
   const formatDate = (dateString) => {
-    if (!dateString) return '未知';
+    if (!dateString) return t('imagePreview.unknown');
     const date = new Date(dateString);
     
     const year = date.getFullYear();
@@ -528,23 +532,23 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const handleDelete = () => {
     if (!currentImage || !currentImage.id) {
-      Alert.alert('错误', '图片信息不完整，无法操作');
+      Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
     
     // 所有分类都执行真正的删除
     logger.debug('执行删除操作...');
     Alert.alert(
-      '确认删除',
-      '确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！',
+      t('imagePreview.confirmTitle') || t('category.confirmDeleteTitle'),
+      t('imagePreview.confirmDelete'),
       [
         { 
-          text: '取消', 
+          text: t('common.cancel'), 
           style: 'cancel',
           onPress: () => logger.debug('用户取消删除')
         },
         {
-          text: '删除',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             logger.debug('用户确认删除，开始删除流程...');
@@ -558,8 +562,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 
                 // 如果是从首页进入的，删除后直接返回首页
                 if (fromScreen === 'Home') {
-                  Alert.alert('成功', '图片已删除', [
-                    { text: '确定', onPress: goBack }
+                  Alert.alert(t('common.success'), t('imagePreview.deleteSuccess') || t('category.deleteSuccess', { count: 1 }), [
+                    { text: t('common.confirm'), onPress: goBack }
                   ]);
                   return;
                 }
@@ -571,7 +575,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 // 如果列表不为空，继续浏览
                 if (reloadSuccess) {
                   // 显示成功提示，但不自动返回
-                  Alert.alert('成功', '图片已删除');
+                  Alert.alert(t('common.success'), t('imagePreview.deleteSuccess') || t('category.deleteSuccess', { count: 1 }));
                 } else {
                   // 列表为空，reloadImageList 已经处理了返回逻辑，这里不需要额外操作
                   logger.debug('列表已空，已返回上一页');
@@ -579,12 +583,12 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               } else {
                 // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
                 logger.debug('删除失败（可能是权限问题）:', result);
-                Alert.alert('删除失败', `删除失败，请检查文件权限`);
+                Alert.alert(t('category.deleteFailedTitle') || t('common.error'), t('category.deleteFailedMessage') || t('category.deleteFailed'));
               }
             } catch (error) {
               // 删除失败通常是权限问题，属于正常情况，使用 debug 级别
               logger.debug('删除图片失败（可能是权限问题）:', error);
-              Alert.alert('错误', '删除失败，请重试');
+              Alert.alert(t('common.error'), t('category.deleteError') || t('common.retry'));
             }
           },
         },
@@ -597,22 +601,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const handleStaging = () => {
     if (!currentImage || !currentImage.id) {
-      Alert.alert('错误', '图片信息不完整，无法操作');
+      Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
     
     logger.debug('放入暂存箱...');
     Alert.alert(
-      '放入暂存箱',
-      '确定要将这张图片放入暂存箱吗？\n\n图片将被放入暂存箱中。',
+      t('category.addToStagingBox'),
+      t('imagePreview.confirmAddToStagingBox'),
       [
         { 
-          text: '取消', 
+          text: t('common.cancel'), 
           style: 'cancel',
           onPress: () => logger.debug('用户取消放入暂存箱')
         },
         {
-          text: '确定',
+          text: t('common.confirm'),
           onPress: async () => {
             logger.debug('用户确认放入暂存箱，开始操作...');
             try {
@@ -635,14 +639,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 setIsInStagingBox(true);
                 
                 // 图片保留在当前列表中，不需要重新加载
-                Alert.alert('成功', '图片已放入暂存箱');
+                Alert.alert(t('common.success'), t('category.addToStagingBoxSuccess', { count: 1 }));
               } else {
                 logger.error('放入暂存箱失败:', result);
-                Alert.alert('错误', '放入暂存箱失败，请重试');
+                Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
               }
             } catch (error) {
               logger.error('放入暂存箱失败:', error);
-              Alert.alert('错误', '放入暂存箱失败，请重试');
+              Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
             }
           },
         },
@@ -655,22 +659,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
    */
   const handleRemoveFromStagingBox = () => {
     if (!currentImage || !currentImage.id) {
-      Alert.alert('错误', '图片信息不完整，无法操作');
+      Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
     
     logger.debug('从暂存箱移除...');
     Alert.alert(
-      '移出暂存箱',
-      '确定要从暂存箱移除这张图片吗？\n\n图片将从暂存箱中移除，但不会删除文件。',
+      t('category.removeFromStagingBox'),
+      t('imagePreview.confirmRemoveFromStagingBox'),
       [
         { 
-          text: '取消', 
+          text: t('common.cancel'), 
           style: 'cancel',
           onPress: () => logger.debug('用户取消移出暂存箱')
         },
         {
-          text: '移出',
+          text: t('imagePreview.remove'),
           onPress: async () => {
             logger.debug('用户确认移出暂存箱，开始操作...');
             try {
@@ -692,14 +696,14 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   }
                 }
                 
-                Alert.alert('成功', '图片已从暂存箱移除');
+                Alert.alert(t('common.success'), t('imagePreview.removeFromStagingBoxSuccess'));
               } else {
                 logger.error('从暂存箱移除失败:', result);
-                Alert.alert('错误', '从暂存箱移除失败，请重试');
+                Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
               }
             } catch (error) {
               logger.error('从暂存箱移除失败:', error);
-              Alert.alert('错误', '从暂存箱移除失败，请重试');
+              Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
             }
           },
         },
@@ -715,10 +719,15 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       return [];
     }
     
+    const currentLang = i18n.language || 'zh';
+    const language = currentLang === 'en' ? 'english' : 'chinese';
+    
     // 注意：暂存箱不是分类，不会出现在 getAllCategoriesWithUI() 返回的列表中，所以不需要过滤
     return configService.getAllCategoriesWithUI()
       .map(category => {
-        let name = category.chinese || category.english || category.id;
+        let name = configService.getCategoryDisplayName(category.id, language) || 
+                   (currentLang === 'en' ? (category.english || category.chinese) : (category.chinese || category.english)) ||
+                   category.id;
         // 将名称改为两行显示（每行2个字）
         if (name.length >= 3) {
           // 3个字或更多：每2个字换行
@@ -736,15 +745,21 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 切换分类选择器显示
+   * 打开分类选择器 Modal
    */
-  const toggleCategorySelector = () => {
-    const newShowActions = !showActions;
-    setShowActions(newShowActions);
-    // 打开分类选择器时，关闭照片创玩面板
-    if (newShowActions && showEnhancePresets) {
+  const openCategoryModal = () => {
+    setShowCategoryModal(true);
+    // 打开分类选择器时，关闭照片创玩 Modal
+    if (showEnhancePresets) {
       setShowEnhancePresets(false);
     }
+  };
+
+  /**
+   * 关闭分类选择器 Modal
+   */
+  const closeCategoryModal = () => {
+    setShowCategoryModal(false);
   };
 
   /**
@@ -773,8 +788,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       
       logger.debug('分类修改成功');
       
-      // 自动关闭分类选择器
-      setShowActions(false);
+      // 自动关闭分类 Modal
+      closeCategoryModal();
       
       // 重新加载图片列表（如果是从分类页进入的）
       if (finalFilterType === 'category' && finalFilterValue !== newCategory) {
@@ -783,7 +798,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('修改分类失败:', error);
-      Alert.alert('错误', '修改分类失败，请重试');
+      Alert.alert(t('common.error'), t('imagePreview.changeCategoryFailed'));
     }
   };
 
@@ -793,7 +808,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const handleShare = async () => {
     const shareUri = resolveImageUri(currentImage);
     if (!currentImage || !shareUri) {
-      Alert.alert('错误', '图片信息不完整，无法分享');
+      Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
 
@@ -811,7 +826,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
         const result = await Share.share({
           url: shareUri,
-          title: '芯图相册',
+          title: t('app.name'),
         });
         
         if (result.action === Share.sharedAction) {
@@ -822,32 +837,60 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('❌ 分享失败:', error);
-      Alert.alert('分享失败', '分享失败，请重试');
+      Alert.alert(t('category.shareFailed'), t('category.shareFailedMessage'));
     }
   };
 
   /**
-   * 打开照片创玩面板
+   * 打开照片创玩 Modal
    */
-  const openEnhancePanel = async () => {
+  const openEnhanceModal = async () => {
     try {
-      // 切换展开/收起
-      if (showEnhancePresets) {
-        setShowEnhancePresets(false);
-        return;
-      }
-      // 打开照片创玩面板时，关闭分类选择器
-      if (showActions) {
-        setShowActions(false);
+      // 打开照片创玩 Modal 时，关闭分类 Modal
+      if (showCategoryModal) {
+        setShowCategoryModal(false);
       }
       const settings = await UnifiedDataService.readSettings();
-      const presets = settings?.aiEnhancePresets || {};
-      setEnhancePresets(presets);
+      const rawPresets = settings?.aiEnhancePresets || {};
+      
+      // 获取当前语言的默认预设翻译（与 PC 端一致）
+      const currentLang = i18n.language || 'zh';
+      const defaultPresets = getDefaultPresets(currentLang);
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 处理预设名称国际化
+      const processedPresets = {};
+      Object.entries(rawPresets).forEach(([id, preset]) => {
+        // 判断是否是默认预设（通过比较名称是否等于中文或英文的默认值）
+        const defaultPreset = defaultPresets[id];
+        const isDefaultName = defaultPreset && (
+          preset.name === zhDefaults[id]?.name ||
+          preset.name === enDefaults[id]?.name
+        );
+        
+        // 如果是默认预设，使用当前语言的翻译；否则使用用户自定义的名称
+        const displayName = isDefaultName ? defaultPreset.name : preset.name;
+        
+        processedPresets[id] = {
+          ...preset,
+          name: displayName
+        };
+      });
+      
+      setEnhancePresets(processedPresets);
       setShowEnhancePresets(true);
     } catch (error) {
       logger.error('加载增强方案失败:', error);
-      Alert.alert('错误', '加载增强方案失败，请稍后重试');
+      Alert.alert(t('common.error'), t('imagePreview.loadEnhancePresetsFailed'));
     }
+  };
+
+  /**
+   * 关闭照片创玩 Modal
+   */
+  const closeEnhanceModal = () => {
+    setShowEnhancePresets(false);
   };
 
   /**
@@ -860,38 +903,39 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       // 会员状态检查
       const { isMember } = await WeChatAuthService.getMembershipStatus();
       if (!isMember) {
-        Alert.alert('提示', '该功能仅对会员开放，请在设置页面开通终身会员后再试。');
+        Alert.alert(t('common.tip') || t('common.confirm'), t('imagePreview.membersOnlyFeature') || t('category.enhanceMembersOnly'));
         return;
       }
 
       // 额度检查
       const credits = await WeChatAuthService.getCredits();
       if (!credits || typeof credits.remaining !== 'number') {
-        Alert.alert('错误', '获取额度失败，请稍后重试');
+        Alert.alert(t('common.error'), t('imagePreview.cannotCheckCredits') || t('common.retry'));
         return;
       }
       if (credits.remaining < count) {
-        Alert.alert('提示', '剩余额度不足，请去"芯图相册"服务号购买额度');
+        Alert.alert(t('common.tip') || t('common.confirm'), t('imagePreview.insufficientCreditsMessageShort', { remaining: credits.remaining, count }));
         return;
       }
 
       // 弹出二次确认：显示剩余额度与本次消耗额度
       Alert.alert(
-        '使用额度确认',
-        `本次将消耗：${count}\n剩余额度：${credits.remaining}\n\n是否继续？`,
+        t('imagePreview.confirmTitle') || t('common.confirm'),
+        t('imagePreview.enhanceConfirmMessage', { count, remaining: credits.remaining }),
         [
-          { text: '取消', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: '确认',
+            text: t('common.confirm'),
             style: 'default',
             onPress: async () => {
               try {
-                setShowEnhancePresets(false);
-                const presetName = (enhancePresets && enhancePresets[presetId] && enhancePresets[presetId].name) ? enhancePresets[presetId].name : presetId;
+                closeEnhanceModal();
+                const preset = enhancePresets?.[presetId];
+                const presetName = preset?.name || presetId;
                 await performEnhance(presetId, presetName);
               } catch (e) {
                 logger.error('提交增强失败:', e);
-                Alert.alert('错误', e.message || '提交失败，请稍后重试');
+                Alert.alert(t('common.error'), e.message || t('category.submitFailed'));
               }
             }
           }
@@ -899,7 +943,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       logger.error('增强检查失败:', error);
-      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
     }
   };
 
@@ -912,7 +956,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       
       const enhanceUri = resolveImageUri(currentImage);
       if (!currentImage || !currentImage.id || !enhanceUri) {
-        Alert.alert('错误', '图片信息不完整');
+        Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
         return;
       }
 
@@ -930,7 +974,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('导航到结果页失败:', error);
-      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
     }
   };
 
@@ -965,7 +1009,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           </TouchableOpacity>
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>
-              暂存箱 ({displayIndex} / {displayTotal})
+              {t('category.stagingBox')} ({displayIndex} / {displayTotal})
             </Text>
           </View>
           <TouchableOpacity onPress={() => setShowInfo(!showInfo)} style={styles.headerButton}>
@@ -977,6 +1021,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     
     // 优先显示来源分类（城市、颜色、目录），而不是内容类别
     let displayName = '';
+    const currentLang = i18n.language || 'zh';
     
     // 调试：记录参数值
     logger.debug('📋 ImagePreview 标题显示参数:', {
@@ -991,11 +1036,11 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     } else {
       switch (currentFilterType) {
         case 'city':
-          displayName = currentFilterValue || '城市';
+          displayName = currentFilterValue || t('category.city');
           logger.debug('✅ 使用城市名作为标题:', displayName);
           break;
         case 'color':
-          displayName = currentFilterValue || '颜色';
+          displayName = getColorNameTranslation(currentFilterValue, currentLang) || currentFilterValue || t('category.color');
           logger.debug('✅ 使用颜色名作为标题:', displayName);
           break;
         case 'directory':
@@ -1006,24 +1051,27 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           }
           break;
         case 'format':
-          displayName = currentFilterValue || '格式';
+          displayName = currentFilterValue || t('category.format');
           logger.debug('✅ 使用格式名作为标题:', displayName);
           break;
         case 'resolution':
-          displayName = currentFilterValue || '分辨率';
+          displayName = currentFilterValue || t('category.resolution');
           logger.debug('✅ 使用分辨率名作为标题:', displayName);
           break;
         case 'orientation':
-          displayName = currentFilterValue || '方向';
+          displayName = getOrientationNameTranslation(currentFilterValue, currentLang) || currentFilterValue || t('category.orientation');
           logger.debug('✅ 使用方向名作为标题:', displayName);
           break;
         case 'similarityGroup':
-          displayName = '相似照片组';
+          displayName = t('category.similarityGroup');
           logger.debug('✅ 使用相似组作为标题');
           break;
         case 'category':
           if (currentFilterValue) {
-            displayName = UnifiedDataService.getCategoryDisplayName(currentFilterValue);
+            const language = currentLang === 'en' ? 'english' : 'chinese';
+            displayName = configService?.getCategoryDisplayName(currentFilterValue, language) || 
+                         UnifiedDataService.getCategoryDisplayName(currentFilterValue) || 
+                         currentFilterValue;
             logger.debug('✅ 使用内容分类作为标题:', displayName);
           }
           break;
@@ -1065,7 +1113,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   return (
       <View style={styles.infoPanel}>
         <View style={styles.infoPanelHeader}>
-          <Text style={styles.infoPanelTitle}>图片信息</Text>
+          <Text style={styles.infoPanelTitle}>{t('imagePreview.fileInfo')}</Text>
           <TouchableOpacity onPress={() => setShowInfo(false)}>
             <Text style={styles.infoPanelClose}>✕</Text>
         </TouchableOpacity>
@@ -1074,16 +1122,16 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         <ScrollView style={styles.infoContent}>
           {/* 基本信息 */}
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>拍摄时间:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.takenTime')}:</Text>
             <Text style={styles.infoValue}>
-              {currentImage.takenAt ? formatDate(currentImage.takenAt) : '未知'}
+              {currentImage.takenAt ? formatDate(currentImage.takenAt) : t('imagePreview.unknown')}
               </Text>
             </View>
 
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>文件时间:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.fileTime')}:</Text>
             <Text style={styles.infoValue}>
-              {currentImage.timestamp ? formatDate(currentImage.timestamp) : '未知'}
+              {currentImage.timestamp ? formatDate(currentImage.timestamp) : t('imagePreview.unknown')}
             </Text>
           </View>
 
@@ -1091,7 +1139,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           {currentImage.latitude && currentImage.longitude && (
             <>
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>GPS坐标:</Text>
+                <Text style={styles.infoLabel}>{t('imagePreview.gpsCoordinates')}:</Text>
                 <Text style={styles.infoValue}>
                   {currentImage.latitude.toFixed(6)}, {currentImage.longitude.toFixed(6)}
               </Text>
@@ -1099,18 +1147,18 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               
               {currentImage.city && (
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>拍摄城市:</Text>
+                  <Text style={styles.infoLabel}>{t('imagePreview.shootingCity')}:</Text>
                   <Text style={styles.infoValue}>
                     {currentImage.city}
                     {currentImage.province && `, ${currentImage.province}`}
-                    {currentImage.cityDistance && ` (距离${currentImage.cityDistance}km)`}
+                    {currentImage.cityDistance && ` ${t('imagePreview.distance', { km: currentImage.cityDistance })}`}
                   </Text>
                 </View>
               )}
               
               {currentImage.altitude && (
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>海拔高度:</Text>
+                  <Text style={styles.infoLabel}>{t('imagePreview.altitude')}:</Text>
                   <Text style={styles.infoValue}>
                     {currentImage.altitude}m
                   </Text>
@@ -1119,7 +1167,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               
               {currentImage.accuracy && (
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>GPS精度:</Text>
+                  <Text style={styles.infoLabel}>{t('imagePreview.gpsAccuracy')}:</Text>
                   <Text style={styles.infoValue}>
                     ±{currentImage.accuracy}m
                   </Text>
@@ -1129,34 +1177,34 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           )}
 
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>文件路径:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.filePath')}:</Text>
             <Text style={styles.infoValue} numberOfLines={3}>
-              {displayLocalPath || (displayUri ? displayUri.replace('file://', '') : '未知')}
+              {displayLocalPath || (displayUri ? displayUri.replace('file://', '') : t('imagePreview.unknown'))}
             </Text>
             </View>
 
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>尺寸:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.dimensions')}:</Text>
             <Text style={styles.infoValue}>
                 {imageDimensions ? 
                   `${imageDimensions.width} × ${imageDimensions.height}` : 
-                '未知'
+                t('imagePreview.unknown')
                 }
               </Text>
             </View>
 
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>大小:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.fileSize')}:</Text>
             <Text style={styles.infoValue}>
               {formatFileSize(currentImage.size)}
               </Text>
             </View>
 
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>分类:</Text>
+            <Text style={styles.infoLabel}>{t('imagePreview.category')}:</Text>
             <Text style={styles.infoValue}>
               {getCategoryDisplayName(currentImage.category)}
-                {currentImage.confidence === 'manual' ? ' (人工)' : 
+                {currentImage.confidence === 'manual' ? ` (${t('imagePreview.manual')})` : 
                  currentImage.confidence ? ` (${(currentImage.confidence * 100).toFixed(1)}%)` : ''}
               </Text>
             </View>
@@ -1167,11 +1215,11 @@ const ImagePreviewScreen = ({ route, navigation }) => {
            (currentImage.mobileNetV3Detections && currentImage.mobileNetV3Detections.predictions && currentImage.mobileNetV3Detections.predictions.length > 0) ? (
               <>
                 <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>🔍 检测结果:</Text>
+                <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
                 <Text style={styles.infoValue}>
-                  {currentImage.message && currentImage.message !== '图像分类完成' ? 
+                  {currentImage.message && currentImage.message !== t('imagePreview.classificationComplete') ? 
                     currentImage.message : 
-                    `${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))} 个物体`
+                    `${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))}${t('imagePreview.objects')}`
                     }
                   </Text>
                 </View>
@@ -1179,11 +1227,11 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               {/* 身份证检测结果 */}
               {currentImage.idCardDetections && currentImage.idCardDetections.length > 0 && (
                 <View style={styles.detectionSection}>
-                  <Text style={styles.detectionTitle}>🆔 身份证检测:</Text>
+                  <Text style={styles.detectionTitle}>🆔 {t('imagePreview.idCardDetection')}:</Text>
                   {currentImage.idCardDetections.map((detection, index) => (
                     <View key={index} style={styles.detectionItem}>
                       <Text style={styles.detectionText}>
-                        {detection.class === 'id_card_front' ? '身份证正面' : '身份证背面'}
+                        {detection.class === 'id_card_front' ? t('imagePreview.idCardFront') : t('imagePreview.idCardBack')}
                         ({(detection.confidence * 100).toFixed(1)}%)
                     </Text>
                     </View>
@@ -1194,10 +1242,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               {/* 通用物体检测结果 */}
               {currentImage.generalDetections && currentImage.generalDetections.length > 0 && (
                 <View style={styles.detectionSection}>
-                  <Text style={styles.detectionTitle}>🌐 通用物体检测:</Text>
+                  <Text style={styles.detectionTitle}>🌐 {t('imagePreview.generalDetection')}:</Text>
                   {currentImage.generalDetections.slice(0, 5).map((detection, index) => {
                     const objectInfo = configService.getYoloObjectById(detection.classId);
-                    const className = objectInfo ? objectInfo.chinese || objectInfo.english : `Class ${detection.classId}`;
+                    // 根据当前语言设置获取物体名称
+                    const currentLang = i18n.language || 'zh';
+                    let className;
+                    if (objectInfo) {
+                      // 优先使用当前语言的名称，如果没有则使用另一种语言
+                      if (currentLang === 'en') {
+                        className = objectInfo.english || objectInfo.chinese || `Class ${detection.classId}`;
+                      } else {
+                        className = objectInfo.chinese || objectInfo.english || `Class ${detection.classId}`;
+                      }
+                    } else {
+                      className = `Class ${detection.classId}`;
+                    }
                     
                     return (
                       <View key={index} style={styles.detectionItem}>
@@ -1209,7 +1269,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   })}
                   {currentImage.generalDetections.length > 5 && (
                     <Text style={styles.detectionMore}>
-                      ... 还有 {currentImage.generalDetections.length - 5} 个物体
+                      {t('imagePreview.moreObjects', { count: currentImage.generalDetections.length - 5 })}
                     </Text>
                   )}
                   </View>
@@ -1218,10 +1278,11 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               {/* MobileNetV3 分类结果 */}
               {currentImage.mobileNetV3Detections && currentImage.mobileNetV3Detections.predictions && currentImage.mobileNetV3Detections.predictions.length > 0 && (
                 <View style={styles.detectionSection}>
-                  <Text style={styles.detectionTitle}>🧠 MobileNetV3 分类:</Text>
+                  <Text style={styles.detectionTitle}>🧠 {t('imagePreview.mobileNetDetection')}:</Text>
                   {currentImage.mobileNetV3Detections.predictions.slice(0, 5).map((prediction, index) => {
                     const mobileNetV3ClassInfo = configService?.getMobileNetV3ClassByEnglishName(prediction.class);
-                    const displayName = mobileNetV3ClassInfo?.chinese || prediction.class;
+                    const currentLang = i18n.language || 'zh';
+                    const displayName = mobileNetV3ClassInfo ? (currentLang === 'en' ? (mobileNetV3ClassInfo.english || mobileNetV3ClassInfo.chinese) : (mobileNetV3ClassInfo.chinese || mobileNetV3ClassInfo.english)) : prediction.class;
                     
                     return (
                       <View key={index} style={styles.detectionItem}>
@@ -1233,7 +1294,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   })}
                   {currentImage.mobileNetV3Detections.predictions.length > 5 && (
                     <Text style={styles.detectionMore}>
-                      ... 还有 {currentImage.mobileNetV3Detections.predictions.length - 5} 个分类
+                      {t('imagePreview.moreClassifications', { count: currentImage.mobileNetV3Detections.predictions.length - 5 })}
                     </Text>
                   )}
                   </View>
@@ -1241,11 +1302,11 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               </>
           ) : (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>🔍 检测结果:</Text>
+              <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
               <Text style={styles.infoValue}>
-                {currentImage.message && currentImage.message !== '图像分类完成' ? 
+                {currentImage.message && currentImage.message !== t('imagePreview.classificationComplete') ? 
                   currentImage.message : 
-                  '未检测到物体'
+                  t('imagePreview.noObjectsDetected')
                 }
               </Text>
             </View>
@@ -1256,37 +1317,58 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   };
 
   /**
-   * 渲染照片创玩面板
+   * 渲染照片创玩 Modal
    */
-  const renderEnhancePanel = () => {
-    if (!showEnhancePresets) return null;
-
+  const renderEnhanceModal = () => {
     return (
-      <View style={styles.enhancePanel}>
-        <ScrollView
-          style={styles.enhanceList}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
-          contentContainerStyle={styles.enhanceListContent}
-        >
-          {Object.entries(enhancePresets)
-            .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
-            .map(([presetId, preset], index) => (
-              <TouchableOpacity
-                key={presetId}
-                style={[
-                  styles.enhancePresetItem,
-                  ((index + 1) % 4 !== 0) && { marginRight: 6 },
-                ]}
-                onPress={() => handleEnhancePresetPress(presetId)}
-              >
-                <Text style={styles.presetName} numberOfLines={1}>
-                  {preset.name || presetId}
-                </Text>
-              </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+      <Modal
+        visible={showEnhancePresets}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={closeEnhanceModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* 标题栏 */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('category.enhanceMenu').replace(' ›', '')}</Text>
+              <Text style={styles.modalSubtitle}>
+                {t('category.selectEnhancePresetForImages', { count: 1 })}
+              </Text>
+            </View>
+
+            {/* 预设列表 */}
+            <ScrollView style={styles.categoryList}>
+              {Object.entries(enhancePresets)
+                .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
+                .map(([presetId, preset]) => {
+                  const displayName = preset.name || presetId;
+                  return (
+                    <TouchableOpacity
+                      key={presetId}
+                      style={styles.categoryItem}
+                      onPress={() => {
+                        handleEnhancePresetPress(presetId);
+                        closeEnhanceModal();
+                      }}
+                    >
+                      <Text style={styles.categoryIcon}>{preset.icon || '✨'}</Text>
+                      <Text style={styles.categoryName}>{displayName}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+            </ScrollView>
+
+            {/* 取消按钮 */}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={closeEnhanceModal}
+            >
+              <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -1296,87 +1378,113 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const renderActions = () => {
     return (
       <View style={styles.actionsBar}>
-        {/* 照片创玩面板 */}
-        {isInStagingBox && renderEnhancePanel()}
-        
         {/* 暂存/移出按钮 */}
         {!isInStagingBox ? (
           <TouchableOpacity style={styles.actionButton} onPress={handleStaging}>
             <Text style={styles.actionIcon}>📦</Text>
-            <Text style={styles.actionLabel}>暂存</Text>
+            <Text style={styles.actionLabel}>{t('imagePreview.stage')}</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.actionButton} onPress={handleRemoveFromStagingBox}>
             <Text style={styles.actionIcon}>📤</Text>
-            <Text style={styles.actionLabel}>移出</Text>
+            <Text style={styles.actionLabel}>{t('imagePreview.remove')}</Text>
           </TouchableOpacity>
         )}
         
         {/* 删除按钮（所有分类都显示） */}
         <TouchableOpacity style={styles.actionButton} onPress={handleDelete}>
           <Text style={styles.actionIcon}>🗑️</Text>
-          <Text style={styles.actionLabel}>删除</Text>
+          <Text style={styles.actionLabel}>{t('common.delete')}</Text>
         </TouchableOpacity>
         
         {/* 照片创玩按钮（所有分类都显示） */}
-        <TouchableOpacity style={styles.actionButton} onPress={openEnhancePanel}>
+        <TouchableOpacity style={styles.actionButton} onPress={openEnhanceModal}>
           <Text style={styles.actionIcon}>✨</Text>
-          <Text style={styles.actionLabel}>创玩</Text>
+          <Text style={styles.actionLabel}>{t('imagePreview.enhance')}</Text>
         </TouchableOpacity>
         
         {/* 分类按钮 */}
-        <TouchableOpacity style={styles.actionButton} onPress={toggleCategorySelector}>
+        <TouchableOpacity style={styles.actionButton} onPress={openCategoryModal}>
           <Text style={styles.actionIcon}>🏷️</Text>
-          <Text style={styles.actionLabel}>分类</Text>
+          <Text style={styles.actionLabel}>{t('imagePreview.category')}</Text>
         </TouchableOpacity>
         
         {/* 分享按钮 */}
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
           <Text style={styles.actionIcon}>📤</Text>
-          <Text style={styles.actionLabel}>分享</Text>
+          <Text style={styles.actionLabel}>{t('category.share')}</Text>
         </TouchableOpacity>
       </View>
     );
   };
 
   /**
-   * 渲染分类选择器（覆盖在图片底部）
+   * 渲染分类选择器 Modal
    */
-  const renderCategorySelector = () => {
-    if (!showActions) return null;
-
-    const categories = getAllCategories();
+  const renderCategoryModal = () => {
+    if (!configService || !configService.isConfigLoaded()) {
+      return null;
+    }
     
-    logger.debug('渲染分类选择器:', {
-      currentCategory: currentImage?.category,
-      categories: categories.map(c => c.id)
-    });
+    const categories = configService.getAllCategoriesWithUI();
+    if (!Array.isArray(categories)) {
+      return null;
+    }
+    
+    const currentLang = i18n.language || 'zh';
+    const language = currentLang === 'en' ? 'english' : 'chinese';
 
     return (
-      <View style={styles.categorySelector}>
-        <View style={styles.categoryGrid}>
-          {categories.map((cat) => {
-            const isSelected = currentImage?.category === cat.id;
-            logger.debug(`分类 ${cat.id}: ${isSelected ? '选中' : '未选中'}`);
-            
-            return (
-              <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.categoryItem,
-                  isSelected && styles.selectedCategory
-                ]}
-                onPress={() => handleCategoryChange(cat.id)}
-              >
-                <Text style={[
-                  styles.categoryName,
-                  isSelected && styles.selectedCategoryText
-                ]}>{cat.name}</Text>
-              </TouchableOpacity>
-            );
-          })}
+      <Modal
+        visible={showCategoryModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={closeCategoryModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* 标题栏 */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('imagePreview.selectCategory')}</Text>
+              <Text style={styles.modalSubtitle}>
+                {t('category.moveImagesTo', { count: 1 })}
+              </Text>
+            </View>
+
+            {/* 分类列表 */}
+            <ScrollView style={styles.categoryList}>
+              {categories.map((cat) => {
+                const categoryName = configService.getCategoryDisplayName(cat.id, language) || 
+                                   (currentLang === 'en' ? (cat.english || cat.chinese) : (cat.chinese || cat.english)) ||
+                                   cat.id;
+                const isSelected = currentImage?.category === cat.id;
+                
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={styles.categoryItem}
+                    onPress={() => handleCategoryChange(cat.id)}
+                  >
+                    <Text style={styles.categoryIcon}>{cat.icon || '🏷️'}</Text>
+                    <Text style={[
+                      styles.categoryName,
+                      isSelected && styles.selectedCategoryText
+                    ]}>{categoryName}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* 取消按钮 */}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={closeCategoryModal}
+            >
+              <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </Modal>
     );
   };
 
@@ -1433,7 +1541,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   />
                 ) : (
                   <View style={[styles.image, styles.imagePlaceholder]}>
-                    <Text style={styles.placeholderText}>无法加载图片</Text>
+                    <Text style={styles.placeholderText}>{t('imagePreview.imageNotFound')}</Text>
                   </View>
                 )}
             </View>
@@ -1443,9 +1551,6 @@ const ImagePreviewScreen = ({ route, navigation }) => {
 
         {/* 导航箭头 */}
         {renderNavigationArrows()}
-
-        {/* 分类选择器（覆盖在图片底部） */}
-        {renderCategorySelector()}
         </View>
 
       {/* 图片信息面板 */}
@@ -1453,6 +1558,12 @@ const ImagePreviewScreen = ({ route, navigation }) => {
 
       {/* 底部操作栏 */}
       {renderActions()}
+
+      {/* 增强预设模态框 */}
+      {renderEnhanceModal()}
+
+      {/* 分类选择器模态框 */}
+      {renderCategoryModal()}
     </SafeAreaView>
   );
 };
@@ -1626,94 +1737,66 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   
-  // 分类选择器
-  categorySelector: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(28, 28, 30, 0.95)',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderTopWidth: 1,
-    borderTopColor: '#3A3A3C',
+  // Modal 样式
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    gap: 8,
+  modalContainer: {
+    backgroundColor: '#1C1C1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3A3A3C',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  categoryList: {
+    maxHeight: 400,
   },
   categoryItem: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#3A3A3C',
-    backgroundColor: 'rgba(58, 58, 60, 0.5)',
-    width: 52,
-    minHeight: 50,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
   },
-  selectedCategory: {
-    borderColor: '#007AFF',
-    borderWidth: 2,
-    backgroundColor: 'rgba(0, 122, 255, 0.3)',
+  categoryIcon: {
+    fontSize: 24,
+    marginRight: 12,
   },
   categoryName: {
-    fontSize: 12,
+    fontSize: 16,
     color: '#FFFFFF',
-    textAlign: 'center',
-    lineHeight: 18,
-    maxWidth: 48,
+    flex: 1,
   },
   selectedCategoryText: {
     color: '#007AFF',
-    fontWeight: 'bold',
-  },
-  
-  // 照片创玩面板
-  enhancePanel: {
-    position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 88,
-    backgroundColor: 'rgba(28, 28, 30, 0.96)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#3A3A3C',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-  },
-  enhanceList: {
-    maxHeight: 96,
-    marginTop: 6,
-  },
-  enhanceListContent: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 0,
-  },
-  enhancePresetItem: {
-    width: (SCREEN_WIDTH - 36 - 6 * 3) / 4,
-    height: 44,
-    marginBottom: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2C2C2E',
-    backgroundColor: 'rgba(44, 44, 46, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  presetName: {
-    fontSize: 12,
     fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'center',
+  },
+  modalCancelButton: {
+    padding: 16,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#3A3A3C',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
   },
 });
 

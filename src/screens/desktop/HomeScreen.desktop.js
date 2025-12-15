@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -18,8 +19,10 @@ import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 import { logger, getUri } from '../../adapters/WebAdapters';
+import { getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
 
 const HomeScreen = () => {
+  const { t, i18n } = useTranslation('common');
   
   // 页面状态管理
   const [currentScreen, setCurrentScreen] = useState('Home');
@@ -56,7 +59,7 @@ const HomeScreen = () => {
   const [showOrientationCategories, setShowOrientationCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
-  const [globalMessage, setGlobalMessage] = useState('图片分类应用已就绪');
+  const [globalMessage, setGlobalMessage] = useState(''); // 初始化为空字符串，稍后通过 useEffect 设置
   const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -508,7 +511,7 @@ const HomeScreen = () => {
     
     // 防抖：只在消息真正变化时更新
     setGlobalMessage(prevMessage => {
-      const newMessage = progress.message || '处理中...';
+      const newMessage = progress.message || t('home.processing');
       if (prevMessage !== newMessage) {
         return newMessage;
       }
@@ -734,7 +737,7 @@ const HomeScreen = () => {
       // 立即设置扫描状态，清除强制显示 readme 状态
       setForceShowReadme(false);
       setIsScanning(true);
-      setGlobalMessage('初始化扫描: 准备扫描环境');
+      setGlobalMessage(t('home.initScanning'));
       
       logger.debug('扫描状态已设置，切换到正常显示模式');
       
@@ -763,7 +766,7 @@ const HomeScreen = () => {
       setIsScanning(false);
     } catch (error) {
       logger.error('智能扫描失败:', error);
-      setGlobalMessage('扫描失败: ' + error.message);
+      setGlobalMessage(t('home.scanFailed', { error: error.message }));
       setIsScanning(false); // 扫描失败时也要重置状态
       throw error;
     }
@@ -815,7 +818,14 @@ const HomeScreen = () => {
       const settings = await UnifiedDataService.readSettings();
       if (settings && settings.lastScanTime) {
         setLastScanTime(settings.lastScanTime);
-        const formattedTime = new Date(settings.lastScanTime).toLocaleString('zh-CN');
+        // 统一时间格式：月-日 时：分：秒（中文和英文都一样）
+        const date = new Date(settings.lastScanTime);
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hour = String(date.getHours()).padStart(2, '0');
+        const minute = String(date.getMinutes()).padStart(2, '0');
+        const second = String(date.getSeconds()).padStart(2, '0');
+        const formattedTime = `${month}-${day} ${hour}:${minute}:${second}`;
         
         // 从缓存获取统计信息，避免触发缓存更新
         const cache = UnifiedDataService.imageCache.getCache();
@@ -834,19 +844,19 @@ const HomeScreen = () => {
         let durationText = '';
         if (settings.lastScanDurationSeconds) {
           if (settings.lastScanDurationMinutes >= 1) {
-            durationText = ` | 耗时: ${settings.lastScanDurationMinutes}分钟`;
+            durationText = ` | ${t('home.duration')}: ${settings.lastScanDurationMinutes}${t('home.minutes')}`;
           } else {
-            durationText = ` | 耗时: ${settings.lastScanDurationSeconds}秒`;
+            durationText = ` | ${t('home.duration')}: ${settings.lastScanDurationSeconds}${t('home.seconds')}`;
           }
         }
         
-        setGlobalMessage(`最近扫描完成时间: ${formattedTime} | 照片数量: ${totalImages} | 空间大小: ${formattedSize}${durationText}`);
+        setGlobalMessage(t('home.lastScanInfo', { time: formattedTime, count: totalImages, size: formattedSize, duration: durationText }));
       } else {
-        setGlobalMessage('图片分类应用已就绪');
+        setGlobalMessage(t('home.ready'));
       }
     } catch (error) {
       logger.error('加载最近扫描时间失败:', error);
-      setGlobalMessage('图片分类应用已就绪');
+      setGlobalMessage(t('home.ready'));
     }
   };
 
@@ -860,13 +870,15 @@ const HomeScreen = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // 组件挂载时加载最近扫描时间和统计信息
+  // 组件挂载时加载最近扫描时间和统计信息，并初始化 globalMessage
   useEffect(() => {
+    setGlobalMessage(t('home.ready'));
     loadLastScanTime();
-  }, []);
+  }, [t]);
 
   // 渲染 Readme 内容的组件
   const ReadmeView = () => {
+    const { t: tReadme } = useTranslation('common');
     logger.debug('ReadmeView 被渲染，readmeContent 长度:', readmeContent.length);
     
     // 如果 readme 内容为空，显示提示信息
@@ -879,8 +891,8 @@ const HomeScreen = () => {
           }
         >
           <View style={styles.readmeContainer}>
-            <Text style={styles.readmeH1}>欢迎使用芯图相册</Text>
-            <Text style={styles.readmeParagraph}>智能分类，便捷管理，仅你可见</Text>
+            <Text style={styles.readmeH1}>{tReadme('home.welcome')}</Text>
+            <Text style={styles.readmeParagraph}>{tReadme('app.description')}</Text>
             <TouchableOpacity
               style={styles.getStartedButton}
               onPress={() => {
@@ -888,7 +900,7 @@ const HomeScreen = () => {
                 setScreenProps({});
               }}
             >
-              <Text style={styles.getStartedButtonText}>进入设置 →</Text>
+              <Text style={styles.getStartedButtonText}>{tReadme('home.goToSettings')}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -1015,7 +1027,7 @@ const HomeScreen = () => {
               setScreenProps({});
             }}
           >
-            <Text style={styles.getStartedButtonText}>进入设置 →</Text>
+            <Text style={styles.getStartedButtonText}>{tReadme('home.goToSettings')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -1038,7 +1050,7 @@ const HomeScreen = () => {
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏷️ 按内容</Text>
+          <Text style={styles.sectionTitle}>🏷️ {t('home.byContent')}</Text>
             <TouchableOpacity
               style={styles.toggleButton}
               onPress={async () => {
@@ -1059,21 +1071,29 @@ const HomeScreen = () => {
               }}
             >
               <Text style={styles.toggleButtonText}>
-                {hideEmptyCategories ? '显示空分类' : '隐藏空分类'}
+                {hideEmptyCategories ? t('home.showEmptyCategories') : t('home.hideEmptyCategories')}
               </Text>
             </TouchableOpacity>
           </View>
           <View style={styles.categoriesContainer}>
             {(() => {
               if (!configService || !configService.isConfigLoaded()) {
-                return <Text>配置服务未初始化</Text>;
+                return <Text>{t('home.configServiceNotInitialized')}</Text>;
               }
-              const categories = configService.getAllCategoriesWithUI().map(category => ({
-                id: category.id,
-                name: category.chinese || category.english || category.id,
-                icon: '📷', // 默认图标
-                color: '#607D8B' // 默认颜色
-              }));
+              const categories = configService.getAllCategoriesWithUI().map(category => {
+                // 根据当前语言动态选择分类名称
+                const currentLang = i18n.language || 'zh';
+                const categoryName = currentLang === 'en' 
+                  ? (category.english || category.chinese) 
+                  : (category.chinese || category.english);
+                
+                return {
+                  id: category.id,
+                  name: categoryName,
+                  icon: '📷', // 默认图标
+                  color: '#607D8B' // 默认颜色
+                };
+              });
               
               const visibleCategories = categories.filter(category => {
                 const count = categoryCounts[category.id] || 0;
@@ -1092,8 +1112,8 @@ const HomeScreen = () => {
                 return (
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyStateIcon}>📷</Text>
-                    <Text style={styles.emptyStateText}>暂无分类图片</Text>
-                    <Text style={styles.emptyStateSubtext}>请先扫描图片或调整显示设置</Text>
+                    <Text style={styles.emptyStateText}>{t('category.noImages')}</Text>
+                    <Text style={styles.emptyStateSubtext}>{t('home.scanOrAdjustSettings')}</Text>
                   </View>
                 );
               }
@@ -1121,7 +1141,7 @@ const HomeScreen = () => {
         {showCityCategories && (
           <View style={styles.categoriesSection}>
             <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🏙️ 按城市</Text>
+            <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
             </View>
             <View style={styles.categoriesContainer}>
               {cityCounts && Object.keys(cityCounts).length > 0 ? (
@@ -1140,7 +1160,7 @@ const HomeScreen = () => {
                     );
                   })
               ) : (
-                <Text style={styles.emptyMessage}>暂无城市数据</Text>
+                <Text style={styles.emptyMessage}>{t('home.noCityData')}</Text>
               )}
             </View>
           </View>
@@ -1160,7 +1180,7 @@ const HomeScreen = () => {
           return (
             <View style={styles.categoriesSection}>
               <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🎨 按颜色</Text>
+              <Text style={styles.sectionTitle}>🎨 {t('home.byColor')}</Text>
               </View>
               <View style={styles.categoriesContainer}>
                 {filteredColorCounts.length > 0 ? (
@@ -1179,7 +1199,7 @@ const HomeScreen = () => {
                     );
                   })
               ) : (
-                  <Text style={styles.emptyMessage}>暂无颜色数据</Text>
+                  <Text style={styles.emptyMessage}>{t('home.noColorData')}</Text>
                 )}
               </View>
             </View>
@@ -1202,7 +1222,7 @@ const HomeScreen = () => {
           return (
             <View style={styles.categoriesSection}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📁 按存储</Text>
+                <Text style={styles.sectionTitle}>📁 {t('home.byStorage')}</Text>
               </View>
               <View style={styles.categoriesContainer}>
                 {filteredDirectoryCounts
@@ -1242,7 +1262,7 @@ const HomeScreen = () => {
           return (
             <View style={styles.categoriesSection}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📄 按格式</Text>
+                <Text style={styles.sectionTitle}>📄 {t('home.byFormat')}</Text>
               </View>
               <View style={styles.categoriesContainer}>
                 {filteredFormatCounts
@@ -1301,7 +1321,7 @@ const HomeScreen = () => {
           return (
             <View style={styles.categoriesSection}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📏 按分辨率</Text>
+                <Text style={styles.sectionTitle}>📏 {t('home.byResolution')}</Text>
               </View>
               <View style={styles.categoriesContainer}>
                 {filteredResolutionCounts
@@ -1345,17 +1365,22 @@ const HomeScreen = () => {
           return (
             <View style={styles.categoriesSection}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>🧭 按方向</Text>
+                <Text style={styles.sectionTitle}>🧭 {t('home.byOrientation')}</Text>
               </View>
               <View style={styles.categoriesContainer}>
                 {filteredOrientationCounts
                   .sort(([,a], [,b]) => b - a)
                   .map(([orientation, count]) => {
                     const recentImages = orientationRecentImages[orientation] || [];
+                    // 翻译方向名称用于显示，但保留原始值用于 onPress
+                    const translatedOrientation = getOrientationNameTranslation(orientation, i18n.language || 'zh');
                     return (
                       <CategoryCard
                         key={orientation}
-                        category={orientation}
+                        category={{ 
+                          id: orientation, // 保留原始值用于 onPress
+                          name: translatedOrientation // 显示翻译后的名称
+                        }}
                         count={count}
                         recentImages={recentImages}
                         onPress={handleOrientationPress}
@@ -1371,7 +1396,7 @@ const HomeScreen = () => {
         {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
           <View style={styles.categoriesSection}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🔗 相似照片</Text>
+              <Text style={styles.sectionTitle}>🔗 {t('category.similarityGroup')}</Text>
             </View>
             <View style={styles.categoriesContainer}>
               {similarityGroups.slice(0, 10).map((group) => (
@@ -1393,7 +1418,7 @@ const HomeScreen = () => {
           <View style={styles.recentSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
-                <Text style={styles.sectionTitle}>📸 最新发现照片</Text>
+                <Text style={styles.sectionTitle}>📸 {t('home.recentDiscoveredPhotos')}</Text>
                 {recentImagesTotal > 0 && (
                   <View style={styles.countBadge}>
                     <Text style={styles.countBadgeText}>{recentImagesTotal}</Text>
@@ -1435,7 +1460,7 @@ const HomeScreen = () => {
               style={styles.titleBarIcon}
               resizeMode="contain"
             />
-            <Text style={styles.titleBarTitle}>芯图相册</Text>
+            <Text style={styles.titleBarTitle}>{t('app.name')}</Text>
           </View>
           <View style={styles.titleBarRight}>
             {/* 暂存箱按钮 */}
@@ -1506,7 +1531,7 @@ const HomeScreen = () => {
             </TouchableOpacity>
             {showScanTip && (
               <View style={styles.scanTipContainer}>
-                <Text style={styles.scanTipText}>为相册智能分类100张，在设置页面开通终身会员后，无限制</Text>
+                <Text style={styles.scanTipText}>{t('home.scanTip')}</Text>
               </View>
             )}
           </View>
@@ -1587,7 +1612,7 @@ const HomeScreen = () => {
                 filterType={screenProps.filterType}
                 filterValue={screenProps.filterValue}
               />
-            ) : <View style={styles.loadingContainer}><Text>Loading Preview...</Text></View>}
+            ) : <View style={styles.loadingContainer}><Text>{t('home.loadingPreview')}</Text></View>}
           </View>
         )}
         
@@ -1606,12 +1631,12 @@ const HomeScreen = () => {
                 onScanProgress={handleScanProgress}
                 isScanning={isScanning}
               />
-            ) : <View style={styles.loadingContainer}><Text>Loading Settings...</Text></View>}
+            ) : <View style={styles.loadingContainer}><Text>{t('home.loadingSettings')}</Text></View>}
           </View>
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue, t]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1627,6 +1652,8 @@ const HomeScreen = () => {
 
 // 渲染分类卡片组件
 const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => {
+  const { i18n } = useTranslation('common');
+  
   // 稳定化图片源对象，避免不必要的重新渲染
   const imageSource = useMemo(() => {
     if (recentImages.length === 0) return null;
@@ -1636,6 +1663,22 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
 
   // 🆕 处理 category 可能是对象（有 id 属性）或字符串（直接是值）的情况
   const categoryValue = typeof category === 'object' && category !== null ? category.id : category;
+  
+  // 根据当前语言动态选择分类名称
+  const getCategoryDisplayName = () => {
+    if (typeof category === 'object' && category !== null) {
+      // 如果已经有 name 字段（已经根据语言处理过），直接使用
+      if (category.name) {
+        return category.name;
+      }
+      // 否则根据当前语言动态选择
+      const currentLang = i18n.language || 'zh';
+      return currentLang === 'en' 
+        ? (category.english || category.chinese) 
+        : (category.chinese || category.english);
+    }
+    return category;
+  };
 
   return (
     <TouchableOpacity
@@ -1658,7 +1701,7 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
       {/* 覆盖层显示分类信息 */}
       <View style={styles.categoryOverlay}>
         <Text style={styles.categoryName}>
-          {typeof category === 'object' && category !== null ? (category.name || category.chinese || category.english || category.id) : category}
+          {getCategoryDisplayName()}
         </Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
@@ -1704,12 +1747,19 @@ const DirectoryCard = React.memo(({ directory, directoryName, count, recentImage
 
 // 渲染颜色卡片组件
 const ColorCard = React.memo(({ color, count, recentImages, onPress }) => {
+  const { i18n } = useTranslation('common');
+  
   // 稳定化图片源对象，避免不必要的重新渲染
   const imageSource = useMemo(() => {
     if (recentImages.length === 0) return null;
     const imageUri = getUri(recentImages[0]);
     return imageUri ? { uri: imageUri } : null;
   }, [recentImages[0]]);
+
+  // 根据当前语言获取颜色名称的翻译
+  const displayColorName = useMemo(() => {
+    return getColorNameTranslation(color, i18n.language);
+  }, [color, i18n.language]);
 
   return (
     <TouchableOpacity
@@ -1731,7 +1781,7 @@ const ColorCard = React.memo(({ color, count, recentImages, onPress }) => {
       
       {/* 覆盖层显示颜色信息 */}
       <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName}>{color}</Text>
+        <Text style={styles.categoryName}>{displayColorName}</Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
     </TouchableOpacity>
@@ -1776,6 +1826,7 @@ const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
 
 // 渲染相似照片卡片组件
 const SimilarityCard = React.memo(({ group, onPress }) => {
+  const { t } = useTranslation('common');
   // 稳定化图片源对象，避免不必要的重新渲染
   const imageSource = useMemo(() => {
     if (!group.latestImageUri) return null;
@@ -1803,7 +1854,7 @@ const SimilarityCard = React.memo(({ group, onPress }) => {
       
       {/* 覆盖层显示相似照片信息 */}
       <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName}>相似照片</Text>
+        <Text style={styles.categoryName}>{t('category.similarityGroup')}</Text>
         <Text style={styles.categoryCount}>{group.imageCount}</Text>
       </View>
     </TouchableOpacity>

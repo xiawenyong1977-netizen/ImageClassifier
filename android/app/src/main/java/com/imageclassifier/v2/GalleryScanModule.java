@@ -40,6 +40,7 @@ public class GalleryScanModule extends ReactContextBaseJavaModule {
      *   - compareLimit: number (比对限制，0表示不限制，推荐值：100用于快速测试，1000用于正常使用)
      *   - remoteApiUrl: string (远程推理API地址，可选)
      *   - cacheApiUrl: string (远端缓存API地址，可选)
+     *   - language: string (语言设置，'zh' 表示中文，'en' 表示英文，用于城市名称选择，默认为 'zh')
      * @param promise Promise对象
      * @return 返回对象包含：
      *   - scanId: string (扫描任务ID)
@@ -66,9 +67,11 @@ public class GalleryScanModule extends ReactContextBaseJavaModule {
             int compareLimit = options.hasKey("compareLimit") ? options.getInt("compareLimit") : 0;
             String remoteApiUrl = options.hasKey("remoteApiUrl") ? options.getString("remoteApiUrl") : null;
             String cacheApiUrl = options.hasKey("cacheApiUrl") ? options.getString("cacheApiUrl") : null;
+            // 🔥 解耦：语言设置由JS层传递，用于城市名称选择
+            String language = options.hasKey("language") ? options.getString("language") : "zh"; // 默认为中文
             
             // 启动扫描（同步执行阶段1和阶段2，返回总数量）
-            GalleryScanService.ScanStartResult result = scanService.startScan(scanPaths, compareLimit, remoteApiUrl, cacheApiUrl);
+            GalleryScanService.ScanStartResult result = scanService.startScan(scanPaths, compareLimit, remoteApiUrl, cacheApiUrl, language);
             
             // 构建返回对象
             WritableMap resultMap = Arguments.createMap();

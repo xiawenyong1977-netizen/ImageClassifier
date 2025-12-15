@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 芯图相册 - 移动端分类详情页（通用）
  * 
  * 支持4种形态：
@@ -23,6 +23,7 @@ import {
   ScrollView,
   NativeModules,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView, useFocusEffect, Alert } from '../../adapters/WebAdapters';
 import { DeviceEventEmitter } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -30,12 +31,15 @@ import WeChatAuthService from '../../services/WeChatAuthService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import { logger, getUri } from '../../adapters/WebAdapters';
+import { getColorNameTranslation, getOrientationNameTranslation, getDefaultPresets } from '../../i18n';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_COLUMNS = 3;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
 
 const CategoryScreen = ({ route, navigation }) => {
+  const { t, i18n } = useTranslation('common');
+  
   // ==================== 路由参数 ====================
   // 统一使用 filterType 和 filterValue，从旧参数推导（过渡期）
   const { filterType: propFilterType, filterValue: propFilterValue, fromScreen } = route.params || {};
@@ -128,6 +132,42 @@ const CategoryScreen = ({ route, navigation }) => {
   };
 
   /**
+   * 缩写英文预设名称（用于移动端显示）
+   */
+  const abbreviatePresetName = (name) => {
+    if (!name || typeof name !== 'string') return name;
+    
+    // 如果是中文，直接返回
+    if (/[\u4e00-\u9fa5]/.test(name)) {
+      return name;
+    }
+    
+    // 英文缩写映射表
+    const abbreviations = {
+      'Portrait': 'Portrait',
+      'Enhance': 'Enhance',
+      'Color': 'Color',
+      'Document': 'Doc',
+      'Custom': 'Custom',
+      'Photo Enhancement': 'Enhance',
+      'ID Card': 'ID Card',
+      'QR Code': 'QR Code',
+    };
+    
+    // 如果匹配到缩写，直接返回
+    if (abbreviations[name]) {
+      return abbreviations[name];
+    }
+    
+    // 如果名称太长（超过8个字符），截断
+    if (name.length > 8) {
+      return name.substring(0, 8) + '...';
+    }
+    
+    return name;
+  };
+
+  /**
    * 获取页面标题（与 PC 端格式一致）
    */
   const getPageTitle = () => {
@@ -135,41 +175,53 @@ const CategoryScreen = ({ route, navigation }) => {
     const count = Array.isArray(images) ? images.length : 0;
     
     if (!filterType) {
-      return '图片列表';
+      return t('category.imageList');
     }
+    
+    const currentLang = i18n.language || 'zh';
+    const language = currentLang === 'en' ? 'english' : 'chinese';
     
     switch (filterType) {
       case 'similarityGroup':
-        return `相似照片组 (${count}张)`;
+        return t('category.similarityGroupWithCount', { count });
       case 'directory':
         if (filterValue) {
           // 提取目录名（最后一个路径段）
           const directoryName = filterValue.split('/').pop() || filterValue;
           // 截断过长的目录名
           const truncatedName = truncateText(directoryName, 20);
-          return `${truncatedName} (${count}张)`;
+          return t('category.directoryWithCount', { name: truncatedName, count });
         }
-        return `目录 (${count}张)`;
+        return t('category.directoryWithCount', { name: t('category.directory'), count });
       case 'city':
-        return `${filterValue || '城市'} (${count}张)`;
+        return t('category.cityWithCount', { city: filterValue || t('category.city'), count });
       case 'color':
-        return `${filterValue || '颜色'} (${count}张)`;
+        return t('category.colorWithCount', { 
+          color: getColorNameTranslation(filterValue, currentLang) || t('category.color'), 
+          count 
+        });
       case 'format':
-        return `📄 ${filterValue || '格式'} (${count}张)`;
+        return t('category.formatWithCount', { format: filterValue || t('category.format'), count });
       case 'resolution':
-        return `📏 ${filterValue || '分辨率'} (${count}张)`;
+        return t('category.resolutionWithCount', { resolution: filterValue || t('category.resolution'), count });
       case 'orientation':
-        return `🧭 ${filterValue || '方向'} (${count}张)`;
+        return t('category.orientationWithCount', { 
+          orientation: getOrientationNameTranslation(filterValue, currentLang) || t('category.orientation'), 
+          count 
+        });
       case 'stagingBox':
-        return `暂存箱 (${count}张)`;
+        return t('category.stagingBoxWithCount', { count });
       case 'category':
         if (filterValue) {
-          const categoryName = UnifiedDataService.getCategoryDisplayName(filterValue);
-          return `${categoryName} (${count}张)`;
+          // 使用 configService 获取对应语言的分类名称（与 PC 端一致）
+          const categoryName = configService?.getCategoryDisplayName(filterValue, language) || 
+                               UnifiedDataService.getCategoryDisplayName(filterValue) || 
+                               filterValue;
+          return t('category.categoryWithCount', { category: categoryName, count });
         }
-        return `分类 (${count}张)`;
+        return t('category.categoryWithCount', { category: t('category.category'), count });
       default:
-        return '图片列表';
+        return t('category.imageList');
     }
   };
 
@@ -180,21 +232,21 @@ const CategoryScreen = ({ route, navigation }) => {
     if (isStaging) {
       // 暂存箱（stagingBox）：移出、删除、创玩、分类、分享
       return [
-        { id: 'removeFromStaging', label: '移出', icon: '➡️', color: '#FF9500' },
-        { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
-        { id: 'enhance', label: '创玩', icon: '✨', color: '#9C27B0' },
-        { id: 'changeCategory', label: '分类', icon: '🏷️', color: '#007AFF' },
-        { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
+        { id: 'removeFromStaging', label: t('category.removeFromStagingLabel'), icon: '➡️', color: '#FF9500' },
+        { id: 'delete', label: t('common.delete'), icon: '🗑️', color: '#FF3B30' },
+        { id: 'enhance', label: t('category.enhance'), icon: '✨', color: '#9C27B0' },
+        { id: 'changeCategory', label: t('category.changeCategory'), icon: '🏷️', color: '#007AFF' },
+        { id: 'share', label: t('category.share'), icon: '📤', color: '#34C759' },
       ];
     }
     
     // 所有非暂存箱的情况（普通分类、城市、相似组）：暂存、删除、创玩、分类、分享
     return [
-      { id: 'staging', label: '暂存', icon: '📦', color: '#FF9500' },
-      { id: 'delete', label: '删除', icon: '🗑️', color: '#FF3B30' },
-      { id: 'enhance', label: '创玩', icon: '✨', color: '#9C27B0' },
-      { id: 'changeCategory', label: '分类', icon: '📁', color: '#007AFF' },
-      { id: 'share', label: '分享', icon: '📤', color: '#34C759' },
+      { id: 'staging', label: t('category.staging'), icon: '📦', color: '#FF9500' },
+      { id: 'delete', label: t('common.delete'), icon: '🗑️', color: '#FF3B30' },
+      { id: 'enhance', label: t('category.enhance'), icon: '✨', color: '#9C27B0' },
+      { id: 'changeCategory', label: t('category.changeCategory'), icon: '📁', color: '#007AFF' },
+      { id: 'share', label: t('category.share'), icon: '📤', color: '#34C759' },
     ];
   };
 
@@ -279,12 +331,12 @@ const CategoryScreen = ({ route, navigation }) => {
       const targetCategoryName = UnifiedDataService.getCategoryDisplayName(newCategory);
       
       Alert.alert(
-        '确认修改分类',
-        `确定要将 ${selectedImageIds.length} 张图片移动到"${targetCategoryName}"分类吗？`,
+        t('category.confirmChangeCategoryTitle'),
+        t('category.confirmChangeCategoryMessage', { count: selectedImageIds.length, category: targetCategoryName }),
         [
-          { text: '取消', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: '确定',
+            text: t('common.confirm'),
             onPress: async () => {
               try {
                 let processed = 0;
@@ -308,7 +360,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 await loadImages();
               } catch (error) {
                 logger.error('批量修改分类失败:', error);
-                Alert.alert('操作失败', '修改分类时发生错误，请重试');
+                Alert.alert(t('category.operationFailed'), t('category.changeCategoryError'));
               }
             },
           },
@@ -316,7 +368,7 @@ const CategoryScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       logger.error('批量修改分类失败:', error);
-      Alert.alert('错误', '操作失败，请重试');
+      Alert.alert(t('common.error'), t('category.operationFailedMessage'));
     }
   };
 
@@ -616,7 +668,7 @@ const CategoryScreen = ({ route, navigation }) => {
       
     } catch (error) {
       logger.error('❌ 加载图片失败:', error);
-      Alert.alert('加载失败', error.message);
+      Alert.alert(t('common.failed'), error.message);
       setLoading(false);
       setRefreshing(false);
     }
@@ -756,7 +808,7 @@ const CategoryScreen = ({ route, navigation }) => {
       const selectedIds = await getSelectedImageIds();
       
       if (selectedIds.length === 0) {
-        Alert.alert('提示', '请先选择图片');
+        Alert.alert(t('common.tip'), t('category.pleaseSelectImages'));
         return;
       }
 
@@ -780,7 +832,7 @@ const CategoryScreen = ({ route, navigation }) => {
           await batchShare(selectedIds);
           break;
         default:
-          Alert.alert('提示', '未知操作');
+          Alert.alert(t('common.tip'), t('category.unknownOperation'));
           break;
       }
       
@@ -788,7 +840,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
     } catch (error) {
       logger.error('❌ 批量操作失败:', error);
-      Alert.alert('操作失败', error.message);
+      Alert.alert(t('category.operationFailed'), error.message);
     }
   };
 
@@ -801,12 +853,38 @@ const CategoryScreen = ({ route, navigation }) => {
         return;
       }
       const settings = await UnifiedDataService.readSettings();
-      const presets = settings?.aiEnhancePresets || {};
-      setEnhancePresets(presets);
+      const rawPresets = settings?.aiEnhancePresets || {};
+      
+      // 获取当前语言的默认预设翻译（与 PC 端一致）
+      const currentLang = i18n.language || 'zh';
+      const defaultPresets = getDefaultPresets(currentLang);
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 处理预设名称国际化
+      const processedPresets = {};
+      Object.entries(rawPresets).forEach(([id, preset]) => {
+        // 判断是否是默认预设（通过比较名称是否等于中文或英文的默认值）
+        const defaultPreset = defaultPresets[id];
+        const isDefaultName = defaultPreset && (
+          preset.name === zhDefaults[id]?.name ||
+          preset.name === enDefaults[id]?.name
+        );
+        
+        // 如果是默认预设，使用当前语言的翻译；否则使用用户自定义的名称
+        const displayName = isDefaultName ? defaultPreset.name : preset.name;
+        
+        processedPresets[id] = {
+          ...preset,
+          name: displayName
+        };
+      });
+      
+      setEnhancePresets(processedPresets);
       setShowEnhancePresets(true);
     } catch (error) {
       logger.error('加载增强方案失败:', error);
-      Alert.alert('错误', '加载增强方案失败，请稍后重试');
+      Alert.alert(t('common.error'), t('category.loadEnhancePresetsFailed'));
     }
   };
 
@@ -821,36 +899,36 @@ const CategoryScreen = ({ route, navigation }) => {
       const selectedIds = await getSelectedImageIds();
       const count = selectedIds.length;
       if (count === 0 || count > 9) {
-        Alert.alert('提示', '请先选择1-9张照片再使用“照片创玩”。');
+        Alert.alert(t('common.tip'), t('category.enhanceCountLimitMessage'));
         return;
       }
 
       // 会员状态检查
       const { isMember } = await WeChatAuthService.getMembershipStatus();
       if (!isMember) {
-        Alert.alert('提示', '该功能仅对会员开放，请在设置页面开通终身会员后再试。');
+        Alert.alert(t('common.tip'), t('category.enhanceMembersOnly'));
         return;
       }
 
       // 额度检查
       const credits = await WeChatAuthService.getCredits();
       if (!credits || typeof credits.remaining !== 'number') {
-        Alert.alert('错误', '获取额度失败，请稍后重试');
+        Alert.alert(t('common.error'), t('category.getCreditsFailed'));
         return;
       }
       if (credits.remaining < count) {
-        Alert.alert('提示', '剩余额度不足，请去“芯图相册”服务号购买额度');
+        Alert.alert(t('common.tip'), t('category.insufficientCreditsMessage2'));
         return;
       }
 
       // 弹出二次确认：显示剩余额度与本次消耗额度
       Alert.alert(
-        '使用额度确认',
-        `本次将消耗：${count}\n剩余额度：${credits.remaining}\n\n是否继续？`,
+        t('category.useCreditsConfirmTitle'),
+        t('category.useCreditsConfirmMessage', { count, remaining: credits.remaining }),
         [
-          { text: '取消', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: '确认',
+            text: t('common.confirm'),
             style: 'default',
             onPress: async () => {
               try {
@@ -859,7 +937,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 await performEnhance(presetId, presetName, selectedIds);
               } catch (e) {
                 logger.error('提交增强失败:', e);
-                Alert.alert('错误', e.message || '提交失败，请稍后重试');
+                Alert.alert(t('common.error'), e.message || t('category.submitFailed'));
               }
             }
           }
@@ -867,7 +945,7 @@ const CategoryScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       logger.error('增强检查失败:', error);
-      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
     }
   };
 
@@ -901,7 +979,7 @@ const CategoryScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('导航到结果页失败:', error);
-      Alert.alert('错误', error.message || '操作失败，请稍后重试');
+      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
     }
   };
 
@@ -976,7 +1054,7 @@ const CategoryScreen = ({ route, navigation }) => {
     } catch (error) {
       logger.error('❌ 批量修改分类失败:', error);
       setShowUpdateProgress(false);
-      Alert.alert('操作失败', error.message);
+      Alert.alert(t('category.operationFailed'), error.message);
     }
   };
 
@@ -986,21 +1064,21 @@ const CategoryScreen = ({ route, navigation }) => {
   const batchShare = async (imageIds) => {
     try {
       if (imageIds.length === 0) {
-        Alert.alert('提示', '请先选择图片');
+        Alert.alert(t('common.tip'), t('category.pleaseSelectImages'));
         return;
       }
 
       if (imageIds.length > 9) {
         Alert.alert(
-          '提示',
-          `当前选中了 ${imageIds.length} 张图片。\n一次最多分享 9 张，请重新选择不超过 9 张的图片。`
+          t('common.tip'),
+          t('category.shareLimitMessage', { count: imageIds.length })
         );
         return;
       }
       
       const selectedImages = images.filter(img => imageIds.includes(img.id));
       if (selectedImages.length === 0) {
-        Alert.alert('错误', '没有找到选中的图片');
+        Alert.alert(t('common.error'), t('category.noSelectedImagesFound'));
         return;
       }
 
@@ -1015,7 +1093,7 @@ const CategoryScreen = ({ route, navigation }) => {
         }).filter(uri => uri != null); // 过滤掉无效的 URI
         
         if (urls.length === 0) {
-          Alert.alert('错误', '无法获取图片 URI，请重试');
+          Alert.alert(t('common.error'), t('category.cannotGetImageUri'));
           return;
         }
         
@@ -1025,7 +1103,7 @@ const CategoryScreen = ({ route, navigation }) => {
           // 使用原生模块分享（支持单张和多张）
           await MultiImageShareModule.shareMultipleImages(urls);
           if (urls.length > 1) {
-            Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
+            Alert.alert(t('category.shareSuccess'), t('category.sharedImagesCount', { count: urls.length }));
           }
         } else {
           // 原生模块不可用，使用React Native Share
@@ -1034,7 +1112,7 @@ const CategoryScreen = ({ route, navigation }) => {
             // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
             const result = await Share.share({
               url: urls[0],
-              title: '芯图相册',
+              title: t('app.name'),
             });
             
             if (result.action === Share.sharedAction) {
@@ -1045,21 +1123,21 @@ const CategoryScreen = ({ route, navigation }) => {
             // 添加 title 参数，让微信等分享目标显示"来自：芯图相册"
             const result = await Share.share({
               urls: urls,
-              title: '芯图相册',
+              title: t('app.name'),
             });
             
             if (result.action === Share.sharedAction) {
-              Alert.alert('分享成功', `已分享 ${urls.length} 张图片`);
+              Alert.alert(t('category.shareSuccess'), t('category.sharedImagesCount', { count: urls.length }));
             }
           }
         }
       } catch (error) {
         logger.error('❌ 分享失败:', error);
-        Alert.alert('分享失败', '分享失败，请重试');
+        Alert.alert(t('category.shareFailed'), t('category.shareFailedMessage'));
       }
     } catch (error) {
       logger.error('❌ 分享操作失败:', error);
-      Alert.alert('操作失败', '分享时发生错误');
+      Alert.alert(t('category.operationFailed'), t('category.shareError'));
     }
   };
 
@@ -1068,12 +1146,12 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const batchMoveToStaging = async (imageIds) => {
     Alert.alert(
-      '暂存',
-      `确定要将选中的 ${imageIds.length} 张图片暂存到待处置吗？\n\n这些图片将被放入暂存箱中。`,
+      t('category.confirmStagingTitle'),
+      t('category.confirmStagingMessage', { count: imageIds.length }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '标记',
+          text: t('category.mark'),
           onPress: async () => {
             try {
               // 1. 清除选中状态（图片保留在当前分类中）
@@ -1109,11 +1187,11 @@ const CategoryScreen = ({ route, navigation }) => {
               
               // 6. 关闭进度提示
               setShowUpdateProgress(false);
-            } catch (error) {
-              logger.error('❌ 批量暂存失败:', error);
-              setShowUpdateProgress(false);
-              Alert.alert('操作失败', '暂存时发生错误，请重试');
-            }
+              } catch (error) {
+                logger.error('❌ 批量暂存失败:', error);
+                setShowUpdateProgress(false);
+                Alert.alert(t('category.operationFailed'), t('category.stagingError'));
+              }
           },
         },
       ]
@@ -1125,12 +1203,12 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const batchRemoveFromStagingBox = async (imageIds) => {
     Alert.alert(
-      '移出暂存箱',
-      `确定要从暂存箱移除选中的 ${imageIds.length} 张图片吗？\n\n这些图片将从暂存箱中移除，但不会删除文件。`,
+      t('category.confirmRemoveFromStagingTitle'),
+      t('category.confirmRemoveFromStagingMessage', { count: imageIds.length }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '移出',
+          text: t('category.removeFromStagingLabel2'),
           onPress: async () => {
             try {
               // 1. 清除选中状态（图片保留在当前分类中）
@@ -1171,7 +1249,7 @@ const CategoryScreen = ({ route, navigation }) => {
             } catch (error) {
               logger.error('❌ 批量从暂存箱移除失败:', error);
               setShowUpdateProgress(false);
-              Alert.alert('操作失败', '从暂存箱移除时发生错误，请重试');
+              Alert.alert(t('category.operationFailed'), t('category.removeFromStagingError'));
             }
           },
         },
@@ -1184,12 +1262,12 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const batchDelete = async (imageIds) => {
     Alert.alert(
-      '确认删除',
-      `确定要删除选中的 ${imageIds.length} 张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！`,
+      t('category.confirmDeleteTitle'),
+      t('category.confirmDeleteMessage', { count: imageIds.length }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '删除',
+          text: t('category.deleteLabel'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -1240,10 +1318,10 @@ const CategoryScreen = ({ route, navigation }) => {
                 // 显示删除结果（只有失败时才显示弹窗）
                 if (result.filesFailed > 0 || !result.success) {
                   Alert.alert(
-                    '删除完成', 
-                    `成功删除 ${result.filesDeleted || 0} 张图片，${result.filesFailed || imageIds.length} 张删除失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。`,
+                    t('category.deleteComplete'), 
+                    t('category.deletePartialSuccessMessage', { deleted: result.filesDeleted || 0, failed: result.filesFailed || imageIds.length }),
                     [
-                      { text: '知道了', style: 'default' }
+                      { text: t('common.gotIt'), style: 'default' }
                     ]
                   );
                 }
@@ -1251,8 +1329,8 @@ const CategoryScreen = ({ route, navigation }) => {
               } else {
                 // result 为 null，说明删除操作根本没有返回结果
                 Alert.alert(
-                  '删除失败', 
-                  '删除操作失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。'
+                  t('category.deleteFailedTitle'), 
+                  t('category.deleteFailedMessage')
                 );
               }
               
@@ -1267,11 +1345,11 @@ const CategoryScreen = ({ route, navigation }) => {
               const errorMessage = error?.message || '';
               if (errorMessage.includes('权限') || errorMessage.includes('删除失败')) {
                 Alert.alert(
-                  '删除失败', 
-                  '删除文件失败\n\n删除失败可能是因为缺少文件管理权限。请在系统设置中为应用开启"文件管理"或"所有文件访问"权限，然后重新尝试删除。'
+                  t('category.deleteFailedTitle'), 
+                  t('category.deleteFailedMessage')
                 );
               } else {
-                Alert.alert('操作失败', '删除时发生错误，请重试');
+                Alert.alert(t('category.operationFailed'), t('category.deleteError'));
               }
             }
           },
@@ -1287,24 +1365,24 @@ const CategoryScreen = ({ route, navigation }) => {
    */
   const batchKeep = async (keepIds) => {
     if (!similarityGroupId) {
-      Alert.alert('提示', '此功能仅在相似组分类中可用');
+      Alert.alert(t('common.tip'), t('category.onlyAvailableInSimilarityGroup'));
       return;
     }
     
     const moveIds = images.filter(img => !keepIds.includes(img.id)).map(img => img.id);
     
     if (moveIds.length === 0) {
-      Alert.alert('提示', '没有需要移动的图片');
+      Alert.alert(t('common.tip'), t('category.noImagesToMove'));
       return;
     }
     
     Alert.alert(
-      '保留选中图片',
-      `确定要保留选中的 ${keepIds.length} 张图片吗？\n\n其他 ${moveIds.length} 张相似图片将被移到暂存箱中。`,
+      t('category.keepSelectedImagesTitle'),
+      t('category.keepSelectedImagesMessage', { keep: keepIds.length, move: moveIds.length }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '确定',
+          text: t('common.confirm'),
           onPress: async () => {
             // 复用批量移到暂存箱的函数
             await batchMoveToStaging(moveIds);
@@ -1377,14 +1455,14 @@ const CategoryScreen = ({ route, navigation }) => {
     return (
       <View style={styles.selectionBar}>
         <TouchableOpacity onPress={handleCancelPress}>
-          <Text style={styles.selectionCancel}>取消</Text>
+          <Text style={styles.selectionCancel}>{t('category.cancelSelection')}</Text>
           </TouchableOpacity>
           <Text style={styles.selectionCount}>
-          已选 {selectedCount}/{images.length}
+          {t('category.selectedCount', { selected: selectedCount, total: images.length })}
           </Text>
         <TouchableOpacity onPress={toggleSelectAll}>
           <Text style={styles.selectionAll}>
-            {selectedCount === images.length && images.length > 0 ? '取消全选' : '全选'}
+            {selectedCount === images.length && images.length > 0 ? t('common.deselectAll') : t('common.selectAll')}
           </Text>
         </TouchableOpacity>
         </View>
@@ -1401,33 +1479,6 @@ const CategoryScreen = ({ route, navigation }) => {
 
     return (
       <View style={styles.actionBar}>
-        {isStaging && showEnhancePresets && (
-          <View style={styles.enhancePanel}>
-            <ScrollView
-              style={styles.enhanceList}
-              showsVerticalScrollIndicator={false}
-              scrollEnabled={false}
-              contentContainerStyle={styles.enhanceListContent}
-            >
-              {Object.entries(enhancePresets)
-                .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
-                .map(([presetId, preset], index) => (
-                  <TouchableOpacity
-                    key={presetId}
-                    style={[
-                      styles.enhancePresetItem,
-                      ((index + 1) % 4 !== 0) && { marginRight: 6 },
-                    ]}
-                    onPress={() => handleEnhancePresetPress(presetId)}
-                  >
-                    <Text style={styles.presetName} numberOfLines={1}>
-                      {preset.name || presetId}
-                    </Text>
-                  </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
         {actions.map(action => (
           <TouchableOpacity
             key={action.id}
@@ -1441,6 +1492,71 @@ const CategoryScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         ))}
       </View>
+    );
+  };
+
+  /**
+   * 关闭增强预设模态框
+   */
+  const closeEnhanceModal = () => {
+    setShowEnhancePresets(false);
+  };
+
+  /**
+   * 渲染增强预设模态框（与Category Modal一致）
+   */
+  const renderEnhanceModal = () => {
+    return (
+      <Modal
+        visible={showEnhancePresets}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={closeEnhanceModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* 标题栏 */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('category.enhanceMenu').replace(' ›', '')}</Text>
+              <Text style={styles.modalSubtitle}>
+                {selectedCount > 0 
+                  ? t('category.selectEnhancePresetForImages', { count: selectedCount })
+                  : t('category.selectEnhancePreset')}
+              </Text>
+            </View>
+
+            {/* 预设列表 */}
+            <ScrollView style={styles.categoryList}>
+              {Object.entries(enhancePresets)
+                .sort(([, a], [, b]) => (a?.sortOrder || 0) - (b?.sortOrder || 0))
+                .map(([presetId, preset]) => {
+                  const displayName = preset.name || presetId;
+                  return (
+                    <TouchableOpacity
+                      key={presetId}
+                      style={styles.categoryItem}
+                      onPress={() => {
+                        handleEnhancePresetPress(presetId);
+                        closeEnhanceModal();
+                      }}
+                    >
+                      <Text style={styles.categoryIcon}>{preset.icon || '✨'}</Text>
+                      <Text style={styles.categoryName}>{displayName}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+            </ScrollView>
+
+            {/* 取消按钮 */}
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={closeEnhanceModal}
+            >
+              <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -1462,7 +1578,7 @@ const CategoryScreen = ({ route, navigation }) => {
   const renderEmpty = () => (
         <View style={styles.emptyContainer}>
       <Text style={styles.emptyIcon}>📭</Text>
-      <Text style={styles.emptyText}>暂无图片</Text>
+      <Text style={styles.emptyText}>{t('category.noImages')}</Text>
         </View>
       );
 
@@ -1526,13 +1642,13 @@ const CategoryScreen = ({ route, navigation }) => {
                 <View style={styles.timelineHeaderContent}>
                   <Text style={styles.timelineDate}>{dateKey}</Text>
                   <Text style={styles.timelineCount}>
-                    ({imagesForDate.length} 张{someSelected && ` · 已选 ${selectedCountInGroup}`})
+                    ({t('category.photosCount', { count: imagesForDate.length })}{someSelected && ` · ${t('category.selectedCount', { selected: selectedCountInGroup, total: imagesForDate.length })}`})
                   </Text>
                 </View>
                 {someSelected && selectionMode && (
                   <View style={styles.timelineSelectionIndicator}>
                     <Text style={styles.timelineSelectionIndicatorText}>
-                      {selectedCountInGroup === imagesForDate.length ? '✓ 全选' : '○ 部分选中'}
+                      {selectedCountInGroup === imagesForDate.length ? t('category.allSelected') : t('category.partiallySelected')}
                     </Text>
                   </View>
                 )}
@@ -1608,7 +1724,7 @@ const CategoryScreen = ({ route, navigation }) => {
                     {/* 已暂存标签（只在非暂存箱分类中显示） */}
                     {isImageInStagingBox && (
                       <View style={styles.stagingBoxBadge}>
-                        <Text style={styles.stagingBoxBadgeText}>已暂存</Text>
+                        <Text style={styles.stagingBoxBadgeText}>{t('category.staged')}</Text>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -1664,24 +1780,32 @@ const CategoryScreen = ({ route, navigation }) => {
           <View style={styles.modalContainer}>
             {/* 标题栏 */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>选择分类</Text>
+              <Text style={styles.modalTitle}>{t('category.selectCategoryTitle')}</Text>
               <Text style={styles.modalSubtitle}>
-                将 {pendingImageIds.length} 张图片移动到：
+                {t('category.moveImagesTo', { count: pendingImageIds.length })}
               </Text>
           </View>
 
             {/* 分类列表 */}
             <ScrollView style={styles.categoryList}>
-              {availableCategories.map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={styles.categoryItem}
-                  onPress={() => selectCategory(cat.id)}
-                >
-                  <Text style={styles.categoryIcon}>{cat.icon || '🏷️'}</Text>
-                  <Text style={styles.categoryName}>{cat.chinese}</Text>
-                </TouchableOpacity>
-              ))}
+              {availableCategories.map((cat) => {
+                // 根据当前语言动态选择分类名称（与 PC 端一致）
+                const currentLang = i18n.language || 'zh';
+                const categoryName = currentLang === 'en' 
+                  ? (cat.english || cat.chinese) 
+                  : (cat.chinese || cat.english);
+                
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={styles.categoryItem}
+                    onPress={() => selectCategory(cat.id)}
+                  >
+                    <Text style={styles.categoryIcon}>{cat.icon || '🏷️'}</Text>
+                    <Text style={styles.categoryName}>{categoryName}</Text>
+                  </TouchableOpacity>
+                );
+              })}
       </ScrollView>
 
             {/* 取消按钮 */}
@@ -1689,7 +1813,7 @@ const CategoryScreen = ({ route, navigation }) => {
               style={styles.modalCancelButton}
               onPress={closeCategoryModal}
             >
-              <Text style={styles.modalCancelText}>取消</Text>
+              <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1736,6 +1860,9 @@ const CategoryScreen = ({ route, navigation }) => {
       {/* 底部操作栏 */}
       {renderBottomBar()}
 
+      {/* 增强预设模态框 */}
+      {renderEnhanceModal()}
+
       {/* 分类选择器模态框 */}
       {renderCategoryModal()}
       
@@ -1747,13 +1874,13 @@ const CategoryScreen = ({ route, navigation }) => {
         onRequestClose={() => setShowDeleteProgress(false)}>
         <View style={styles.progressModalOverlay}>
           <View style={styles.progressModalContent}>
-            <Text style={styles.progressModalTitle}>正在删除图片</Text>
+            <Text style={styles.progressModalTitle}>{t('category.deletingImages')}</Text>
             <Text style={styles.progressModalText}>
-              已删除: {deleteProgress.filesDeleted}/{deleteProgress.total}
+              {t('category.deletedCount', { deleted: deleteProgress.filesDeleted, total: deleteProgress.total })}
             </Text>
             {deleteProgress.filesFailed > 0 && (
               <Text style={styles.progressModalError}>
-                失败: {deleteProgress.filesFailed}
+                {t('category.failedCount', { failed: deleteProgress.filesFailed })}
               </Text>
             )}
             <View style={styles.progressBar}>
@@ -1778,17 +1905,17 @@ const CategoryScreen = ({ route, navigation }) => {
           <View style={styles.progressModalContent}>
             <Text style={styles.progressModalTitle}>
               {updateOperationType === 'changeCategory' 
-                ? `正在修改${updateProgress.total}张图片的分类`
+                ? t('category.changingCategory', { count: updateProgress.total })
                 : updateOperationType === 'moveToStaging'
-                ? `正在将${updateProgress.total}张图片放入暂存箱`
+                ? t('category.movingToStaging', { count: updateProgress.total })
                 : updateOperationType === 'removeFromStaging'
-                ? `正在从暂存箱移除${updateProgress.total}张图片`
-                : '正在处理图片'
+                ? t('category.removingFromStaging', { count: updateProgress.total })
+                : t('category.processingImages')
               }
             </Text>
             {updateProgress.filesFailed > 0 && (
               <Text style={styles.progressModalError}>
-                失败: {updateProgress.filesFailed}
+                {t('category.failedCount', { failed: updateProgress.filesFailed })}
               </Text>
             )}
             <View style={styles.progressBar}>
@@ -1939,13 +2066,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 8,
     right: 8,
-    bottom: 88, // 与底部按钮保持合理间距
+    bottom: 80, // 覆盖在底部操作按钮上方
     backgroundColor: 'rgba(28,28,30,0.96)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#3A3A3C',
     paddingHorizontal: 8,
     paddingVertical: 10,
+    zIndex: 1000, // 确保在底部操作按钮上方
+    elevation: 10, // Android 阴影
+    shadowColor: '#000', // iOS 阴影
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   enhanceHeader: {
     flexDirection: 'row',
@@ -1965,35 +2098,30 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
   enhanceList: {
-    maxHeight: 96, // 两行高度（按钮高度44 * 2 + 行间距8）
+    maxHeight: 300,
     marginTop: 6,
   },
   enhanceListContent: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   enhancePresetItem: {
-    width: (SCREEN_WIDTH - 36 - 6 * 3) / 4, // 额外预留2px(面板描边)，保证四列不换行
-    height: 44,
-    marginBottom: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2C2C2E',
-    backgroundColor: 'rgba(44,44,46,0.9)',
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
+  },
+  enhancePresetIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  enhancePresetName: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    flex: 1,
   },
   presetInfo: {
     flex: 1,
-  },
-  presetName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'center',
   },
   presetPrompt: {
     fontSize: 12,

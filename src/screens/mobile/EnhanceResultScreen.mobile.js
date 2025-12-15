@@ -12,6 +12,8 @@ import {
   PanResponder,
   Animated,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { getDefaultPresets } from '../../i18n';
 import { Alert, RNFS, logger, getUri } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
@@ -28,13 +30,69 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
  * - initialIndex?: number
  */
 export default function EnhanceResultScreen({ route, navigation }) {
+  const { t, i18n } = useTranslation('common');
   const {
-    presetName = '照片创玩',
+    presetName: routePresetName,
     presetId, // 预设方案ID（必须）
     selected = [],
     results = {},
     initialIndex = 0,
   } = route.params || {};
+
+  // 根据 presetId 和当前语言获取国际化后的预设名称
+  const [presetName, setPresetName] = useState(routePresetName || t('enhanceResult.defaultPresetName'));
+
+  useEffect(() => {
+    const loadPresetName = async () => {
+      if (!presetId) {
+        setPresetName(t('enhanceResult.defaultPresetName'));
+        return;
+      }
+      
+      try {
+        // 获取当前语言的默认预设
+        const currentLang = i18n.language || 'zh';
+        const defaultPresets = getDefaultPresets(currentLang);
+        const zhDefaults = getDefaultPresets('zh');
+        const enDefaults = getDefaultPresets('en');
+        
+        // 从设置中读取预设信息
+        const settings = await UnifiedDataService.readSettings();
+        const settingsPreset = settings?.aiEnhancePresets?.[presetId];
+        
+        // 判断是否是默认预设（通过比较名称是否等于中文或英文的默认值）
+        const defaultPreset = defaultPresets[presetId];
+        if (defaultPreset && settingsPreset) {
+          const isDefaultName = (
+            settingsPreset.name === zhDefaults[presetId]?.name ||
+            settingsPreset.name === enDefaults[presetId]?.name
+          );
+          
+          // 如果是默认预设，使用当前语言的翻译；否则使用用户自定义的名称
+          if (isDefaultName) {
+            setPresetName(defaultPreset.name);
+          } else {
+            setPresetName(settingsPreset.name);
+          }
+        } else if (defaultPreset) {
+          // 如果没有设置信息，使用默认预设名称
+          setPresetName(defaultPreset.name);
+        } else {
+          // 如果都没有，使用路由传入的名称或默认值
+          setPresetName(routePresetName || t('enhanceResult.defaultPresetName'));
+        }
+      } catch (error) {
+        logger.warn('⚠️ 加载预设名称失败，使用默认值:', error);
+        // 出错时使用默认预设名称或路由传入的名称
+        const currentLang = i18n.language || 'zh';
+        const defaultPresets = getDefaultPresets(currentLang);
+        const defaultPreset = defaultPresets[presetId];
+        setPresetName(defaultPreset?.name || routePresetName || t('enhanceResult.defaultPresetName'));
+      }
+    };
+    
+    loadPresetName();
+  }, [presetId, i18n.language, routePresetName, t]);
 
   const [index, setIndex] = useState(Math.min(Math.max(initialIndex, 0), Math.max(selected.length - 1, 0)));
   const [showEnhanced, setShowEnhanced] = useState(false);
@@ -79,13 +137,13 @@ export default function EnhanceResultScreen({ route, navigation }) {
   const onSave = useCallback(async () => {
     // 仅保存增强图（对齐PC逻辑）
     if (!enhancedReady || !currentResult?.enhancedUri) {
-      Alert.alert('提示', '增强结果未就绪，稍后再试');
+      Alert.alert(t('enhanceResult.tip'), t('enhanceResult.notReady'));
       return;
     }
     if (!current) return;
     // 防重复保存
     if (currentResult?.saved) {
-      Alert.alert('提示', '该图片已保存过');
+      Alert.alert(t('enhanceResult.tip'), t('enhanceResult.alreadySaved'));
       return;
     }
     try {
@@ -131,8 +189,16 @@ export default function EnhanceResultScreen({ route, navigation }) {
 
       // 3) 组装完整数据并写入数据库（对齐PC：writeImageDetailedInfo + 刷新缓存）
       const now = Date.now();
-      const path = res.path || res.uri?.replace('file://', '') || '';
-      const newImageUri = res.path ? `file:///${path.replace(/\\/g, '/')}` : (res.uri || '');
+      
+      // 移动端：拼装 URI 格式为 contentUri||path（如果有 path）
+      // res.uri 是 MediaStore 返回的 content:// URI（例如：content://media/external/images/media/12345）
+      // res.path 是文件系统路径，可能是：
+      // - Android 9及以下：绝对路径（如 /storage/emulated/0/Pictures/芯图相册/image.jpg）
+      // - Android 10+：可能为 null（因为使用 MediaStore API，不直接暴露文件路径）
+      // 如果有 path，拼装成 contentUri||path 格式；如果没有 path，只使用 contentUri
+      const contentUri = res.uri || '';
+      const path = res.path || '';
+      const newImageUri = path ? `${contentUri}||${path}` : contentUri;
       let fileSize = 0;
       try {
         if (path) {
@@ -141,20 +207,38 @@ export default function EnhanceResultScreen({ route, navigation }) {
         }
       } catch {}
 
+      // 复制原图的所有元数据，只改变 uri 指向新保存的图片
       const completeImageData = {
-        uri: newImageUri,
+        uri: newImageUri, // 新保存的图片 URI
         fileName: res.fileName || fileName || 'enhanced.jpg', // 优先使用返回的文件名，否则使用我们生成的
-        category: 'tobecleaned',
-        confidence: 1.0,
-        timestamp: now,
-        takenAt: now,
-        size: fileSize,
+        // 复制原图的所有元数据
+        category: originalImage?.category || 'other', // 保持原图的分类，如果没有则默认为 other
+        confidence: originalImage?.confidence ?? 1.0, // 保持原图的置信度，如果没有则默认为 1.0
+        timestamp: now, // 文件时间戳使用新保存的时间
+        takenAt: originalImage?.takenAt || now, // 保持原图的拍摄时间，如果没有则使用当前时间
+        size: fileSize, // 新保存图片的文件大小
+        // 复制原图的所有检测结果和描述信息
         idCardDetections: originalImage?.idCardDetections || [],
         generalDetections: originalImage?.generalDetections || [],
         mobileNetV3Detections: originalImage?.mobileNetV3Detections || null,
         message: originalImage?.message || null,
+        // 复制原图的其他元数据
         ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions }),
+        ...(originalImage?.city && { city: originalImage.city }),
+        ...(originalImage?.color && { color: originalImage.color }),
+        // resolution 和 orientation 是从 width/height 动态计算的，不需要复制
+        // 如果原图有 width/height，它们会通过 imageDimensions 传递，系统会自动计算
       };
+      
+      // 验证必要字段
+      if (!completeImageData.category) {
+        logger.warn('⚠️ 图片数据缺少category，自动设置为other');
+        completeImageData.category = 'other';
+      }
+      if (!completeImageData.timestamp) {
+        logger.warn('⚠️ 图片数据缺少timestamp，使用当前时间');
+        completeImageData.timestamp = now;
+      }
 
       // 使用 writeImageDetailedInfo 保存图片数据（服务层会自动刷新缓存）
       await UnifiedDataService.writeImageDetailedInfo([completeImageData], true);
@@ -171,7 +255,8 @@ export default function EnhanceResultScreen({ route, navigation }) {
       }));
 
     } catch (e) {
-      Alert.alert('保存失败', e?.message || String(e));
+      logger.error('❌ 保存增强图片失败:', e);
+      Alert.alert(t('enhanceResult.saveFailedTitle'), e?.message || t('enhanceResult.saveFailed'));
     } finally {
       setSavingById((prev) => {
         const next = { ...prev };
@@ -223,7 +308,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
         }).filter(Boolean);
         
         if (uris.length === 0) {
-          Alert.alert('错误', '没有有效的图片');
+          Alert.alert(t('common.error'), t('enhanceResult.noValidImages'));
           setTaskProcessing(false);
           return;
         }
@@ -233,7 +318,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
         const validPrepared = prepared.filter(p => !p.error);
         
         if (validPrepared.length === 0) {
-          Alert.alert('错误', '图片预处理失败');
+          Alert.alert(t('common.error'), t('enhanceResult.preprocessFailed'));
           setTaskProcessing(false);
           if (abortControllerRef.current) {
             abortControllerRef.current = null;
@@ -348,7 +433,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
         }
 
         logger.error('提交/轮询增强任务失败:', error);
-        Alert.alert('错误', error.message || '提交失败，请稍后重试');
+        Alert.alert(t('common.error'), error.message || t('enhanceResult.submitFailed'));
         
         // 将所有图片标记为失败
         setLocalResults((prev) => {
@@ -357,7 +442,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
             updated[img.id] = {
               ...(updated[img.id] || {}),
               status: 'failed',
-              error: error.message || '任务失败',
+              error: error.message || t('enhanceResult.taskFailed'),
             };
           });
           return updated;
@@ -387,18 +472,18 @@ export default function EnhanceResultScreen({ route, navigation }) {
         e.preventDefault();
         
         Alert.alert(
-          '确认返回',
-          '照片增强任务还在处理中，返回后照片的处理结果将会临时保存在服务器。\n\n再次提交同一照片的相同处理将会直接从服务器中返回，不扣减额度。',
+          t('enhanceResult.confirmBack'),
+          t('enhanceResult.taskProcessingMessage'),
           [
             {
-              text: '继续等待',
+              text: t('enhanceResult.continueWaiting'),
               style: 'cancel',
               onPress: () => {
                 // 用户选择继续等待，不返回（已经通过 preventDefault 阻止了）
               }
             },
             {
-              text: '确认返回',
+              text: t('enhanceResult.confirmBackButton'),
               style: 'destructive',
               onPress: () => {
                 // 用户确认返回，取消轮询任务
@@ -496,17 +581,17 @@ export default function EnhanceResultScreen({ route, navigation }) {
               resizeMode="contain"
             />
           ) : (
-            <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>暂无图片</Text></View>
+            <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>{t('enhanceResult.noImage')}</Text></View>
           );
         })() : (
-          <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>暂无图片</Text></View>
+          <View style={styles.imagePlaceholder}><Text style={styles.placeholderText}>{t('enhanceResult.noImage')}</Text></View>
         )}
 
         {/* 处理中/加载中/失败蒙层 */}
         {(processing || loadingEnhanced || failed) && (
           <View style={styles.processingOverlay}>
             <Text style={styles.processingText}>
-              {failed ? '处理失败' : loadingEnhanced ? '加载增强结果中…' : '处理中…'}
+              {failed ? t('enhanceResult.failed') : loadingEnhanced ? t('enhanceResult.loadingEnhancedResult') : t('enhanceResult.processing')}
             </Text>
           </View>
         )}
@@ -542,7 +627,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
             },
           ]}>
             <TouchableOpacity style={[styles.saveButton, (!canSave) && styles.saveButtonDisabled]} onPress={onSave} disabled={!canSave}>
-              <Text style={styles.saveText}>{currentResult?.saved ? '已保存' : (isSaving ? '保存中…' : '保存到相册')}</Text>
+              <Text style={styles.saveText}>{currentResult?.saved ? t('enhanceResult.saved') : (isSaving ? t('enhanceResult.saving') : t('enhanceResult.saveToGallery'))}</Text>
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -550,7 +635,7 @@ export default function EnhanceResultScreen({ route, navigation }) {
         <View style={styles.footerRight}>
           {enhancedReady && (
             <TouchableOpacity style={styles.toggleFooterButton} onPress={toggleShow}>
-              <Text style={styles.toggleFooterText}>{showEnhanced ? '显示原图' : `显示${presetName || '增强'}`}</Text>
+              <Text style={styles.toggleFooterText}>{showEnhanced ? t('enhanceResult.showOriginal') : t('enhanceResult.showEnhanced', { preset: presetName || t('enhanceResult.defaultPresetName') })}</Text>
             </TouchableOpacity>
           )}
         </View>
