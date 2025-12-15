@@ -1093,7 +1093,7 @@ const CategoryScreen = ({
   };
 
   // 关闭增强模态框
-  const handleCloseEnhanceModal = () => {
+  const handleCloseEnhanceModal = (hasSaved = false) => {
     // 如果任务还在进行中（processing状态），显示确认提示
     if (isProcessing && enhanceProgress.status === 'processing') {
       Alert.alert(
@@ -1128,6 +1128,12 @@ const CategoryScreen = ({
                 status: 'idle',
                 imageStatuses: []
               });
+              
+              // 如果有保存操作，重新加载数据
+              if (hasSaved) {
+                logger.debug('🔄 检测到保存操作，重新加载图片列表');
+                loadImages();
+              }
             }
           }
         ]
@@ -1157,269 +1163,14 @@ const CategoryScreen = ({
       status: 'idle',
       imageStatuses: []
     });
+    
+    // 如果有保存操作，重新加载数据
+    if (hasSaved) {
+      logger.debug('🔄 检测到保存操作，重新加载图片列表');
+      loadImages();
+    }
   };
 
-  // 保存并添加到暂存箱（合并原有的"保存到本地"和"添加为新图"）
-  // 事件处理函数：捕获点击时刻用户看到的图片
-  const handleSaveAndAdd = async () => {
-    if (enhanceResults.length === 0) return;
-    
-    // 捕获点击时刻的结果（快照）
-    const resultToAdd = enhanceResults[currentImageIndex];
-    if (!resultToAdd) return;
-    
-    // 如果已经保存过，不再重复保存
-    if (resultToAdd.saved) {
-      Alert.alert('提示', '该图片已保存过');
-      return;
-    }
-    
-    try {
-      logger.debug('➕ 开始添加为新图:', resultToAdd.originalFileName);
-      
-      // 1. 下载增强后的图片
-      const imageBlob = await ImageEnhanceService.downloadEnhancedImage(resultToAdd.enhancedUri);
-      
-      // 2. 保存到 xualbum 目录
-      const saveResult = await ImageEnhanceService.saveToXualbum(
-        imageBlob,
-        resultToAdd.originalFileName
-      );
-      
-      logger.debug('✅ 图片已保存到:', saveResult.filePath);
-      
-      // 3. 从原图获取分类信息（message和detection_results）
-      // allImages 只包含精简信息，需要调用详细信息接口获取完整信息
-      let originalImage = null;
-      try {
-        if (resultToAdd.originalImageId) {
-          originalImage = await UnifiedDataService.readImageDetailsById(resultToAdd.originalImageId);
-          logger.debug('✅ 从数据库获取完整原图信息');
-        } else if (resultToAdd.originalUri != null) {
-          // 如果没有 ID，尝试从 URI 查找（检查 null 和 undefined）
-          const targetOriginalUri = getUri(resultToAdd.originalUri);
-          if (targetOriginalUri) {
-            const tempImage = allImages.find(img => {
-              const imgUri = getUri(img);
-              return imgUri && targetOriginalUri && imgUri === targetOriginalUri;
-            });
-            if (tempImage?.id) {
-              originalImage = await UnifiedDataService.readImageDetailsById(tempImage.id);
-              logger.debug('✅ 通过URI找到ID，从数据库获取完整原图信息');
-            }
-          }
-        }
-      } catch (error) {
-        logger.warn('⚠️ 从数据库查询原图详细信息失败:', error);
-        // 降级到使用精简信息
-        originalImage = allImages.find(img => {
-          if (resultToAdd.originalImageId && img.id === resultToAdd.originalImageId) {
-            return true;
-          }
-          if (resultToAdd.originalUri != null) {
-            const imgUri = getUri(img);
-            const targetOriginalUri = getUri(resultToAdd.originalUri);
-            return imgUri && targetOriginalUri && imgUri === targetOriginalUri;
-          }
-          return false;
-        });
-      }
-      
-      logger.debug('🔍 查找原图:', { 
-        originalImageId: resultToAdd.originalImageId, 
-        originalUri: resultToAdd.originalUri,
-        found: !!originalImage,
-        hasMessage: !!originalImage?.message,
-        message: originalImage?.message,
-        hasIdCardDetections: !!originalImage?.idCardDetections?.length,
-        idCardDetectionsCount: originalImage?.idCardDetections?.length || 0,
-        hasGeneralDetections: !!originalImage?.generalDetections?.length,
-        generalDetectionsCount: originalImage?.generalDetections?.length || 0,
-        hasMobileNetV3Detections: !!originalImage?.mobileNetV3Detections,
-        mobileNetV3Detections: originalImage?.mobileNetV3Detections ? 'present' : 'null'
-      });
-      
-      // 4. 使用writeImageDetailedInfo一次性保存完整数据（包括基础信息和详细信息）
-      // 注意：不传入id，让系统根据uri自动生成，与扫描服务保持一致
-      const timestamp = Date.now();
-      const newImageUri = `file:///${saveResult.filePath.replace(/\\/g, '/')}`;
-      
-      // 准备完整的图片数据，包含所有必要字段（参考扫描服务的格式）
-      const completeImageData = {
-        uri: newImageUri, // 必须有uri，系统会根据uri生成id
-        fileName: saveResult.fileName,
-        category: originalImage?.category || 'other', // 保持原图的分类，如果没有则默认为 other
-        confidence: 1.0, // 默认置信度
-        timestamp: timestamp, // 时间戳（必须）
-        takenAt: timestamp || null, // 拍摄时间
-        size: imageBlob.size || 0, // 文件大小
-        // 复制原图的检测结果和描述信息
-        idCardDetections: originalImage?.idCardDetections || [],
-        generalDetections: originalImage?.generalDetections || [],
-        mobileNetV3Detections: originalImage?.mobileNetV3Detections || null,
-        message: originalImage?.message || null,
-        // 如果有imageDimensions也复制
-        ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions })
-      };
-      
-      // 验证必要字段
-      if (!completeImageData.category) {
-        logger.warn('⚠️ 图片数据缺少category，自动设置为other');
-        completeImageData.category = 'other';
-      }
-      if (!completeImageData.timestamp) {
-        logger.warn('⚠️ 图片数据缺少timestamp，使用当前时间');
-        completeImageData.timestamp = Date.now();
-      }
-      
-      // 保存数据并更新缓存（updateCache=true 会重建缓存）
-      logger.debug('💾 准备保存图片数据:', {
-        uri: newImageUri,
-        fileName: completeImageData.fileName,
-        category: completeImageData.category,
-        timestamp: completeImageData.timestamp,
-        size: completeImageData.size,
-        hasMessage: !!completeImageData.message,
-        message: completeImageData.message,
-        hasIdCardDetections: !!completeImageData.idCardDetections?.length,
-        idCardDetectionsCount: completeImageData.idCardDetections?.length || 0,
-        hasGeneralDetections: !!completeImageData.generalDetections?.length,
-        generalDetectionsCount: completeImageData.generalDetections?.length || 0,
-        hasMobileNetV3Detections: !!completeImageData.mobileNetV3Detections,
-        mobileNetV3Detections: completeImageData.mobileNetV3Detections ? 'present' : 'null'
-      });
-      
-      // 生成预期ID以便后续验证（使用与存储服务相同的算法）
-      let expectedImageId;
-      try {
-        const storageService = UnifiedDataService.imageStorageService;
-        if (storageService?.storage?.generateStableId) {
-          expectedImageId = storageService.storage.generateStableId(newImageUri);
-        } else {
-          // 备用算法（与generateStableId相同的逻辑）
-          let hash = 0;
-          for (let i = 0; i < newImageUri.length; i++) {
-            const char = newImageUri.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-          }
-          expectedImageId = `img_${Math.abs(hash).toString(36)}`;
-        }
-      } catch (e) {
-        logger.warn('⚠️ 生成预期ID失败:', e);
-        expectedImageId = null;
-      }
-      
-      // 使用 writeImageDetailedInfo 保存图片数据（服务层会自动刷新缓存）
-      await UnifiedDataService.writeImageDetailedInfo([completeImageData], true);
-      
-      // 🆕 如果原图在暂存箱中，新文件也添加到暂存箱
-      if (originalImage?.id && expectedImageId) {
-        const isOriginalInStagingBox = await UnifiedDataService.isInStagingBox(originalImage.id);
-        if (isOriginalInStagingBox) {
-          await UnifiedDataService.addToStagingBox([expectedImageId]);
-          logger.debug('✅ 原图在暂存箱中，新文件已添加到暂存箱:', expectedImageId);
-        } else {
-          logger.debug('✅ 原图不在暂存箱中，新文件不添加到暂存箱');
-        }
-      }
-      
-      // 缓存刷新已由 writeImageDetailedInfo 处理，不需要手动刷新
-      
-      logger.debug('✅ 图片完整信息已保存并重建缓存:', { 
-        uri: newImageUri,
-        fileName: completeImageData.fileName,
-        category: completeImageData.category,
-        expectedId: expectedImageId,
-        hasMessage: !!completeImageData.message,
-        hasDetections: !!(completeImageData.idCardDetections?.length || completeImageData.generalDetections?.length || completeImageData.mobileNetV3Detections)
-      });
-      
-      // 验证：直接从数据库查询
-      try {
-        const directImage = await UnifiedDataService.imageStorageService?.getImageById?.(expectedImageId);
-        logger.debug('🔍 直接从数据库查询验证:', {
-          expectedId: expectedImageId,
-          foundInDB: !!directImage,
-          dbImageCategory: directImage?.category,
-          dbImageUri: directImage?.uri
-        });
-      } catch (dbError) {
-        logger.warn('⚠️ 数据库直接查询失败:', dbError);
-      }
-      
-      // 5. 标记该图片为已保存
-      setEnhanceResults(prevResults => 
-        prevResults.map((result, index) => 
-          index === currentImageIndex 
-            ? { ...result, saved: true, savedAt: timestamp }
-            : result
-        )
-      );
-      
-      // 6. 验证保存结果（调试用）
-      try {
-        // 从暂存箱中查找刚保存的图片
-        const allStagingBoxImages = await UnifiedDataService.getStagingBoxImages();
-        // 统一使用 getUri 进行比较
-        const newImageUriForCompare = getUri(newImageUri) || newImageUri;
-        const savedImage = allStagingBoxImages.find(img => {
-          const imgUri = getUri(img);
-          return imgUri && newImageUriForCompare && imgUri === newImageUriForCompare;
-        });
-        
-        // 列出所有缓存中的URI，便于对比
-        const cachedUris = allStagingBoxImages.map(img => getUri(img)).filter(Boolean);
-        logger.debug('🔍 保存后验证:', {
-          savedUri: newImageUri,
-          savedUriForCompare: newImageUriForCompare,
-          foundInCache: !!savedImage,
-          totalStagingBox: allStagingBoxImages.length,
-          savedImageCategory: savedImage?.category,
-          savedImageId: savedImage?.id,
-          cachedUris: cachedUris.slice(0, 5) // 只显示前5个URI
-        });
-        
-        // 尝试模糊匹配（比较文件名）
-        const savedFileName = newImageUri.split('/').pop();
-        const matchByFileName = allStagingBoxImages.find(img => {
-          const imgUri = getUri(img);
-          if (!imgUri) return false;
-          const imgFileName = imgUri.split('/').pop();
-          return imgFileName === savedFileName;
-        });
-        
-        if (!savedImage && matchByFileName) {
-          const matchUri = getUri(matchByFileName);
-          logger.warn('⚠️ URI不匹配，但文件名匹配:', {
-            savedUri: newImageUri,
-            savedUriForCompare: newImageUriForCompare,
-            cachedUri: matchUri,
-            savedFileName,
-            cachedFileName: matchUri?.split('/').pop()
-          });
-        }
-        
-        if (!savedImage && !matchByFileName) {
-          logger.error('❌ 新保存的图片不在暂存箱中！', {
-            savedUri: newImageUri,
-            cachedCount: allStagingBoxImages.length,
-            allCachedUris: cachedUris
-          });
-        }
-      } catch (verifyError) {
-        logger.warn('⚠️ 验证保存结果失败:', verifyError);
-      }
-      
-      Alert.alert('成功', '已保存到暂存箱，可继续查看其他图片');
-      
-      // 不关闭结果模态框，让用户可以继续查看和保存其他图片
-      
-    } catch (error) {
-      logger.error('❌ 添加为新图失败:', error);
-      Alert.alert('错误', `添加失败: ${error.message}`);
-    }
-  };
 
   // 开始增强处理（从方案按钮触发）
   // preset: 选中的增强方案
@@ -1574,70 +1325,7 @@ const CategoryScreen = ({
                 imageStatuses: imageStatuses
               });
               
-              // 实时更新已完成图片的URI到enhanceResults（支持过程中显示）
-              setEnhanceResults(prevResults => {
-                const newResults = [...prevResults];
-                let hasUpdate = false;
-                
-                imageStatuses.forEach((imgStatus) => {
-                  if (!imgStatus) return; // 跳过 null 值
-                  if (imgStatus.status === 'completed' && imgStatus.result_url) {
-                    const index = imgStatus.index;
-                    // 确保 index 是有效数字
-                    if (index == null || typeof index !== 'number' || index < 0 || index >= preparedImages.length) {
-                      logger.warn(`⚠️ 无效的图片索引: ${index}, 跳过该状态更新`);
-                      return;
-                    }
-                    const originalImage = preparedImages[index]?.originalImage;
-                    
-                    if (originalImage) {
-                      const enhancedUrl = imgStatus.result_url || imgStatus.url || imgStatus.enhanced_url;
-                      
-                      // 检查是否已经存在这个索引的结果
-                      const originalImageUri = getUri(originalImage);
-                      const existingIndex = newResults.findIndex(r => {
-                        // 确保 r 存在后再访问其属性
-                        if (!r) return false;
-                        // 通过originalUri或index匹配
-                        return (r.originalUri && originalImageUri && r.originalUri === originalImageUri) || 
-                               (r.originalImageId === originalImage.id);
-                      });
-                      
-                      if (existingIndex >= 0) {
-                        // 更新现有结果（如果URI还没设置或者状态是pending）
-                        if (!newResults[existingIndex].enhancedUri || newResults[existingIndex].status !== 'success') {
-                          newResults[existingIndex] = {
-                            ...newResults[existingIndex],
-                            // 确保 originalUri 和 originalImageId 字段存在
-                            originalImageId: newResults[existingIndex].originalImageId || originalImage.id,
-                            originalUri: newResults[existingIndex].originalUri || originalImageUri,
-                            originalFileName: newResults[existingIndex].originalFileName || originalImage.fileName,
-                            enhancedUri: enhancedUrl,
-                            status: 'success'
-                          };
-                          hasUpdate = true;
-                          logger.debug(`🔄 更新已完成的图片URI [索引${index}]: ${originalImage.fileName}`);
-                        }
-                      } else {
-                        // 创建新结果（如果还没创建）
-                        newResults[index] = {
-                          originalImageId: originalImage.id,
-                          originalUri: originalImageUri,
-                          originalFileName: originalImage.fileName,
-                          enhancedUri: enhancedUrl,
-                          taskId: taskResult.task_id,
-                          preset: preset,
-                          status: 'success'
-                        };
-                        hasUpdate = true;
-                        logger.debug(`➕ 添加已完成的图片URI [索引${index}]: ${originalImage.fileName}`);
-                      }
-                    }
-                  }
-                });
-                
-                return hasUpdate ? newResults : prevResults;
-              });
+              // 注意：实时更新已由子组件通过 progress.imageStatuses 自己处理，不需要在这里更新 enhanceResults
               
               logger.debug(`📊 进度更新 [轮询${pollCount}次]: ${completedImages}/${taskResult.total_images} (${progressPercent.toFixed(1)}%) - 状态: ${status.status}`);
             },
@@ -1981,7 +1669,11 @@ const CategoryScreen = ({
       </TouchableOpacity>
       
       <Text style={styles.title}>
-        {!filterType || !filterValue
+        {!filterType
+          ? '图片列表'
+          : filterType === 'stagingBox'
+          ? `🗑️ 暂存箱 (${allImages.length}张)`
+          : !filterValue
           ? '图片列表'
           : filterType === 'similarityGroup'
           ? `相似照片组 (${allImages.length}张)`
@@ -1991,8 +1683,6 @@ const CategoryScreen = ({
           ? `${filterValue} (${allImages.length}张)`
           : filterType === 'color'
           ? `🎨 ${filterValue} (${allImages.length}张)`
-          : filterType === 'stagingBox'
-          ? `🗑️ 暂存箱 (${allImages.length}张)`
           : filterType === 'category'
           ? `${UnifiedDataService.getCategoryDisplayName(filterValue)} (${allImages.length}张)`
           : filterType === 'format'
@@ -2795,7 +2485,8 @@ const CategoryScreen = ({
           currentIndex={currentImageIndex}
           isProcessing={isProcessing}
           onIndexChange={setCurrentImageIndex}
-          onSave={handleSaveAndAdd}
+          allImages={allImages}
+          categoryImages={[]}
         />
       )}
 
