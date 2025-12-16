@@ -35,7 +35,7 @@ module.exports = {
       const webpack = require('webpack');
       webpackConfig.plugins.push(
         new webpack.IgnorePlugin({
-          resourceRegExp: /^(react-native-fs|react-native-vector-icons|react-native-image-picker)$/
+          resourceRegExp: /^(react-native-fs|react-native-vector-icons|react-native-image-picker|react-native-localize)$/
         })
       );
       
@@ -50,6 +50,43 @@ module.exports = {
             }
           ]
         })
+      );
+      
+      // 配置 source-map-loader 忽略缺失的 source map 文件
+      // 修复 onnxruntime-react-native 缺失 source map 导致的构建失败
+      if (webpackConfig.module && webpackConfig.module.rules) {
+        webpackConfig.module.rules.forEach((rule) => {
+          // 查找 source-map-loader 规则
+          if (rule.use && Array.isArray(rule.use)) {
+            const sourceMapLoaderIndex = rule.use.findIndex(
+              (use) => use.loader && use.loader.includes('source-map-loader')
+            );
+            
+            if (sourceMapLoaderIndex !== -1) {
+              // 排除 onnxruntime-react-native 模块
+              if (!rule.exclude) {
+                rule.exclude = /node_modules\/onnxruntime-react-native/;
+              } else if (Array.isArray(rule.exclude)) {
+                rule.exclude.push(/node_modules\/onnxruntime-react-native/);
+              } else {
+                rule.exclude = [rule.exclude, /node_modules\/onnxruntime-react-native/];
+              }
+              
+              // 配置 source-map-loader 忽略错误
+              rule.use[sourceMapLoaderIndex].options = rule.use[sourceMapLoaderIndex].options || {};
+              // 使用 webpack 的 ignoreWarnings 或者直接修改 loader 行为
+            }
+          }
+        });
+      }
+      
+      // 使用 webpack 的 ignoreWarnings 来忽略 source map 警告
+      if (!webpackConfig.ignoreWarnings) {
+        webpackConfig.ignoreWarnings = [];
+      }
+      webpackConfig.ignoreWarnings.push(
+        /Failed to parse source map/,
+        /ENOENT: no such file or directory.*\.map/
       );
       
       return webpackConfig;

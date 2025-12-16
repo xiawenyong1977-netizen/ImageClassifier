@@ -1263,16 +1263,16 @@ const CategoryScreen = ({
     const isStagingBox = filterType === 'stagingBox';
     
     // 获取所有分类列表（排除tobecleaned，因为暂存箱已独立）
+    // 使用 getAllCategoriesWithUI() 确保顺序与配置文件中的 categoryDisplayOrder 一致
     const configService = UnifiedDataService.configService;
     let availableCategories = [];
     if (configService?.isConfigLoaded()) {
-      const categoryMap = configService.getCategoryNameMap();
-      availableCategories = Object.entries(categoryMap)
-        .filter(([id]) => id !== 'tobecleaned') // 排除旧的tobecleaned分类
-        .map(([id, names]) => ({
-          id,
-          chinese: names.chinese,
-          english: names.english
+      availableCategories = configService.getAllCategoriesWithUI()
+        .filter(cat => cat.id !== 'tobecleaned') // 排除旧的tobecleaned分类
+        .map(cat => ({
+          id: cat.id,
+          chinese: cat.chinese,
+          english: cat.english
         }));
     }
     

@@ -1,5 +1,6 @@
 import React, { useState, memo, useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, Image, StyleSheet, Text } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
@@ -18,7 +19,8 @@ const MemoizedImage = memo(({ uri, imageId, onError, onLoad }) => {
   );
 });
 
-const RecentImagesGrid = memo(({ images, onImagePress }) => {
+const RecentImagesGrid = ({ images, onImagePress }) => {
+  const { t } = useTranslation('common');
   const [imageErrors, setImageErrors] = useState({});
 
   const handleImageError = useCallback((imageId) => {
@@ -43,12 +45,12 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
 
   // 从图片对象中提取目录名的辅助函数（与移动端一致）
   const getDirectoryName = useCallback((image) => {
-    if (!image) return '未知目录';
+    if (!image) return t('home.unknownDirectory');
     
     // 使用 getLocalPath 提取路径（支持 contentUri||path 格式）
     const path = getLocalPath(image);
     if (!path) {
-      return '未知目录';
+      return t('home.unknownDirectory');
     }
     
     // 从路径中提取目录名（倒数第二级目录）
@@ -61,13 +63,13 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
     } else if (pathParts.length === 1) {
       return pathParts[0];
     }
-    return '未知目录';
-  }, []);
+    return t('home.unknownDirectory');
+  }, [t]);
 
   if (!images || images.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>暂无新照片</Text>
+        <Text style={styles.emptyText}>{t('home.noNewPhotos')}</Text>
       </View>
     );
   }
@@ -78,19 +80,25 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
         const imageId = image.id || index;
         const hasError = imageErrors[imageId];
         
+        // 如果没有提供 onImagePress，使用 View 而不是 TouchableOpacity（不可点击）
+        const ImageWrapper = onImagePress ? TouchableOpacity : View;
+        const wrapperProps = onImagePress ? {
+          onPress: () => onImagePress(image, 'Home', {
+            category: image.category,
+            city: image.city,
+            similarityGroupId: image.similarityGroupId
+          }),
+          activeOpacity: 0.8
+        } : {};
+        
         return (
-          <TouchableOpacity
+          <ImageWrapper
             key={imageId}
             style={[
               styles.imageContainer,
               (index + 1) % 3 === 0 && styles.lastInRow
             ]}
-            onPress={() => onImagePress(image, 'Home', {
-              category: image.category,
-              city: image.city,
-              similarityGroupId: image.similarityGroupId
-            })}
-            activeOpacity={0.8}>
+            {...wrapperProps}>
             
             {/* 尝试显示实际图片 */}
             {(() => {
@@ -136,12 +144,12 @@ const RecentImagesGrid = memo(({ images, onImagePress }) => {
                 {getDirectoryName(image)}
               </Text>
             </View>
-          </TouchableOpacity>
+          </ImageWrapper>
         );
       })}
     </View>
   );
-});
+};
 
 const styles = StyleSheet.create({
   grid: {
@@ -205,5 +213,5 @@ const styles = StyleSheet.create({
   },
 });
 
-export default RecentImagesGrid;
+export default React.memo(RecentImagesGrid);
 

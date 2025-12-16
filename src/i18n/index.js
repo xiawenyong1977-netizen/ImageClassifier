@@ -106,20 +106,26 @@ const detectSystemLanguage = () => {
     }
     
     // React Native 环境：尝试使用 react-native-localize（如果已安装）
-    try {
-      const { getLocales } = require('react-native-localize');
-      const locales = getLocales();
-      if (locales && locales.length > 0) {
-        const systemLang = locales[0].languageCode.toLowerCase();
-        if (systemLang === 'zh') {
-          return 'zh';
+    // 使用动态 require 避免 webpack 静态分析警告
+    if (typeof require !== 'undefined') {
+      try {
+        // 使用动态 require，webpack 不会静态分析
+        const localizeModule = require('react-native-localize');
+        if (localizeModule && localizeModule.getLocales) {
+          const locales = localizeModule.getLocales();
+          if (locales && locales.length > 0) {
+            const systemLang = locales[0].languageCode.toLowerCase();
+            if (systemLang === 'zh') {
+              return 'zh';
+            }
+            if (systemLang === 'en') {
+              return 'en';
+            }
+          }
         }
-        if (systemLang === 'en') {
-          return 'en';
-        }
+      } catch (e) {
+        // react-native-localize 未安装，忽略
       }
-    } catch (e) {
-      // react-native-localize 未安装，忽略
     }
     
     // 默认返回中文

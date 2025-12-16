@@ -20,6 +20,8 @@ import ImageSimilarityService from './ImageSimilarityService';
 import { ScanService } from '../adapters/ScanServiceAdapter';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
 import { localInferencePhase as sharedLocalInference } from './localInferencePhase';
+import { getCurrentLanguageAsync } from '../i18n';
+import i18n from '../i18n';
 
 const { GalleryScanModule } = NativeModules;
 
@@ -134,7 +136,7 @@ class GalleryScannerService {
   async startScan(options = {}, onProgress = null) {
     // 检查是否已经在扫描中
     if (this.isScanning) {
-      const errorMsg = '扫描已在进行中，请等待当前扫描完成';
+      const errorMsg = i18n.t('home.scanAlreadyInProgress');
       logger.warn(`⚠️ ${errorMsg}`);
       throw new Error(errorMsg);
     }
@@ -142,7 +144,7 @@ class GalleryScannerService {
     // 检查原生模块是否可用
     if (!GalleryScanModule) {
       logger.error('❌ GalleryScanModule 不可用，无法使用原生扫描');
-      throw new Error('GalleryScanModule 不可用，请确保在Android平台运行');
+      throw new Error(i18n.t('home.galleryScanModuleUnavailable'));
     }
     
     // 确认使用原生扫描
@@ -205,11 +207,14 @@ class GalleryScannerService {
 
       // 启动原生层扫描
       logger.info('🚀 启动原生层扫描服务...');
+      // 🔥 获取当前语言设置，传递给原生层用于城市名称选择
+      const currentLanguage = i18n.language || 'zh';
       const result = await GalleryScanModule.startScan({
         scanPaths: options.scanPaths || [],
         compareLimit: options.compareLimit || 0,
         remoteApiUrl: baseURL, // 使用配置中的baseURL
         cacheApiUrl: baseURL,  // 缓存API和远程推理API使用同一个baseURL
+        language: currentLanguage, // 传递当前语言设置（'zh' 或 'en'）
       });
 
       this.currentScanId = result.scanId;
@@ -375,7 +380,16 @@ class GalleryScannerService {
       this._cleanupScanState();
       // 通知等待的 Promise 扫描已出错
       if (this.scanReject) {
-        this.scanReject(new Error(message || '扫描失败'));
+        // 如果消息是中文错误消息，使用国际化翻译；否则直接使用原消息
+        let errorMessage = message;
+        if (message && message.includes('扫描失败')) {
+          // 提取原始错误信息（如果有）
+          const originalError = message.replace('扫描失败: ', '');
+          errorMessage = i18n.t('home.scanFailed', { error: originalError });
+        } else if (!message) {
+          errorMessage = i18n.t('home.scanFailed', { error: '' });
+        }
+        this.scanReject(new Error(errorMessage));
         this.scanResolve = null;
         this.scanReject = null;
       }
@@ -466,12 +480,16 @@ class GalleryScannerService {
               return null;
             }
 
+            // 获取当前语言设置（异步读取，确保获取到最新的语言设置）
+            const currentLanguage = await getCurrentLanguageAsync();
+
             // 查询地理位置信息（并发执行）
             const locationInfo = await cityLocationService.findNearestCityAsync(
               latitude,
               longitude,
               200, // 200km范围
-              true // 使用远程API
+              true, // 使用远程API
+              currentLanguage  // 传递当前语言设置
             );
 
             if (locationInfo) {
@@ -596,10 +614,14 @@ class GalleryScannerService {
     });
     
     // Android平台：更新前台服务通知
+    // progressData.message 已经包含国际化的消息，如果为空则让原生层使用资源文件的默认消息
+    // 通知标题也由JS层传递，根据应用内语言设置国际化
+    const notificationTitle = i18n.t('home.scanNotificationTitle');
     ScanService.updateProgress(
-      progressData.message || `${stage}: ${processedThisPhase}/${totalFoundThisPhase}`,
+      progressData.message || null, // 传递null让原生层使用资源文件的默认消息（已国际化）
       processedThisPhase,
-      totalFoundThisPhase
+      totalFoundThisPhase,
+      notificationTitle // 传递国际化的通知标题
     );
     
     // 调用进度回调（UI更新）
@@ -638,7 +660,7 @@ class GalleryScannerService {
     // 根据阶段生成简单的提示信息
     switch (stage) {
       case 'initializing':
-        simpleMessage = '初始化扫描: 准备扫描环境';
+        simpleMessage = i18n.t('home.initScanning');
         // 如果 scanStartTimestamp 还未设置，设置为当前时间（Date 对象）
         if (!this.scanStartTimestamp) {
           this.scanStartTimestamp = new Date();
@@ -648,61 +670,61 @@ class GalleryScannerService {
       case 'directory_scanning':
         // 如果还没有发现照片，只显示扫描中；否则显示发现数量
         if (filesFound && filesFound > 0) {
-          simpleMessage = `目录扫描 | 发现: ${filesFound} 张照片`;
+          simpleMessage = i18n.t('home.scanProgress.directoryScanningFound', { count: filesFound });
         } else {
-          simpleMessage = `目录扫描: 正在扫描...`;
+          simpleMessage = i18n.t('home.scanProgress.directoryScanning');
         }
         break;
         
       case 'file_comparison':
         const totalFiles = filesFound || 0;
-        simpleMessage = `照片比对: 正在分析 ${totalFiles} 张照片，查找新增和已删除的照片`;
+        simpleMessage = i18n.t('home.scanProgress.fileComparison', { count: totalFiles });
         break;
         
       case 'screenshot_detection':
         if (filesFound > 0 && filesProcessed === 0) {
-          simpleMessage = `照片扫描: 开始处理 ${filesFound} 张图片`;
+          simpleMessage = i18n.t('home.scanProgress.photoScanningStart', { count: filesFound });
         } else {
-          simpleMessage = `照片扫描: ${filesProcessed || 0}/${filesFound || 0}`;
+          simpleMessage = i18n.t('home.scanProgress.photoScanning', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
       
       case 'cache_check':
       case 'cache_checking':
         if (filesFound > 0 && filesProcessed === 0) {
-          simpleMessage = `分类查询: 开始处理 ${filesFound} 张图片`;
+          simpleMessage = i18n.t('home.scanProgress.categoryQueryStart', { count: filesFound });
         } else {
-          simpleMessage = `分类查询: ${filesProcessed || 0}/${filesFound || 0}`;
+          simpleMessage = i18n.t('home.scanProgress.categoryQuery', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
           
       case 'remote_inference':
         if (filesFound > 0 && filesProcessed === 0) {
-          simpleMessage = `智能识别: 开始处理 ${filesFound} 张图片`;
+          simpleMessage = i18n.t('home.scanProgress.smartRecognitionStart', { count: filesFound });
         } else {
-          simpleMessage = `智能识别: ${filesProcessed || 0}/${filesFound || 0}`;
+          simpleMessage = i18n.t('home.scanProgress.smartRecognition', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
         
       case 'local_inference':
         if (filesFound > 0 && filesProcessed === 0) {
-          simpleMessage = `本地识别: 开始处理 ${filesFound} 张图片`;
+          simpleMessage = i18n.t('home.scanProgress.localRecognitionStart', { count: filesFound });
         } else {
-          simpleMessage = `本地识别: ${filesProcessed || 0}/${filesFound || 0}`;
+          simpleMessage = i18n.t('home.scanProgress.localRecognition', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
         
         
       case 'location_enrichment':
         if (filesFound > 0 && filesProcessed === 0) {
-          simpleMessage = `位置信息补全: 开始处理 ${filesFound} 张图片`;
+          simpleMessage = i18n.t('home.scanProgress.locationEnrichmentStart', { count: filesFound });
         } else {
-          simpleMessage = `位置信息补全: ${filesProcessed || 0}/${filesFound || 0}`;
+          simpleMessage = i18n.t('home.scanProgress.locationEnrichment', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
         
       case 'removing_files':
-        simpleMessage = `移除已删除照片: ${filesProcessed || 0} 张`;
+        simpleMessage = i18n.t('home.scanProgress.removingFiles', { count: filesProcessed || 0 });
         break;
         
       case 'similarity_detection':
@@ -713,25 +735,25 @@ class GalleryScannerService {
             // 开始时：如果 groupsCount === 0，说明是开始消息，filesFound 是图片数
             // 如果 groupsCount > 0，说明是窗口进度更新，filesFound 是窗口数
             if (groupsCount === 0) {
-              simpleMessage = `相似度检测: 开始处理 ${filesFound} 张图片`;
+              simpleMessage = i18n.t('home.scanProgress.similarityDetectionStart', { count: filesFound });
             } else {
-              simpleMessage = `相似度检测: 窗口 ${filesProcessed}/${filesFound} | 发现 ${groupsCount} 个相似组`;
+              simpleMessage = i18n.t('home.scanProgress.similarityDetectionProgress', { processed: filesProcessed, total: filesFound, groups: groupsCount });
             }
           } else {
             // 进度中：filesFound 和 filesProcessed 是窗口数
-            simpleMessage = `相似度检测: 窗口 ${filesProcessed}/${filesFound} | 发现 ${groupsCount} 个相似组`;
+            simpleMessage = i18n.t('home.scanProgress.similarityDetectionProgress', { processed: filesProcessed, total: filesFound, groups: groupsCount });
           }
         } else {
-          simpleMessage = `相似度检测: 开始处理`;
+          simpleMessage = i18n.t('home.scanProgress.similarityDetectionStart', { count: 0 });
         }
         break;
         
       case 'native_scan_completed':
-        simpleMessage = `原生层扫描完成`;
+        simpleMessage = i18n.t('home.scanProgress.nativeScanCompleted');
         break;
         
       case 'completed':
-        simpleMessage = `扫描完成: 处理了 ${filesProcessed || 0} 张照片`;
+        simpleMessage = i18n.t('home.scanProgress.scanCompleted', { count: filesProcessed || 0 });
         // 计算和保存扫描耗时
         if (this.scanStartTimestamp) {
           // 确保 scanStartTimestamp 是 Date 对象
@@ -754,7 +776,7 @@ class GalleryScannerService {
         break;
         
       default:
-        simpleMessage = '处理中...';
+        simpleMessage = i18n.t('common.processing');
     }
     
     // 添加全局统计信息到消息中
@@ -805,7 +827,10 @@ class GalleryScannerService {
     
     // 显示统计信息（除了相似度检测阶段，其他阶段都显示总进度统计）
     if (stage !== 'similarity_detection' && totalImagesToBeClassified > 0) {
-      finalMessage += ` | 分类成功: ${imagesClassified}/${totalImagesToBeClassified}`;
+      finalMessage += ` | ${i18n.t('home.scanProgress.classificationSuccess', { 
+        classified: imagesClassified, 
+        total: totalImagesToBeClassified 
+      })}`;
     }
     
     return {

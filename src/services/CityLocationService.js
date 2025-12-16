@@ -23,10 +23,12 @@ class CityLocationService {
    * 调用远程API查找最近的城市（使用附近城市列表，按人口筛选真正的城市）
    * @param {number} latitude - 纬度
    * @param {number} longitude - 经度
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
    * @returns {Promise<Object|null>} 城市信息对象或null
    */
-  async findNearestCityRemote(latitude, longitude) {
+  async findNearestCityRemote(latitude, longitude, language = 'zh') {
     // 使用附近城市列表API，查询50公里内的前10个城市
+    // 注意：API会返回中文和英文的城市名称，不需要在URL中传递语言参数
     const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearbyCities}?latitude=${latitude}&longitude=${longitude}&limit=10&max_distance_km=50`;
     
     try {
@@ -51,16 +53,26 @@ class CityLocationService {
       
       const mainCity = sortedByPopulation[0];
       
-      // 使用API返回的中文名称
-      const chineseName = mainCity.name_zh || mainCity.name;
+      // 根据语言设置选择城市名称
+      // 如果语言是英文且API返回了英文名称，使用英文名称；否则使用中文名称
+      let cityName;
+      if (language === 'en' && mainCity.name) {
+        // 使用英文名称（API返回的 name 字段是英文，如 "Beijing"）
+        cityName = mainCity.name;
+      } else {
+        // 使用中文名称（API返回的 name_zh 字段是中文，如 "北京"）
+        cityName = mainCity.name_zh || mainCity.name;
+      }
       
-      // 标准化城市名称：移除"市"后缀，统一格式
-      const normalizedCityName = this.normalizeCityName(chineseName);
+      // 标准化城市名称：移除"市"后缀，统一格式（仅对中文名称）
+      const normalizedCityName = language === 'zh' 
+        ? this.normalizeCityName(cityName)
+        : cityName;
       
       // 转换API返回格式到本地格式
       const city = {
         name: normalizedCityName,
-        province: chineseName, // 使用中文名作为省份（暂时）
+        province: mainCity.name_zh || mainCity.name, // 省份使用中文名称
         lat: mainCity.latitude,
         lng: mainCity.longitude,
         distance: Math.round(mainCity.distance_km * 100) / 100,
@@ -130,46 +142,48 @@ class CityLocationService {
    * @param {number} latitude - 纬度
    * @param {number} longitude - 经度
    * @param {number} maxDistance - 最大搜索距离(公里)，默认200公里
+   * @param {boolean} useRemoteApi - 是否使用远程API，默认true
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
    * @returns {Promise<Object|null>} 城市信息对象或null
    */
-  async findNearestCityAsync(latitude, longitude, maxDistance = 200, useRemoteApi = true) {
+  async findNearestCityAsync(latitude, longitude, maxDistance = 200, useRemoteApi = true, language = 'zh') {
     // 参数验证
     if (!this.isValidCoordinate(latitude, longitude)) {
       logger.warn('Invalid coordinates provided');
       return null;
     }
 
-    // 检查缓存
-    const cacheKey = this.getCacheKey(latitude, longitude);
+    // 检查缓存（包含语言信息，确保不同语言的结果分别缓存）
+    const cacheKey = this.getCacheKey(latitude, longitude, language);
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey);
     }
 
     let nearestCity = null;
 
-    // 如果禁用远程API，直接使用本地查询
+    // 如果禁用远程API，直接使用本地查询（本地数据只有中文）
     if (!useRemoteApi) {
       nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
     } else {
       try {
-        // 1. 优先尝试远程API
-        nearestCity = await this.findNearestCityRemote(latitude, longitude);
+        // 1. 优先尝试远程API（传递语言参数）
+        nearestCity = await this.findNearestCityRemote(latitude, longitude, language);
         
-        // 如果远程API失败或未找到结果，回退到本地查询
+        // 如果远程API失败或未找到结果，回退到本地查询（本地数据只有中文）
         if (!nearestCity) {
           nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
         }
         
       } catch (error) {
-        // 如果远程API调用异常，回退到本地查询
+        // 如果远程API调用异常，回退到本地查询（本地数据只有中文）
         nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
       }
     }
 
-    // 缓存结果并确保城市名称标准化
+    // 缓存结果（使用包含语言的缓存键）
+    // 注意：城市名称的标准化已经在 findNearestCityRemote（中文）和 findNearestCity（本地）中完成
+    // 英文名称不需要标准化
     if (nearestCity) {
-      // 确保城市名称标准化（防止远程API返回未标准化的名称）
-      nearestCity.name = this.normalizeCityName(nearestCity.name);
       this.setCache(cacheKey, nearestCity);
     }
 
@@ -314,16 +328,18 @@ class CityLocationService {
   }
 
   /**
-   * 生成缓存键
+   * 生成缓存键（包含语言信息，确保不同语言的结果分别缓存）
    * @param {number} latitude - 纬度
    * @param {number} longitude - 经度
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
    * @returns {string} 缓存键
    */
-  getCacheKey(latitude, longitude) {
+  getCacheKey(latitude, longitude, language = 'zh') {
     // 将坐标四舍五入到小数点后2位，减少缓存键数量
     const lat = Math.round(latitude * 100) / 100;
     const lng = Math.round(longitude * 100) / 100;
-    return `${lat}_${lng}`;
+    // 包含语言信息，确保不同语言的结果分别缓存
+    return `${lat}_${lng}_${language}`;
   }
 
   /**

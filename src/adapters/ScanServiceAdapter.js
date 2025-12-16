@@ -71,17 +71,20 @@ export const ScanService = {
   
   /**
    * 更新扫描进度
-   * @param {string} message - 进度消息
+   * @param {string} message - 进度消息（已国际化的消息）
    * @param {number} processed - 已处理数量
    * @param {number} total - 总数量
+   * @param {string} title - 通知标题（已国际化，可选）
    */
-  updateProgress: (message, processed, total) => {
+  updateProgress: (message, processed, total, title = null) => {
     if (Platform.OS === 'android' && ScanServiceModule) {
       try {
+        // 使用传入的已国际化消息和标题，如果没有则让原生层使用资源文件的默认值
         ScanServiceModule.updateScanProgress(
-          message || '扫描中...',
+          message || null, // 传递null让原生层使用默认值（已国际化）
           processed || 0,
-          total || 0
+          total || 0,
+          title || null // 传递null让原生层使用资源文件的默认值（已国际化）
         );
       } catch (error) {
         console.warn('更新扫描进度失败:', error);

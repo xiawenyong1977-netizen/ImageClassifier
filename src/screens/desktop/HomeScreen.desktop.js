@@ -1435,7 +1435,7 @@ const HomeScreen = () => {
             </View>
             <RecentImagesGrid 
               images={stableRecentImages} 
-              onImagePress={handleImagePress}
+              onImagePress={null}
             />
           </View>
         )}

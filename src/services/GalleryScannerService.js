@@ -1,4 +1,4 @@
-﻿// 导入WebAdapters统一适配器
+// 导入WebAdapters统一适配器
 import { 
   logger, 
   readImageFileAsBlob, 
@@ -18,6 +18,8 @@ import ImageClassifierService from './ImageClassifierService';
 import cityLocationService from './CityLocationService';
 import ImageProcessor from './ImageProcessor';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
+import { getCurrentLanguageAsync } from '../i18n';
+import i18n from '../i18n';
 import { localInferencePhase as sharedLocalInference } from './localInferencePhase';
 
 
@@ -72,13 +74,17 @@ const enrichLocationInfoWithCity = async (latitude, longitude, altitude = null, 
     locationInfo.altitude = altitude;
   }
 
+  // 获取当前语言设置（异步读取，确保获取到最新的语言设置）
+  const currentLanguage = await getCurrentLanguageAsync();
+
   // 查找最近的城市信息
   try {
     const nearestCity = await cityLocationService.findNearestCityAsync(
       latitude,
       longitude,
       200,
-      useRemoteApi
+      useRemoteApi,
+      currentLanguage  // 传递当前语言设置
     );
 
     if (nearestCity) {
@@ -631,10 +637,10 @@ class GalleryScannerService {
     let simpleMessage = '';
     let shouldRefresh = false;
     
-    // 根据阶段生成简单的提示信息
+    // 根据阶段生成简单的提示信息（使用 i18n 翻译）
     switch (stage) {
       case 'initializing':
-        simpleMessage = '初始化扫描: 准备扫描环境';
+        simpleMessage = i18n.t('home.initScanning');
         // 记录扫描开始时间（Date 对象，用于增量相似度检测）
         // 如果已经设置过，则不覆盖（scanWithIndependentThread 中已设置）
         if (!this.scanStartTimestamp || !(this.scanStartTimestamp instanceof Date)) {
@@ -645,52 +651,68 @@ class GalleryScannerService {
       case 'directory_scanning':
         // 如果还没有发现照片，只显示扫描中；否则显示发现数量
         if (filesFound && filesFound > 0) {
-          simpleMessage = `目录扫描 | 发现: ${filesFound} 张照片`;
+          simpleMessage = i18n.t('home.scanProgress.directoryScanningFound', { count: filesFound });
         } else {
-          simpleMessage = `目录扫描: 正在扫描...`;
+          simpleMessage = i18n.t('home.scanProgress.directoryScanning');
         }
         break;
         
       case 'file_comparison':
         const totalFiles = filesFound || 0;
-        simpleMessage = `照片比对: 正在分析 ${totalFiles} 张照片，查找新增和已删除的照片`;
+        simpleMessage = i18n.t('home.scanProgress.fileComparison', { count: totalFiles });
         break;
         
       case 'screenshot_detection':
-        simpleMessage = `照片扫描: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = i18n.t('home.scanProgress.photoScanning', { 
+          processed: filesProcessed || 0, 
+          total: filesFound || 0 
+        });
         break;
       
       case 'cache_checking':
-        simpleMessage = `分类查询: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = i18n.t('home.scanProgress.categoryQuery', { 
+          processed: filesProcessed || 0, 
+          total: filesFound || 0 
+        });
         break;
           
         
       case 'remote_inference':
-        simpleMessage = `智能识别: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = i18n.t('home.scanProgress.smartRecognition', { 
+          processed: filesProcessed || 0, 
+          total: filesFound || 0 
+        });
         break;
         
       case 'local_inference':
-        simpleMessage = `本地识别: ${filesProcessed || 0}/${filesFound || 0}`;
+        simpleMessage = i18n.t('home.scanProgress.localRecognition', { 
+          processed: filesProcessed || 0, 
+          total: filesFound || 0 
+        });
         break;
         
         
       case 'removing_files':
-        simpleMessage = `移除已删除照片: ${filesProcessed || 0} 张`;
+        simpleMessage = i18n.t('home.scanProgress.removingFiles', { count: filesProcessed || 0 });
         break;
         
       case 'similarity_detection':
         if (filesFound && filesProcessed !== undefined) {
           // 相似度检测阶段显示时间窗口进度和动态相似组数量
           const groupsCount = this.imagesClassified || 0;
-          simpleMessage = `相似度检测: (${filesProcessed}/${filesFound}) 窗口 | 发现 ${groupsCount} 个相似组`;
+          simpleMessage = i18n.t('home.scanProgress.similarityDetectionProgress', {
+            processed: filesProcessed,
+            total: filesFound,
+            groups: groupsCount
+          });
         } else {
-          simpleMessage = `相似度检测: 开始处理`;
+          simpleMessage = i18n.t('home.scanProgress.similarityDetectionStart');
         }
         break;
         
      
       case 'completed':
-        simpleMessage = `扫描完成: 处理了 ${filesProcessed || 0} 张照片`;
+        simpleMessage = i18n.t('home.scanProgress.scanCompleted', { count: filesProcessed || 0 });
         // 计算和保存扫描耗时
         if (this.scanStartTimestamp) {
           const scanEndTimestamp = Date.now();
@@ -714,7 +736,7 @@ class GalleryScannerService {
         break;
         
       default:
-        simpleMessage = '处理中...';
+        simpleMessage = i18n.t('home.processing');
     }
     
     // 添加全局统计信息到消息中
@@ -776,7 +798,10 @@ class GalleryScannerService {
         : (stage === 'screenshot_detection' && filesFound ? filesFound : 0);
       
       if (totalCount > 0) {
-        finalMessage += ` | 分类成功: ${this.imagesClassified}/${totalCount}`;
+        finalMessage += ` | ${i18n.t('home.scanProgress.classificationSuccess', { 
+          classified: this.imagesClassified, 
+          total: totalCount 
+        })}`;
       }
     }
     
@@ -1052,7 +1077,9 @@ class GalleryScannerService {
 
                 total: 0,
 
-                message: `扫描目录: ${dirPath.split('/').pop() || dirPath.split('\\').pop()}`,
+                message: i18n.t('home.scanProgress.scanningDirectory', { 
+                  directory: dirPath.split('/').pop() || dirPath.split('\\').pop() 
+                }),
 
                 filesFound: images.length,
 
@@ -1179,7 +1206,9 @@ class GalleryScannerService {
     // Android平台：更新前台服务通知
     if (Platform.OS === 'android') {
       const progressMessage = progressData.message || `${stage}: ${processedThisPhase}/${totalFoundThisPhase}`;
-      ScanService.updateProgress(progressMessage, processedThisPhase, totalFoundThisPhase);
+      // 通知标题也由JS层传递，根据应用内语言设置国际化
+      const notificationTitle = i18n.t('home.scanNotificationTitle');
+      ScanService.updateProgress(progressMessage, processedThisPhase, totalFoundThisPhase, notificationTitle);
     }
     
     // 调用进度回调（UI更新）
@@ -1190,16 +1219,16 @@ class GalleryScannerService {
     }
     
     try {
-      this.onProgress({
-        stage: progressData.stage,
-        message: progressData.message,
-        filesProcessed: processedThisPhase,
-        filesFound: totalFoundThisPhase,
-        imagesClassified,
-        totalImagesToBeClassified,
-        isComplete: progressData.isComplete,
-        shouldRefresh: progressData.shouldRefresh,
-      });
+    this.onProgress({
+      stage: progressData.stage,
+      message: progressData.message,
+      filesProcessed: processedThisPhase,
+      filesFound: totalFoundThisPhase,
+      imagesClassified,
+      totalImagesToBeClassified,
+      isComplete: progressData.isComplete,
+      shouldRefresh: progressData.shouldRefresh,
+    });
     } catch (error) {
       logger.error(`❌ 调用 onProgress 回调失败: ${error.message}`);
     }
