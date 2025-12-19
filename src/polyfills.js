@@ -52,3 +52,56 @@ if (typeof global.performance === 'undefined') {
   };
 }
 
+// 设置 Intl polyfill (React Native 的 JavaScriptCore 在某些 Android 版本中不支持 Intl)
+// 直接使用简单实现，避免 require 失败导致应用无法启动
+if (typeof global.Intl === 'undefined') {
+  global.Intl = {
+    DateTimeFormat: class {
+      constructor(locale, options) {
+        this.locale = locale;
+        this.options = options;
+      }
+      format(date) {
+        // 简单的日期格式化实现
+        if (!date) return '';
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return '';
+        // 使用简单的日期格式化，不依赖 Intl
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        const seconds = String(d.getSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      }
+    },
+    NumberFormat: class {
+      constructor(locale, options) {
+        this.locale = locale;
+        this.options = options;
+      }
+      format(number) {
+        // 简单的数字格式化实现
+        if (typeof number !== 'number') return String(number);
+        // 使用简单的数字格式化，不依赖 Intl
+        return String(number);
+      }
+    },
+    Collator: class {
+      constructor(locale, options) {
+        this.locale = locale;
+        this.options = options;
+      }
+      compare(a, b) {
+        // 简单的字符串比较实现（不依赖 localeCompare）
+        const aStr = String(a || '').toLowerCase();
+        const bStr = String(b || '').toLowerCase();
+        if (aStr < bStr) return -1;
+        if (aStr > bStr) return 1;
+        return 0;
+      }
+    }
+  };
+}
+

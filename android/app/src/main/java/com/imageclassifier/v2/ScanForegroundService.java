@@ -108,7 +108,10 @@ public class ScanForegroundService extends Service {
             lastProcessed = processed;
             lastTotal = total;
             
-            updateNotification(message != null ? message : DEFAULT_SCANNING_MESSAGE, processed, total, title);
+            // 🔥 修复：使用 lastTitle 而不是 title，确保与心跳机制保持一致
+            // 如果 title == null，使用 lastTitle（保持之前的值或null）
+            // 如果 title != null，lastTitle 已被更新，使用 lastTitle（等于 title）
+            updateNotification(message != null ? message : DEFAULT_SCANNING_MESSAGE, processed, total, lastTitle);
         } else if ("STOP_SCAN".equals(action)) {
             // 停止心跳任务
             if (handler != null && heartbeatRunnable != null) {

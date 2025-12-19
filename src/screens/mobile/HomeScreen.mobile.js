@@ -960,52 +960,83 @@ const HomeScreen = ({ navigation }) => {
 
 
   /**
+   * 获取分类显示名称（根据当前语言动态获取）
+   */
+  const getCategoryDisplayName = useCallback((categoryId) => {
+    if (!configService || !configService.isConfigLoaded()) {
+      return categoryId;
+    }
+    
+    const currentLang = i18n.language || 'zh';
+    const categoryConfig = configService.getAllCategoriesWithUI().find(cat => cat.id === categoryId);
+    
+    if (categoryConfig) {
+      return currentLang === 'en' 
+        ? (categoryConfig.english || categoryConfig.chinese || categoryId)
+        : (categoryConfig.chinese || categoryConfig.english || categoryId);
+    }
+    
+    // 如果找不到配置，尝试使用 configService 的方法
+    try {
+      const language = currentLang === 'en' ? 'english' : 'chinese';
+      return configService.getCategoryDisplayName(categoryId, language) || categoryId;
+    } catch (e) {
+      return categoryId;
+    }
+  }, [i18n.language]);
+
+  /**
    * 渲染分类卡片（与PC端一致的设计）
    */
-  const renderCategoryCard = (category) => (
-    <TouchableOpacity
-      key={category.id}
-      style={styles.categoryCard}
-      onPress={() => {
-        try {
-          // 🆕 添加空值检查
-          if (!category || !category.id || !navigation) {
-            logger.warn('❌ 分类数据无效或导航对象为空:', { category, navigation: !!navigation });
-            return;
+  const renderCategoryCard = (category) => {
+    // 动态获取分类名称（根据当前语言）
+    const categoryName = getCategoryDisplayName(category.id);
+    
+    return (
+      <TouchableOpacity
+        key={category.id}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            // 🆕 添加空值检查
+            if (!category || !category.id || !navigation) {
+              logger.warn('❌ 分类数据无效或导航对象为空:', { category, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📁 点击分类卡片:', category.id);
+            // 注意：暂存箱不是分类，不会出现在分类列表中，所以这里不需要判断 stagingBox
+            navigation.navigate('Category', {
+              filterType: 'category',
+              filterValue: category.id,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 分类卡片点击失败:', error);
           }
-          
-          logger.debug('📁 点击分类卡片:', category.id);
-          // 注意：暂存箱不是分类，不会出现在分类列表中，所以这里不需要判断 stagingBox
-          navigation.navigate('Category', {
-            filterType: 'category',
-            filterValue: category.id,
-            fromScreen: 'Home',
-          });
-        } catch (error) {
-          logger.error('❌ 分类卡片点击失败:', error);
-        }
-      }}
-    >
-      {/* 缩略图占满整个卡片 */}
-      {category.recentImages && category.recentImages.length > 0 ? (
-        <Image
-          source={{ uri: getUri(category.recentImages[0]) || category.recentImages[0]?.uri }}
-          style={styles.thumbnail}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
-          <Text style={styles.emptyThumbnailText}>📷</Text>
-            </View>
-      )}
-      
-      {/* 覆盖层显示分类信息 */}
-      <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
-        <Text style={styles.categoryCount}>{category.count}</Text>
-            </View>
-            </TouchableOpacity>
-  );
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {category.recentImages && category.recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(category.recentImages[0]) || category.recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: category.color }]}>
+            <Text style={styles.emptyThumbnailText}>📷</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示分类信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName} numberOfLines={1}>{categoryName}</Text>
+          <Text style={styles.categoryCount}>{category.count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   /**
    * 渲染按内容分类区（4列网格）

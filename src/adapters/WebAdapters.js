@@ -725,7 +725,17 @@ export const AsyncStorage = {
     if (Platform.OS === 'web') {
       try {
         const value = localStorage.getItem(key);
-        return value ? JSON.parse(value) : null;
+        if (value === null) {
+          return null;
+        }
+        // 尝试解析 JSON，如果失败则返回原始字符串（兼容旧数据）
+        try {
+          return JSON.parse(value);
+        } catch (parseError) {
+          // 如果解析失败，可能是旧数据直接存储的字符串，直接返回
+          logger.debug(`[Web] AsyncStorage.getItem: 无法解析 JSON，返回原始值: ${key}`);
+          return value;
+        }
       } catch (error) {
         logger.error('[Web] AsyncStorage.getItem error:', error);
         return null;

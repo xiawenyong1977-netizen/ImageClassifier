@@ -1397,9 +1397,13 @@ const ImagePreviewScreen = ({
                     <View style={styles.detectionSection}>
                       <Text style={styles.detectionTitle}>🌐 {t('imagePreview.generalDetection')}:</Text>
                       {currentImage.generalDetections.slice(0, 5).map((detection, index) => {
-                        // 获取类别名称
+                        // 获取类别名称，根据当前语言动态选择
                         const objectInfo = configService.getYoloObjectById(detection.classId);
-                        const className = objectInfo ? objectInfo.chinese || objectInfo.english : `Class ${detection.classId}`;
+                        const currentLang = i18n.language || 'zh';
+                        const language = currentLang === 'en' ? 'english' : 'chinese';
+                        const className = objectInfo 
+                          ? (objectInfo[language] || objectInfo.chinese || objectInfo.english || `Class ${detection.classId}`)
+                          : `Class ${detection.classId}`;
                         
                         return (
                           <View key={index} style={styles.detectionItem}>

@@ -835,17 +835,23 @@ public class GalleryScanService {
                 return null;
             }
             
-            // 🔥 解耦：根据JS层传递的语言设置选择城市名称
+            // 🔥 解耦：根据JS层传递的语言设置选择城市名称和省份名称
             String cityName;
             String provinceName;
             if ("en".equals(language)) {
                 // 英文：优先使用英文名，如果没有则使用中文名
                 cityName = mainCity.optString("name", mainCity.optString("name_zh", ""));
-                provinceName = mainCity.optString("name", mainCity.optString("name_zh", ""));
+                // 省份：优先使用admin1（省份英文名），如果没有则尝试admin1_zh，最后fallback到城市名称
+                provinceName = mainCity.optString("admin1", 
+                    mainCity.optString("admin1_zh", 
+                        mainCity.optString("name_zh", mainCity.optString("name", ""))));
             } else {
                 // 中文（默认）：优先使用中文名，如果没有则使用英文名
                 cityName = mainCity.optString("name_zh", mainCity.optString("name", ""));
-                provinceName = mainCity.optString("name_zh", mainCity.optString("name", ""));
+                // 省份：优先使用admin1_zh（省份中文名），如果没有则尝试admin1，最后fallback到城市名称
+                provinceName = mainCity.optString("admin1_zh", 
+                    mainCity.optString("admin1", 
+                        mainCity.optString("name_zh", mainCity.optString("name", ""))));
                 // 标准化城市名称：移除"市"后缀（仅中文）
                 if (cityName.endsWith("市")) {
                     cityName = cityName.substring(0, cityName.length() - 1);

@@ -18,9 +18,11 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { RNFS, logger } from '../adapters/WebAdapters';
 
 const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = null }) => {
+  const { t } = useTranslation('common');
   const [currentDirectory, setCurrentDirectory] = useState('/storage/emulated/0');
   const [directories, setDirectories] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -45,7 +47,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
       // 检查路径是否存在
       const exists = await RNFS.exists(path);
       if (!exists) {
-        Alert.alert('错误', '目录不存在');
+        Alert.alert(t('common.error'), t('directoryPicker.directoryNotExists'));
         return;
       }
 
@@ -55,14 +57,20 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
       // 过滤出目录（排除文件）
       const dirs = items.filter(item => item.isDirectory());
       
-      // 按名称排序
-      dirs.sort((a, b) => a.name.localeCompare(b.name));
+      // 按名称排序（使用不依赖 Intl 的排序方法）
+      dirs.sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });
       
       setDirectories(dirs);
       
     } catch (error) {
       logger.error('加载目录内容失败:', error);
-      Alert.alert('错误', '无法读取目录内容');
+      Alert.alert(t('common.error'), t('directoryPicker.cannotReadDirectory'));
     } finally {
       setLoading(false);
     }
@@ -130,7 +138,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
         style={styles.selectButton}
         onPress={() => selectDirectory(item.name)}
       >
-        <Text style={styles.selectButtonText}>选择</Text>
+        <Text style={styles.selectButtonText}>{t('directoryPicker.select')}</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -149,7 +157,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
           onPress={goBack}
         >
           <Text style={styles.navButtonText}>
-            ← 返回
+            ← {t('common.back')}
           </Text>
         </TouchableOpacity>
         
@@ -163,7 +171,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
           style={styles.selectCurrentButton}
           onPress={selectCurrentDirectory}
         >
-          <Text style={styles.selectCurrentButtonText}>选择此目录</Text>
+          <Text style={styles.selectCurrentButtonText}>{t('directoryPicker.selectThisDirectory')}</Text>
                </TouchableOpacity>
       </View>
     );
@@ -179,7 +187,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
       <View style={styles.container}>
         {/* 标题栏 */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>选择扫描目录</Text>
+          <Text style={styles.headerTitle}>{t('directoryPicker.selectScanDirectory')}</Text>
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Text style={styles.closeButtonText}>✕</Text>
           </TouchableOpacity>
@@ -192,7 +200,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>加载中...</Text>
+            <Text style={styles.loadingText}>{t('common.loading')}</Text>
           </View>
         ) : (
           <FlatList
@@ -207,7 +215,7 @@ const DirectoryPicker = ({ visible, onClose, onSelectDirectory, currentPath = nu
         {/* 底部提示 */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            选择一个目录作为图片扫描路径
+            {t('directoryPicker.selectDirectoryForScan')}
           </Text>
         </View>
       </View>

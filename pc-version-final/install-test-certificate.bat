@@ -13,8 +13,22 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
+REM 检查证书文件是否存在
+set "CER_FILE=%~dp0test-certificate.cer"
+if not exist "%CER_FILE%" (
+    echo [错误] 证书文件不存在: %CER_FILE%
+    echo.
+    echo 请先创建测试证书:
+    echo   .\create-test-certificate.ps1
+    echo.
+    pause
+    exit /b 1
+)
+
 echo 正在安装证书...
-certutil -addstore Root "%~dp0test-certificate.cer"
+echo 证书文件: %CER_FILE%
+echo.
+certutil -addstore Root "%CER_FILE%"
 
 if %errorLevel% equ 0 (
     echo.
@@ -23,6 +37,7 @@ if %errorLevel% equ 0 (
 ) else (
     echo.
     echo [失败] 证书安装失败
+    echo 错误代码: %errorLevel%
 )
 
 echo.

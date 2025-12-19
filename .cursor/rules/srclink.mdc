@@ -1,0 +1,5 @@
+---
+pc-version-final/src 是 ./src目录的符号链接
+pc-version-final/public 是 ./public目录的符号链接
+alwaysApply: true
+---

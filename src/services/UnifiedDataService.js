@@ -1910,16 +1910,21 @@ class UnifiedDataService {
   // 批量保存图片详细信息
   async writeImageDetailedInfo(imageDataArray, updateCache = true) {
     try {
+      logger.debug(`💾 开始保存图片详细信息: ${imageDataArray.length}张, updateCache=${updateCache}`);
       await this.imageStorageService.saveImageDetailedInfo(imageDataArray);
+      logger.debug(`✅ 图片详细信息保存成功: ${imageDataArray.length}张`);
       
       // 根据参数决定是否立即更新缓存
       if (updateCache) {
-        // 更新缓存
-        await this.imageCache.buildCache();
+        logger.debug('🔄 开始刷新缓存...');
+        // 更新缓存（使用 refreshCache 而不是 buildCache，确保真正重新读取数据库）
+        await this.imageCache.refreshCache();
+        logger.debug('✅ 缓存刷新完成');
         // 通知监听器
         this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
       }
     } catch (error) {
+      logger.error('❌ 批量保存图片详细信息失败:', error);
       console.error('❌ 批量保存图片详细信息失败:', error);
       throw error;
     }

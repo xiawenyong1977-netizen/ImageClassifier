@@ -4,7 +4,8 @@
 Write-Host "正在创建测试证书..." -ForegroundColor Green
 
 # 证书参数
-$certSubject = "CN=ImageClassifier"
+# 重要：Publisher 必须与 package.json 中的 appx.publisher 完全匹配！
+$certSubject = "CN=03F46D22-3B0F-4788-A8BF-351A4DF78D3D"
 $certName = "ImageClassifier-Test-Certificate"
 $pfxPassword = "test123456"  # 测试密码，可以修改
 

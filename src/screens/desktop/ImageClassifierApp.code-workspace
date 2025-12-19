@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../ImageClassifierBackend"
+		},
+		{
+			"path": "../../../../xintuxiangce"
+		}
+	],
+	"settings": {
+		"java.configuration.updateBuildConfiguration": "disabled",
+		"java.compile.nullAnalysis.mode": "disabled"
+	}
+}

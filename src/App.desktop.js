@@ -19,6 +19,11 @@ try {
 // Direct React hooks import to avoid version conflicts
 const { useEffect, useState } = React;
 
+// 🌐 初始化i18n
+import './i18n';
+import { loadSavedLanguage } from './i18n';
+import { useTranslation } from 'react-i18next';
+
 // Import desktop screens
 import HomeScreen from './screens/desktop/HomeScreen.desktop';
 // UnifiedDataService 使用动态导入避免热更新时的循环依赖问题
@@ -29,6 +34,7 @@ import { logger } from './adapters/WebAdapters';
 
 export default function App() {
   logger.debug('App.desktop.js 开始渲染');
+  const { t } = useTranslation('common');
   
   const [isServiceReady, setIsServiceReady] = useState(false);
 
@@ -37,6 +43,10 @@ export default function App() {
     const initApp = async () => {
       try {
         logger.debug('App.desktop.js 开始初始化服务...');
+        
+        // 首先加载保存的语言设置
+        await loadSavedLanguage();
+        logger.debug('语言设置已加载');
         
         // 初始化配置服务
         await configService.initialize();
@@ -80,7 +90,7 @@ export default function App() {
         
         {/* 加载状态 */}
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>正在初始化...</Text>
+          <Text style={styles.loadingText}>{t('common.initializing')}</Text>
         </View>
       </View>
     );
