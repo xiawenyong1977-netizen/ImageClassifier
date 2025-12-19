@@ -1,5 +1,6 @@
 import { AsyncStorage, logger, Platform, SQLite } from '../adapters/WebAdapters';
 import configService from './ConfigService.js';
+import { getDefaultPresets } from '../i18n/index.js';
 
 // SQLite 适配器类（移动端）
 class SQLiteAdapter {
@@ -1611,8 +1612,11 @@ class ImageStorageService {
       await this.ensureInitialized();
       
       if (!imageDataArray || imageDataArray.length === 0) {
+        logger.debug('⚠️ saveImageDetailedInfo: 图片数据数组为空，跳过保存');
         return;
       }
+      
+      logger.debug(`💾 saveImageDetailedInfo: 准备保存 ${imageDataArray.length} 张图片`);
       
       // 等待之前的保存操作完成
       while (this.saveLock) {
@@ -1625,10 +1629,11 @@ class ImageStorageService {
       const result = await this.saveLock;
       this.saveLock = null;
       
+      logger.debug(`✅ saveImageDetailedInfo: 保存完成 ${imageDataArray.length} 张图片`);
       return result;
       
     } catch (error) {
-      logger.error('Batch save failed:', error);
+      logger.error('❌ Batch save failed:', error);
       this.saveLock = null; // 确保锁被释放
       throw error;
     }
@@ -3041,49 +3046,18 @@ class ImageStorageService {
           result.scanInterval = 5;
         }
         
-        // 🆕 定义默认 AI 增强预设方案
-        const defaultAiEnhancePresets = {
-          portrait: {
-            name: '人像美颜',
-            icon: '👤',
-            prompt: '修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变',
-            description: '适合人物照片',
-            enabled: true,
-            sortOrder: 1
-          },
-          enhance: {
-            name: '清晰增强',
-            icon: '✨',
-            prompt: '增强图像清晰度，去除模糊，锐化细节，提升整体质量',
-            description: '适合模糊照片',
-            enabled: true,
-            sortOrder: 2
-          },
-          color: {
-            name: '色彩优化',
-            icon: '🎨',
-            prompt: '优化色彩饱和度和对比度，使图片更加鲜艳生动',
-            description: '适合偏暗照片',
-            enabled: true,
-            sortOrder: 3
-          },
-          document: {
-            name: '证件处理',
-            icon: '🪪',
-            prompt: '增强证件照片的清晰度和对比度，优化文字识别效果，提升证件信息的可读性，适用于身份证、护照、港澳通行证等各类证件照片',
-            description: '适合证件照片',
-            enabled: true,
-            sortOrder: 4
-          },
-          custom: {
-            name: '自定义',
-            icon: '⚙️',
-            prompt: '',
-            description: '自定义编辑需求',
-            enabled: true,
-            sortOrder: 5
-          }
-        };
+        // 🆕 初始化语言设置（如果不存在）
+        if (result.app_language === undefined || result.app_language === null) {
+          result.app_language = 'zh'; // 默认中文
+        }
+        // 确保语言值有效
+        if (result.app_language !== 'zh' && result.app_language !== 'en') {
+          result.app_language = 'zh';
+        }
+        
+        // 🆕 获取当前语言并定义默认 AI 增强预设方案（支持多语言）
+        const currentLang = result.app_language;
+        const defaultAiEnhancePresets = getDefaultPresets(currentLang);
         
         // 初始化或合并 AI 增强预设方案
         if (!result.aiEnhancePresets) {
@@ -3091,11 +3065,42 @@ class ImageStorageService {
           logger.debug('✅ 已初始化 AI 增强预设方案（首次使用）');
         } else {
           // 合并默认预设与用户配置，补充缺失的新预设
-          result.aiEnhancePresets = {
-            ...defaultAiEnhancePresets,
-            ...result.aiEnhancePresets
-          };
-          // 已合并 AI 增强预设方案（包含新预设）
+          // 对于已存在的预设，保留用户的 name 和 description（如果用户修改过）
+          // 对于新添加的预设，使用默认值
+          const mergedPresets = { ...defaultAiEnhancePresets };
+          let hasNewPresets = false; // 标记是否有新预设被添加
+          
+          for (const [presetId, userPreset] of Object.entries(result.aiEnhancePresets)) {
+            if (mergedPresets[presetId]) {
+              // 保留用户的修改（name, description, prompt, enabled）
+              mergedPresets[presetId] = {
+                ...mergedPresets[presetId],
+                name: userPreset.name || mergedPresets[presetId].name,
+                description: userPreset.description || mergedPresets[presetId].description,
+                prompt: userPreset.prompt !== undefined ? userPreset.prompt : mergedPresets[presetId].prompt,
+                enabled: userPreset.enabled !== undefined ? userPreset.enabled : mergedPresets[presetId].enabled,
+                sortOrder: userPreset.sortOrder !== undefined ? userPreset.sortOrder : mergedPresets[presetId].sortOrder
+              };
+            } else {
+              // 用户自定义的新预设，保留
+              mergedPresets[presetId] = userPreset;
+            }
+          }
+          
+          // 检查是否有新预设被添加到默认预设中（用户配置中没有的）
+          for (const presetId of Object.keys(defaultAiEnhancePresets)) {
+            if (!result.aiEnhancePresets[presetId]) {
+              hasNewPresets = true;
+              break;
+            }
+          }
+          
+          // 只在有新预设被添加时才输出日志，避免频繁输出
+          if (hasNewPresets) {
+            logger.debug('✅ 已合并 AI 增强预设方案（包含新预设）');
+          }
+          
+          result.aiEnhancePresets = mergedPresets;
         }
         
         // 🆕 初始化默认预设
@@ -3128,6 +3133,9 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
+        
+        // 🆕 语言设置（默认中文）
+        app_language: 'zh',
         
         // 🆕 AI 增强预设方案
         aiEnhancePresets: {
@@ -3193,6 +3201,9 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5,
+        
+        // 🆕 语言设置（默认中文）
+        app_language: 'zh',
         
         // 🆕 AI 增强预设方案
         aiEnhancePresets: {
@@ -5014,15 +5025,37 @@ class ImageStorageService {
 
   /**
    * 获取暂存箱图片数量
-   * 返回实际存在的图片数量（过滤掉已删除的图片）
+   * 直接统计 staging_box 表中的记录数，性能更好
+   * 注意：这个数量可能包含已删除的图片ID，但为了性能考虑，不进行过滤
+   * 如果需要精确数量（排除已删除的图片），请使用 getStagingBoxImages().length
    * @returns {Promise<number>}
    */
   async getStagingBoxCount() {
     try {
-      // 获取实际存在的图片，而不是只统计ID数量
-      // 这样可以确保数量与 getStagingBoxImages() 返回的数量一致
-      const images = await this.getStagingBoxImages();
-      return images.length;
+      await this.ensureInitialized();
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        const stagingBoxData = await this.storage.getItem(this.storageKeys.stagingBox) || [];
+        return stagingBoxData.length;
+      } else {
+        // 移动端：SQLite
+        // 确保 storage 已初始化
+        if (!this.storage || !this.storage.db) {
+          logger.error('❌ SQLite 数据库未初始化');
+          return 0;
+        }
+        
+        const [result] = await this.storage.db.executeSql(
+          'SELECT COUNT(*) as count FROM staging_box'
+        );
+        
+        if (!result || !result.rows || result.rows.length === 0) {
+          return 0;
+        }
+        
+        return result.rows.item(0).count || 0;
+      }
     } catch (error) {
       logger.error('获取暂存箱数量失败:', error);
       return 0;

@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -21,7 +22,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import { SafeAreaView, Alert, RNFS } from '../../adapters/WebAdapters';
+import { SafeAreaView, Alert, RNFS, AsyncStorage } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import ImageStorageService from '../../services/ImageStorageService';
@@ -29,14 +30,18 @@ import WeChatAuthService from '../../services/WeChatAuthService';
 import DirectoryPicker from '../../components/DirectoryPicker.mobile';
 import { logger } from '../../adapters/WebAdapters';
 import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
+import { changeLanguage, getCurrentLanguage, getDefaultPresets } from '../../i18n';
 
 const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
+  const { t, i18n } = useTranslation('common');
+  
   // ==================== 状态管理 ====================
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState({});
+  const [currentLanguage, setCurrentLanguage] = useState(getCurrentLanguage());
   
-  const [storageType, setStorageType] = useState('检测中...');
-  const [storageSize, setStorageSize] = useState('计算中...');
+  const [storageType, setStorageType] = useState(t('settings.detecting'));
+  const [storageSize, setStorageSize] = useState(t('settings.calculating'));
   
   // 扫描路径设置
   const [galleryPaths, setGalleryPaths] = useState([]);
@@ -62,6 +67,27 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     detectStorageInfo();
     checkMembershipStatus();
   }, []);
+
+  // 监听语言变化，同步更新 currentLanguage 状态
+  useEffect(() => {
+    const updateLanguage = () => {
+      const newLanguage = getCurrentLanguage();
+      if (currentLanguage !== newLanguage) {
+        setCurrentLanguage(newLanguage);
+      }
+    };
+    
+    // 初始化时设置
+    updateLanguage();
+    
+    // 监听 i18n 语言变化事件（如果支持）
+    if (i18n && i18n.on) {
+      i18n.on('languageChanged', updateLanguage);
+      return () => {
+        i18n.off('languageChanged', updateLanguage);
+      };
+    }
+  }, [i18n, currentLanguage]);
 
   /**
    * 加载设置
@@ -90,7 +116,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       logger.debug('设置加载完成:', savedSettings);
     } catch (error) {
       logger.error('❌ 加载设置失败:', error);
-      Alert.alert('错误', '加载设置失败');
+      Alert.alert(t('common.error'), t('settings.loadingSettingsFailed'));
     } finally {
       setLoading(false);
     }
@@ -124,7 +150,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       }
     } catch (error) {
       logger.error('保存设置失败:', error);
-      Alert.alert('错误', '保存设置失败');
+      Alert.alert(t('common.error'), t('settings.saveSettingsFailed'));
     }
   };
 
@@ -148,7 +174,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       
     } catch (error) {
       logger.error('Failed to save gallery paths:', error);
-      Alert.alert('错误', error.message || '保存照片目录失败');
+      Alert.alert(t('common.error'), error.message || t('settings.saveDirectoryFailedMessage'));
     }
   };
 
@@ -174,7 +200,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       const updatedPaths = [...galleryPaths, selectedPath];
       saveGalleryPaths(updatedPaths);
     } else if (galleryPaths.includes(selectedPath)) {
-      Alert.alert('提示', '该目录已存在');
+      Alert.alert(t('settings.tip'), t('settings.directoryAlreadyExists'));
     }
   };
 
@@ -183,12 +209,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    */
   const removeGalleryPath = (pathToRemove) => {
     Alert.alert(
-      '确认删除',
-      `确定要删除路径 "${pathToRemove}" 吗？`,
+      t('settings.confirmDelete'),
+      t('settings.confirmDeletePath', { path: pathToRemove }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '删除',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             const updatedPaths = galleryPaths.filter(path => path !== pathToRemove);
@@ -256,7 +282,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         logger.debug(`🔍 检测路径: ${basePath}`);
         const exists = await RNFS.exists(basePath);
         if (exists) {
-          const typeName = type === 'wechat' ? '微信' : type === 'qq' ? 'QQ' : type === 'camera' ? '相册' : '截图';
+          const typeName = type === 'wechat' ? t('settings.wechat') : type === 'qq' ? t('settings.qq') : type === 'camera' ? t('settings.camera') : t('settings.screenshots');
           logger.debug(`✅ 检测到${typeName}目录: ${basePath}`);
           foundPaths.push(basePath);
         } else {
@@ -267,7 +293,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       }
     }
     
-    const typeName = type === 'wechat' ? '微信' : type === 'qq' ? 'QQ' : type === 'camera' ? '相册' : '截图';
+    const typeName = type === 'wechat' ? t('settings.wechat') : type === 'qq' ? t('settings.qq') : type === 'camera' ? t('settings.camera') : t('settings.screenshots');
     if (foundPaths.length > 0) {
       logger.debug(`✅ 找到${foundPaths.length}个${typeName}目录: ${foundPaths.join(', ')}`);
     } else {
@@ -297,22 +323,22 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
           const newPaths = foundPaths.filter(path => !galleryPaths.includes(path));
           
           if (newPaths.length === 0) {
-            Alert.alert('提示', '所有目录都已存在');
+            Alert.alert(t('settings.tip'), t('settings.allDirectoriesExist'));
           } else {
             // 添加所有新路径
             const updatedPaths = [...galleryPaths, ...newPaths];
             await saveGalleryPaths(updatedPaths);
             
-            const typeName = dirType === 'wechat' ? '微信' : dirType === 'qq' ? 'QQ' : dirType === 'camera' ? '相册' : '截图';
+            const typeName = dirType === 'wechat' ? t('settings.wechat') : dirType === 'qq' ? t('settings.qq') : dirType === 'camera' ? t('settings.camera') : t('settings.screenshots');
             if (foundPaths.length > newPaths.length) {
-              Alert.alert('成功', `添加了${newPaths.length}个${typeName}目录\n共检测到${foundPaths.length}个目录，${foundPaths.length - newPaths.length}个已存在`);
+              Alert.alert(t('common.success'), t('settings.addedDirectoriesWithExisting', { new: newPaths.length, type: typeName, total: foundPaths.length, existing: foundPaths.length - newPaths.length }));
             } else {
-              Alert.alert('成功', `添加了${newPaths.length}个${typeName}目录`);
+              Alert.alert(t('common.success'), t('settings.addedDirectories', { count: newPaths.length, type: typeName }));
             }
           }
         } else {
-          const typeName = dirType === 'wechat' ? '微信' : dirType === 'qq' ? 'QQ' : dirType === 'camera' ? '相册' : '截图';
-          Alert.alert('未找到', `没有检测到${typeName}目录，可能该应用未安装或目录路径不同`);
+          const typeName = dirType === 'wechat' ? t('settings.wechat') : dirType === 'qq' ? t('settings.qq') : dirType === 'camera' ? t('settings.camera') : t('settings.screenshots');
+          Alert.alert(t('common.failed'), t('settings.noDirectoriesFound', { type: typeName }));
         }
       } else {
         // 未知类型使用固定路径检测
@@ -320,21 +346,95 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         
         if (exists) {
           if (galleryPaths.includes(pathOrType)) {
-            Alert.alert('提示', '该目录已存在');
+            Alert.alert(t('settings.tip'), t('settings.directoryAlreadyExists'));
           } else {
             const updatedPaths = [...galleryPaths, pathOrType];
             await saveGalleryPaths(updatedPaths);
-            Alert.alert('成功', '目录添加成功');
+            Alert.alert(t('common.success'), t('settings.directoryAddedSuccess'));
           }
         } else {
-          Alert.alert('未找到', '没有检测到该目录');
+          Alert.alert(t('common.failed'), t('settings.directoryNotFound'));
         }
       }
     } catch (error) {
       logger.error('检测目录失败:', error);
-      Alert.alert('错误', '检测失败，请重试');
+      Alert.alert(t('common.error'), t('settings.detectionFailed'));
     } finally {
       setDetectingDirectory(null);
+    }
+  };
+
+  /**
+   * 格式化字节大小
+   */
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  /**
+   * 获取AsyncStorage存储大小
+   */
+  const getAsyncStorageSize = async () => {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      let totalSize = 0;
+      
+      for (const key of keys) {
+        const value = await AsyncStorage.getItem(key);
+        if (value) {
+          // 如果 value 是对象，需要序列化为字符串来计算大小
+          const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
+          totalSize += valueStr.length;
+        }
+      }
+      
+      return totalSize;
+    } catch (error) {
+      logger.error('获取AsyncStorage大小失败:', error);
+      return 0;
+    }
+  };
+
+  /**
+   * 获取SQLite数据库大小（通过查询数据估算）
+   */
+  const getSQLiteSize = async () => {
+    try {
+      const imageStorageService = new ImageStorageService();
+      await imageStorageService.ensureInitialized();
+      
+      // 获取所有图片数据并计算大小
+      const allImages = await UnifiedDataService.readAllImages();
+      let totalSize = 0;
+      
+      // 计算图片数据大小
+      if (allImages && allImages.length > 0) {
+        totalSize += JSON.stringify(allImages).length;
+      }
+      
+      // 尝试获取其他存储的数据大小
+      try {
+        const stats = await UnifiedDataService.readCategoryCounts();
+        if (stats) totalSize += JSON.stringify(stats).length;
+      } catch (e) {
+        // 忽略错误
+      }
+      
+      try {
+        const settings = await UnifiedDataService.readSettings();
+        if (settings) totalSize += JSON.stringify(settings).length;
+      } catch (e) {
+        // 忽略错误
+      }
+      
+      return totalSize;
+    } catch (error) {
+      logger.error('获取SQLite大小失败:', error);
+      return 0;
     }
   };
 
@@ -343,19 +443,25 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    */
   const detectStorageInfo = async () => {
     try {
-      const imageStorageService = new ImageStorageService();
+      // 移动端使用 SQLite（通过 ImageStorageService）
+      setStorageType('SQLite');
       
-      // 检测存储类型
-      let type = 'SQLite';
-      if (typeof window !== 'undefined' && window.indexedDB) {
-        type = 'IndexedDB';
+      // 移动端：优先尝试获取 SQLite 数据库大小，失败则使用 AsyncStorage
+      try {
+        const sqliteSize = await getSQLiteSize();
+        if (sqliteSize > 0) {
+          setStorageSize(formatBytes(sqliteSize));
+        } else {
+          // SQLite 大小为 0，尝试 AsyncStorage（可能是降级模式）
+          const asyncStorageSize = await getAsyncStorageSize();
+          setStorageSize(formatBytes(asyncStorageSize));
+        }
+      } catch (error) {
+        // SQLite 获取失败，使用 AsyncStorage
+        logger.debug('SQLite 大小获取失败，使用 AsyncStorage:', error);
+        const asyncStorageSize = await getAsyncStorageSize();
+        setStorageSize(formatBytes(asyncStorageSize));
       }
-      setStorageType(type);
-      
-      // 计算存储大小
-      const allImages = await UnifiedDataService.readAllImages();
-      const sizeInMB = (allImages.length * 50) / 1024; // 估算，每张图片约50KB元数据
-      setStorageSize(`${sizeInMB.toFixed(2)} MB (${allImages.length}张图片)`);
       
     } catch (error) {
       logger.error('❌ 检测存储信息失败:', error);
@@ -409,7 +515,11 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             // 防止重复弹窗
             if (!activationAlertShownRef.current) {
               activationAlertShownRef.current = true;
-              Alert.alert('成功', '会员已激活！');
+              // 确保使用最新的语言设置：从 i18n 实例获取最新的 t 函数
+              // 因为 setInterval 回调可能捕获旧的闭包，需要显式获取当前语言
+              const currentLang = i18n.language || 'zh';
+              // 使用 i18n 实例的 t 函数，确保使用最新语言
+              Alert.alert(i18n.t('common.success', { lng: currentLang }), i18n.t('settings.memberActivated', { lng: currentLang }));
             }
             clearInterval(poll);
             setCheckingFollow(false);
@@ -445,7 +555,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    */
   const openWeChatScan = async () => {
     if (!qrCode) {
-      Alert.alert('提示', '二维码未生成，请先生成二维码');
+      Alert.alert(t('settings.tip'), t('settings.qrCodeNotGenerated'));
       return;
     }
 
@@ -470,12 +580,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       // 保存成功后，弹出提示
       if (saveResult) {
         Alert.alert(
-          '保存成功',
-          '二维码已保存到相册，现在打开微信？',
+          t('settings.saveSuccess'),
+          t('settings.qrCodeSavedToAlbum'),
           [
-            { text: '取消', style: 'cancel' },
+            { text: t('common.cancel'), style: 'cancel' },
             {
-              text: '打开微信',
+              text: t('common.openWeChat'),
               style: 'default',
               onPress: async () => {
                 await openWeChatApp();
@@ -486,12 +596,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       } else {
         // 保存失败，直接尝试打开微信
         Alert.alert(
-          '提示',
-          '二维码保存失败，是否继续打开微信？',
+          t('settings.tip'),
+          t('settings.qrCodeSaveFailed'),
           [
-            { text: '取消', style: 'cancel' },
+            { text: t('common.cancel'), style: 'cancel' },
             {
-              text: '打开微信',
+              text: t('common.openWeChat'),
               style: 'default',
               onPress: async () => {
                 await openWeChatApp();
@@ -503,9 +613,9 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     } catch (error) {
       logger.error('❌ 操作失败:', error);
       Alert.alert(
-        '提示',
-        '操作时出现问题，请手动打开微信扫描上方的二维码',
-        [{ text: '知道了', style: 'default' }]
+        t('settings.tip'),
+        t('settings.operationError'),
+        [{ text: t('common.gotIt'), style: 'default' }]
       );
     }
   };
@@ -522,24 +632,24 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         await Linking.openURL(weixinMain);
         logger.debug('✅ 已打开微信主界面');
         Alert.alert(
-          '提示',
-          '已打开微信，请在右上角"+"菜单中选择"扫一扫"，然后扫描已保存的二维码',
-          [{ text: '知道了', style: 'default' }]
+          t('settings.tip'),
+          t('settings.openedWeChat'),
+          [{ text: t('common.gotIt'), style: 'default' }]
         );
       } else {
         logger.warn('⚠️ 无法打开微信');
         Alert.alert(
-          '提示',
-          '无法自动打开微信，请手动打开微信，在"扫一扫"中扫描已保存的二维码',
-          [{ text: '知道了', style: 'default' }]
+          t('settings.tip'),
+          t('settings.cannotOpenWeChat'),
+          [{ text: t('common.gotIt'), style: 'default' }]
         );
       }
     } catch (error) {
       logger.error('❌ 打开微信失败:', error);
       Alert.alert(
-        '提示',
-        '无法打开微信，请手动打开微信，在"扫一扫"中扫描已保存的二维码',
-        [{ text: '知道了', style: 'default' }]
+        t('settings.tip'),
+        t('settings.cannotOpenWeChatManual'),
+        [{ text: t('common.gotIt'), style: 'default' }]
       );
     }
   };
@@ -561,14 +671,43 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   const openEditPreset = (presetId) => {
     const preset = aiEnhancePresets[presetId];
     if (preset) {
+      // 获取当前语言的缺省预设，用于判断是否是缺省值
+      const defaultPresets = getDefaultPresets(currentLanguage);
+      const defaultPreset = defaultPresets[presetId];
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 判断是否是缺省值
+      const isDefaultName = defaultPreset && (
+        preset.name === zhDefaults[presetId]?.name || 
+        preset.name === enDefaults[presetId]?.name
+      );
+      const isDefaultDescription = defaultPreset && (
+        preset.description === zhDefaults[presetId]?.description || 
+        preset.description === enDefaults[presetId]?.description
+      );
+      const isDefaultPrompt = defaultPreset && (
+        preset.prompt === zhDefaults[presetId]?.prompt || 
+        preset.prompt === enDefaults[presetId]?.prompt
+      );
+      
+      // 如果是缺省值，使用当前语言的翻译；否则使用用户修改的值
+      const displayName = (defaultPreset && isDefaultName) ? defaultPreset.name : preset.name;
+      const displayDescription = (defaultPreset && isDefaultDescription) ? defaultPreset.description : preset.description;
+      const displayPrompt = (defaultPreset && isDefaultPrompt) ? defaultPreset.prompt : preset.prompt;
+      
       setEditingPreset({
         id: presetId,
-        name: preset.name,
+        name: displayName,
         icon: preset.icon,
-        prompt: preset.prompt,
-        description: preset.description,
+        prompt: displayPrompt,
+        description: displayDescription,
         enabled: preset.enabled,
-        sortOrder: preset.sortOrder
+        sortOrder: preset.sortOrder,
+        // 保存原始值，用于判断是否修改过
+        _originalName: preset.name,
+        _originalDescription: preset.description,
+        _originalPrompt: preset.prompt
       });
       setShowEditModal(true);
     }
@@ -581,13 +720,51 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     if (!editingPreset) return;
     
     try {
+      // 获取缺省值用于判断
+      const defaultPresets = getDefaultPresets(currentLanguage);
+      const defaultPreset = defaultPresets[editingPreset.id];
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 判断原始值是否是缺省值
+      const wasDefaultName = editingPreset._originalName && (
+        editingPreset._originalName === zhDefaults[editingPreset.id]?.name || 
+        editingPreset._originalName === enDefaults[editingPreset.id]?.name
+      );
+      const wasDefaultDescription = editingPreset._originalDescription && (
+        editingPreset._originalDescription === zhDefaults[editingPreset.id]?.description || 
+        editingPreset._originalDescription === enDefaults[editingPreset.id]?.description
+      );
+      const wasDefaultPrompt = editingPreset._originalPrompt !== undefined && (
+        editingPreset._originalPrompt === zhDefaults[editingPreset.id]?.prompt || 
+        editingPreset._originalPrompt === enDefaults[editingPreset.id]?.prompt
+      );
+      
+      // 判断用户是否修改了值
+      const nameChanged = editingPreset.name !== editingPreset._originalName;
+      const descriptionChanged = editingPreset.description !== editingPreset._originalDescription;
+      const promptChanged = editingPreset.prompt !== editingPreset._originalPrompt;
+      
+      // 确定保存的值：
+      // - 如果原始值是缺省值，且用户没有修改，保存当前语言的缺省值
+      // - 如果用户修改了，保存用户修改的值
+      const savedName = (wasDefaultName && !nameChanged && defaultPreset) 
+        ? defaultPreset.name 
+        : editingPreset.name;
+      const savedDescription = (wasDefaultDescription && !descriptionChanged && defaultPreset) 
+        ? defaultPreset.description 
+        : editingPreset.description;
+      const savedPrompt = (wasDefaultPrompt && !promptChanged && defaultPreset) 
+        ? defaultPreset.prompt 
+        : editingPreset.prompt;
+      
       const updatedPresets = {
         ...aiEnhancePresets,
         [editingPreset.id]: {
-          name: editingPreset.name,
+          name: savedName,
           icon: editingPreset.icon,
-          prompt: editingPreset.prompt,
-          description: editingPreset.description,
+          prompt: savedPrompt,
+          description: savedDescription,
           enabled: editingPreset.enabled,
           sortOrder: editingPreset.sortOrder
         }
@@ -608,10 +785,10 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         }));
       }
       
-      Alert.alert('成功', '预设已保存');
+      Alert.alert(t('common.success'), t('settings.presetSaved'));
     } catch (error) {
       logger.error('保存AI增强预设失败:', error);
-      Alert.alert('错误', '保存预设失败，请重试');
+      Alert.alert(t('common.error'), t('settings.savePresetFailed'));
     }
   };
   
@@ -642,7 +819,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       }
     } catch (error) {
       logger.error('切换预设状态失败:', error);
-      Alert.alert('错误', '操作失败，请重试');
+      Alert.alert(t('common.error'), t('settings.operationFailed'));
     }
   };
   
@@ -655,8 +832,8 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     // 先检查是否正在扫描（使用全局变量）
     if (window.isScanning) {
       Alert.alert(
-        '操作提示',
-        '扫描正在进行中，请等待扫描完成后再清空数据。',
+        t('settings.operationTip'),
+        t('settings.scanningInProgress'),
         [{ text: '确定', style: 'default' }]
       );
       return;
@@ -664,23 +841,23 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
     // 扫描未进行时才显示确认对话框
     Alert.alert(
-      '确认清空',
-      '确定要清空所有照片的分类和位置信息吗？\n\n⚠️ 此操作不可恢复！',
+      t('settings.clearPhotoInfo'),
+      t('settings.confirmClearPhotoInfo'),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '清空',
+          text: t('settings.confirmClear'),
           style: 'destructive',
           onPress: async () => {
             try {
               await UnifiedDataService.clearAllData();
-              Alert.alert('成功', '相册信息已清空');
+              Alert.alert(t('common.success'), t('settings.photoInfoCleared'));
               // 重新加载设置和存储信息
               await loadSettings();
               await detectStorageInfo();
             } catch (error) {
               logger.error('❌ 清空数据失败:', error);
-              Alert.alert('失败', error.message);
+              Alert.alert(t('common.failed'), error.message);
             }
           },
         },
@@ -718,6 +895,55 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   );
 
   /**
+   * 渲染语言选择项（应用信息部分）
+   */
+  const renderLanguageItem = () => (
+    <View style={styles.infoItem}>
+      <Text style={styles.infoLabel}>{t('settings.language')}</Text>
+      <View style={styles.languageSelectorInline}>
+        <TouchableOpacity
+          style={[styles.languageButtonInline, currentLanguage === 'zh' && styles.languageButtonInlineActive]}
+          onPress={async () => {
+            try {
+              await changeLanguage('zh');
+              // 等待 changeLanguage 完成后再更新状态，确保同步
+              const newLanguage = getCurrentLanguage();
+              setCurrentLanguage(newLanguage);
+              logger.debug('🌐 语言已切换到中文，当前语言:', newLanguage);
+            } catch (error) {
+              logger.error('❌ 切换语言失败:', error);
+              Alert.alert(t('common.error'), t('settings.languageSwitchFailed') || '切换语言失败');
+            }
+          }}
+        >
+          <Text style={[styles.languageButtonTextInline, currentLanguage === 'zh' && styles.languageButtonTextInlineActive]}>
+            {t('common.chinese')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.languageButtonInline, currentLanguage === 'en' && styles.languageButtonInlineActive]}
+          onPress={async () => {
+            try {
+              await changeLanguage('en');
+              // 等待 changeLanguage 完成后再更新状态，确保同步
+              const newLanguage = getCurrentLanguage();
+              setCurrentLanguage(newLanguage);
+              logger.debug('🌐 语言已切换到英文，当前语言:', newLanguage);
+            } catch (error) {
+              logger.error('❌ 切换语言失败:', error);
+              Alert.alert(t('common.error'), t('settings.languageSwitchFailed') || '切换语言失败');
+            }
+          }}
+        >
+          <Text style={[styles.languageButtonTextInline, currentLanguage === 'en' && styles.languageButtonTextInlineActive]}>
+            {t('common.english')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  /**
    * 渲染分组标题
    */
   const renderSectionTitle = (title) => (
@@ -731,7 +957,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>加载中...</Text>
+          <Text style={styles.loadingText}>{t('common.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -741,7 +967,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
     <SafeAreaView style={styles.container}>
       {/* 顶部导航栏 */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>设置</Text>
+        <Text style={styles.headerTitle}>{t('settings.title')}</Text>
       </View>
 
       {/* 设置列表 */}
@@ -750,23 +976,23 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>🤖 智能分类</Text>
+              <Text style={styles.sectionTitle} numberOfLines={1} ellipsizeMode="tail">🤖 {t('settings.smartClassification')}</Text>
             </View>
           </View>
           
           {renderActionButton(
             '🗑️',
-            '清空相册信息',
-            '清空所有照片的分类和位置信息',
+            t('settings.clearAlbumInfo'),
+            t('settings.clearAlbumInfoDesc'),
             handleClearData,
             true
           )}
           
-          {/* 目录设置 - 与“清空相册信息”区域对齐 */}
+          {/* 目录设置 - 与"清空相册信息"区域对齐 */}
           <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>目录设置</Text>
+            <Text style={styles.actionButtonText}>{t('settings.directorySettings')}</Text>
             <Text style={styles.actionButtonDescription}>
-              设置后扫描指定目录照片，无指定目录则扫描设备所有照片
+              {t('settings.directorySettingsDescription')}
             </Text>
             
             {/* 目录选择器按钮 */}
@@ -774,12 +1000,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               style={styles.directoryPickerButton}
               onPress={openDirectoryPicker}
             >
-              <Text style={styles.directoryPickerButtonText}>📁 浏览选择目录</Text>
+              <Text style={styles.directoryPickerButtonText}>{t('settings.browseSelectDirectory')}</Text>
             </TouchableOpacity>
 
             {/* 快捷目录按钮 */}
             <View style={styles.quickDirectoryContainer}>
-              <Text style={styles.quickDirectoryTitle}>常用目录快速添加：</Text>
+              <Text style={styles.quickDirectoryTitle}>{t('settings.quickAddCommonDirectories')}</Text>
               <View style={styles.quickDirectoryRow}>
                 <TouchableOpacity
                   style={[styles.quickDirectoryButton, detectingDirectory === 'wechat' && styles.quickDirectoryButtonDetecting]}
@@ -787,7 +1013,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'wechat' ? '🔍 检测中...' : '💬 微信目录'}
+                    {detectingDirectory === 'wechat' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.wechatDirectory')}`}
                   </Text>
                 </TouchableOpacity>
 
@@ -797,7 +1023,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'qq' ? '🔍 检测中...' : '💬 QQ目录'}
+                    {detectingDirectory === 'qq' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.qqDirectory')}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -809,7 +1035,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'camera' ? '🔍 检测中...' : '📷 相册目录'}
+                    {detectingDirectory === 'camera' ? `🔍 ${t('settings.detecting')}` : `📷 ${t('settings.cameraDirectory')}`}
                   </Text>
                 </TouchableOpacity>
 
@@ -819,7 +1045,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'screenshots' ? '🔍 检测中...' : '📸 截图目录'}
+                    {detectingDirectory === 'screenshots' ? `🔍 ${t('settings.detecting')}` : `📸 ${t('settings.screenshotsDirectory')}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -843,12 +1069,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
           {/* 显示设置 - 开关面板样式 */}
           <View style={styles.switchPanel}>
-            <Text style={styles.switchPanelTitle}>显示设置</Text>
+            <Text style={styles.switchPanelTitle}>{t('settings.displaySettings')}</Text>
             
             <View style={styles.switchGrid}>
               {/* 显示城市分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🏙️ 城市分类</Text>
+                <Text style={styles.switchLabel}>🏙️ {t('settings.cityCategory')}</Text>
                 <Switch
                   value={settings.showCityCategories !== false}
                   onValueChange={(value) => updateSetting('showCityCategories', value)}
@@ -859,7 +1085,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示颜色分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🎨 颜色分类</Text>
+                <Text style={styles.switchLabel}>🎨 {t('settings.colorCategory')}</Text>
                 <Switch
                   value={settings.showColorCategories !== false}
                   onValueChange={(value) => updateSetting('showColorCategories', value)}
@@ -870,7 +1096,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示存储分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📁 存储分类</Text>
+                <Text style={styles.switchLabel}>📁 {t('settings.directoryCategory')}</Text>
                 <Switch
                   value={settings.showDirectoryCategories !== false}
                   onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
@@ -881,7 +1107,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示格式分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📄 格式分类</Text>
+                <Text style={styles.switchLabel}>📄 {t('settings.formatCategory')}</Text>
                 <Switch
                   value={settings.showFormatCategories !== false}
                   onValueChange={(value) => updateSetting('showFormatCategories', value)}
@@ -892,7 +1118,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示分辨率分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📏 分辨率分类</Text>
+                <Text style={styles.switchLabel}>📏 {t('settings.resolutionCategory')}</Text>
                 <Switch
                   value={settings.showResolutionCategories !== false}
                   onValueChange={(value) => updateSetting('showResolutionCategories', value)}
@@ -903,7 +1129,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示方向分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🧭 方向分类</Text>
+                <Text style={styles.switchLabel}>🧭 {t('settings.orientationCategory')}</Text>
                 <Switch
                   value={settings.showOrientationCategories !== false}
                   onValueChange={(value) => updateSetting('showOrientationCategories', value)}
@@ -914,7 +1140,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示相似照片 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🔗 相似照片</Text>
+                <Text style={styles.switchLabel}>🔗 {t('settings.similarityPhotos')}</Text>
                 <Switch
                   value={settings.showSimilarityGroups !== false}
                   onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
@@ -925,7 +1151,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
 
               {/* 显示最近照片 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📸 最近照片</Text>
+                <Text style={styles.switchLabel}>📸 {t('settings.recentPhotos')}</Text>
                 <Switch
                   value={settings.showRecentPhotos !== false}
                   onValueChange={(value) => updateSetting('showRecentPhotos', value)}
@@ -941,31 +1167,58 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>✨ 照片创玩</Text>
+              <Text style={styles.sectionTitle}>✨ {t('settings.photoEnhancement')}</Text>
             </View>
           </View>
           <Text style={styles.sectionDescription}>
-            配置照片创玩的预设方案，可自定义提示词
+            {t('settings.photoEnhancementDesc')}
           </Text>
           
           {Object.entries(aiEnhancePresets)
             .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
-            .map(([presetId, preset]) => (
-              <View key={presetId} style={styles.presetItem}>
-                <View style={styles.presetLeft}>
-                  <Text style={styles.presetIcon}>{preset.icon}</Text>
-                  <View style={styles.presetInfo}>
-                    <Text style={styles.presetName}>{preset.name}</Text>
-                    <Text style={styles.presetPrompt} numberOfLines={2}>
-                      {preset.prompt || '（未设置提示词）'}
-                    </Text>
+            .map(([presetId, preset]) => {
+              // 获取当前语言的缺省预设，用于显示
+              const defaultPresets = getDefaultPresets(currentLanguage);
+              const defaultPreset = defaultPresets[presetId];
+              
+              // 如果是缺省预设，且用户没有修改过名称、描述和提示词，使用当前语言的翻译
+              // 判断方法：检查当前值是否等于中文或英文的缺省值
+              const zhDefaults = getDefaultPresets('zh');
+              const enDefaults = getDefaultPresets('en');
+              const isDefaultName = defaultPreset && (
+                preset.name === zhDefaults[presetId]?.name || 
+                preset.name === enDefaults[presetId]?.name
+              );
+              const isDefaultDescription = defaultPreset && (
+                preset.description === zhDefaults[presetId]?.description || 
+                preset.description === enDefaults[presetId]?.description
+              );
+              const isDefaultPrompt = defaultPreset && (
+                preset.prompt === zhDefaults[presetId]?.prompt || 
+                preset.prompt === enDefaults[presetId]?.prompt
+              );
+              
+              // 显示用的名称、描述和提示词
+              const displayName = (defaultPreset && isDefaultName) ? defaultPreset.name : preset.name;
+              const displayDescription = (defaultPreset && isDefaultDescription) ? defaultPreset.description : preset.description;
+              const displayPrompt = (defaultPreset && isDefaultPrompt) ? defaultPreset.prompt : preset.prompt;
+              
+              return (
+                <View key={presetId} style={styles.presetItem}>
+                  <View style={styles.presetLeft}>
+                    <Text style={styles.presetIcon}>{preset.icon}</Text>
+                    <View style={styles.presetInfo}>
+                      <Text style={styles.presetName}>{displayName}</Text>
+                      <Text style={styles.presetPrompt} numberOfLines={2}>
+                        {displayPrompt || t('settings.noPromptSet')}
+                      </Text>
+                    </View>
                   </View>
-                </View>
                 <View style={styles.presetRight}>
                   <TouchableOpacity
                     style={styles.editPresetButton}
                     onPress={() => openEditPreset(presetId)}>
-                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
+                    <Text style={styles.editPresetButtonText}>{t('settings.editPreset')}</Text>
                   </TouchableOpacity>
                   <Switch
                     value={preset.enabled}
@@ -974,20 +1227,21 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   />
                 </View>
               </View>
-            ))}
+              );
+            })}
           
           {/* 如果已关注，显示额度 */}
           {wechatStatus === 'member' && (
             <View style={styles.creditsContainer}>
-              <Text style={styles.creditsTitle}>💰 使用额度</Text>
+              <Text style={styles.creditsTitle}>💰 {t('settings.creditsUsage')}</Text>
               <View style={styles.creditsInfo}>
-                <Text style={styles.creditsLabel}>剩余额度：</Text>
+                <Text style={styles.creditsLabel}>{t('settings.remainingCredits')}：</Text>
                 <Text style={styles.creditsValue}>
                   {credits.remaining} / {credits.total}
                 </Text>
               </View>
               <Text style={styles.creditsDescription}>
-                已使用 {credits.used} 次，建议合理使用额度
+                {t('settings.creditsUsed', { count: credits.used })}
               </Text>
             </View>
           )}
@@ -997,7 +1251,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>💎 会员服务</Text>
+              <Text style={styles.sectionTitle}>💎 {t('settings.membershipService')}</Text>
             </View>
           </View>
           
@@ -1007,18 +1261,18 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             <View style={styles.membershipHeader}>
               <Text style={styles.membershipIcon}>🆓</Text>
               <View>
-                <Text style={styles.membershipName}>免费会员</Text>
-                <Text style={styles.membershipTag}>当前状态</Text>
+                <Text style={styles.membershipName}>{t('settings.freeMember')}</Text>
+                <Text style={styles.membershipTag}>{t('settings.currentStatus')}</Text>
               </View>
             </View>
             <View style={styles.membershipFeatures}>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>智能分类：100张照片</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberSmartClassification')}</Text>
               </View>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✗</Text>
-                <Text style={styles.membershipFeatureText}>照片创玩：0张</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberPhotoEnhancement')}</Text>
               </View>
             </View>
           </View>
@@ -1029,9 +1283,9 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             <View style={styles.membershipHeader}>
               <Text style={styles.membershipIcon}>💎</Text>
               <View>
-                <Text style={styles.membershipName}>终身会员</Text>
+                <Text style={styles.membershipName}>{t('settings.lifetimeMember')}</Text>
                 <Text style={styles.membershipTagPremium}>
-                  {wechatStatus === 'member' ? '已激活' : '未激活'}
+                  {wechatStatus === 'member' ? t('settings.activated') : t('settings.notActivated')}
                 </Text>
               </View>
             </View>
@@ -1040,15 +1294,15 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             <View style={styles.membershipFeaturesColumn}>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>智能分类：照片数不限</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberSmartClassification')}</Text>
               </View>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>照片创玩：免费10张</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberPhotoEnhancement')}</Text>
               </View>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>更多配额需购买算力</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberMoreQuota')}</Text>
               </View>
             </View>
 
@@ -1069,12 +1323,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                     style={styles.membershipQrButton}
                     onPress={generateQrCode}>
                     <Text style={styles.membershipQrButtonText}>
-                      {checkingFollow ? '生成中...' : '🔲 生成二维码'}
+                      {checkingFollow ? t('settings.generating') : t('settings.generateQrCode')}
                     </Text>
                   </TouchableOpacity>
                 )}
                 <Text style={styles.membershipQrHint}>
-                  {qrCode ? '点击二维码打开微信，然后手动进入扫一扫' : '微信扫码关注"芯图相册"，开通会员'}
+                  {qrCode ? t('settings.clickQrCodeToOpenWeChat') : t('settings.qrCodeHint')}
                 </Text>
               </View>
             )}
@@ -1085,14 +1339,15 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.titleRow}>
-              <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
+              <Text style={styles.sectionTitle}>ℹ️ {t('settings.appInfo')}</Text>
             </View>
           </View>
-          {renderInfoItem('版本', BUILD_VERSION)}
-          {renderInfoItem('构建版本', `${BUILD_VERSION_CODE} (${BUILD_DATE})`)}
-          {renderInfoItem('平台', '移动端 (React Native)')}
-          {renderInfoItem('存储类型', storageType)}
-          {renderInfoItem('存储大小', storageSize)}
+          {renderInfoItem(t('settings.version'), BUILD_VERSION)}
+          {renderInfoItem(t('settings.buildVersion'), `${BUILD_VERSION_CODE} (${BUILD_DATE})`)}
+          {renderInfoItem(t('settings.platform'), t('settings.mobile'))}
+          {renderInfoItem(t('settings.storageType'), storageType)}
+          {renderInfoItem(t('settings.storageSize'), storageSize)}
+          {renderLanguageItem()}
         </View>
 
         {/* 底部空白 */}
@@ -1118,7 +1373,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingPreset?.name || '编辑预设'}</Text>
+              <Text style={styles.modalTitle}>{editingPreset?.name || t('common.edit')}</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => {
@@ -1143,14 +1398,14 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   </View>
 
                   <View style={styles.modalField}>
-                    <Text style={styles.modalLabel}>提示词</Text>
+                    <Text style={styles.modalLabel}>{t('settings.prompt')}</Text>
                     <TextInput
                       style={[styles.modalInput, styles.modalTextArea]}
                       value={editingPreset.prompt}
                       onChangeText={(text) =>
                         setEditingPreset({ ...editingPreset, prompt: text })
                       }
-                      placeholder="输入AI增强的提示词，例如：修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变"
+                      placeholder={t('settings.promptPlaceholder')}
                       multiline
                       numberOfLines={6}
                       textAlignVertical="top"
@@ -1162,31 +1417,28 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                         <TouchableOpacity
                           style={styles.documentButton}
                           onPress={() => {
-                            const idCardPrompt =
-                              '增强身份证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做身份证证件照，白色背景，深色有领上衣，面部光线均匀';
+                            const idCardPrompt = t('settings.idCardPrompt');
                             setEditingPreset({ ...editingPreset, prompt: idCardPrompt });
                           }}>
-                          <Text style={styles.documentButtonText}>🆔 身份证</Text>
+                          <Text style={styles.documentButtonText}>🆔 {t('settings.idCard')}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
                           style={styles.documentButton}
                           onPress={() => {
-                            const passportPrompt =
-                              '增强护照照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做护照证件照，白色背景，深色有领上衣，面部光线均匀，眼神平视前方';
+                            const passportPrompt = t('settings.passportPrompt');
                             setEditingPreset({ ...editingPreset, prompt: passportPrompt });
                           }}>
-                          <Text style={styles.documentButtonText}>📘 护照</Text>
+                          <Text style={styles.documentButtonText}>📘 {t('settings.passport')}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
                           style={styles.documentButton}
                           onPress={() => {
-                            const hkMacauPrompt =
-                              '增强港澳通行证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做港澳通行证证件照，白色或淡蓝色背景，深色有领上衣，面部光线均匀';
+                            const hkMacauPrompt = t('settings.hkMacauPassPrompt');
                             setEditingPreset({ ...editingPreset, prompt: hkMacauPrompt });
                           }}>
-                          <Text style={styles.documentButtonText}>🏝️ 港澳通行证</Text>
+                          <Text style={styles.documentButtonText}>🏝️ {t('settings.hkMacauPass')}</Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1316,7 +1568,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingTop: 0,
     paddingBottom: 0,
-    width: 120,
+    flex: 1,
     textAlignVertical: 'center',
   },
   section: {
@@ -1790,6 +2042,66 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#000000',
     flex: 1,
+  },
+  languageOptions: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  languageOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#E5E5EA',
+  },
+  languageOptionActive: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
+  },
+  languageOptionText: {
+    fontSize: 16,
+    color: '#000000',
+  },
+  languageOptionTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  languageCheckmark: {
+    fontSize: 18,
+    color: '#007AFF',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  // 内联语言选择器样式（应用信息部分）
+  languageSelectorInline: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  languageButtonInline: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#F8F8F8',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  languageButtonInlineActive: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
+  },
+  languageButtonTextInline: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  languageButtonTextInlineActive: {
+    color: '#007AFF',
+    fontWeight: '600',
   },
 });
 

@@ -1,8 +1,13 @@
 // 🔧 确保 polyfill 已加载
 import './polyfills';
 
+// 🌐 初始化i18n
+import './i18n';
+import { loadSavedLanguage } from './i18n';
+
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, Platform } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 console.log('📦 App.js: 开始导入模块...');
 
@@ -26,6 +31,11 @@ import SettingsScreen from './screens/mobile/SettingsScreen.mobile';
 console.log('📦 App.js: SettingsScreen 导入成功');
 import EnhanceResultScreen from './screens/mobile/EnhanceResultScreen.mobile';
 
+// 静态导入服务模块（避免 release 构建时的 require undefined 问题）
+import UnifiedDataService from './services/UnifiedDataService';
+import configService from './services/ConfigService';
+import { ModelPathAdapter } from './adapters/WebAdapters';
+
 console.log('📦 App.js: 创建 Navigator...');
 const Stack = createStackNavigator();
 console.log('📦 App.js: Stack Navigator 创建成功');
@@ -33,7 +43,10 @@ const Tab = createBottomTabNavigator();
 console.log('📦 App.js: Tab Navigator 创建成功');
 
 // 主标签导航器
-const MainTabNavigator = ({ stagingBoxCount }) => (
+const MainTabNavigator = ({ stagingBoxCount }) => {
+  const { t } = useTranslation('common');
+  
+  return (
   <Tab.Navigator
     screenOptions={({ route }) => ({
       tabBarIcon: ({ focused, color, size }) => {
@@ -102,15 +115,15 @@ const MainTabNavigator = ({ stagingBoxCount }) => (
       name="Home" 
       component={HomeScreen}
       options={{ 
-        title: '首页',
-        tabBarLabel: '首页',
+        title: t('home.title'),
+        tabBarLabel: t('home.title'),
       }}
     />
     <Tab.Screen 
       name="StagingBox" 
       options={{ 
-        title: '暂存箱',
-        tabBarLabel: '暂存箱',
+        title: t('category.stagingBox'),
+        tabBarLabel: t('category.stagingBox'),
         tabBarStyle: { display: 'none' }, // 隐藏底部导航栏
       }}
     >
@@ -132,12 +145,13 @@ const MainTabNavigator = ({ stagingBoxCount }) => (
       name="Settings" 
       component={SettingsScreen}
       options={{ 
-        title: '设置',
-        tabBarLabel: '设置',
+        title: t('common.settings'),
+        tabBarLabel: t('common.settings'),
       }}
     />
   </Tab.Navigator>
-);
+  );
+};
 
 // 权限状态检查函数
 const checkAppPermissions = async () => {
@@ -176,12 +190,15 @@ console.log('📦 App.js: 定义 App 组件...');
 
 export default function App() {
   console.log('📦 App.js: App 组件开始渲染');
+  const { t } = useTranslation('common');
   
   const [isServiceReady, setIsServiceReady] = React.useState(false);
   const [stagingBoxCount, setStagingBoxCount] = React.useState(0);
   
   useEffect(() => {
     console.log('📦 App.js: App useEffect 运行');
+    // 加载保存的语言设置
+    loadSavedLanguage();
     initializeApp();
   }, []);
 
@@ -191,7 +208,6 @@ export default function App() {
 
     const loadStagingBoxCount = async () => {
       try {
-        const UnifiedDataService = require('./services/UnifiedDataService.js').default;
         const count = await UnifiedDataService.getStagingBoxCount();
         setStagingBoxCount(count);
       } catch (error) {
@@ -214,19 +230,16 @@ export default function App() {
       
       // 1. 首先初始化 ConfigService（最重要，其他服务依赖它）
       console.log('📋 [1/3] 初始化 ConfigService...');
-      const configService = require('./services/ConfigService.js').default;
       await configService.initialize();
       console.log('✅ ConfigService 初始化完成');
       
       // 2. 初始化 UnifiedDataService（数据存储服务）
       console.log('📋 [2/3] 初始化 UnifiedDataService...');
-      const UnifiedDataService = require('./services/UnifiedDataService.js').default;
       await UnifiedDataService.initialize();
       console.log('✅ UnifiedDataService 初始化完成');
       
       // 3. 后台复制模型文件（移动端）
       console.log('📋 [3/3] 复制模型文件...');
-      const { ModelPathAdapter } = require('./adapters/WebAdapters');
       if (ModelPathAdapter && ModelPathAdapter.ensureModelExists) {
         const models = ['id_card_detection.onnx', 'yolov8s.onnx', 'mobilenetv3_rw_Opset17.onnx'];
         for (const model of models) {
@@ -252,8 +265,8 @@ export default function App() {
       <View style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>🚀 正在初始化...</Text>
-          <Text style={styles.loadingSubText}>加载配置和数据服务</Text>
+          <Text style={styles.loadingText}>🚀 {t('common.initializing')}</Text>
+          <Text style={styles.loadingSubText}>{t('app.loadingServices')}</Text>
         </View>
       </View>
     );

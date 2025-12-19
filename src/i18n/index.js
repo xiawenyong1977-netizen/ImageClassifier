@@ -2,68 +2,30 @@ import i18n from 'i18next';
 import zh from './locales/zh/common.json';
 import en from './locales/en/common.json';
 
-// 安全导入 AsyncStorage（支持 Web 和移动端）
-// 使用动态导入避免 Metro bundler 的模块解析问题
-let AsyncStorage;
-
-// 检测平台
+// 检测平台（用于判断是否是 React Native 环境）
 const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
-const isWeb = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
-if (isReactNative) {
-  // 移动端：直接使用原生模块
-  try {
-    const AsyncStorageNative = require('@react-native-async-storage/async-storage').default;
-    AsyncStorage = {
-      getItem: async (key) => {
-        const value = await AsyncStorageNative.getItem(key);
-        try {
-          return value ? JSON.parse(value) : null;
-        } catch {
-          return value;
-        }
-      },
-      setItem: async (key, value) => {
-        const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
-        return await AsyncStorageNative.setItem(key, stringValue);
-      },
-      removeItem: async (key) => {
-        return await AsyncStorageNative.removeItem(key);
-      },
-      clear: async () => {
-        return await AsyncStorageNative.clear();
-      },
-      getAllKeys: async () => {
-        return await AsyncStorageNative.getAllKeys();
-      }
-    };
-    console.log('✅ AsyncStorage 已从原生模块导入（移动端）');
-  } catch (error) {
-    console.error('❌ 移动端导入 AsyncStorage 失败:', error);
-    // 尝试从 WebAdapters 导入作为降级
-    try {
-      const WebAdapters = require('../adapters/WebAdapters');
-      AsyncStorage = WebAdapters.AsyncStorage;
-      console.log('✅ AsyncStorage 已从 WebAdapters 导入（降级方案）');
-    } catch (fallbackError) {
-      console.error('❌ 降级导入也失败:', fallbackError);
-      throw new Error('Failed to import AsyncStorage: ' + error.message);
+// 延迟导入 ImageStorageService，避免循环依赖
+// ImageStorageService 导入了 getDefaultPresets from this file
+let ImageStorageServiceInstance = null;
+let ImageStorageServicePromise = null;
+
+const getImageStorageService = async () => {
+  if (!ImageStorageServiceInstance) {
+    if (!ImageStorageServicePromise) {
+      // 使用动态 import 避免循环依赖和 Metro bundler 静态分析
+      // 在 React Native 中，eval('require') 不可用，必须使用动态 import
+      // 注意：路径是相对于当前文件（src/i18n/index.js）的，所以需要 ../services/
+      ImageStorageServicePromise = import('../services/ImageStorageService.js').then(module => {
+        const ImageStorageService = module.default;
+        ImageStorageServiceInstance = new ImageStorageService();
+        return ImageStorageServiceInstance;
+      });
     }
+    await ImageStorageServicePromise;
   }
-} else {
-  // Web/Desktop：从 WebAdapters 导入
-  try {
-    const WebAdapters = require('../adapters/WebAdapters');
-    AsyncStorage = WebAdapters.AsyncStorage;
-    if (!AsyncStorage) {
-      throw new Error('AsyncStorage not found in WebAdapters');
-    }
-    console.log('✅ AsyncStorage 已从 WebAdapters 导入（Web/Desktop）');
-  } catch (error) {
-    console.error('❌ Web/Desktop 导入 AsyncStorage 失败:', error);
-    throw new Error('Failed to import AsyncStorage: ' + error.message);
-  }
-}
+  return ImageStorageServiceInstance;
+};
 
 // 安全导入 initReactI18next
 // 使用标准的 ES6 import 语法（React Native 支持）
@@ -105,28 +67,9 @@ const detectSystemLanguage = () => {
       }
     }
     
-    // React Native 环境：尝试使用 react-native-localize（如果已安装）
-    // 使用动态 require 避免 webpack 静态分析警告
-    if (typeof require !== 'undefined') {
-      try {
-        // 使用动态 require，webpack 不会静态分析
-        const localizeModule = require('react-native-localize');
-        if (localizeModule && localizeModule.getLocales) {
-          const locales = localizeModule.getLocales();
-          if (locales && locales.length > 0) {
-            const systemLang = locales[0].languageCode.toLowerCase();
-            if (systemLang === 'zh') {
-              return 'zh';
-            }
-            if (systemLang === 'en') {
-              return 'en';
-            }
-          }
-        }
-      } catch (e) {
-        // react-native-localize 未安装，忽略
-      }
-    }
+    // React Native 环境：react-native-localize 需要异步导入
+    // 这里先返回默认值，在异步函数中再尝试检测
+    // 避免在同步初始化时使用动态 require 导致 release 构建失败
     
     // 默认返回中文
     return 'zh';
@@ -136,11 +79,39 @@ const detectSystemLanguage = () => {
   }
 };
 
+/**
+ * 异步检测系统语言环境（使用 react-native-localize）
+ * @returns {Promise<string>} 检测到的语言代码
+ */
+const detectSystemLanguageAsync = async () => {
+  if (isReactNative) {
+    try {
+      // 使用动态 import 避免 release 构建时的 require undefined 问题
+      const localizeModule = await import('react-native-localize').catch(() => null);
+      if (localizeModule && localizeModule.getLocales) {
+        const locales = localizeModule.getLocales();
+        if (locales && locales.length > 0) {
+          const systemLang = locales[0].languageCode.toLowerCase();
+          if (systemLang === 'zh') {
+            return 'zh';
+          }
+          if (systemLang === 'en') {
+            return 'en';
+          }
+        }
+      }
+    } catch (e) {
+      // react-native-localize 未安装，忽略
+    }
+  }
+  return 'zh';
+};
+
 // 从AsyncStorage读取保存的语言设置（同步版本，用于初始化）
 const getSavedLanguageSync = () => {
   try {
     // React Native AsyncStorage是异步的，但初始化需要同步
-    // 先使用系统语言，然后在App启动后异步更新
+    // 先使用系统语言（同步检测），然后在App启动后异步更新
     return detectSystemLanguage();
   } catch (error) {
     console.error('读取语言设置失败:', error);
@@ -165,31 +136,35 @@ i18n
 // 在App启动后异步加载保存的语言设置
 export const loadSavedLanguage = async () => {
   try {
-    const savedLanguage = await AsyncStorage.getItem('app_language');
+    const storageService = await getImageStorageService();
+    const settings = await storageService.getSettings();
+    const savedLanguage = settings?.app_language;
+    
     console.log('🌐 加载保存的语言设置:', savedLanguage);
     if (savedLanguage && (savedLanguage === 'zh' || savedLanguage === 'en')) {
       console.log('🌐 切换到保存的语言:', savedLanguage);
       await i18n.changeLanguage(savedLanguage);
       console.log('🌐 当前i18n语言:', i18n.language);
     } else {
-      // 首次安装：如果 AsyncStorage 中没有语言设置，根据系统语言初始化
-      const defaultLanguage = detectSystemLanguage();
+      // 首次安装：如果 settings 中没有语言设置，根据系统语言初始化
+      // 使用异步检测以支持 react-native-localize
+      const defaultLanguage = await detectSystemLanguageAsync();
       console.log('🌐 未找到保存的语言设置，检测到系统语言:', defaultLanguage);
       // 确保 i18n.language 与检测到的系统语言一致
       if (i18n.language !== defaultLanguage) {
         await i18n.changeLanguage(defaultLanguage);
       }
-      // 首次安装时，将系统语言保存到 AsyncStorage，确保后续扫描时能正确读取
+      // 首次安装时，将系统语言保存到 settings，确保后续扫描时能正确读取
       try {
-        await AsyncStorage.setItem('app_language', defaultLanguage);
-        console.log('🌐 已初始化系统语言设置到 AsyncStorage:', defaultLanguage);
+        await storageService.saveSettings({ ...settings, app_language: defaultLanguage }, true);
+        console.log('🌐 已初始化系统语言设置到 settings:', defaultLanguage);
       } catch (error) {
         console.warn('⚠️ 保存系统语言设置失败（不影响使用）:', error);
       }
     }
   } catch (error) {
     console.error('❌ 加载保存的语言设置失败:', error);
-    // 出错时使用系统语言
+    // 出错时使用默认语言
     const defaultLanguage = detectSystemLanguage();
     if (i18n.language !== defaultLanguage) {
       await i18n.changeLanguage(defaultLanguage);
@@ -201,13 +176,38 @@ export const loadSavedLanguage = async () => {
 export const changeLanguage = async (lng) => {
   try {
     console.log('🌐 切换语言到:', lng);
-    await AsyncStorage.setItem('app_language', lng);
-    const savedValue = await AsyncStorage.getItem('app_language');
-    console.log('🌐 验证保存的语言值:', savedValue);
+    
+    // 验证语言代码
+    if (lng !== 'zh' && lng !== 'en') {
+      throw new Error(`不支持的语言代码: ${lng}`);
+    }
+    
+    const storageService = await getImageStorageService();
+    const settings = await storageService.getSettings();
+    
+    // 保存语言设置
+    await storageService.saveSettings({ ...settings, app_language: lng });
+    
+    // 验证保存是否成功
+    const updatedSettings = await storageService.getSettings();
+    console.log('🌐 验证保存的语言值:', updatedSettings?.app_language);
+    
+    if (updatedSettings?.app_language !== lng) {
+      throw new Error(`语言设置保存失败，期望: ${lng}, 实际: ${updatedSettings?.app_language}`);
+    }
+    
+    // 切换 i18n 语言
     await i18n.changeLanguage(lng);
     console.log('🌐 i18n语言已切换为:', i18n.language);
+    
+    // 验证 i18n 语言是否切换成功
+    if (i18n.language !== lng) {
+      console.warn('⚠️ i18n语言切换后不一致，期望:', lng, '实际:', i18n.language);
+    }
   } catch (error) {
     console.error('❌ 切换语言失败:', error);
+    // 重新抛出错误，让调用者知道失败
+    throw error;
   }
 };
 
@@ -216,10 +216,13 @@ export const getCurrentLanguage = () => {
   return i18n.language || 'zh';
 };
 
-// 导出异步获取当前语言的函数（从 AsyncStorage 读取，更可靠）
+// 导出异步获取当前语言的函数（从 settings 读取，更可靠）
 export const getCurrentLanguageAsync = async () => {
   try {
-    const savedLanguage = await AsyncStorage.getItem('app_language');
+    const storageService = await getImageStorageService();
+    const settings = await storageService.getSettings();
+    const savedLanguage = settings?.app_language;
+    
     if (savedLanguage && (savedLanguage === 'zh' || savedLanguage === 'en')) {
       // 同时更新 i18n.language 以保持同步
       if (i18n.language !== savedLanguage) {
@@ -227,12 +230,13 @@ export const getCurrentLanguageAsync = async () => {
       }
       return savedLanguage;
     }
-    // 如果没有保存的语言设置（首次安装），使用系统语言并初始化 AsyncStorage
-    const defaultLanguage = detectSystemLanguage();
+    // 如果没有保存的语言设置（首次安装），使用系统语言并初始化 settings
+    // 使用异步检测以支持 react-native-localize
+    const defaultLanguage = await detectSystemLanguageAsync();
     console.log('🌐 首次使用，检测到系统语言:', defaultLanguage);
     try {
-      // 确保 AsyncStorage 中有语言设置，方便后续读取
-      await AsyncStorage.setItem('app_language', defaultLanguage);
+      // 确保 settings 中有语言设置，方便后续读取
+      await storageService.saveSettings({ ...settings, app_language: defaultLanguage }, true);
       // 同时更新 i18n.language
       if (i18n.language !== defaultLanguage) {
         await i18n.changeLanguage(defaultLanguage);

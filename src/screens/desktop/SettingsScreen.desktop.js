@@ -1,19 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, ActivityIndicator, TextInput, Image } from 'react-native';
 import { SafeAreaView, Alert, AsyncStorage, logger } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import ImageStorageService from '../../services/ImageStorageService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import { BUILD_DATE, BUILD_VERSION, BUILD_VERSION_CODE } from '../../config/BuildInfo';
+import { changeLanguage, getCurrentLanguage, getDefaultPresets } from '../../i18n';
 
 const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScanning }) => {
+  const { t, i18n } = useTranslation('common');
+  const [currentLanguage, setCurrentLanguage] = useState(getCurrentLanguage());
+  
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [galleryPaths, setGalleryPaths] = useState([]); // 默认路径，将在loadSettings中设置
   const [newPath, setNewPath] = useState(''); // 新路径输入
   const [originalPaths, setOriginalPaths] = useState([]); // 原始路径，用于比较变更
-  const [storageType, setStorageType] = useState('检测中...'); // 存储类型
-  const [storageSize, setStorageSize] = useState('计算中...'); // 存储大小
+  const [storageType, setStorageType] = useState(t('settings.detecting')); // 存储类型
+  const [storageSize, setStorageSize] = useState(t('settings.calculating')); // 存储大小
   
   // AI增强预设相关状态
   const [aiEnhancePresets, setAiEnhancePresets] = useState({});
@@ -72,7 +77,11 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             await loadCredits();
             if (!activationAlertShownRef.current) {
               activationAlertShownRef.current = true;
-              Alert.alert('成功', '会员已激活！');
+              // 确保使用最新的语言设置：从 i18n 实例获取最新的 t 函数
+              // 因为 setInterval 回调可能捕获旧的闭包，需要显式获取当前语言
+              const currentLang = i18n.language || 'zh';
+              // 使用 i18n 实例的 t 函数，确保使用最新语言
+              Alert.alert(i18n.t('common.success', { lng: currentLang }), i18n.t('settings.memberActivated', { lng: currentLang }));
             }
             clearInterval(poll);
             setCheckingFollow(false);
@@ -154,7 +163,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
           setStorageType('IndexedDB');
           setStorageSize(formatBytes(indexedDBSize));
         } else if (localStorageSize > 0) {
-          setStorageType('localStorage (降级)');
+          setStorageType(t('settings.localStorageFallback'));
           setStorageSize(formatBytes(localStorageSize));
         } else {
           setStorageType('IndexedDB');
@@ -168,8 +177,8 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('检测存储类型失败:', error);
-      setStorageType('未知');
-      setStorageSize('无法计算');
+      setStorageType(t('settings.unknown'));
+      setStorageSize(t('settings.cannotCalculate'));
     }
   };
 
@@ -274,7 +283,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('Failed to save settings:', error);
-      Alert.alert('错误', '保存设置失败');
+      Alert.alert(t('common.error'), t('settings.saveSettingsFailed'));
     }
   };
 
@@ -286,7 +295,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       
       // 验证路径不能为空数组
       if (!paths || paths.length === 0) {
-        Alert.alert('错误', '扫描路径不能为空，请至少添加一个目录。');
+        Alert.alert(t('common.error'), t('settings.scanPathCannotBeEmpty'));
         return;
       }
       
@@ -300,7 +309,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
     } catch (error) {
       logger.error('Failed to save gallery paths:', error);
-      Alert.alert('错误', error.message || '保存照片目录失败');
+      Alert.alert(t('common.error'), error.message || t('settings.saveDirectoryFailed'));
     }
   };
 
@@ -320,7 +329,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('文件夹选择失败:', error);
-      Alert.alert('错误', '文件夹选择失败，请手动输入路径');
+      Alert.alert(t('common.error'), t('settings.folderSelectionFailed'));
     }
   };
 
@@ -331,26 +340,26 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       saveGalleryPaths(updatedPaths);
       setNewPath('');
     } else if (galleryPaths.includes(newPath.trim())) {
-      Alert.alert('提示', '该目录已存在');
+      Alert.alert(t('common.confirm'), t('settings.directoryExists'));
     } else {
-      Alert.alert('提示', '请输入有效的目录路径');
+      Alert.alert(t('common.confirm'), t('settings.pleaseEnterValidPath'));
     }
   };
 
   // 删除目录
   const removeGalleryPath = (pathToRemove) => {
     if (galleryPaths.length <= 1) {
-      Alert.alert('提示', '至少需要保留一个目录');
+      Alert.alert(t('common.confirm'), t('settings.atLeastOneDirectoryRequired'));
       return;
     }
     
     Alert.alert(
-      '确认删除',
-      `确定要删除目录 "${pathToRemove}" 吗？`,
+      t('settings.confirmDeleteDirectory'),
+      t('settings.confirmDeleteDirectoryMessage', { path: pathToRemove }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '删除',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             const updatedPaths = galleryPaths.filter(path => path !== pathToRemove);
@@ -367,14 +376,43 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
   const openEditPreset = (presetId) => {
     const preset = aiEnhancePresets[presetId];
     if (preset) {
+      // 获取当前语言的缺省预设，用于判断是否是缺省值
+      const defaultPresets = getDefaultPresets(currentLanguage);
+      const defaultPreset = defaultPresets[presetId];
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 判断是否是缺省值
+      const isDefaultName = defaultPreset && (
+        preset.name === zhDefaults[presetId]?.name || 
+        preset.name === enDefaults[presetId]?.name
+      );
+      const isDefaultDescription = defaultPreset && (
+        preset.description === zhDefaults[presetId]?.description || 
+        preset.description === enDefaults[presetId]?.description
+      );
+      const isDefaultPrompt = defaultPreset && (
+        preset.prompt === zhDefaults[presetId]?.prompt || 
+        preset.prompt === enDefaults[presetId]?.prompt
+      );
+      
+      // 如果是缺省值，使用当前语言的翻译；否则使用用户修改的值
+      const displayName = (defaultPreset && isDefaultName) ? defaultPreset.name : preset.name;
+      const displayDescription = (defaultPreset && isDefaultDescription) ? defaultPreset.description : preset.description;
+      const displayPrompt = (defaultPreset && isDefaultPrompt) ? defaultPreset.prompt : preset.prompt;
+      
       setEditingPreset({
         id: presetId,
-        name: preset.name,
+        name: displayName,
         icon: preset.icon,
-        prompt: preset.prompt,
-        description: preset.description,
+        prompt: displayPrompt,
+        description: displayDescription,
         enabled: preset.enabled,
-        sortOrder: preset.sortOrder
+        sortOrder: preset.sortOrder,
+        // 保存原始值，用于判断是否修改过
+        _originalName: preset.name,
+        _originalDescription: preset.description,
+        _originalPrompt: preset.prompt
       });
       setShowEditModal(true);
     }
@@ -385,13 +423,51 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
     if (!editingPreset) return;
     
     try {
+      // 获取缺省值用于判断
+      const defaultPresets = getDefaultPresets(currentLanguage);
+      const defaultPreset = defaultPresets[editingPreset.id];
+      const zhDefaults = getDefaultPresets('zh');
+      const enDefaults = getDefaultPresets('en');
+      
+      // 判断原始值是否是缺省值
+      const wasDefaultName = editingPreset._originalName && (
+        editingPreset._originalName === zhDefaults[editingPreset.id]?.name || 
+        editingPreset._originalName === enDefaults[editingPreset.id]?.name
+      );
+      const wasDefaultDescription = editingPreset._originalDescription && (
+        editingPreset._originalDescription === zhDefaults[editingPreset.id]?.description || 
+        editingPreset._originalDescription === enDefaults[editingPreset.id]?.description
+      );
+      const wasDefaultPrompt = editingPreset._originalPrompt !== undefined && (
+        editingPreset._originalPrompt === zhDefaults[editingPreset.id]?.prompt || 
+        editingPreset._originalPrompt === enDefaults[editingPreset.id]?.prompt
+      );
+      
+      // 判断用户是否修改了值
+      const nameChanged = editingPreset.name !== editingPreset._originalName;
+      const descriptionChanged = editingPreset.description !== editingPreset._originalDescription;
+      const promptChanged = editingPreset.prompt !== editingPreset._originalPrompt;
+      
+      // 确定保存的值：
+      // - 如果原始值是缺省值，且用户没有修改，保存当前语言的缺省值
+      // - 如果用户修改了，保存用户修改的值
+      const savedName = (wasDefaultName && !nameChanged && defaultPreset) 
+        ? defaultPreset.name 
+        : editingPreset.name;
+      const savedDescription = (wasDefaultDescription && !descriptionChanged && defaultPreset) 
+        ? defaultPreset.description 
+        : editingPreset.description;
+      const savedPrompt = (wasDefaultPrompt && !promptChanged && defaultPreset) 
+        ? defaultPreset.prompt 
+        : editingPreset.prompt;
+      
       const updatedPresets = {
         ...aiEnhancePresets,
         [editingPreset.id]: {
-          name: editingPreset.name,
+          name: savedName,
           icon: editingPreset.icon,
-          prompt: editingPreset.prompt,
-          description: editingPreset.description,
+          prompt: savedPrompt,
+          description: savedDescription,
           enabled: editingPreset.enabled,
           sortOrder: editingPreset.sortOrder
         }
@@ -412,10 +488,10 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         }));
       }
       
-      Alert.alert('成功', '预设已保存');
-    } catch (error) {
-      logger.error('保存AI增强预设失败:', error);
-      Alert.alert('错误', '保存预设失败，请重试');
+              Alert.alert(t('common.success'), t('settings.presetSaved'));
+            } catch (error) {
+              logger.error('保存AI增强预设失败:', error);
+              Alert.alert(t('common.error'), t('settings.savePresetFailed'));
     }
   };
 
@@ -444,7 +520,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('切换预设状态失败:', error);
-      Alert.alert('错误', '操作失败，请重试');
+      Alert.alert(t('common.error'), t('settings.operationFailed'));
     }
   };
 
@@ -453,20 +529,20 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
     // 先检查是否正在扫描（使用全局变量）
     if (typeof window !== 'undefined' && window.isScanning) {
       Alert.alert(
-        '操作提示',
-        '扫描正在进行中，请等待扫描完成后再清空数据。',
-        [{ text: '确定', style: 'default' }]
+        t('settings.operationTip'),
+        t('settings.scanningInProgress'),
+        [{ text: t('common.confirm'), style: 'default' }]
       );
       return;
     }
 
     Alert.alert(
-      '清空照片信息',
-      '确定要清空所有照片的分类和位置信息吗？此操作不可撤销。',
+      t('settings.clearPhotoInfo'),
+      t('settings.confirmClearPhotoInfo'),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '确定清空',
+          text: t('settings.confirmClear'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -480,10 +556,10 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               
               // 重新加载设置以反映清空后的状态
               await loadSettings();
-              Alert.alert('成功', '照片信息已清空！');
+              Alert.alert(t('common.success'), t('settings.photoInfoCleared'));
             } catch (error) {
               logger.error('清空数据失败:', error);
-              Alert.alert('错误', '清空数据失败，请重试');
+              Alert.alert(t('common.error'), t('settings.clearDataFailed'));
             }
           }
         }
@@ -517,32 +593,32 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             onPress={() => navigation.goBack()}>
             <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>设置</Text>
+          <Text style={styles.title}>{t('settings.title')}</Text>
           <View style={styles.placeholder} />
         </View>
 
         {/* 智能分类 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🤖 智能分类</Text>
+          <Text style={styles.sectionTitle} numberOfLines={1} ellipsizeMode="tail">🤖 {t('settings.smartClassification')}</Text>
           
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleClearData}>
-            <Text style={styles.actionButtonTextRed}>🗑️ 清空相册信息</Text>
+            <Text style={styles.actionButtonTextRed}>🗑️ {t('settings.clearAlbumInfo')}</Text>
             <Text style={styles.actionButtonDescription}>
-              清空所有照片的分类和位置信息
+              {t('settings.clearAlbumInfoDesc')}
             </Text>
           </TouchableOpacity>
 
           {/* 目录设置 - 与“清空相册信息”区域对齐 */}
           <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>目录设置</Text>
+            <Text style={styles.actionButtonText}>{t('settings.directorySettings')}</Text>
             
             {/* 添加新目录 */}
             <View style={styles.addPathContainer}>
               <TextInput
                 style={styles.pathInput}
-                placeholder="输入目录路径（例如：D:\Photos）"
+                placeholder={t('settings.directoryPathPlaceholder')}
                 value={newPath}
                 onChangeText={setNewPath}
                 placeholderTextColor="#999"
@@ -555,7 +631,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={addGalleryPath}>
-                <Text style={styles.addButtonText}>+ 添加</Text>
+                <Text style={styles.addButtonText}>+ {t('common.add')}</Text>
               </TouchableOpacity>
             </View>
 
@@ -585,12 +661,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
           {/* 显示设置 - 开关面板样式 */}
           <View style={styles.switchPanel}>
-            <Text style={styles.switchPanelTitle}>显示设置</Text>
+            <Text style={styles.switchPanelTitle}>{t('settings.displaySettings')}</Text>
             
             <View style={styles.switchGrid}>
               {/* 显示城市分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🏙️ 城市分类</Text>
+                <Text style={styles.switchLabel}>🏙️ {t('settings.cityCategory')}</Text>
                 <Switch
                   value={settings.showCityCategories !== false}
                   onValueChange={(value) => updateSetting('showCityCategories', value)}
@@ -601,7 +677,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示颜色分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🎨 颜色分类</Text>
+                <Text style={styles.switchLabel}>🎨 {t('settings.colorCategory')}</Text>
                 <Switch
                   value={settings.showColorCategories !== false}
                   onValueChange={(value) => updateSetting('showColorCategories', value)}
@@ -612,7 +688,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示存储分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📁 存储分类</Text>
+                <Text style={styles.switchLabel}>📁 {t('settings.directoryCategory')}</Text>
                 <Switch
                   value={settings.showDirectoryCategories !== false}
                   onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
@@ -623,7 +699,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示格式分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📄 格式分类</Text>
+                <Text style={styles.switchLabel}>📄 {t('settings.formatCategory')}</Text>
                 <Switch
                   value={settings.showFormatCategories !== false}
                   onValueChange={(value) => updateSetting('showFormatCategories', value)}
@@ -634,7 +710,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示分辨率分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📏 分辨率分类</Text>
+                <Text style={styles.switchLabel}>📏 {t('settings.resolutionCategory')}</Text>
                 <Switch
                   value={settings.showResolutionCategories !== false}
                   onValueChange={(value) => updateSetting('showResolutionCategories', value)}
@@ -645,7 +721,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示方向分类 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🧭 方向分类</Text>
+                <Text style={styles.switchLabel}>🧭 {t('settings.orientationCategory')}</Text>
                 <Switch
                   value={settings.showOrientationCategories !== false}
                   onValueChange={(value) => updateSetting('showOrientationCategories', value)}
@@ -656,7 +732,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示相似照片 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🔗 相似照片</Text>
+                <Text style={styles.switchLabel}>🔗 {t('settings.similarityPhotos')}</Text>
                 <Switch
                   value={settings.showSimilarityGroups !== false}
                   onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
@@ -667,7 +743,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
               {/* 显示最近照片 */}
               <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📸 最近照片</Text>
+                <Text style={styles.switchLabel}>📸 {t('settings.recentPhotos')}</Text>
                 <Switch
                   value={settings.showRecentPhotos !== false}
                   onValueChange={(value) => updateSetting('showRecentPhotos', value)}
@@ -681,52 +757,80 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* AI Image Enhancement Presets */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>✨ 照片创玩</Text>
+          <Text style={styles.sectionTitle}>✨ {t('settings.photoEnhancement')}</Text>
           
           <Text style={styles.sectionDescription}>
-            配置照片创玩的预设方案，可自定义提示词
+            {t('settings.photoEnhancementDesc')}
           </Text>
           
           {Object.entries(aiEnhancePresets)
             .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
-            .map(([presetId, preset]) => (
-              <View key={presetId} style={styles.presetItem}>
-                <View style={styles.presetLeft}>
-                  <Text style={styles.presetIcon}>{preset.icon}</Text>
-                  <View style={styles.presetInfo}>
-                    <Text style={styles.presetName}>{preset.name}</Text>
-                    <Text style={styles.presetPrompt} numberOfLines={2}>
-                      {preset.prompt || '（未设置提示词）'}
-                    </Text>
+            .map(([presetId, preset]) => {
+              // 获取当前语言的缺省预设，用于显示
+              const defaultPresets = getDefaultPresets(currentLanguage);
+              const defaultPreset = defaultPresets[presetId];
+              
+              // 如果是缺省预设，且用户没有修改过名称、描述和提示词，使用当前语言的翻译
+              // 判断方法：检查当前值是否等于中文或英文的缺省值
+              const zhDefaults = getDefaultPresets('zh');
+              const enDefaults = getDefaultPresets('en');
+              const isDefaultName = defaultPreset && (
+                preset.name === zhDefaults[presetId]?.name || 
+                preset.name === enDefaults[presetId]?.name
+              );
+              const isDefaultDescription = defaultPreset && (
+                preset.description === zhDefaults[presetId]?.description || 
+                preset.description === enDefaults[presetId]?.description
+              );
+              const isDefaultPrompt = defaultPreset && (
+                preset.prompt === zhDefaults[presetId]?.prompt || 
+                preset.prompt === enDefaults[presetId]?.prompt
+              );
+              
+              // 显示用的名称、描述和提示词
+              const displayName = (defaultPreset && isDefaultName) ? defaultPreset.name : preset.name;
+              const displayDescription = (defaultPreset && isDefaultDescription) ? defaultPreset.description : preset.description;
+              const displayPrompt = (defaultPreset && isDefaultPrompt) ? defaultPreset.prompt : preset.prompt;
+              
+              return (
+                <View key={presetId} style={styles.presetItem}>
+                  <View style={styles.presetLeft}>
+                    <Text style={styles.presetIcon}>{preset.icon}</Text>
+                    <View style={styles.presetInfo}>
+                      <Text style={styles.presetName}>{displayName}</Text>
+                      <Text style={styles.presetPrompt} numberOfLines={2}>
+                        {displayPrompt || t('settings.noPromptSet')}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.presetRight}>
+                    <TouchableOpacity
+                      style={styles.editPresetButton}
+                      onPress={() => openEditPreset(presetId)}>
+                      <Text style={styles.editPresetButtonText}>✏️ {t('common.edit')}</Text>
+                    </TouchableOpacity>
+                    <Switch
+                      value={preset.enabled}
+                      onValueChange={() => togglePresetEnabled(presetId)}
+                      trackColor={{ false: '#ccc', true: '#4CAF50' }}
+                    />
                   </View>
                 </View>
-                <View style={styles.presetRight}>
-                  <TouchableOpacity
-                    style={styles.editPresetButton}
-                    onPress={() => openEditPreset(presetId)}>
-                    <Text style={styles.editPresetButtonText}>✏️ 编辑</Text>
-                  </TouchableOpacity>
-                  <Switch
-                    value={preset.enabled}
-                    onValueChange={() => togglePresetEnabled(presetId)}
-                    trackColor={{ false: '#ccc', true: '#4CAF50' }}
-                  />
-                </View>
-              </View>
-            ))}
+              );
+            })}
           
           {/* 如果已关注，显示额度 */}
           {wechatStatus === 'member' && (
             <View style={styles.creditsContainer}>
-              <Text style={styles.creditsTitle}>💰 使用额度</Text>
+              <Text style={styles.creditsTitle}>💰 {t('settings.creditsUsage')}</Text>
               <View style={styles.creditsInfo}>
-                <Text style={styles.creditsLabel}>剩余额度：</Text>
+                <Text style={styles.creditsLabel}>{t('settings.remainingCredits')}:</Text>
                 <Text style={styles.creditsValue}>
                   {credits.remaining} / {credits.total}
                 </Text>
               </View>
               <Text style={styles.creditsDescription}>
-                已使用 {credits.used} 次，建议合理使用额度
+                {t('settings.creditsUsed', { count: credits.used })}
               </Text>
             </View>
           )}
@@ -734,7 +838,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* 会员服务 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💎 会员服务</Text>
+          <Text style={styles.sectionTitle}>💎 {t('settings.membershipService')}</Text>
           
           {/* 免费会员（仅在非会员时显示） */}
           {wechatStatus !== 'member' && (
@@ -742,18 +846,18 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             <View style={styles.membershipHeader}>
               <Text style={styles.membershipIcon}>🆓</Text>
               <View>
-                <Text style={styles.membershipName}>免费会员</Text>
-                <Text style={styles.membershipTag}>当前状态</Text>
+                <Text style={styles.membershipName}>{t('settings.freeMember')}</Text>
+                <Text style={styles.membershipTag}>{t('settings.currentStatus')}</Text>
               </View>
             </View>
             <View style={styles.membershipFeatures}>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>智能分类：100张照片</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberSmartClassification')}</Text>
               </View>
               <View style={styles.membershipFeatureItem}>
                 <Text style={styles.membershipFeatureIcon}>✗</Text>
-                <Text style={styles.membershipFeatureText}>照片创玩：0张</Text>
+                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberPhotoEnhancement')}</Text>
               </View>
             </View>
           </View>
@@ -768,9 +872,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                 <View style={styles.membershipHeader}>
                   <Text style={styles.membershipIcon}>💎</Text>
                   <View>
-                    <Text style={styles.membershipName}>终身会员</Text>
+                    <Text style={styles.membershipName}>{t('settings.lifetimeMember')}</Text>
                     <Text style={styles.membershipTagPremium}>
-                      {wechatStatus === 'member' ? '已激活' : '未激活'}
+                      {wechatStatus === 'member' ? t('settings.activated') : t('settings.notActivated')}
                     </Text>
                   </View>
                 </View>
@@ -779,15 +883,15 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                 <View style={styles.membershipFeaturesColumn}>
                   <View style={styles.membershipFeatureItem}>
                     <Text style={styles.membershipFeatureIcon}>✓</Text>
-                    <Text style={styles.membershipFeatureText}>智能分类：照片数不限</Text>
+                    <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberSmartClassification')}</Text>
                   </View>
                   <View style={styles.membershipFeatureItem}>
                     <Text style={styles.membershipFeatureIcon}>✓</Text>
-                    <Text style={styles.membershipFeatureText}>照片创玩：免费10张</Text>
+                    <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberPhotoEnhancement')}</Text>
                   </View>
                   <View style={styles.membershipFeatureItem}>
                     <Text style={styles.membershipFeatureIcon}>✓</Text>
-                    <Text style={styles.membershipFeatureText}>更多配额需购买算力</Text>
+                    <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberMoreQuota')}</Text>
                   </View>
                 </View>
               </View>
@@ -805,12 +909,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                       style={styles.membershipQrButton}
                       onPress={generateQrCode}>
                       <Text style={styles.membershipQrButtonText}>
-                        {checkingFollow ? '生成中...' : '🔲 生成二维码'}
+                        {checkingFollow ? t('settings.generating') : t('settings.generateQrCode')}
                       </Text>
                     </TouchableOpacity>
                   )}
                   <Text style={styles.membershipQrHint}>
-                    微信扫码关注"芯图相册"，开通会员
+                    {t('settings.qrCodeHint')}
                   </Text>
                 </View>
               )}
@@ -820,31 +924,62 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
         {/* App Info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ℹ️ 应用信息</Text>
+          <Text style={styles.sectionTitle}>ℹ️ {t('settings.appInfo')}</Text>
           
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>版本</Text>
+            <Text style={styles.infoLabel}>{t('settings.version')}</Text>
             <Text style={styles.infoValue}>{BUILD_VERSION}</Text>
           </View>
           
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>构建版本</Text>
+            <Text style={styles.infoLabel}>{t('settings.buildVersion')}</Text>
             <Text style={styles.infoValue}>{BUILD_VERSION_CODE} ({BUILD_DATE})</Text>
           </View>
           
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>平台</Text>
-            <Text style={styles.infoValue}>桌面版</Text>
+            <Text style={styles.infoLabel}>{t('settings.platform')}</Text>
+            <Text style={styles.infoValue}>{t('settings.desktop')}</Text>
           </View>
           
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>存储类型</Text>
+            <Text style={styles.infoLabel}>{t('settings.storageType')}</Text>
             <Text style={styles.infoValue}>{storageType}</Text>
           </View>
           
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>存储大小</Text>
+            <Text style={styles.infoLabel}>{t('settings.storageSize')}</Text>
             <Text style={styles.infoValue}>{storageSize}</Text>
+          </View>
+          
+          {/* 语言设置 */}
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>{t('settings.language')}</Text>
+            <View style={styles.languageSelector}>
+              <TouchableOpacity
+                style={[styles.languageButton, currentLanguage === 'zh' && styles.languageButtonActive]}
+                onPress={async () => {
+                  await changeLanguage('zh');
+                  setCurrentLanguage('zh');
+                }}
+              >
+                <Text style={[styles.languageButtonText, currentLanguage === 'zh' && styles.languageButtonTextActive]}>
+                  {t('common.chinese')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.languageButton, currentLanguage === 'en' && styles.languageButtonActive]}
+                onPress={async () => {
+                  await changeLanguage('en');
+                  setCurrentLanguage('en');
+                  // 语言切换后，重新加载设置以更新缺省预设的显示
+                  await loadSettings();
+                }}
+              >
+                <Text style={[styles.languageButtonText, currentLanguage === 'en' && styles.languageButtonTextActive]}>
+                  {t('common.english')}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -875,12 +1010,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               </View>
 
               <View style={styles.modalField}>
-                <Text style={styles.modalLabel}>提示词</Text>
+                <Text style={styles.modalLabel}>{t('settings.prompt')}</Text>
                 <TextInput
                   style={[styles.modalInput, styles.modalTextArea]}
                   value={editingPreset.prompt}
                   onChangeText={(text) => setEditingPreset({ ...editingPreset, prompt: text })}
-                  placeholder="输入AI增强的提示词，例如：修复面部瑕疵和皱纹，提亮肤色，保持人物原貌不变"
+                  placeholder={t('settings.promptPlaceholder')}
                   multiline
                   numberOfLines={6}
                   textAlignVertical="top"
@@ -892,28 +1027,28 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                     <TouchableOpacity
                       style={styles.documentButton}
                       onPress={() => {
-                        const idCardPrompt = '增强身份证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做身份证证件照，白色背景，深色有领上衣，面部光线均匀';
+                        const idCardPrompt = t('settings.idCardPrompt');
                         setEditingPreset({ ...editingPreset, prompt: idCardPrompt });
                       }}>
-                      <Text style={styles.documentButtonText}>🆔 身份证</Text>
+                      <Text style={styles.documentButtonText}>🆔 {t('settings.idCard')}</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity
                       style={styles.documentButton}
                       onPress={() => {
-                        const passportPrompt = '增强护照照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做护照证件照，白色背景，深色有领上衣，面部光线均匀，眼神平视前方';
+                        const passportPrompt = t('settings.passportPrompt');
                         setEditingPreset({ ...editingPreset, prompt: passportPrompt });
                       }}>
-                      <Text style={styles.documentButtonText}>📘 护照</Text>
+                      <Text style={styles.documentButtonText}>📘 {t('settings.passport')}</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity
                       style={styles.documentButton}
                       onPress={() => {
-                        const hkMacauPrompt = '增强港澳通行证照片清晰度，确保人脸五官清晰可见，头发不遮挡眉毛和耳朵，正面免冠，适合做港澳通行证证件照，白色或淡蓝色背景，深色有领上衣，面部光线均匀';
+                        const hkMacauPrompt = t('settings.hkMacauPassPrompt');
                         setEditingPreset({ ...editingPreset, prompt: hkMacauPrompt });
                       }}>
-                      <Text style={styles.documentButtonText}>🏝️ 港澳通行证</Text>
+                      <Text style={styles.documentButtonText}>🏝️ {t('settings.hkMacauPass')}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -927,12 +1062,12 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                   setShowEditModal(false);
                   setEditingPreset(null);
                 }}>
-                <Text style={styles.modalCancelButtonText}>取消</Text>
+                <Text style={styles.modalCancelButtonText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.modalSaveButton}
                 onPress={saveEditedPreset}>
-                <Text style={styles.modalSaveButtonText}>保存</Text>
+                <Text style={styles.modalSaveButtonText}>{t('common.save')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -990,6 +1125,7 @@ const styles = StyleSheet.create({
     color: '#333',
     padding: 16,
     paddingBottom: 8,
+    flexShrink: 1,
   },
   subSection: {
     marginTop: 8,
@@ -1605,6 +1741,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#fff',
+  },
+  languageSelector: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  languageButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  languageButtonActive: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
+  },
+  languageButtonText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  languageButtonTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
   },
 });
 

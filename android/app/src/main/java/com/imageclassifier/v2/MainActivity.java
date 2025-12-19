@@ -15,7 +15,7 @@ public class MainActivity extends ReactActivity {
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
-    super.onCreate(null);
+    super.onCreate(savedInstanceState);
     
     // 获取 WakeLock，保持应用进程活跃（即使进入后台）
     PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);

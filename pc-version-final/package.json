@@ -1,6 +1,6 @@
 {
   "name": "imageclassifier-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "芯图相册-智能分类，便捷管理，仅你可见",
   "author": "ImageClassifier Team",
   "main": "public/electron.js",
@@ -70,7 +70,8 @@
     "files": [
       "build/**/*",
       "public/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "images/**/*"
     ],
     "buildDependenciesFromSource": false,
     "npmRebuild": false,
@@ -88,19 +89,37 @@
           "arch": [
             "x64"
           ]
-        }
-      ],
-      "requestedExecutionLevel": "asInvoker",
-      "extraResources": [
+        },
         {
-          "from": "redist/",
-          "to": "redist/",
-          "filter": [
-            "**/*"
+          "target": "appx",
+          "arch": [
+            "x64"
           ]
         }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "appx": {
+      "displayName": "芯图相册",
+      "publisher": "CN=03F46D22-3B0F-4788-A8BF-351A4DF78D3D",
+      "publisherDisplayName": "智语未来软件",
+      "identityName": "E8546D00.75903E98454E",
+      "applicationId": "XinTuAlbum",
+      "backgroundColor": "transparent",
+      "showNameOnTiles": true,
+      "artifactName": "${productName}-${version}.${ext}",
+      "languages": [
+        "zh-CN"
       ]
     },
+    "extraFiles": [
+      {
+        "from": "build/appx/Assets",
+        "to": "Assets",
+        "filter": ["**/*.png"]
+      }
+    ],
+    "afterPack": "./copy-appx-icons.js",
     "mac": {
       "icon": "public/icon.icns",
       "target": [
