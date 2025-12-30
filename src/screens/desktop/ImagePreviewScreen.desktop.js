@@ -7,6 +7,7 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import ImageClassifierService from '../../services/ImageClassifierService';
 import configService from '../../services/ConfigService';
+import cityLocationService from '../../services/CityLocationService';
 import EnhanceResultScreen from './EnhanceResultScreen.desktop';
 
 // Helper function to get category information
@@ -130,6 +131,7 @@ const ImagePreviewScreen = ({
   const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 1 });
   const [loading, setLoading] = useState(true);
   const [isInStagingBox, setIsInStagingBox] = useState(false); // 跟踪图片是否在暂存箱
+  const [locationDetailString, setLocationDetailString] = useState(null); // 位置详细信息字符串
   
   // 导航相关状态
   const [categoryImages, setCategoryImages] = useState([]);
@@ -194,6 +196,28 @@ const ImagePreviewScreen = ({
 
     loadImageDetails();
   }, [finalImageId]);
+
+  // 根据 location_id 获取位置详细信息字符串
+  useEffect(() => {
+    const loadLocationDetailString = async () => {
+      // currentImage.city 字段存储的是 location_id
+      if (!currentImage || !currentImage.city || typeof currentImage.city !== 'string') {
+        setLocationDetailString(null);
+        return;
+      }
+
+      try {
+        const currentLanguage = i18n.language || 'zh';
+        const locationString = await cityLocationService.getLocationDetailString(currentImage.city, currentLanguage);
+        setLocationDetailString(locationString);
+      } catch (error) {
+        logger.error('加载位置详情失败:', error);
+        setLocationDetailString(null);
+      }
+    };
+
+    loadLocationDetailString();
+  }, [currentImage?.city, i18n.language]);
 
   // 🆕 加载当前上下文的所有图片（基于 filterType 和 filterValue）
   const loadContextImages = async (currentImageData) => {
@@ -1299,16 +1323,24 @@ const ImagePreviewScreen = ({
                     </Text>
                   </View>
                   
-                  {currentImage.city && (
+                  {/* 使用 getLocationDetailString 接口获取并显示位置信息 */}
+                  {locationDetailString ? (
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>{t('imagePreview.shootingCity')}:</Text>
+                      <Text style={styles.infoValue}>
+                        {locationDetailString}
+                      </Text>
+                    </View>
+                  ) : currentImage.city ? (
+                    // 如果位置详情加载失败，显示 location_id 作为后备
                     <View style={styles.infoRow}>
                       <Text style={styles.infoLabel}>{t('imagePreview.shootingCity')}:</Text>
                       <Text style={styles.infoValue}>
                         {currentImage.city}
                         {currentImage.province && `, ${currentImage.province}`}
-                        {currentImage.cityDistance && ` ${t('imagePreview.distance', { km: currentImage.cityDistance })}`}
                       </Text>
                     </View>
-                  )}
+                  ) : null}
                   
                   {currentImage.altitude && (
                     <View style={styles.infoRow}>

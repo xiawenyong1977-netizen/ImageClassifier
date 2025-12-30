@@ -50,8 +50,8 @@ class ImageSimilarityService {
     if (!image || !image.category) {
       return false;
     }
-    // 排除以下分类：手机截图、二维码、证件照、待分类（NA）
-    const excludedCategories = ['screenshot', 'qrcode', 'idcard', 'NA'];
+    // 排除以下分类：手机截图、二维码、证件照
+    const excludedCategories = ['screenshot', 'qrcode', 'idcard'];
     return excludedCategories.includes(image.category);
   }
 
@@ -65,7 +65,6 @@ class ImageSimilarityService {
       screenshot: 0,
       qrcode: 0,
       idcard: 0,
-      NA: 0,
       total: 0
     };
     
@@ -116,6 +115,7 @@ class ImageSimilarityService {
       onProgress = null, // 进度回调函数
       images = null,
       clearExisting = images == null,
+      useSimplifiedAlgorithm = undefined, // 是否使用简化算法（undefined时使用默认值）
     } = options;
 
     logger.debug(`开始相似图片检测: 时间窗口=${timeWindow}秒, 阈值=${similarityThreshold}, 输入图片=${images ? images.length : '全量'}`);
@@ -132,7 +132,7 @@ class ImageSimilarityService {
         return { success: true, groups: [], processed: 0 };
       }
       
-      // 过滤掉不需要进行相似度检测的分类（手机截图、二维码、证件照、待分类）
+      // 过滤掉不需要进行相似度检测的分类（手机截图、二维码、证件照）
       const beforeFilterCount = allImages.length;
       const excludedStats = this.getExcludedCategoryStats(allImages);
       allImages = allImages.filter(image => !this.shouldExcludeFromSimilarityDetection(image));
@@ -142,7 +142,6 @@ class ImageSimilarityService {
         if (excludedStats.screenshot > 0) statsParts.push(`screenshot: ${excludedStats.screenshot}`);
         if (excludedStats.qrcode > 0) statsParts.push(`qrcode: ${excludedStats.qrcode}`);
         if (excludedStats.idcard > 0) statsParts.push(`idcard: ${excludedStats.idcard}`);
-        if (excludedStats.NA > 0) statsParts.push(`NA: ${excludedStats.NA}`);
         logger.debug(`📊 相似度检测：已排除 ${filteredCount} 张图片（${statsParts.join(', ')}）`);
       }
 
@@ -170,6 +169,7 @@ class ImageSimilarityService {
           similarityThreshold,
           groupType: 'similar',
           onProgress, // 传递进度回调
+          ...(useSimplifiedAlgorithm !== undefined && { useSimplifiedAlgorithm }), // 如果指定了则传递，否则使用默认值
         }
       );
 
@@ -295,7 +295,7 @@ class ImageSimilarityService {
     });
     
     const excludedCount = images.length - imagesWithTime.length;
-    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 排除${excludedCount}张（screenshot/qrcode/idcard/NA/无时间）, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
+    logger.debug(`🔍 开始相似度检测: 输入${images.length}张图片, 排除${excludedCount}张（screenshot/qrcode/idcard/无时间）, 有效${imagesWithTime.length}张图片, 时间窗口=${opts.timeWindow}秒`);
     
     if (imagesWithTime.length === 0) {
       logger.debug('⚠️ 没有有效的图片进行相似度检测');
@@ -362,8 +362,9 @@ class ImageSimilarityService {
           await this._saveWindowGroups(windowGroups);
         }
         
-        // 更频繁的进度更新：每5个窗口、每3个相似组或最后一个窗口
-        if (opts.onProgress && (index % 5 === 0 || index === timeWindows.length - 1 || totalGroups % 3 === 0)) {
+        // 🔥 每个窗口处理完后都更新进度，确保进度实时更新
+        // onProgress(processed, total, groups): 已处理窗口数, 总窗口数, 当前发现的相似组数量
+        if (opts.onProgress) {
           opts.onProgress(index + 1, timeWindows.length, totalGroups);
         }
       }
@@ -374,6 +375,12 @@ class ImageSimilarityService {
       
       // 5. 合并跨窗口的相似组
       const mergedGroups = this._mergeSimilarGroups(allGroups);
+      
+      // 🔥 合并完成后，更新最终进度（使用合并后的相似组数量）
+      // onProgress(processed, total, groups): 已处理窗口数, 总窗口数, 合并后的最终相似组数量
+      if (opts.onProgress) {
+        opts.onProgress(timeWindows.length, timeWindows.length, mergedGroups.length);
+      }
       
       logger.debug(`🎯 相似度检测完成: 发现${mergedGroups.length}个相似组, 处理${processedCount}张图片`);
       

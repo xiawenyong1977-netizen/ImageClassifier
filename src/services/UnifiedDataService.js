@@ -2048,12 +2048,31 @@ class UnifiedDataService {
   }
 
   /**
-   * 清空相似度数据
+   * 查询从指定时间点之后文件时间更新的图片（基于 timestamp）
+   * @param {string|Date} sinceTimestamp - ISO 8601格式的时间字符串或Date对象
+   * @returns {Promise<Array>} 图片列表（完整信息）
    */
-  async clearSimilarityData() {
+  async readImagesByTimestampAfter(sinceTimestamp) {
     try {
-      logger.debug('清空相似度数据');
-      await this.imageStorageService.clearSimilarityData();
+      return await this.imageStorageService.getImagesByTimestampAfter(sinceTimestamp);
+    } catch (error) {
+      logger.error('读取最近文件时间更新的图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 清空相似度数据
+   * @param {Array<string|number>} [imageIds] - 可选，指定要清除相似度数据的图片ID数组。如果未指定，则清除所有相似度数据
+   */
+  async clearSimilarityData(imageIds = null) {
+    try {
+      if (imageIds && Array.isArray(imageIds) && imageIds.length > 0) {
+        logger.debug(`清除 ${imageIds.length} 张图片的相似度数据`);
+      } else {
+        logger.debug('清空所有相似度数据');
+      }
+      await this.imageStorageService.clearSimilarityData(imageIds);
       logger.debug('相似度数据清空完成');
     } catch (error) {
       logger.error('清空相似度数据失败:', error);
@@ -2149,7 +2168,8 @@ class UnifiedDataService {
           const image = imageMap.get(imageInfo.id);
           if (image) {
             validImageCount++;
-            const imageTime = image.takenAt ? new Date(image.takenAt).getTime() : image.timestamp;
+            // 🔥 使用文件时间（timestamp）而不是拍摄时间（takenAt），因为新复制过来的照片文件时间会变化
+            const imageTime = image.timestamp ? (typeof image.timestamp === 'string' ? new Date(image.timestamp).getTime() : image.timestamp) : 0;
             if (imageTime > latestTime) {
               latestTime = imageTime;
               latestImage = image;
@@ -2160,7 +2180,8 @@ class UnifiedDataService {
         return {
           groupId: group.id,
           imageCount: validImageCount,
-          latestImageUri: latestImage ? getUri(latestImage) : null
+          latestImageUri: latestImage ? getUri(latestImage) : null,
+          latestTime: latestTime > 0 ? new Date(latestTime) : null
         };
       });
       

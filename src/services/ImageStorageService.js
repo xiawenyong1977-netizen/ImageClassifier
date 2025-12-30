@@ -2679,6 +2679,164 @@ class ImageStorageService {
   }
 
   /**
+   * 查询从指定时间点之后文件时间更新的图片（基于 timestamp）
+   * @param {string|Date} sinceTimestamp - ISO 8601格式的时间字符串或Date对象
+   * @returns {Promise<Array>} 图片列表（完整信息）
+   */
+  async getImagesByTimestampAfter(sinceTimestamp) {
+    try {
+      await this.ensureInitialized();
+      
+      // 转换为ISO 8601格式字符串或时间戳
+      let sinceTimeStr;
+      let sinceTimeNum;
+      if (sinceTimestamp instanceof Date) {
+        sinceTimeStr = sinceTimestamp.toISOString();
+        sinceTimeNum = sinceTimestamp.getTime();
+      } else if (typeof sinceTimestamp === 'string') {
+        sinceTimeStr = sinceTimestamp;
+        sinceTimeNum = new Date(sinceTimestamp).getTime();
+      } else {
+        throw new Error('sinceTimestamp 必须是 Date 对象或 ISO 8601 字符串');
+      }
+      
+      if (Platform.OS === 'web') {
+        // PC端：IndexedDB
+        return await this._getImagesByTimestampAfterIndexedDB(sinceTimeStr, sinceTimeNum);
+      } else {
+        // 移动端：SQLite
+        return await this._getImagesByTimestampAfterSQLite(sinceTimeStr);
+      }
+      
+    } catch (error) {
+      logger.error('查询最近文件时间更新的图片失败:', error);
+      return [];
+    }
+  }
+
+  // 移动端：SQLite查询（基于 timestamp）
+  async _getImagesByTimestampAfterSQLite(sinceTimeStr) {
+    try {
+      await this.ensureInitialized();
+      
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ SQLite数据库对象为空');
+        return [];
+      }
+      
+      if (!this.storage.db.executeSql) {
+        logger.error('❌ SQLite数据库executeSql方法不存在');
+        return [];
+      }
+      
+      // 🔥 使用文件时间（timestamp）查询
+      const sql = `SELECT * FROM images WHERE timestamp > ? ORDER BY timestamp DESC`;
+      const [result] = await this.storage.db.executeSql(sql, [sinceTimeStr]);
+      
+      if (!result || !result.rows) {
+        return [];
+      }
+      
+      const images = [];
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        const img = {
+          id: row.id,
+          uri: row.uri,
+          fileName: row.fileName,
+          category: row.category,
+          confidence: row.confidence,
+          timestamp: row.timestamp,
+          takenAt: row.takenAt,
+          size: row.size,
+          mimeType: row.mimeType,
+          width: row.width,
+          height: row.height,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          altitude: row.altitude,
+          accuracy: row.accuracy,
+          address: row.address,
+          city: row.city,
+          country: row.country,
+          province: row.province,
+          district: row.district,
+          street: row.street,
+          locationSource: row.locationSource,
+          cityDistance: row.cityDistance,
+          message: row.message,
+          idCardDetections: row.idCardDetections ? JSON.parse(row.idCardDetections) : null,
+          generalDetections: row.generalDetections ? JSON.parse(row.generalDetections) : null,
+          mobileNetV3Detections: row.mobileNetV3Detections ? JSON.parse(row.mobileNetV3Detections) : null,
+          imageDimensions: row.imageDimensions ? JSON.parse(row.imageDimensions) : null
+        };
+        images.push(img);
+      }
+      
+      logger.debug(`📥 SQLite查询最近文件时间更新的图片: 找到 ${images.length} 张（since: ${sinceTimeStr}）`);
+      return images;
+      
+    } catch (error) {
+      logger.error('SQLite查询最近文件时间更新的图片失败:', error);
+      return [];
+    }
+  }
+
+  // PC端：IndexedDB查询（基于 timestamp）
+  async _getImagesByTimestampAfterIndexedDB(sinceTimeStr, sinceTimeNum) {
+    try {
+      if (!this.storage || !this.storage.db) {
+        logger.error('❌ IndexedDB数据库对象为空');
+        return [];
+      }
+      
+      return new Promise((resolve, reject) => {
+        const transaction = this.storage.db.transaction(['images'], 'readonly');
+        const store = transaction.objectStore('images');
+        const images = [];
+        
+        // IndexedDB 没有 timestamp 索引，需要遍历所有图片
+        const request = store.openCursor();
+        
+        request.onsuccess = (event) => {
+          const cursor = event.target.result;
+          if (cursor) {
+            const img = cursor.value;
+            // 🔥 使用文件时间（timestamp）比较
+            if (img.timestamp) {
+              const imgTime = typeof img.timestamp === 'string' ? new Date(img.timestamp).getTime() : img.timestamp;
+              if (imgTime > sinceTimeNum) {
+                images.push(img);
+              }
+            }
+            cursor.continue();
+          } else {
+            // 按 timestamp DESC 排序
+            images.sort((a, b) => {
+              const timeA = a.timestamp ? (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp) : 0;
+              const timeB = b.timestamp ? (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp) : 0;
+              return timeB - timeA;
+            });
+            logger.debug(`📥 IndexedDB查询最近文件时间更新的图片: 找到 ${images.length} 张（since: ${sinceTimeStr}）`);
+            resolve(images);
+          }
+        };
+        
+        request.onerror = () => {
+          logger.error('IndexedDB查询最近文件时间更新的图片失败:', request.error);
+          reject(request.error);
+        };
+      });
+      
+    } catch (error) {
+      logger.error('IndexedDB查询最近文件时间更新的图片失败:', error);
+      return [];
+    }
+  }
+
+  /**
    * 批量获取图片详细信息（按ID列表）
    * @param {Array<string>} imageIds - 图片ID数组
    * @returns {Promise<Map<string, Object>>} ID到图片对象的映射
@@ -3571,7 +3729,7 @@ class ImageStorageService {
         images,
         stats,
         exportDate: new Date().toISOString(),
-        version: '1.0.0',
+        version: '1.1.0',
       };
       
       logger.debug(`Exported ${images.length} images and statistics`);

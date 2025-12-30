@@ -1659,18 +1659,8 @@ class ImageClassifierService {
    */
   getAPIConfig() {
     return {
-      baseURL: 'https://api.aifuture.net.cn',
-      timeout: 30000, // 30秒超时
-      categoryMap: {
-        "social_activities": "social_activities",
-        "pets": "pets",
-        "single_person": "single_person",
-        "foods": "foods",
-        "travel_scenery": "travel_scenery",
-        "screenshot": "screenshot",
-        "idcard": "idcard",
-        "other": "other"
-      }
+      baseURL: 'http://123.57.68.4:8000',
+      timeout: 30000 // 30秒超时
     };
   }
 
@@ -1715,7 +1705,7 @@ class ImageClassifierService {
 
   /**
    * 批量查询缓存
-   * @param {Array<string>} imageHashes - 图片哈希数组（自动分批处理）
+   * @param {Array<{hash: string, uri: string}>} imageHashes - 包含hash和uri的对象数组（自动分批处理）
    * @param {string} userId - 可选的用户ID
    * @returns {Promise<Object>} 批量缓存查询结果 { success: true, total, cached_count, items: [] }
    */
@@ -1727,15 +1717,54 @@ class ImageClassifierService {
     }
     
     try {
-      logger.debug(`🔍 批量查询缓存：${imageHashes.length} 个哈希值`);
+      logger.debug(`🔍 批量查询缓存（v2）：${imageHashes.length} 个哈希值`);
       
-      // 分批处理（每批100个）
-      const batchSize = this.BATCH_CONFIG.CACHE_BATCH_SIZE;
+      // 验证输入格式：必须是对象数组，且包含 hash 和 uri
+      const normalizedItems = imageHashes.map((item, index) => {
+        if (typeof item === 'string') {
+          throw new Error(`batchCheckCache: 参数格式错误，索引 ${index} 处传入的是字符串，必须传入包含 hash 和 uri 的对象`);
+        }
+        
+        const hash = item.hash || item.image_hash;
+        const uri = item.uri || item.image_uri;
+        
+        if (!hash) {
+          throw new Error(`batchCheckCache: 参数格式错误，索引 ${index} 处缺少 hash 字段`);
+        }
+        
+        if (!uri) {
+          throw new Error(`batchCheckCache: 参数格式错误，索引 ${index} 处缺少 uri 字段（后端需要真实的 image URI）`);
+        }
+        
+        return {
+          hash: hash,
+          uri: uri
+        };
+      });
+      
+      // 分批处理（每批200个，v2接口支持最多200个）
+      const batchSize = Math.min(this.BATCH_CONFIG.CACHE_BATCH_SIZE, 200);
       const allItems = [];
       let totalCached = 0;
       
-      for (let i = 0; i < imageHashes.length; i += batchSize) {
-        const batchHashes = imageHashes.slice(i, i + batchSize);
+      for (let i = 0; i < normalizedItems.length; i += batchSize) {
+        const batchItems = normalizedItems.slice(i, i + batchSize);
+        
+        // 构建 v2 格式的请求体
+        // image_uri 是必填字段，必须使用真实的图片 URI
+        const requestBody = {
+          items: batchItems.map((item, index) => ({
+            index: index,
+            image_hash: item.hash,
+            image_uri: item.uri  // 使用真实的 image_uri（后端必需）
+          }))
+          // prompt 和 user_id 是可选的，不传或传 null 都可以
+        };
+        
+        // 可选字段：只在有值时才添加
+        if (userId) {
+          requestBody.user_id = userId;
+        }
         
         const headers = { 'Content-Type': 'application/json' };
         if (userId) {
@@ -1750,26 +1779,62 @@ class ImageClassifierService {
         }, this.BATCH_CONFIG.CACHE_TIMEOUT);
         
         try {
-          const response = await fetch(`${config.baseURL}/api/v1/classify/batch-check-cache`, {
+          const response = await fetch(`${config.baseURL}/api/v2/classify/batch-check-cache`, {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify({ image_hashes: batchHashes }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal
           });
           
           clearTimeout(timeoutId); // 成功后清除超时器
           
           if (!response.ok) {
-            throw new Error(`批量缓存查询失败: HTTP ${response.status}`);
+            // 尝试读取错误详情
+            let errorDetail = '';
+            try {
+              const errorData = await response.json();
+              errorDetail = errorData.detail || errorData.error || '';
+            } catch (e) {
+              errorDetail = await response.text().catch(() => '');
+            }
+            logger.error(`❌ 批量缓存查询失败: HTTP ${response.status}`, {
+              status: response.status,
+              statusText: response.statusText,
+              errorDetail: errorDetail,
+              requestBody: requestBody
+            });
+            throw new Error(`批量缓存查询失败: HTTP ${response.status}${errorDetail ? ` - ${errorDetail}` : ''}`);
           }
           
           const result = await response.json();
           
+          // 检查是否有错误
+          if (result.error_type && result.error_type !== 'success') {
+            throw new Error(result.error || '缓存查询失败');
+          }
           
-          allItems.push(...result.items);
-          totalCached += result.cached_count;
+          // v2 接口返回格式：{ results: [...], summary: { total, cached_count, miss_count } }
+          const items = result.results || [];
+          const summary = result.summary || {};
           
-          logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${result.cached_count}/${result.total}`);
+          // 转换为兼容格式（包含 image_hash 字段，数据嵌套在 data 字段中）
+          const formattedItems = items.map(item => ({
+            image_hash: item.image_hash,
+            cached: item.cached || false,
+            data: item.cached ? {
+              category: item.category,
+              confidence: item.confidence,
+              description: item.description,
+              message: item.description,  // 兼容字段
+              background_color: item.background_color,
+              raw_content: item.raw_content
+            } : null
+          }));
+          
+          allItems.push(...formattedItems);
+          totalCached += summary.cached_count || 0;
+          
+          logger.debug(`✅ 批次 ${Math.floor(i / batchSize) + 1}：命中 ${summary.cached_count || 0}/${summary.total || items.length}`);
         } catch (fetchError) {
           clearTimeout(timeoutId); // 失败后也要清除超时器
           if (fetchError.name === 'AbortError') {
@@ -1823,55 +1888,59 @@ class ImageClassifierService {
         
         // 添加图片文件
         let totalBlobSize = 0;
-        const fileUris = []; // 记录所有文件URI供诊断
         
         for (const imageData of imageDataList) {
             const blobSize = imageData.blobSize || imageData.blob?.size || 0;
             totalBlobSize += blobSize;
             
-            // React Native 的 FormData 需要特殊格式
-            if (Platform.OS !== 'web') {
-              // 移动端：使用 uri、type、name 格式（直接使用文件路径，不用 Blob）
-              const fileUri = imageData.resizedUri;
-              if (!fileUri || !fileUri.startsWith('file://')) {
-                logger.error(`❌ 无效的文件路径: ${fileUri}, imageData:`, {
-                  fileName: imageData.fileName,
-                  uri: imageData.uri,
-                  resizedUri: imageData.resizedUri
-                });
-                throw new Error(`无效的文件路径: ${fileUri}`);
+            // PC端：使用 Blob
+            formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
+          }
+          
+        // 添加图片元数据（v2格式）
+        const imageMetadata = {
+          items: imageDataList.map((img, index) => {
+            // 注意：image_uri 应该使用原始文件路径，而不是缩放后的 base64 数据 URI
+            // resizedUri 可能是 base64 数据 URI（data:image/jpeg;base64,...），不应该作为 image_uri
+            // 优先使用 imageData.uri（原始文件路径），否则使用 uri
+            let imageUri = img.imageData?.uri || img.uri || null;
+            
+            // 如果 imageUri 是 base64 数据 URI，尝试从 imageData 获取原始路径
+            if (imageUri && imageUri.startsWith('data:image/')) {
+              logger.warn(`⚠️ 图片 ${index} 的 URI 是 base64 数据 URI，尝试使用原始路径`);
+              // 如果 imageData 有原始 URI，使用它
+              if (img.imageData?.uri && !img.imageData.uri.startsWith('data:image/')) {
+                imageUri = img.imageData.uri;
+              } else {
+                // 如果没有原始路径，使用 fileName 作为备用
+                imageUri = img.fileName || `image_${index}`;
+                logger.warn(`⚠️ 图片 ${index} 缺少原始 URI，使用 fileName 作为备用: ${imageUri}`);
               }
-              
-              formData.append('images', {
-                uri: fileUri,
-                type: 'image/jpeg',
-                name: imageData.fileName || 'image.jpg'
-              });
-              fileUris.push(fileUri);
-            } else {
-              // PC端：使用 Blob
-              formData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
             }
-          }
-          
-        // 移动端：验证文件存在性
-        if (Platform.OS !== 'web') {
-          const RNFS = require('react-native-fs');
-          for (const fileUri of fileUris) {
-            const filePath = fileUri.replace('file://', '');
-            const exists = await RNFS.exists(filePath);
-            if (!exists) {
-              logger.error(`❌ FormData构建前，文件已不存在: ${fileUri}`);
-              throw new Error(`FormData构建失败：文件不存在 ${fileUri}`);
+            
+            if (!imageUri) {
+              logger.warn(`⚠️ 图片 ${index} 缺少 URI，使用 fileName 作为备用: ${img.fileName || 'unknown'}`);
+              imageUri = img.fileName || `image_${index}`;
             }
-          }
-        }
-          
-        // 添加哈希列表
-        const hashes = imageDataList.map(img => img.hash).filter(h => h);
-        if (hashes.length > 0) {
-          formData.append('image_hashes', JSON.stringify(hashes));
-        }
+            
+            // 获取 hash（第一阶段计算的基于原图的 hash）
+            // hash 可能来自 img.hash 或 img.imageData.hash
+            const imageHash = img.hash || img.imageData?.hash || null;
+            
+            if (!imageHash) {
+              logger.warn(`⚠️ 图片 ${index} 缺少 hash，将无法正确匹配缓存`);
+            }
+            
+            return {
+              index: index,
+              image_uri: imageUri,
+              image_hash: imageHash  // 添加第一阶段计算的基于原图的 hash
+            };
+          }),
+          prompt: null, // 可选，使用默认提示词
+          user_id: userId || null // 可选
+        };
+        formData.append('image_metadata', JSON.stringify(imageMetadata));
         
         const headers = {};
         if (userId) {
@@ -1896,24 +1965,10 @@ class ImageClassifierService {
             const retryInfo = retryCount > 0 ? ` (重试 ${retryCount}/${maxRetries})` : '';
             logger.info(`🚀 开始发送请求 (${imageDataList.length}张图片, ${(totalBlobSize / 1024 / 1024).toFixed(2)}MB)${retryInfo}...`);
             
-            // 移动端：fetch前再次验证文件（诊断用）
-            if (Platform.OS !== 'web') {
-              const RNFS = require('react-native-fs');
-              logger.debug(`📋 fetch前验证文件...`);
-              for (const imageData of imageDataList) {
-                const filePath = imageData.resizedUri.replace('file://', '');
-                const exists = await RNFS.exists(filePath);
-                if (!exists) {
-                  throw new Error(`fetch前文件已消失: ${imageData.fileName}`);
-                }
-              }
-              logger.debug(`✅ 所有文件验证通过`);
-            }
-            
             const fetchStartTime = Date.now();
             logger.debug(`📤 调用 fetch()...`);
             
-            response = await fetch(`${config.baseURL}/api/v1/classify/batch`, {
+            response = await fetch(`${config.baseURL}/api/v2/classify/batch`, {
               method: 'POST',
               headers: headers,
               body: formData,
@@ -1966,19 +2021,48 @@ class ImageClassifierService {
               // 【关键】重建FormData对象，因为可能被破坏了
               const newFormData = new FormData();
               for (const imageData of imageDataList) {
-                if (Platform.OS !== 'web') {
-                  newFormData.append('images', {
-                    uri: imageData.resizedUri,
-                    type: 'image/jpeg',
-                    name: imageData.fileName || 'image.jpg'
-                  });
-                } else {
-                  newFormData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
-                }
+                // PC端：使用 Blob
+                newFormData.append('images', imageData.blob, imageData.fileName || 'image.jpg');
               }
-              if (hashes.length > 0) {
-                newFormData.append('image_hashes', JSON.stringify(hashes));
-              }
+              // 添加图片元数据（v2格式，重试时也需要重建）
+              const retryImageMetadata = {
+                items: imageDataList.map((img, index) => {
+                  // 注意：image_uri 应该使用原始文件路径，而不是缩放后的 base64 数据 URI
+                  let imageUri = img.imageData?.uri || img.uri || null;
+                  
+                  // 如果 imageUri 是 base64 数据 URI，尝试从 imageData 获取原始路径
+                  if (imageUri && imageUri.startsWith('data:image/')) {
+                    logger.warn(`⚠️ 重试时图片 ${index} 的 URI 是 base64 数据 URI，尝试使用原始路径`);
+                    if (img.imageData?.uri && !img.imageData.uri.startsWith('data:image/')) {
+                      imageUri = img.imageData.uri;
+                    } else {
+                      imageUri = img.fileName || `image_${index}`;
+                      logger.warn(`⚠️ 重试时图片 ${index} 缺少原始 URI，使用 fileName 作为备用: ${imageUri}`);
+                    }
+                  }
+                  
+                  if (!imageUri) {
+                    logger.warn(`⚠️ 重试时图片 ${index} 缺少 URI，使用 fileName 作为备用: ${img.fileName || 'unknown'}`);
+                    imageUri = img.fileName || `image_${index}`;
+                  }
+                  
+                  // 获取 hash（第一阶段计算的基于原图的 hash）
+                  const imageHash = img.hash || img.imageData?.hash || null;
+                  
+                  if (!imageHash) {
+                    logger.warn(`⚠️ 重试时图片 ${index} 缺少 hash，将无法正确匹配缓存`);
+                  }
+                  
+                  return {
+                    index: index,
+                    image_uri: imageUri,
+                    image_hash: imageHash  // 添加第一阶段计算的基于原图的 hash
+                  };
+                }),
+                prompt: null,
+                user_id: userId || null
+              };
+              newFormData.append('image_metadata', JSON.stringify(retryImageMetadata));
               formData = newFormData;
                 
               continue; // 继续下一次重试
@@ -1996,33 +2080,74 @@ class ImageClassifierService {
           }
         }
         
+        // 处理 HTTP 非 200 的情况（请求级错误，与单个图片无关）
         if (!response.ok) {
           const errorText = await response.text();
           logger.error(`❌ HTTP错误: ${response.status} ${response.statusText}`, errorText);
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
+          throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
         }
         
         const result = await response.json();
         
+        // v2 接口响应格式：results 数组和 summary 对象
+        const results = result.results || [];
+        const summary = result.summary || {};
         
-        // 合并结果，保留原始 imageData 引用
-        const itemsWithData = result.items.map((item, idx) => ({
-          ...item,
-          imageData: imageDataList[idx].imageData // 保留原始图片数据引用
-        }));
-        
-        logger.debug(`✅ 批量分类完成：成功 ${result.success_count}/${result.total}`);
-        
-        // 清理这个批次的临时缩放文件（移动端）
-        if (Platform.OS !== 'web') {
-          await this.cleanupBatchTempFiles(imageDataList);
+        // 检查整体错误（error_type 不为 SUCCESS）- 服务级错误，与单个图片无关
+        if (result.error_type && result.error_type !== 'success') {
+          const errorMessage = result.error || '内部服务异常';
+          logger.error(`❌ 服务端返回错误: ${result.error_type}`, errorMessage);
+          throw new Error(`服务端错误 (${result.error_type}): ${errorMessage}`);
         }
+        
+        // 合并结果，保留原始 imageData 引用，处理单个 result 的错误
+        // 注意：数据结构要与 batchCheckCache 保持一致，数据嵌套在 data 字段中
+        const itemsWithData = results.map((item, idx) => {
+          const imageData = imageDataList[idx]?.imageData;
+          
+          // 如果该 result 有错误，保存错误信息到 message，分类保持 NA
+          if (item.error) {
+            return {
+              index: item.index,
+              image_uri: item.image_uri,
+              success: false,
+              error: item.error,
+              data: null, // 错误时 data 为 null
+              imageData
+            };
+          }
+          
+          // 成功的情况，将数据嵌套在 data 字段中（与 batchCheckCache 保持一致）
+          return {
+            index: item.index,
+            image_uri: item.image_uri,
+            success: true,
+            error: null,
+            data: {
+              category: item.category,
+              confidence: item.confidence,
+              description: item.description,
+              message: item.description, // 兼容字段
+              background_color: item.background_color,
+              raw_content: item.raw_content,
+              inference_method: item.inference_method,
+              processing_time_ms: item.processing_time_ms
+            },
+            imageData
+          };
+        });
+        
+        const successCount = summary.success_count || 0;
+        const totalCount = summary.total_count || imageDataList.length;
+        const failedCount = summary.failed_count || 0;
+        
+        logger.debug(`✅ 批量分类完成：成功 ${successCount}/${totalCount}`);
       
         return {
           success: true,
-          total: imageDataList.length,
-          success_count: result.success_count,
-          fail_count: result.fail_count,
+          total: totalCount,
+          success_count: successCount,
+          fail_count: failedCount,
           items: itemsWithData
         };
       } catch (batchError) {
@@ -2060,11 +2185,6 @@ class ImageClassifierService {
             : batchError.message || '批量处理失败',
           imageData: imageData.imageData
         }));
-        
-        // 清理异常批次的临时文件（移动端）
-        if (Platform.OS !== 'web') {
-          await this.cleanupBatchTempFiles(imageDataList);
-        }
         
         return {
           success: false,
@@ -2127,49 +2247,43 @@ class ImageClassifierService {
     }
   }
 
-  /**
-   * 清理批次的临时缩放文件（移动端）
-   */
-  async cleanupBatchTempFiles(batch) {
-    try {
-      const RNFS = require('react-native-fs');
-      let deletedCount = 0;
-      
-      for (const imageData of batch) {
-        if (imageData.resizedUri && imageData.resizedUri.startsWith('file://')) {
-          const filePath = imageData.resizedUri.replace('file://', '');
-          try {
-            const exists = await RNFS.exists(filePath);
-            if (exists) {
-              await RNFS.unlink(filePath);
-              deletedCount++;
-            }
-          } catch (deleteError) {
-            // 忽略删除错误，不影响主流程
-            logger.debug(`⚠️ 清理临时文件失败: ${filePath}`, deleteError.message);
-          }
-        }
-      }
-      
-      if (deletedCount > 0) {
-        logger.debug(`🗑️ 清理了 ${deletedCount} 个临时缩放文件`);
-      }
-    } catch (error) {
-      // 清理失败不应影响主流程
-      logger.debug(`⚠️ 批量清理临时文件失败:`, error.message);
-    }
-  }
 
-  async checkHealth() {
+  async checkHealthv2() {
     const config = this.getAPIConfig();
     
     try {
       logger.debug('🏥 检查后端服务健康状态...');
       
+      // 构建查询参数（v2版本支持的可选参数）
+      const queryParams = new URLSearchParams();
+      
+      // 获取 user_id（客户端ID）
+      try {
+        const clientId = await UnifiedDataService.getClientId();
+        if (clientId) {
+          queryParams.append('user_id', clientId);
+        }
+      } catch (error) {
+        logger.debug('⚠️ 获取客户端ID失败，跳过user_id参数:', error.message);
+      }
+      
+      // 获取设备类型
+      const deviceType = Platform.OS === 'web' ? 'Web' : 
+                        Platform.OS === 'android' ? 'Android' : 
+                        Platform.OS === 'ios' ? 'iOS' : 'Unknown';
+      queryParams.append('device_type', deviceType);
+      
+      // 添加客户端时间戳（ISO 8601格式）
+      const clientTimestamp = new Date().toISOString();
+      queryParams.append('client_timestamp', clientTimestamp);
+      
+      // 构建完整的URL
+      const url = `${config.baseURL}/api/v2/health${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+      
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.BATCH_CONFIG.HEALTH_CHECK_TIMEOUT);
       
-      const response = await fetch(`${config.baseURL}/api/v1/health`, {
+      const response = await fetch(url, {
         method: 'GET',
         signal: controller.signal
       });
@@ -2195,7 +2309,10 @@ class ImageClassifierService {
         available: isHealthy,
         status: data.status,
         database: data.database,
-        modelApi: data.model_api
+        modelApi: data.model_api,
+        userId: data.user_id,
+        deviceType: data.device_type,
+        clientTimestamp: data.client_timestamp
       });
       
       return {
@@ -2203,7 +2320,10 @@ class ImageClassifierService {
         status: data.status,
         database: data.database,
         modelApi: data.model_api,
-        timestamp: data.timestamp
+        timestamp: data.timestamp,
+        userId: data.user_id,
+        deviceType: data.device_type,
+        clientTimestamp: data.client_timestamp
       };
       
     } catch (error) {
@@ -2235,25 +2355,46 @@ class ImageClassifierService {
   }
 
   /**
-   * 查询缓存
+   * 查询缓存（v2版本，使用批量接口）
    * 
    * @param {string} imageHash - 图片SHA-256哈希
    * @param {string} clientId - 客户端ID
-   * @returns {Promise<Object>} 缓存查询结果
+   * @param {string} imageUri - 图片URI（可选，用于标识）
+   * @returns {Promise<Object>} 缓存查询结果 { cached: boolean, data: Object|null, request_id: string }
    */
-  async checkCache(imageHash, clientId) {
+  async checkCache(imageHash, clientId, imageUri = null) {
     const config = this.getAPIConfig();
     
     try {
-      const response = await fetch(`${config.baseURL}/api/v1/classify/check-cache`, {
+      // v2版本使用批量接口，单次查询也需要按照批量格式发送
+      const requestBody = {
+        items: [
+          {
+            index: 0,
+            image_uri: imageUri || `hash_${imageHash.substring(0, 8)}`,
+            image_hash: imageHash
+          }
+        ]
+      };
+      
+      // 如果提供了 clientId，添加到请求体中
+      if (clientId) {
+        requestBody.user_id = clientId;
+      }
+      
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      
+      // Header方式传递用户ID（优先级更高）
+      if (clientId) {
+        headers['X-User-ID'] = clientId;
+      }
+      
+      const response = await fetch(`${config.baseURL}/api/v2/classify/batch-check-cache`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-ID': clientId || ''
-        },
-        body: JSON.stringify({
-          image_hash: imageHash
-        })
+        headers: headers,
+        body: JSON.stringify(requestBody)
       });
       
       if (!response.ok) {
@@ -2262,8 +2403,35 @@ class ImageClassifierService {
       
       const result = await response.json();
       
+      // 检查是否有错误
+      if (result.error_type && result.error_type !== 'success') {
+        throw new Error(result.error || '缓存查询失败');
+      }
       
-      return result;
+      // 从批量响应中提取第一个结果
+      if (result.results && result.results.length > 0) {
+        const cacheItem = result.results[0];
+        
+        // 转换为兼容格式
+        return {
+          cached: cacheItem.cached || false,
+          data: cacheItem.cached ? {
+            category: cacheItem.category,
+            confidence: cacheItem.confidence,
+            description: cacheItem.description,
+            background_color: cacheItem.background_color,
+            raw_content: cacheItem.raw_content
+          } : null,
+          request_id: result.request_id
+        };
+      } else {
+        // 没有结果，返回未缓存
+        return {
+          cached: false,
+          data: null,
+          request_id: result.request_id
+        };
+      }
       
     } catch (error) {
       logger.error('❌ 查询缓存失败:', error);
@@ -2325,108 +2493,6 @@ class ImageClassifierService {
     }
   }
 
-  /**
-   * 完整的远程图片分类流程
-   * 
-   * @param {Blob|File|string} imageInput - 图片文件或URI
-   * @param {Object} options - 选项
-   * @param {boolean} options.checkHealthFirst - 是否先检查健康状态
-   * @returns {Promise<Object>} 分类结果
-   */
-  async classifyImageRemote(imageInput, options = {}) {
-    const {
-      checkHealthFirst = false
-    } = options;
-    
-    try {
-      logger.debug('🚀 开始远程图片分类...');
-      
-      // 步骤0: 检查服务可用性（可选）
-      if (checkHealthFirst) {
-        logger.debug('🏥 检查服务状态...');
-        const health = await this.checkHealth();
-        
-        if (!health.available) {
-          throw new Error(`服务不可用: ${health.reason || '未知原因'}`);
-        }
-        
-        logger.debug('✅ 服务正常');
-      }
-      
-      // 获取客户端ID
-      const clientId = await UnifiedDataService.getClientId();
-      logger.debug('🆔 客户端ID:', clientId);
-      
-      // 将imageInput转换为Blob/File
-      let imageFile = imageInput;
-      
-      // 如果输入是URI字符串，需要转换为Blob
-      if (typeof imageInput === 'string') {
-        const response = await fetch(imageInput);
-        const blob = await response.blob();
-        imageFile = new File([blob], 'image.jpg', { type: blob.type || 'image/jpeg' });
-      }
-      
-      // 步骤1: 计算哈希
-      const imageHash = await this.calculateSHA256(imageFile);
-      
-      // 步骤1.5: 缩放图像到1024x1024（保持宽高比）
-      const resizedImageFile = await this.resizeImageTo1024(imageFile);
-      
-      // 步骤2: 查询缓存（强制使用）
-      const cacheResult = await this.checkCache(imageHash, clientId);
-      
-      if (cacheResult.cached) {
-        // 缓存命中！
-        logger.info(`✅ 远程推理缓存命中: ${imageHash.substring(0, 8)}...`);
-        
-        // 直接返回完整的缓存结果
-        return {
-          success: true,
-          data: cacheResult.data,  // 保留完整的 data 对象
-          from_cache: true,
-          request_id: cacheResult.request_id
-        };
-      }
-      
-      // 步骤3: 缓存未命中，上传图片
-      logger.debug('⬆️  上传图片分类...');
-      const result = await this.uploadAndClassify(resizedImageFile, imageHash, clientId);
-      
-      if (result.success) {
-        logger.debug('✅ 远程分类成功');
-        
-        // 直接返回完整的服务器响应
-        return {
-          success: true,
-          data: result.data,  // 保留完整的 data 对象
-          from_cache: false,
-          processing_time_ms: result.processing_time_ms,
-          request_id: result.request_id
-        };
-      } else {
-        throw new Error(result.error || '分类失败');
-      }
-      
-    } catch (error) {
-      logger.error('❌ 远程分类失败:', error);
-      
-      // 返回结构兼容本地分类格式
-      return {
-        success: false,
-        error: error.message,
-        categoryId: 'other',
-        confidence: 0,
-        message: `远程分类失败: ${error.message}`,
-        // 保持与本地分类兼容的空字段
-        idCardDetections: [],
-        generalDetections: [],
-        mobileNetV3Detections: [],
-        imageDimensions: null,
-        allModelResults: {}
-      };
-    }
-  }
 
   /**
    * 将图像缩放到1024x1024，保持宽高比

@@ -1,227 +1,733 @@
-// 城市坐标查找服务 - 跨平台实现
-import citiesData from '../data/china-cities.json';
+// 城市坐标查找服务 - 重构版本
+// 使用本地数据库和远程API批量查询位置信息
 import { logger } from '../adapters/WebAdapters';
+import locationStorageService from './LocationStorageService';
+
+/**
+ * 国家代码到中英文名称的映射表
+ * 基于 ISO 3166-1 alpha-2 标准
+ */
+const COUNTRY_CODE_MAP = {
+  'CN': { zh: '中国', en: 'China' },
+  'US': { zh: '美国', en: 'United States' },
+  'JP': { zh: '日本', en: 'Japan' },
+  'KR': { zh: '韩国', en: 'South Korea' },
+  'GB': { zh: '英国', en: 'United Kingdom' },
+  'FR': { zh: '法国', en: 'France' },
+  'DE': { zh: '德国', en: 'Germany' },
+  'IT': { zh: '意大利', en: 'Italy' },
+  'ES': { zh: '西班牙', en: 'Spain' },
+  'RU': { zh: '俄罗斯', en: 'Russia' },
+  'CA': { zh: '加拿大', en: 'Canada' },
+  'AU': { zh: '澳大利亚', en: 'Australia' },
+  'BR': { zh: '巴西', en: 'Brazil' },
+  'IN': { zh: '印度', en: 'India' },
+  'MX': { zh: '墨西哥', en: 'Mexico' },
+  'AR': { zh: '阿根廷', en: 'Argentina' },
+  'TH': { zh: '泰国', en: 'Thailand' },
+  'VN': { zh: '越南', en: 'Vietnam' },
+  'PH': { zh: '菲律宾', en: 'Philippines' },
+  'ID': { zh: '印度尼西亚', en: 'Indonesia' },
+  'MY': { zh: '马来西亚', en: 'Malaysia' },
+  'SG': { zh: '新加坡', en: 'Singapore' },
+  'TW': { zh: '台湾', en: 'Taiwan' },
+  'HK': { zh: '香港', en: 'Hong Kong' },
+  'MO': { zh: '澳门', en: 'Macau' },
+  'NL': { zh: '荷兰', en: 'Netherlands' },
+  'BE': { zh: '比利时', en: 'Belgium' },
+  'CH': { zh: '瑞士', en: 'Switzerland' },
+  'AT': { zh: '奥地利', en: 'Austria' },
+  'SE': { zh: '瑞典', en: 'Sweden' },
+  'NO': { zh: '挪威', en: 'Norway' },
+  'DK': { zh: '丹麦', en: 'Denmark' },
+  'FI': { zh: '芬兰', en: 'Finland' },
+  'PL': { zh: '波兰', en: 'Poland' },
+  'GR': { zh: '希腊', en: 'Greece' },
+  'PT': { zh: '葡萄牙', en: 'Portugal' },
+  'TR': { zh: '土耳其', en: 'Turkey' },
+  'SA': { zh: '沙特阿拉伯', en: 'Saudi Arabia' },
+  'AE': { zh: '阿联酋', en: 'United Arab Emirates' },
+  'EG': { zh: '埃及', en: 'Egypt' },
+  'ZA': { zh: '南非', en: 'South Africa' },
+  'NZ': { zh: '新西兰', en: 'New Zealand' },
+  'IE': { zh: '爱尔兰', en: 'Ireland' },
+  'IL': { zh: '以色列', en: 'Israel' },
+  'CL': { zh: '智利', en: 'Chile' },
+  'CO': { zh: '哥伦比亚', en: 'Colombia' },
+  'PE': { zh: '秘鲁', en: 'Peru' },
+  'VE': { zh: '委内瑞拉', en: 'Venezuela' },
+  'PK': { zh: '巴基斯坦', en: 'Pakistan' },
+  'BD': { zh: '孟加拉国', en: 'Bangladesh' },
+  'MM': { zh: '缅甸', en: 'Myanmar' },
+  'KH': { zh: '柬埔寨', en: 'Cambodia' },
+  'LA': { zh: '老挝', en: 'Laos' },
+  'NP': { zh: '尼泊尔', en: 'Nepal' },
+  'LK': { zh: '斯里兰卡', en: 'Sri Lanka' },
+  'UZ': { zh: '乌兹别克斯坦', en: 'Uzbekistan' },
+  'KZ': { zh: '哈萨克斯坦', en: 'Kazakhstan' },
+  'MN': { zh: '蒙古', en: 'Mongolia' },
+  'KP': { zh: '朝鲜', en: 'North Korea' },
+};
+
+/**
+ * 根据国家代码和语言获取国家名称
+ * @param {string} countryCode - 国家代码（ISO 3166-1 alpha-2）
+ * @param {string} language - 语言设置 ('zh' 或 'en')
+ * @returns {string} 国家名称，如果未找到则返回原始代码
+ */
+function getCountryName(countryCode, language = 'zh') {
+  if (!countryCode || typeof countryCode !== 'string') {
+    return countryCode || '';
+  }
+  
+  const code = countryCode.trim().toUpperCase();
+  const countryInfo = COUNTRY_CODE_MAP[code];
+  
+  if (!countryInfo) {
+    // 如果未找到映射，返回原始代码
+    return code;
+  }
+  
+  return language === 'en' ? countryInfo.en : countryInfo.zh;
+}
 
 class CityLocationService {
   constructor() {
-    this.cities = citiesData;
-    this.cache = new Map(); // 缓存最近查找结果
-    this.maxCacheSize = 1000; // 最大缓存数量
-    
     // API配置
     this.apiConfig = {
-      baseURL: 'https://api.aifuture.net.cn',
-      timeout: 5000, // 5秒超时
+      baseURL: 'http://123.57.68.4:8000',
+      timeout: 10000, // 10秒超时（批量请求可能需要更长时间）
       endpoints: {
-        nearestCity: '/api/v1/location/nearest-city',
-        nearbyCities: '/api/v1/location/nearby-cities'
+        nearestCities: '/api/v2/location/nearest-cities' // 使用v2批量接口
       }
     };
   }
 
   /**
-   * 调用远程API查找最近的城市（使用附近城市列表，按人口筛选真正的城市）
-   * @param {number} latitude - 纬度
-   * @param {number} longitude - 经度
-   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
-   * @returns {Promise<Object|null>} 城市信息对象或null
+   * 批量查询多个坐标点的最近城市
+   * @param {Array<{id?: string, latitude: number, longitude: number}>} coordinates - 坐标数组
+   * @param {Object} options - 可选配置
+   * @param {string} options.language - 语言设置 ('zh' | 'en')，默认 'zh'
+   * @param {boolean} options.skipRemote - 是否跳过远程查询（仅查本地），默认 false
+   * @returns {Promise<Array<LocationResult>>} 位置信息结果数组（与输入顺序一致）
    */
-  async findNearestCityRemote(latitude, longitude, language = 'zh') {
-    // 使用附近城市列表API，查询50公里内的前10个城市
-    // 注意：API会返回中文和英文的城市名称，不需要在URL中传递语言参数
-    const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearbyCities}?latitude=${latitude}&longitude=${longitude}&limit=10&max_distance_km=50`;
+  async getLocationsBatch(coordinates, options = {}) {
+    const { language = 'zh', skipRemote = false } = options;
+    
+    // 参数验证
+    if (!coordinates || !Array.isArray(coordinates) || coordinates.length === 0) {
+      logger.warn('坐标数组为空或无效');
+      return [];
+    }
+
+    // 过滤有效坐标
+    const validCoordinates = coordinates.filter(coord => {
+      if (!this.isValidCoordinate(coord.latitude, coord.longitude)) {
+        logger.warn('无效的坐标点:', coord);
+        return false;
+      }
+      return true;
+    });
+
+    if (validCoordinates.length === 0) {
+      logger.warn('没有有效的坐标点');
+      return [];
+    }
+
+    // 1. 先在本地数据库查询
+    let localResults = new Map();
+    try {
+      localResults = await locationStorageService.getLocationsBatch(validCoordinates);
+    } catch (error) {
+      logger.error('本地数据库查询失败:', error);
+      // 继续执行，降级到远程查询
+    }
+
+    // 2. 找出本地未找到的坐标点
+    const missingCoordinates = validCoordinates.filter(coord => {
+      const normalizedLat = this.normalizeCoordinate(coord.latitude);
+      const normalizedLng = this.normalizeCoordinate(coord.longitude);
+      const key = `${normalizedLat}_${normalizedLng}`;
+      return !localResults.has(key);
+    });
+
+    // 3. 如果所有坐标都在本地找到，直接返回
+    if (missingCoordinates.length === 0) {
+      return this.formatResults(validCoordinates, localResults, language);
+    }
+
+    // 4. 如果跳过远程查询，只返回本地结果
+    if (skipRemote) {
+      return this.formatResults(validCoordinates, localResults, language);
+    }
+
+    // 5. 批量请求服务器获取缺失的坐标
+    let remoteResults = [];
+    try {
+      remoteResults = await this._fetchAndSaveFromRemote(missingCoordinates);
+    } catch (error) {
+      logger.error('远程API查询失败:', error);
+      // 继续执行，只返回本地结果
+    }
+
+    // 6. 合并本地和远程结果
+    const allResults = new Map(localResults);
+    
+    // 添加远程查询结果
+    if (remoteResults && remoteResults.length > 0) {
+      // 重新查询本地数据库（因为远程结果已保存）
+      try {
+        const updatedLocalResults = await locationStorageService.getLocationsBatch(missingCoordinates);
+        updatedLocalResults.forEach((value, key) => {
+          allResults.set(key, value);
+        });
+      } catch (error) {
+        logger.error('重新查询本地数据库失败:', error);
+      }
+    }
+
+    return this.formatResults(validCoordinates, allResults, language);
+  }
+
+  /**
+   * 从服务器批量获取最近城市并自动保存
+   * @param {Array<{id?: string, latitude: number, longitude: number}>} coordinates - 坐标数组
+   * @returns {Promise<Array<Object>>} 服务器返回的结果数组
+   * @private
+   */
+  async _fetchAndSaveFromRemote(coordinates) {
+    if (!coordinates || coordinates.length === 0) {
+      return [];
+    }
+
+    const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearestCities}`;
+    const requestBody = {
+      coordinates: coordinates.map(coord => ({
+        id: coord.id,
+        latitude: coord.latitude,
+        longitude: coord.longitude
+      }))
+    };
+    
+    // 记录请求详情
+    logger.debug('📤 发送位置信息批量查询请求:', {
+      url: url,
+      method: 'POST',
+      coordinatesCount: coordinates.length,
+      timeout: this.apiConfig.timeout,
+      requestBodySize: JSON.stringify(requestBody).length
+    });
     
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.apiConfig.timeout);
       
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+
       clearTimeout(timeout);
-      
+
+      // 记录响应详情
+      logger.debug('📥 收到服务器响应:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // 尝试读取错误响应体
+        let errorBody = null;
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            errorBody = await response.json();
+          } else {
+            errorBody = await response.text();
+          }
+        } catch (e) {
+          logger.warn('⚠️ 无法读取错误响应体:', e.message);
+        }
+        
+        logger.error('❌ 服务器返回错误响应:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorBody: errorBody
+        });
+        
+        throw new Error(`HTTP ${response.status}: ${response.statusText}${errorBody ? ` - ${JSON.stringify(errorBody)}` : ''}`);
+      }
+
+      const data = await response.json();
+      
+      logger.debug('📥 服务器返回数据:', {
+        success: data.success,
+        resultsCount: data.results?.length || 0,
+        totalCount: data.total_count,
+        successCount: data.success_count,
+        failedCount: data.failed_count
+      });
+      
+      if (!data.success || !data.results) {
+        logger.warn('服务器返回格式异常:', data);
+        return [];
+      }
+
+      // 提取成功查询的城市数据并保存到本地数据库
+      const locationsToSave = [];
+      const coordinateToIndexMap = new Map(); // 记录查询坐标到 locationsToSave 索引的映射
+      const errors = [];
+      
+      for (const result of data.results) {
+        if (result.success && result.city) {
+          try {
+            // 验证必填字段
+            if (!result.city.name_en) {
+              throw new Error(`API返回的城市数据缺少name_en字段：${JSON.stringify(result.city)}`);
+            }
+            
+            const index = locationsToSave.length;
+            locationsToSave.push(result.city);
+            
+            // 记录查询坐标到索引的映射（用于后续保存坐标映射）
+            if (result.coordinate && result.coordinate.latitude && result.coordinate.longitude) {
+              coordinateToIndexMap.set(index, {
+                latitude: result.coordinate.latitude,
+                longitude: result.coordinate.longitude
+              });
+            }
+          } catch (error) {
+            errors.push({
+              coordinate: result.coordinate,
+              cityData: result.city,
+              error: error.message
+            });
+            
+            logger.error('❌ 处理API返回的城市数据失败', {
+              coordinate: result.coordinate,
+              cityData: result.city,
+              error: error.message
+            });
+          }
+        }
       }
       
-      const cities = await response.json();
-      
-      if (!cities || cities.length === 0) {
-        return null;
+      // 批量保存到本地数据库
+      if (locationsToSave.length > 0) {
+        try {
+          // 保存位置信息（只保存位置详情，不保存坐标映射）
+          const savedDetails = await locationStorageService.saveLocationsBatch(locationsToSave);
+          logger.debug(`✅ 已保存 ${locationsToSave.length} 个位置信息到本地数据库`);
+          
+          // 保存查询坐标映射（使用查询时的坐标，即图片的GPS坐标）
+          // 通过索引对应关系匹配：locationsToSave[index] 对应 savedDetails[index]
+          // savedDetails 中已经包含了 location_id（由 LocationStorageService 内部生成）
+          // 注意：savedDetails 的顺序应该和 locationsToSave 一致
+          const coordinateMappings = [];
+          if (savedDetails && Array.isArray(savedDetails)) {
+            for (const [index, coordinate] of coordinateToIndexMap.entries()) {
+              // 直接通过索引匹配（假设顺序一致）
+              const detail = savedDetails[index];
+              
+              if (detail && detail.location_id && coordinate) {
+                coordinateMappings.push({
+                  latitude: coordinate.latitude,
+                  longitude: coordinate.longitude,
+                  location_id: detail.location_id
+                });
+              } else {
+                logger.debug(`⚠️ 未找到对应的location_id: index=${index}, coordinate=${JSON.stringify(coordinate)}, hasDetail=${!!detail}, locationId=${detail?.location_id}`);
+              }
+            }
+          }
+          
+          // 保存查询坐标映射（直接调用适配器方法）
+          if (coordinateMappings.length > 0) {
+            try {
+              // 确保已初始化
+              await locationStorageService.ensureInitialized();
+              // 直接调用适配器方法
+              await locationStorageService.storage.saveCoordinateMappings(coordinateMappings);
+              logger.debug(`✅ 已保存 ${coordinateMappings.length} 个查询坐标映射到本地数据库`);
+            } catch (error) {
+              logger.error('保存查询坐标映射失败:', error);
+              // 不抛出错误，继续返回结果
+            }
+          }
+        } catch (error) {
+          logger.error('保存位置信息到本地数据库失败:', error);
+          // 不抛出错误，继续返回结果
+        }
       }
       
-      // 按人口排序，选择人口最多的城市（通常是真正的市级单位，而不是区）
-      const sortedByPopulation = [...cities].sort((a, b) => b.population - a.population);
+      if (errors.length > 0) {
+        logger.warn(`⚠️ ${errors.length} 个位置数据保存失败`);
+      }
       
-      const mainCity = sortedByPopulation[0];
+      return data.results;
       
-      // 根据语言设置选择城市名称
-      // 如果语言是英文且API返回了英文名称，使用英文名称；否则使用中文名称
-      let cityName;
-      if (language === 'en' && mainCity.name) {
-        // 使用英文名称（API返回的 name 字段是英文，如 "Beijing"）
-        cityName = mainCity.name;
+    } catch (error) {
+      // 详细错误诊断
+      if (error.name === 'AbortError') {
+        logger.error('❌ 远程API查询超时:', {
+          url: url,
+          timeout: this.apiConfig.timeout,
+          coordinatesCount: coordinates.length,
+          errorName: error.name,
+          errorMessage: error.message
+        });
+      } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        // 网络错误：可能是CORS、网络连接、DNS等问题
+        logger.error('❌ 远程API查询失败 (网络错误)');
+        logger.error('📍 请求URL:', url);
+        logger.error('📍 错误类型:', error.name);
+        logger.error('📍 错误消息:', error.message);
+        logger.error('📍 坐标数量:', coordinates.length);
+        logger.error('📍 请求方法:', 'POST');
+        logger.error('📍 请求体大小:', JSON.stringify(requestBody).length, 'bytes');
+        logger.error('📍 可能的原因:', [
+          '1. CORS策略阻止了请求 - 检查服务器CORS配置',
+          '2. 网络连接失败 - 检查网络连接',
+          '3. DNS解析失败 - 检查域名是否正确',
+          '4. 服务器不可达 - 检查服务器是否运行',
+          '5. SSL证书问题 - 检查HTTPS配置'
+        ]);
+        if (error.stack) {
+          logger.error('📍 错误堆栈:', error.stack);
+        }
+        
+        // 自动诊断：尝试简单的 GET 请求测试连接
+        logger.info('🔍 开始自动诊断...');
+        try {
+          const healthUrl = `${this.apiConfig.baseURL}/api/v2/health`;
+          logger.info(`   尝试 GET 请求: ${healthUrl}`);
+          
+          const healthResponse = await fetch(healthUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          });
+          
+          logger.info(`   ✅ GET 请求成功: 状态码 ${healthResponse.status}`);
+          logger.warn('   ⚠️ GET 请求成功但 POST 请求失败，很可能是 CORS 配置问题');
+          logger.warn('   ⚠️ 服务器可能只允许 GET 请求，或者 CORS 配置不完整');
+          
+          if (healthResponse.ok) {
+            const healthData = await healthResponse.json();
+            logger.info('   📥 健康检查响应:', healthData);
+          }
+        } catch (healthError) {
+          logger.error(`   ❌ GET 请求也失败: ${healthError.message}`);
+          logger.error('   💡 这表明可能是网络连接问题，而不是 CORS 问题');
+        }
+        
+        logger.info('🔍 诊断建议:');
+        logger.info('   1. 打开浏览器开发者工具 -> Network 标签页');
+        logger.info('   2. 查看是否有对 /api/v2/location/nearest-cities 的请求');
+        logger.info('   3. 如果有请求，查看状态码和响应头（特别是 CORS 相关头）');
+        logger.info('   4. 如果没有请求，可能是请求被浏览器阻止（CORS preflight 失败）');
+        logger.info(`   5. 手动测试: 在浏览器中访问 ${this.apiConfig.baseURL}/api/v2/health`);
+        logger.info('   6. 或在控制台运行: await testLocationAPI()');
       } else {
-        // 使用中文名称（API返回的 name_zh 字段是中文，如 "北京"）
-        cityName = mainCity.name_zh || mainCity.name;
+        logger.error('❌ 远程API查询失败:', {
+          url: url,
+          errorName: error.name,
+          errorMessage: error.message,
+          errorStack: error.stack,
+          coordinatesCount: coordinates.length
+        });
       }
-      
-      // 标准化城市名称：移除"市"后缀，统一格式（仅对中文名称）
+      return [];
+    }
+  }
+
+  /**
+   * 格式化结果
+   * @param {Array<Object>} coordinates - 原始坐标数组
+   * @param {Map<string, Object>} results - 位置信息映射
+   * @param {string} language - 语言设置
+   * @returns {Array<LocationResult>} 格式化后的结果数组
+   */
+  formatResults(coordinates, results, language) {
+    return coordinates.map(coord => {
+      const normalizedLat = this.normalizeCoordinate(coord.latitude);
+      const normalizedLng = this.normalizeCoordinate(coord.longitude);
+      const key = `${normalizedLat}_${normalizedLng}`;
+      const location = results.get(key);
+
+      if (!location) {
+        return {
+          id: coord.id,
+          latitude: coord.latitude,
+          longitude: coord.longitude,
+          success: false,
+          city: null,
+          error: '未找到位置信息',
+          fromCache: false
+        };
+      }
+
+      // 根据语言选择城市名称
+      const cityName = language === 'en' && location.name_en 
+        ? location.name_en 
+        : (location.name_zh || location.name_en);
+
+      // 标准化城市名称（仅中文）
       const normalizedCityName = language === 'zh' 
         ? this.normalizeCityName(cityName)
         : cityName;
-      
-      // 转换API返回格式到本地格式
-      const city = {
-        name: normalizedCityName,
-        province: mainCity.name_zh || mainCity.name, // 省份使用中文名称
-        lat: mainCity.latitude,
-        lng: mainCity.longitude,
-        distance: Math.round(mainCity.distance_km * 100) / 100,
-        source: 'remote'
-      };
-      
-      return city;
-      
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        logger.warn('⚠️ 远程API查询超时');
-      } else {
-        logger.warn('⚠️ 远程API查询失败:', error.message);
-      }
-      return null;
-    }
-  }
 
-  /**
-   * 根据坐标查找最近的城市（同步，仅本地查询）
-   * @param {number} latitude - 纬度
-   * @param {number} longitude - 经度
-   * @param {number} maxDistance - 最大搜索距离(公里)，默认200公里
-   * @returns {Object|null} 城市信息对象或null
-   */
-  findNearestCity(latitude, longitude, maxDistance = 200) {
-    // 参数验证
-    if (!this.isValidCoordinate(latitude, longitude)) {
-      logger.warn('Invalid coordinates provided');
-      return null;
-    }
-
-    // 检查缓存
-    const cacheKey = this.getCacheKey(latitude, longitude);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey);
-    }
-    let nearestCity = null;
-    let minDistance = Infinity;
-
-    // 遍历所有城市查找最近的一个
-    for (const city of this.cities) {
+      // 计算距离（如果查询坐标与城市坐标不同）
       const distance = this.calculateDistance(
-        latitude, 
-        longitude, 
-        city.lat, 
-        city.lng
+        coord.latitude,
+        coord.longitude,
+        location.latitude,
+        location.longitude
       );
 
-      if (distance < minDistance && distance <= maxDistance) {
-        minDistance = distance;
-        nearestCity = {
-          ...city,
-          name: this.normalizeCityName(city.name), // 标准化城市名称
-          distance: Math.round(distance * 100) / 100, // 保留两位小数
-          source: 'local'
-        };
-      }
-    }
-
-
-    return nearestCity;
+      return {
+        id: coord.id,
+        latitude: coord.latitude,
+        longitude: coord.longitude,
+        success: true,
+        location_id: location.location_id, // 添加 location_id 到返回结果
+        city: {
+          name: normalizedCityName,
+          name_zh: location.name_zh,
+          name_en: location.name_en,
+          province: location.province,
+          city: location.city,
+          district: location.district,
+          lat: location.latitude,
+          lng: location.longitude,
+          country_code: location.country_code,
+          data_source: location.data_source,
+          distance: Math.round(distance * 100) / 100,
+          source: 'local',
+          location_id: location.location_id // 也添加到 city 对象中以便兼容
+        },
+        fromCache: true
+      };
+    });
   }
 
   /**
-   * 根据坐标查找最近的城市（混合模式：优先远程API，失败时回退到本地）
+   * 根据 location_id 和语言设置获取位置名称
+   * @param {string} locationId - 位置ID
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
+   * @returns {Promise<string|null>} 位置名称，如果未找到则返回 null
+   */
+  async getLocationName(locationId, language = 'zh') {
+    if (!locationId || typeof locationId !== 'string') {
+      logger.warn('getLocationName: locationId 无效', { locationId });
+      return null;
+    }
+
+    try {
+      // 确保已初始化
+      await locationStorageService.ensureInitialized();
+      
+      // 先从缓存中查找
+      let locationDetail = null;
+      if (locationStorageService.locationDetailsCache && locationStorageService.locationDetailsCache.has(locationId)) {
+        locationDetail = locationStorageService.locationDetailsCache.get(locationId);
+      } else {
+        // 缓存未命中，从数据库查询
+        locationDetail = await locationStorageService.storage.getLocationDetail(locationId);
+        
+        // 如果找到，更新缓存
+        if (locationDetail && locationDetail.location_id) {
+          locationStorageService.locationDetailsCache.set(locationDetail.location_id, locationDetail);
+        }
+      }
+
+      if (!locationDetail) {
+        logger.debug(`getLocationName: 未找到位置信息，locationId=${locationId}`);
+        return null;
+      }
+
+      // 根据语言设置返回对应的名称
+      if (language === 'en') {
+        return locationDetail.name_en || locationDetail.name_zh || null;
+      } else {
+        return locationDetail.name_zh || locationDetail.name_en || null;
+      }
+    } catch (error) {
+      logger.error('getLocationName: 获取位置名称失败', { locationId, language, error });
+      return null;
+    }
+  }
+
+  /**
+   * 根据 location_id 获取详细的位置信息
+   * @param {string} locationId - 位置ID
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'，用于返回对应语言的名称字段
+   * @returns {Promise<Object|null>} 位置详细信息对象，如果未找到则返回 null
+   * 
+   * 返回对象包含以下字段：
+   * - location_id: 位置ID
+   * - name: 根据语言设置返回的名称（name_zh 或 name_en）
+   * - name_zh: 中文名称
+   * - name_en: 英文名称
+   * - country_code: 国家代码（如 'CN', 'US'）
+   * - province: 省份/州
+   * - city: 城市
+   * - district: 区/县
+   * - latitude: 纬度
+   * - longitude: 经度
+   * - admin1_code: 一级行政区划代码
+   * - admin2_code: 二级行政区划代码
+   * - geoname_id: GeoNames ID
+   * - population: 人口数量
+   * - data_source: 数据来源（如 'gaode', 'nominatim'）
+   * - api_city_id: API城市ID
+   * - api_adcode: API行政区划代码
+   * - api_id: API ID
+   * - created_at: 创建时间
+   * - updated_at: 更新时间
+   */
+  async getLocationDetail(locationId, language = 'zh') {
+    if (!locationId || typeof locationId !== 'string') {
+      logger.warn('getLocationDetail: locationId 无效', { locationId });
+      return null;
+    }
+
+    try {
+      // 确保已初始化
+      await locationStorageService.ensureInitialized();
+      
+      // 先从缓存中查找
+      let locationDetail = null;
+      if (locationStorageService.locationDetailsCache && locationStorageService.locationDetailsCache.has(locationId)) {
+        locationDetail = locationStorageService.locationDetailsCache.get(locationId);
+      } else {
+        // 缓存未命中，从数据库查询
+        locationDetail = await locationStorageService.storage.getLocationDetail(locationId);
+        
+        // 如果找到，更新缓存
+        if (locationDetail && locationDetail.location_id) {
+          locationStorageService.locationDetailsCache.set(locationDetail.location_id, locationDetail);
+        }
+      }
+
+      if (!locationDetail) {
+        logger.debug(`getLocationDetail: 未找到位置信息，locationId=${locationId}`);
+        return null;
+      }
+
+      // 根据语言设置选择主要显示名称
+      const displayName = language === 'en' 
+        ? (locationDetail.name_en || locationDetail.name_zh || '')
+        : (locationDetail.name_zh || locationDetail.name_en || '');
+
+      // 返回格式化的位置详情对象
+      return {
+        location_id: locationDetail.location_id,
+        name: displayName,
+        name_zh: locationDetail.name_zh || null,
+        name_en: locationDetail.name_en || null,
+        country_code: locationDetail.country_code || null,
+        province: locationDetail.province || null,
+        city: locationDetail.city || null,
+        district: locationDetail.district || null,
+        latitude: locationDetail.latitude || null,
+        longitude: locationDetail.longitude || null,
+        admin1_code: locationDetail.admin1_code || null,
+        admin2_code: locationDetail.admin2_code || null,
+        geoname_id: locationDetail.geoname_id || null,
+        population: locationDetail.population || null,
+        data_source: locationDetail.data_source || null,
+        api_city_id: locationDetail.api_city_id || null,
+        api_adcode: locationDetail.api_adcode || null,
+        api_id: locationDetail.api_id || null,
+        created_at: locationDetail.created_at || null,
+        updated_at: locationDetail.updated_at || null
+      };
+    } catch (error) {
+      logger.error('getLocationDetail: 获取位置详情失败', { locationId, language, error });
+      return null;
+    }
+  }
+
+  /**
+   * 根据 location_id 获取格式化的位置信息字符串
+   * @param {string} locationId - 位置ID
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
+   * @returns {Promise<string|null>} 格式化的位置信息字符串，如果未找到则返回 null
+   * 
+   * 返回格式示例：
+   * - 中文：济南市, 历城区, 山东省, CN
+   * - 英文：Jinan, Licheng District, Shandong Province, CN
+   */
+  /**
+   * 根据 location_id 获取格式化的位置信息字符串
+   * @param {string} locationId - 位置ID
+   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
+   * @returns {Promise<string|null>} 格式化的位置信息字符串，如果未找到则返回 null
+   * 
+   * 返回格式示例：
+   * - 中文：济南, 历城区, 山东省, 中国
+   * - 英文：Jinan, Licheng District, Shandong Province, China
+   */
+  async getLocationDetailString(locationId, language = 'zh') {
+    const detail = await this.getLocationDetail(locationId, language);
+    if (!detail) {
+      return null;
+    }
+
+    const parts = [];
+    
+    // 城市名称
+    if (detail.name) {
+      parts.push(detail.name);
+    }
+    
+    // 区/县
+    if (detail.district && detail.district.trim() !== '') {
+      parts.push(detail.district);
+    }
+    
+    // 省份
+    if (detail.province && detail.province.trim() !== '' && detail.province !== 'unknown') {
+      parts.push(detail.province);
+    }
+    
+    // 国家名称（翻译后的）
+    if (detail.country_code && detail.country_code.trim() !== '') {
+      const countryName = getCountryName(detail.country_code, language);
+      parts.push(countryName);
+    }
+    
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
+  /**
+   * 根据坐标查找最近的城市（单个，兼容旧接口）
    * @param {number} latitude - 纬度
    * @param {number} longitude - 经度
-   * @param {number} maxDistance - 最大搜索距离(公里)，默认200公里
-   * @param {boolean} useRemoteApi - 是否使用远程API，默认true
+   * @param {number} maxDistance - 最大搜索距离(公里)，已废弃，保留兼容性
+   * @param {boolean} useRemoteApi - 是否使用远程API，已废弃，保留兼容性
    * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
    * @returns {Promise<Object|null>} 城市信息对象或null
    */
   async findNearestCityAsync(latitude, longitude, maxDistance = 200, useRemoteApi = true, language = 'zh') {
-    // 参数验证
-    if (!this.isValidCoordinate(latitude, longitude)) {
-      logger.warn('Invalid coordinates provided');
-      return null;
+    const results = await this.getLocationsBatch([{
+      latitude,
+      longitude
+    }], { language, skipRemote: !useRemoteApi });
+
+    if (results.length > 0 && results[0].success) {
+      return results[0].city;
     }
 
-    // 检查缓存（包含语言信息，确保不同语言的结果分别缓存）
-    const cacheKey = this.getCacheKey(latitude, longitude, language);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey);
-    }
-
-    let nearestCity = null;
-
-    // 如果禁用远程API，直接使用本地查询（本地数据只有中文）
-    if (!useRemoteApi) {
-      nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
-    } else {
-      try {
-        // 1. 优先尝试远程API（传递语言参数）
-        nearestCity = await this.findNearestCityRemote(latitude, longitude, language);
-        
-        // 如果远程API失败或未找到结果，回退到本地查询（本地数据只有中文）
-        if (!nearestCity) {
-          nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
-        }
-        
-      } catch (error) {
-        // 如果远程API调用异常，回退到本地查询（本地数据只有中文）
-        nearestCity = this.findNearestCity(latitude, longitude, maxDistance);
-      }
-    }
-
-    // 缓存结果（使用包含语言的缓存键）
-    // 注意：城市名称的标准化已经在 findNearestCityRemote（中文）和 findNearestCity（本地）中完成
-    // 英文名称不需要标准化
-    if (nearestCity) {
-      this.setCache(cacheKey, nearestCity);
-    }
-
-    return nearestCity;
-  }
-
-  /**
-   * 根据坐标查找指定范围内的所有城市
-   * @param {number} latitude - 纬度
-   * @param {number} longitude - 经度
-   * @param {number} radius - 搜索半径(公里)
-   * @returns {Array} 城市信息数组
-   */
-  findCitiesInRadius(latitude, longitude, radius = 100) {
-    if (!this.isValidCoordinate(latitude, longitude)) {
-      return [];
-    }
-
-    const citiesInRadius = [];
-
-    for (const city of this.cities) {
-      const distance = this.calculateDistance(
-        latitude, 
-        longitude, 
-        city.lat, 
-        city.lng
-      );
-
-      if (distance <= radius) {
-        citiesInRadius.push({
-          ...city,
-          distance: Math.round(distance * 100) / 100
-        });
-      }
-    }
-
-    // 按距离排序
-    return citiesInRadius.sort((a, b) => a.distance - b.distance);
+    return null;
   }
 
   /**
@@ -232,7 +738,6 @@ class CityLocationService {
   normalizeCityName(cityName) {
     if (!cityName) return cityName;
     
-    // 移除"市"后缀，统一格式
     let normalized = cityName.trim();
     if (normalized.endsWith('市')) {
       normalized = normalized.slice(0, -1);
@@ -242,44 +747,27 @@ class CityLocationService {
   }
 
   /**
-   * 根据城市名称查找城市信息
-   * @param {string} cityName - 城市名称
-   * @returns {Object|null} 城市信息对象或null
+   * 标准化坐标精度（保留4位小数）
+   * @param {number} coord - 坐标值
+   * @returns {number} 标准化后的坐标
    */
-  findCityByName(cityName) {
-    if (!cityName || typeof cityName !== 'string') {
-      return null;
-    }
-
-    const normalizedName = cityName.trim();
-    
-    // 精确匹配
-    let city = this.cities.find(c => c.name === normalizedName);
-    if (city) return city;
-
-    // 模糊匹配
-    city = this.cities.find(c => 
-      c.name.includes(normalizedName) || 
-      normalizedName.includes(c.name)
-    );
-    
-    return city || null;
+  normalizeCoordinate(coord) {
+    return Math.round(coord * 10000) / 10000;
   }
 
   /**
-   * 根据省份查找该省的所有城市
-   * @param {string} provinceName - 省份名称
-   * @returns {Array} 城市信息数组
+   * 验证坐标是否有效
+   * @param {number} latitude - 纬度
+   * @param {number} longitude - 经度
+   * @returns {boolean} 是否有效
    */
-  findCitiesByProvince(provinceName) {
-    if (!provinceName || typeof provinceName !== 'string') {
-      return [];
-    }
-
-    const normalizedProvince = provinceName.trim();
-    return this.cities.filter(city => 
-      city.province === normalizedProvince
-    );
+  isValidCoordinate(latitude, longitude) {
+    return typeof latitude === 'number' && 
+           typeof longitude === 'number' &&
+           !isNaN(latitude) && 
+           !isNaN(longitude) &&
+           latitude >= -90 && latitude <= 90 &&
+           longitude >= -180 && longitude <= 180;
   }
 
   /**
@@ -313,88 +801,123 @@ class CityLocationService {
   }
 
   /**
-   * 验证坐标是否有效
-   * @param {number} latitude - 纬度
-   * @param {number} longitude - 经度
-   * @returns {boolean} 是否有效
+   * 测试API连接（用于诊断问题）
+   * 在浏览器控制台中调用：cityLocationService.testAPIConnection()
    */
-  isValidCoordinate(latitude, longitude) {
-    return typeof latitude === 'number' && 
-           typeof longitude === 'number' &&
-           !isNaN(latitude) && 
-           !isNaN(longitude) &&
-           latitude >= -90 && latitude <= 90 &&
-           longitude >= -180 && longitude <= 180;
-  }
-
-  /**
-   * 生成缓存键（包含语言信息，确保不同语言的结果分别缓存）
-   * @param {number} latitude - 纬度
-   * @param {number} longitude - 经度
-   * @param {string} language - 语言设置 ('zh' 或 'en')，默认为 'zh'
-   * @returns {string} 缓存键
-   */
-  getCacheKey(latitude, longitude, language = 'zh') {
-    // 将坐标四舍五入到小数点后2位，减少缓存键数量
-    const lat = Math.round(latitude * 100) / 100;
-    const lng = Math.round(longitude * 100) / 100;
-    // 包含语言信息，确保不同语言的结果分别缓存
-    return `${lat}_${lng}_${language}`;
-  }
-
-  /**
-   * 设置缓存
-   * @param {string} key - 缓存键
-   * @param {Object} value - 缓存值
-   */
-  setCache(key, value) {
-    // 如果缓存已满，删除最旧的条目
-    if (this.cache.size >= this.maxCacheSize) {
-      const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
-    }
+  async testAPIConnection() {
+    const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearestCities}`;
+    const testCoordinates = [{
+      id: 'test_001',
+      latitude: 39.9042,
+      longitude: 116.4074
+    }];
     
-    this.cache.set(key, value);
-  }
-
-  /**
-   * 清空缓存
-   */
-  clearCache() {
-    this.cache.clear();
-  }
-
-  /**
-   * 获取缓存统计信息
-   * @returns {Object} 缓存统计
-   */
-  getCacheStats() {
-    return {
-      size: this.cache.size,
-      maxSize: this.maxCacheSize,
-      hitRate: this.cacheHits / (this.cacheHits + this.cacheMisses) || 0
-    };
-  }
-
-  /**
-   * 获取所有城市数量
-   * @returns {number} 城市数量
-   */
-  getCityCount() {
-    return this.cities.length;
-  }
-
-  /**
-   * 获取所有省份列表
-   * @returns {Array} 省份名称数组
-   */
-  getProvinces() {
-    const provinces = [...new Set(this.cities.map(city => city.province))];
-    return provinces.sort();
+    logger.info('🧪 开始测试API连接...', {
+      url: url,
+      testCoordinates: testCoordinates
+    });
+    
+    try {
+      // 测试1: 简单GET请求（健康检查）
+      try {
+        const healthUrl = `${this.apiConfig.baseURL}/api/v2/health`;
+        logger.info('🧪 测试1: 健康检查端点...', { url: healthUrl });
+        const healthResponse = await fetch(healthUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        logger.info('✅ 健康检查成功:', {
+          status: healthResponse.status,
+          statusText: healthResponse.statusText,
+          ok: healthResponse.ok
+        });
+        if (healthResponse.ok) {
+          const healthData = await healthResponse.json();
+          logger.info('📥 健康检查响应数据:', healthData);
+        }
+      } catch (healthError) {
+        logger.error('❌ 健康检查失败:', {
+          errorName: healthError.name,
+          errorMessage: healthError.message,
+          errorStack: healthError.stack
+        });
+      }
+      
+      // 测试2: POST请求（位置查询）
+      logger.info('🧪 测试2: 位置查询端点...', { url: url });
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          coordinates: testCoordinates
+        })
+      });
+      
+      logger.info('📥 收到响应:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+      
+      if (!response.ok) {
+        let errorBody = null;
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            errorBody = await response.json();
+          } else {
+            errorBody = await response.text();
+          }
+        } catch (e) {
+          logger.warn('⚠️ 无法读取错误响应体:', e.message);
+        }
+        
+        logger.error('❌ 服务器返回错误:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorBody: errorBody
+        });
+        return { success: false, error: `HTTP ${response.status}: ${response.statusText}`, errorBody };
+      }
+      
+      const data = await response.json();
+      logger.info('✅ API连接测试成功:', {
+        success: data.success,
+        resultsCount: data.results?.length || 0
+      });
+      
+      return { success: true, data };
+      
+    } catch (error) {
+      logger.error('❌ API连接测试失败:', {
+        errorName: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack,
+        url: url,
+        possibleCauses: [
+          'CORS策略阻止了请求（检查服务器CORS配置）',
+          '网络连接失败（检查网络连接）',
+          'DNS解析失败（检查域名是否正确）',
+          '服务器不可达（检查服务器是否运行）',
+          'SSL证书问题（检查HTTPS配置）'
+        ]
+      });
+      return { success: false, error: error.message, errorName: error.name };
+    }
   }
 }
 
 // 创建单例实例
 const cityLocationService = new CityLocationService();
+
+// 导出测试方法到全局（方便在浏览器控制台中调用）
+if (typeof window !== 'undefined') {
+  window.testLocationAPI = () => cityLocationService.testAPIConnection();
+}
 
 export default cityLocationService;

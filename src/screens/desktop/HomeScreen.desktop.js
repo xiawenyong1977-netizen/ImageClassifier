@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-  Alert,
-  SafeAreaView,
   Dimensions,
   Image,
   Animated,
@@ -17,8 +15,9 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
+import cityLocationService from '../../services/CityLocationService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
-import { logger, getUri } from '../../adapters/WebAdapters';
+import { logger, getUri, Alert, SafeAreaView } from '../../adapters/WebAdapters';
 import { getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
 
 const HomeScreen = () => {
@@ -65,8 +64,6 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
   const [totalImagesCount, setTotalImagesCount] = useState(0);
-  const [readmeContent, setReadmeContent] = useState('');
-  const [forceShowReadme, setForceShowReadme] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const rotationValue = useRef(new Animated.Value(0)).current;
   
@@ -116,10 +113,9 @@ const HomeScreen = () => {
         logger.debug('没有分类数据，跳过加载分类最近图片');
       }
       
-      // 加载各城市的最近图片（按数量排序取前10个）
-      const sortedCities = Object.entries(cityCountsData).sort(([,a], [,b]) => b - a);
-      const cityIds = sortedCities.slice(0, 10).map(([cityName]) => cityName);
-      const cityImagesPromises = cityIds.map(async (cityName) => {
+      // 加载所有城市的最近图片（确保所有城市卡片都能显示缩略图）
+      const allCityIds = Object.keys(cityCountsData);
+      const cityImagesPromises = allCityIds.map(async (cityName) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByCity(cityName, 1);
           return { cityName, images };
@@ -302,144 +298,9 @@ const HomeScreen = () => {
     logger.debug('更新 hideEmptyCategoriesRef.current:', hideEmptyCategories);
   }, [hideEmptyCategories]);
   
-  // 加载 readme 内容
-  const loadReadme = useCallback(async () => {
-    try {
-      // 方法1: 尝试从 public 目录通过 fetch 加载（推荐）
-      try {
-        logger.debug('尝试从 public 目录加载 readme');
-        const response = await fetch('./readme/readme.md');
-        if (response.ok) {
-          let content = await response.text();
-          logger.debug('从 public 目录读取 readme 成功，长度:', content.length);
-          
-          // 处理图片路径，将相对路径转换为 public 目录下的路径
-          content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
-            const imagePath = `./readme/${filename}`;
-            return `src="${imagePath}"`;
-          });
-          
-          setReadmeContent(content);
-          return;
-        }
-      } catch (fetchError) {
-        logger.debug('从 public 目录加载失败:', fetchError);
-      }
-
-      // 方法2: 尝试从文件系统读取（fallback）
-      if (typeof window !== 'undefined' && window.require) {
-        const fs = window.require('fs');
-        const path = window.require('path');
-        
-        // 尝试不同的路径
-        const possiblePaths = [
-          path.join(process.cwd(), 'public', 'readme', 'readme.md'),
-          path.join(process.cwd(), 'readme', 'readme.md'),
-          path.join(process.cwd(), '..', 'readme', 'readme.md'), // 上一级目录
-          path.join(__dirname, 'readme', 'readme.md'),
-          path.join(__dirname, '..', '..', 'readme', 'readme.md'), // 上两级目录
-          path.join(process.resourcesPath || '', 'readme', 'readme.md'),
-          path.join(process.cwd(), '..', '..', 'readme', 'readme.md'), // 项目根目录
-          'readme/readme.md',
-          '../readme/readme.md',
-          '../../readme/readme.md'
-        ];
-        
-        let content = '';
-        let readmePath = '';
-        let readmeDir = '';
-        
-        for (const testPath of possiblePaths) {
-          try {
-            logger.debug('尝试读取 readme 文件:', testPath);
-            if (fs.existsSync(testPath)) {
-              content = fs.readFileSync(testPath, 'utf-8');
-              readmePath = testPath;
-              readmeDir = path.dirname(testPath);
-              logger.debug('readme 文件读取成功，路径:', readmePath);
-              break;
-            }
-          } catch (e) {
-            logger.debug('路径不存在或读取失败:', testPath);
-          }
-        }
-        
-        if (content) {
-          // 处理图片路径，将相对路径转换为绝对路径
-          content = content.replace(/src="\.\/([^"]+)"/g, (match, filename) => {
-            const imagePath = path.join(readmeDir, filename).replace(/\\/g, '/');
-            return `src="file:///${imagePath}"`;
-          });
-          
-          setReadmeContent(content);
-          logger.debug('readme 内容设置成功，长度:', content.length);
-          return;
-        }
-      }
-
-      // 方法3: 使用 fallback 内容
-      logger.warn('未找到 readme 文件，使用 fallback 内容');
-      const fallbackContent = `您是否也曾经历过这样的时刻？
-
-在旅途中，我们举起镜头，想要留住山河壮阔的壮丽瞬间；在聚会时，我们按下快门，渴望定格与好友欢聚的每一张笑脸；回到家中，我们随手一拍，记录下家人的温情陪伴与宠物的暖心依赖；甚至当美食上桌，我们也习惯性地"咔嚓"一声，将色香味俱全的体验封存为永恒的记忆……
-
-科技让拍照变得轻而易举，却也带来了"幸福的烦恼"。为了捕捉最完美的瞬间，我们常常对同一场景连拍数张；工作之中，相机也成为得力助手——会议实录、资料拍摄、事实留存、沟通截图……大量的图片无声地堆积在手机相册中，其中有珍贵的文档、美好的回忆，也有重要的凭证。
-
-日积月累，手机存储空间频频告急，而云备份又让人担忧隐私安全。如何高效整理海量照片，在释放空间的同时，守护每一份珍贵记忆，已成为我们每个人都需要面对的日常课题。
-
-芯图相册，正是为您解决这一难题而生的智能伙伴。
-
-我们运用最新AI技术，在您的设备本地即可对照片进行智能识别与分类。无需登录、无需网络、更无任何内嵌广告——从根源上杜绝隐私泄露风险，给您纯粹、安心的整理体验。
-
-📁 核心功能：智能分类，便捷管理
-
-· 第一版已支持按内容、城市、相似度三大维度进行分类
-· 内容识别覆盖七大常见类别：手机截图、证件照片、单人照、社会活动（多人照）、自然风景、美食与萌宠
-· 经过严格测试，分类准确率稳定在90%以上
-· 如有个别分类有误，您也可手动调整，灵活又贴心
-
-操作指引：四步完成相册焕新
-
-以手机相册清理为例，轻松上手：
-
-1. 连接与设置
-       使用数据线连接手机与电脑，在设置页面选定需要整理的相册目录。
-
-2. 一键智能分类
-       点击"开始智能分类"，AI将自动扫描识别，首页清晰展示分类进度与图片统计。
-
-3. 便捷拣选暂存
-       分类完成后，可逐类浏览，轻松勾选需要处理的作品，一键移入暂存箱。
-
-4. 最终清理或归档
-       进入暂存箱二次确认，无误后全选删除，或复制到指定文件夹完成归档。`;
-      setReadmeContent(fallbackContent);
-      
-    } catch (error) {
-      logger.error('读取 readme 文件失败:', error);
-      setReadmeContent('');
-    }
-  }, []);
-
-  // 检查是否需要强制显示 readme（用于测试）
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const showReadme = urlParams.get('showReadme');
-      if (showReadme === 'true') {
-        setForceShowReadme(true);
-        logger.debug('强制显示 readme 模式已启用');
-      }
-    }
-  }, []);
-
   // 初始化数据加载
   useEffect(() => {
-    const initializeData = async () => {
-      await loadData();
-      loadReadme();
-    };
-    initializeData();
+    loadData();
   }, []);
   
   // 页面重新挂载时重新加载数据（通过页面切换实现）
@@ -493,7 +354,6 @@ const HomeScreen = () => {
         progress.stage === 'remote_inference' || progress.stage === 'local_inference' ||
         progress.stage === 'processing_images' || progress.stage === 'removing_files' ||
         progress.stage === 'similarity_detection' || progress.stage === 'updating_data') {
-      setForceShowReadme(false);
       setIsScanning(true);
     }
     
@@ -599,14 +459,138 @@ const HomeScreen = () => {
     }));
   };
 
-  // 兼容性包装函数（保持向后兼容）
-  const handleDirectoryPress = (directory) => handleFilterPress('directory', directory);
-  const handleCategoryPress = (category) => handleFilterPress('category', category);
-  const handleColorPress = (color) => handleFilterPress('color', color);
-  const handleCityPress = (city) => handleFilterPress('city', city);
-  const handleFormatPress = (format) => handleFilterPress('format', format);
-  const handleResolutionPress = (resolution) => handleFilterPress('resolution', resolution);
-  const handleOrientationPress = (orientation) => handleFilterPress('orientation', orientation);
+  // 执行 AI 分类的实际逻辑
+  const executeAIClassify = useCallback(async () => {
+    try {
+      logger.debug('开始对 NA 分类图片进行 AI 分类');
+      
+      // 设置扫描状态
+      setIsScanning(true);
+      setGlobalMessage(t('home.initScanning'));
+      
+      // 创建 GalleryScannerService 实例
+      const galleryScannerService = new GalleryScannerService();
+      
+      // 设置进度回调，复用现有的进度更新机制
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('AI分类进度:', progress);
+        handleScanProgress(progress);
+        
+        // 检查是否需要刷新页面
+        if (progress.shouldRefresh) {
+          logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
+          setTimeout(async () => {
+            try {
+              await loadData();
+            } catch (error) {
+              logger.error('❌ 刷新失败:', error);
+            }
+          }, 0);
+        }
+      };
+      
+      // 记录扫描开始时间
+      const scanStartTime = new Date().toISOString();
+      
+      // 调用 AI 分类方法（不传 imagesToClassify，让它读取所有 NA 图片）
+      await galleryScannerService.aiImageClassifyByContent(scanStartTime, null);
+      
+      logger.debug('AI 分类完成');
+      
+      // 刷新数据
+      await loadData();
+      
+    } catch (error) {
+      logger.error('AI 分类失败:', error);
+      setGlobalMessage(t('home.scanFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+    }
+  }, [handleScanProgress, loadData, t]);
+
+  // 启动相似度检测
+  const handleStartSimilarityDetection = useCallback(async () => {
+    // 检查是否正在扫描
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过相似度检测请求');
+      return;
+    }
+
+    try {
+      logger.debug('开始相似度检测');
+      
+      // 设置扫描状态
+      setIsScanning(true);
+      setGlobalMessage(t('home.similarityDetectionInProgress'));
+      
+      // 创建 GalleryScannerService 实例，复用其相似度检测逻辑
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      
+      // 设置进度回调，复用 handleScanProgress
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('相似度检测进度:', progress);
+        handleScanProgress(progress);
+      };
+      
+      // 设置扫描开始时间（用于增量检测）
+      galleryScannerService.scanStartTimestamp = new Date();
+      
+      // 直接调用 similarityDetectionPhase，它会使用内部的 sendProgressMessage
+      await galleryScannerService.similarityDetectionPhase();
+      
+      // 获取相似组统计以显示完成消息
+      const similarityGroupsStats = await UnifiedDataService.getSimilarityGroupsStats();
+      const groupsCount = similarityGroupsStats ? similarityGroupsStats.length : 0;
+      
+      logger.debug(`相似度检测完成: 发现${groupsCount}个相似组`);
+      setGlobalMessage(t('home.similarityDetectionCompleted', { count: groupsCount }));
+      
+      // 刷新数据以显示新的相似组
+      await loadData();
+      
+    } catch (error) {
+      logger.error('相似度检测失败:', error);
+      setGlobalMessage(t('home.similarityDetectionFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+    }
+  }, [isScanning, loadData, t, handleScanProgress]);
+
+  // 处理 NA 分类的 AI 分类（右键点击触发）
+  const handleNACategoryAIClassify = useCallback(() => {
+    // 检查是否正在扫描
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过 AI 分类请求');
+      return;
+    }
+
+    // 获取待分类照片数量
+    const naCount = categoryCounts['NA'] || categoryCounts.NA || 0;
+
+    // 显示确认对话框
+    Alert.alert(
+      t('home.aiClassifyConfirmTitle'),
+      t('home.aiClassifyConfirmMessage', { count: naCount }),
+      [
+        {
+          text: t('common.cancel'),
+          style: 'cancel',
+          onPress: () => {
+            logger.debug('用户取消 AI 分类');
+          }
+        },
+        {
+          text: t('common.confirm'),
+          style: 'default',
+          onPress: () => {
+            logger.debug('用户确认开始 AI 分类');
+            executeAIClassify();
+          }
+        }
+      ]
+    );
+  }, [isScanning, executeAIClassify, t, categoryCounts]);
 
   // 处理图片点击 - 直接通过URL参数传递图片ID和上下文信息
   const handleImagePress = useCallback((image, fromScreen, additionalProps = {}) => {
@@ -677,6 +661,14 @@ const HomeScreen = () => {
     logger.debug('设置URL参数，imageId:', imageId, 'filterType:', filterType, 'filterValue:', filterValue);
   }, []);
 
+  // 兼容性包装函数（保持向后兼容）
+  const handleDirectoryPress = (directory) => handleFilterPress('directory', directory);
+  const handleCategoryPress = (category) => handleFilterPress('category', category);
+  const handleColorPress = (color) => handleFilterPress('color', color);
+  const handleCityPress = (city) => handleFilterPress('city', city);
+  const handleFormatPress = (format) => handleFilterPress('format', format);
+  const handleResolutionPress = (resolution) => handleFilterPress('resolution', resolution);
+  const handleOrientationPress = (orientation) => handleFilterPress('orientation', orientation);
 
   // 处理刷新
   const onRefresh = useCallback(async () => {
@@ -734,8 +726,7 @@ const HomeScreen = () => {
         compareLimitOption = { compareLimit: 100 };
       }
 
-      // 立即设置扫描状态，清除强制显示 readme 状态
-      setForceShowReadme(false);
+      // 立即设置扫描状态
       setIsScanning(true);
       setGlobalMessage(t('home.initScanning'));
       
@@ -876,164 +867,6 @@ const HomeScreen = () => {
     loadLastScanTime();
   }, [t]);
 
-  // 渲染 Readme 内容的组件
-  const ReadmeView = () => {
-    const { t: tReadme } = useTranslation('common');
-    logger.debug('ReadmeView 被渲染，readmeContent 长度:', readmeContent.length);
-    
-    // 如果 readme 内容为空，显示提示信息
-    if (!readmeContent || readmeContent.length === 0) {
-      return (
-        <ScrollView
-          style={styles.scrollView}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          <View style={styles.readmeContainer}>
-            <Text style={styles.readmeH1}>{tReadme('home.welcome')}</Text>
-            <Text style={styles.readmeParagraph}>{tReadme('app.description')}</Text>
-            <TouchableOpacity
-              style={styles.getStartedButton}
-              onPress={() => {
-                setCurrentScreen('Settings');
-                setScreenProps({});
-              }}
-            >
-              <Text style={styles.getStartedButtonText}>{tReadme('home.goToSettings')}</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      );
-    }
-    
-    return (
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        <View style={styles.readmeContainer}>
-          <View style={styles.readmeContent}>
-            {/* 解析并渲染 markdown 内容 */}
-            {readmeContent.split('\n').map((line, index) => {
-              // 标题
-              if (line.startsWith('# ')) {
-                return <Text key={index} style={styles.readmeH1}>{line.substring(2)}</Text>;
-              } else if (line.startsWith('## ')) {
-                return <Text key={index} style={styles.readmeH2}>{line.substring(3)}</Text>;
-              } else if (line.startsWith('### ')) {
-                return <Text key={index} style={styles.readmeH3}>{line.substring(4)}</Text>;
-              }
-              // 列表项
-              else if (line.startsWith('· ')) {
-                return <Text key={index} style={styles.readmeListItem}>• {line.substring(2)}</Text>;
-              }
-              // 数字列表
-              else if (/^\d+\.\s/.test(line)) {
-                return <Text key={index} style={styles.readmeNumberedItem}>{line}</Text>;
-              }
-              // HTML 图片标签 - 解析并渲染为 React Native 组件
-              else if (line.includes('<div') || line.includes('<img') || line.includes('</div>')) {
-                // 解析 HTML 内容，提取图片路径
-                const imgMatches = line.match(/src="([^"]+)"/g);
-                if (imgMatches && imgMatches.length > 0) {
-                  const imageSources = imgMatches.map(match => {
-                    const src = match.replace('src="', '').replace('"', '');
-                    return src;
-                  });
-                  
-                  // 如果是水平排列的图片（2张图片）
-                  if (imageSources.length === 2) {
-                    return (
-                      <View key={index} style={styles.readmeHorizontalImages}>
-                        <Image 
-                          source={{ uri: imageSources[0] }} 
-                          style={styles.readmeImageHorizontal}
-                          resizeMode="cover"
-                        />
-                        <Image 
-                          source={{ uri: imageSources[1] }} 
-                          style={styles.readmeImageHorizontal}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    );
-                  } 
-                  // 如果是单张图片
-                  else if (imageSources.length === 1) {
-                    return (
-                      <View key={index} style={styles.readmeSingleImage}>
-                        <Image 
-                          source={{ uri: imageSources[0] }} 
-                          style={styles.readmeImageSingle}
-                          resizeMode="contain"
-                        />
-                      </View>
-                    );
-                  }
-                }
-                
-                // 如果无法解析，尝试使用 dangerouslySetInnerHTML（fallback）
-                if (typeof window !== 'undefined') {
-                  return (
-                    <View key={index} style={styles.readmeImageContainer}>
-                      <div dangerouslySetInnerHTML={{ __html: line }} />
-                    </View>
-                  );
-                }
-                return null;
-              }
-              // 空行
-              else if (line.trim() === '') {
-                return <View key={index} style={styles.readmeEmptyLine} />;
-              }
-              // 普通段落
-              else {
-                // 检查是否包含加粗文本 **文本**
-                if (line.includes('**')) {
-                  const parts = line.split(/(\*\*[^*]+\*\*)/g);
-                  return (
-                    <Text key={index} style={styles.readmeParagraph}>
-                      {parts.map((part, partIndex) => {
-                        if (part.startsWith('**') && part.endsWith('**')) {
-                          // 加粗文本
-                          const boldText = part.slice(2, -2);
-                          return (
-                            <Text key={partIndex} style={styles.readmeBoldText}>
-                              {boldText}
-                            </Text>
-                          );
-                        } else {
-                          // 普通文本
-                          return part;
-                        }
-                      })}
-                    </Text>
-                  );
-                } else {
-                  return <Text key={index} style={styles.readmeParagraph}>{line}</Text>;
-                }
-              }
-            })}
-          </View>
-          
-          {/* 开始使用按钮 */}
-          <TouchableOpacity
-            style={styles.getStartedButton}
-            onPress={() => {
-              setCurrentScreen('Settings');
-              setScreenProps({});
-            }}
-          >
-            <Text style={styles.getStartedButtonText}>{tReadme('home.goToSettings')}</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    );
-  };
-
   // 渲染首页内容的函数
   const renderHomeContent = () => {
     logger.debug('hideEmptyCategoriesRef.current:', hideEmptyCategoriesRef.current);
@@ -1130,6 +963,7 @@ const HomeScreen = () => {
                     count={count}
                     recentImages={recentImages}
                     onPress={handleCategoryPress}
+                    onRightClick={category.id === 'NA' ? handleNACategoryAIClassify : undefined}
                   />
                 );
               });
@@ -1392,23 +1226,64 @@ const HomeScreen = () => {
           );
         })()}
 
-        {/* 相似照片板块 - 根据设置显示，且只有当有相似照片组时才显示 */}
-        {showSimilarityGroups && similarityGroups && similarityGroups.length > 0 && (
+        {/* 相似照片板块 - 根据设置显示 */}
+        {showSimilarityGroups && (
           <View style={styles.categoriesSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🔗 {t('category.similarityGroup')}</Text>
+            <View style={styles.recentSectionHeader}>
+              <View style={styles.sectionTitleContainer}>
+                <Text style={styles.sectionTitle}>🔗 {t('category.similarityGroup')}</Text>
+              </View>
+              {similarityGroups && similarityGroups.length > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.refreshButton,
+                    isScanning && styles.refreshButtonDisabled
+                  ]}
+                  onPress={handleStartSimilarityDetection}
+                  disabled={isScanning}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.refreshButtonText,
+                    isScanning && styles.refreshButtonTextDisabled
+                  ]}>🔄</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={styles.categoriesContainer}>
-              {similarityGroups.slice(0, 10).map((group) => (
-                <SimilarityCard
-                  key={group.groupId}
-                  group={group}
-                  onPress={(group) => {
-                    // 🆕 使用统一的过滤处理函数
-                    handleFilterPress('similarityGroup', group.groupId);
-                  }}
-                />
-              ))}
+              {similarityGroups && similarityGroups.length > 0 ? (
+                similarityGroups.slice(0, 10).map((group) => (
+                  <SimilarityCard
+                    key={group.groupId}
+                    group={group}
+                    onPress={(group) => {
+                      // 🆕 使用统一的过滤处理函数
+                      handleFilterPress('similarityGroup', group.groupId);
+                    }}
+                  />
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateIcon}>🔗</Text>
+                  <Text style={styles.emptyStateText}>{t('home.noSimilarityGroups')}</Text>
+                  <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.startSimilarityButton,
+                      isScanning && styles.startSimilarityButtonDisabled
+                    ]}
+                    onPress={handleStartSimilarityDetection}
+                    disabled={isScanning}
+                  >
+                    <Text style={[
+                      styles.startSimilarityButtonText,
+                      isScanning && styles.startSimilarityButtonTextDisabled
+                    ]}>
+                      {t('home.startSimilarityDetection')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -1496,19 +1371,13 @@ const HomeScreen = () => {
         {currentScreen === 'Home' && (
           <View style={styles.screenContainer}>
             {/* 消息提示区 */}
-            {!(forceShowReadme && !isScanning) && (
-              <View style={styles.scanProgressBanner}>
-                <Text style={styles.scanProgressMessage}>
-                  {globalMessage}
-                </Text>
-              </View>
-            )}
+            <View style={styles.scanProgressBanner}>
+              <Text style={styles.scanProgressMessage}>
+                {globalMessage}
+              </Text>
+            </View>
             {/* 主内容区域 */}
-            {forceShowReadme && !isScanning ? (
-              <ReadmeView />
-            ) : (
-              renderHomeContent()
-            )}
+            {renderHomeContent()}
             
             {/* FAB扫描按钮 - 只在Home页面显示 */}
             <TouchableOpacity 
@@ -1636,7 +1505,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, readmeContent, forceShowReadme, isScanning, refreshing, onRefresh, rotationValue, t]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, isScanning, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1651,7 +1520,7 @@ const HomeScreen = () => {
 };
 
 // 渲染分类卡片组件
-const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => {
+const CategoryCard = React.memo(({ category, count, recentImages, onPress, onRightClick }) => {
   const { i18n } = useTranslation('common');
   
   // 稳定化图片源对象，避免不必要的重新渲染
@@ -1680,10 +1549,51 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress }) => 
     return category;
   };
 
+  // 处理右键点击事件 - 阻止默认右键菜单
+  const handleContextMenu = (event) => {
+    logger.debug(`handleContextMenu 被调用: categoryValue=${categoryValue}, hasOnRightClick=${!!onRightClick}`);
+    event.preventDefault(); // 阻止默认的右键菜单
+    event.stopPropagation();
+    
+    // 检查是否为 NA 分类
+    if (categoryValue === 'NA' && onRightClick) {
+      logger.debug(`通过 onContextMenu 调用onRightClick: ${categoryValue}`);
+      // 使用 setTimeout 延迟调用，避免 Alert 阻塞事件处理
+      setTimeout(() => {
+        onRightClick();
+      }, 0);
+    }
+  };
+
+  // 处理鼠标按下事件（用于右键点击检测）
+  const handleMouseDown = (event) => {
+    logger.debug(`handleMouseDown 被调用: button=${event.button}, categoryValue=${categoryValue}, hasOnRightClick=${!!onRightClick}`);
+    
+    // 右键点击（button === 2）
+    if (event.button === 2) {
+      logger.debug(`鼠标右键按下: ${categoryValue}`);
+      event.preventDefault(); // 阻止默认右键菜单
+      event.stopPropagation();
+      
+      // 检查是否为 NA 分类
+      if (categoryValue === 'NA' && onRightClick) {
+        logger.debug(`调用onRightClick: ${categoryValue}`);
+        // 使用 setTimeout 延迟调用，避免 Alert 阻塞事件处理
+        setTimeout(() => {
+          onRightClick();
+        }, 0);
+      } else {
+        logger.debug(`跳过右键点击处理: categoryValue=${categoryValue}, hasOnRightClick=${!!onRightClick}`);
+      }
+    }
+  };
+
   return (
     <TouchableOpacity
       style={styles.categoryCard}
       onPress={() => onPress(categoryValue)}
+      onContextMenu={handleContextMenu}
+      onMouseDown={handleMouseDown}
     >
       {/* 缩略图占满整个卡片 */}
       {imageSource ? (
@@ -1789,13 +1699,47 @@ const ColorCard = React.memo(({ color, count, recentImages, onPress }) => {
 });
 
 // 渲染城市卡片组件
-const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
+const CityCard = ({ city, count, recentImages, onPress }) => {
+  const { i18n } = useTranslation('common');
+  const [cityName, setCityName] = useState(city); // 默认显示 location_id，加载后显示名称
+  
   // 稳定化图片源对象，避免不必要的重新渲染
   const imageSource = useMemo(() => {
     if (recentImages.length === 0) return null;
     const imageUri = getUri(recentImages[0]);
     return imageUri ? { uri: imageUri } : null;
   }, [recentImages[0]]);
+
+  // 获取当前语言，使用 useMemo 确保语言变化时重新计算
+  const currentLanguage = useMemo(() => i18n.language || 'zh', [i18n.language]);
+
+  // 根据当前语言和 location_id 获取位置名称
+  useEffect(() => {
+    const loadCityName = async () => {
+      if (!city || typeof city !== 'string') {
+        return;
+      }
+      
+      try {
+        logger.debug('CityCard 加载城市名称:', { city, currentLanguage });
+        const name = await cityLocationService.getLocationName(city, currentLanguage);
+        if (name) {
+          logger.debug('CityCard 获取到城市名称:', { city, name, language: currentLanguage });
+          setCityName(name);
+        } else {
+          // 如果获取失败，保持显示 location_id
+          logger.debug('CityCard 未获取到城市名称，使用 location_id:', city);
+          setCityName(city);
+        }
+      } catch (error) {
+        logger.error('获取城市名称失败:', { city, error });
+        // 出错时保持显示 location_id
+        setCityName(city);
+      }
+    };
+    
+    loadCityName();
+  }, [city, currentLanguage]);
 
   return (
     <TouchableOpacity
@@ -1817,12 +1761,12 @@ const CityCard = React.memo(({ city, count, recentImages, onPress }) => {
       
       {/* 覆盖层显示城市信息 */}
       <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName}>{city}</Text>
+        <Text style={styles.categoryName}>{cityName}</Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
     </TouchableOpacity>
   );
-});
+};
 
 // 渲染相似照片卡片组件
 const SimilarityCard = React.memo(({ group, onPress }) => {
@@ -2066,9 +2010,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     cursor: 'pointer',
   },
+  refreshButtonDisabled: {
+    backgroundColor: '#e0e0e0',
+    opacity: 0.5,
+  },
   refreshButtonText: {
     fontSize: 16,
     lineHeight: 16,
+  },
+  refreshButtonTextDisabled: {
+    opacity: 0.5,
   },
   categoriesContainer: {
     flexDirection: 'row',
@@ -2153,139 +2104,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 24,
     paddingHorizontal: 20,
+    minHeight: 120,
   },
   emptyStateIcon: {
-    fontSize: 64,
-    marginBottom: 16,
+    fontSize: 48,
+    marginBottom: 8,
     opacity: 0.6,
   },
   emptyStateText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 4,
     textAlign: 'center',
   },
   emptyStateSubtext: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#999',
     textAlign: 'center',
-    lineHeight: 20,
-  },
-  // Readme 样式
-  readmeContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-    padding: 24,
-    margin: 16,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  readmeContent: {
-    flex: 1,
-  },
-  readmeH1: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginVertical: 8,
-    lineHeight: 24,
-  },
-  readmeH2: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#444',
-    marginVertical: 10,
-    lineHeight: 30,
-  },
-  readmeH3: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#555',
-    marginVertical: 8,
-    lineHeight: 26,
-  },
-  readmeParagraph: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 24,
-    marginVertical: 4,
-  },
-  readmeBoldText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    lineHeight: 24,
-  },
-  readmeListItem: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 24,
-    marginLeft: 16,
-    marginVertical: 2,
-  },
-  readmeNumberedItem: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#555',
-    lineHeight: 26,
-    marginVertical: 6,
-  },
-  readmeEmptyLine: {
-    height: 8,
-  },
-  readmeImageContainer: {
-    marginVertical: 12,
-    alignItems: 'center',
-  },
-  readmeHorizontalImages: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginVertical: 12,
-    gap: 10,
-  },
-  readmeImageHorizontal: {
-    width: '48%',
-    height: 200,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  readmeSingleImage: {
-    alignItems: 'center',
-    marginVertical: 12,
-  },
-  readmeImageSingle: {
-    width: '80%',
-    maxWidth: 400,
-    height: 250,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  getStartedButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 8,
-    marginTop: 24,
-    alignSelf: 'center',
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  getStartedButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 0,
   },
   // FAB按钮样式
   fabButton: {
@@ -2325,6 +2165,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#fff',
     lineHeight: 18,
+  },
+  // 开始相似度检测按钮样式
+  startSimilarityButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 16,
+    alignSelf: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  startSimilarityButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+    shadowColor: '#CCCCCC',
+    shadowOpacity: 0.2,
+    opacity: 0.6,
+  },
+  startSimilarityButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  startSimilarityButtonTextDisabled: {
+    color: '#999999',
   },
 });
 

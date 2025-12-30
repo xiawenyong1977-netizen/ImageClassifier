@@ -194,7 +194,7 @@ class GalleryScannerService {
       // 从ImageClassifierService获取API配置（不需要初始化，getAPIConfig不需要初始化）
       // 注意：原生扫描不需要初始化ImageClassifierService，因为本地推理在JS层后续处理阶段才需要
       const apiConfig = this.imageClassifier.getAPIConfig();
-      const baseURL = apiConfig.baseURL || 'https://api.aifuture.net.cn';
+      const baseURL = apiConfig.baseURL || 'https://www.xintxiangce.top';
       
       // 先设置事件监听器，确保能接收到所有事件
       this.setupEventListeners();

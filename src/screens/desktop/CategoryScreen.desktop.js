@@ -42,7 +42,10 @@ const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPr
     const handleSelectionChange = (event) => {
       const imageIds = imagesForDate.map(img => img.id);
       if (imageIds.includes(event.detail.imageId)) {
-        updateSelectionState();
+        // 使用 setTimeout 延迟状态更新，避免在渲染期间调用 setState
+        setTimeout(() => {
+          updateSelectionState();
+        }, 0);
       }
     };
     
@@ -416,7 +419,10 @@ const CategoryScreen = ({
   // 监听选中状态变化，强制刷新Header
   useEffect(() => {
     const handleSelectionChange = () => {
-      setSelectionVersion(v => v + 1);
+      // 使用 setTimeout 延迟状态更新，避免在渲染期间调用 setState
+      setTimeout(() => {
+        setSelectionVersion(v => v + 1);
+      }, 0);
     };
     
     window.addEventListener('imageSelectionChanged', handleSelectionChange);
@@ -1587,8 +1593,11 @@ const CategoryScreen = ({
     useEffect(() => {
       const handleSelectionChange = (event) => {
         if (event.detail.imageId === item.id) {
-          setSelected(event.detail.isSelected);
-          logger.debug(`选中状态变化: ${item.id} -> ${event.detail.isSelected}`);
+          // 使用 setTimeout 延迟状态更新，避免在渲染期间调用 setState
+          setTimeout(() => {
+            setSelected(event.detail.isSelected);
+            logger.debug(`选中状态变化: ${item.id} -> ${event.detail.isSelected}`);
+          }, 0);
         }
       };
       
