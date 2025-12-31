@@ -360,7 +360,7 @@ const CategoryScreen = ({ route, navigation }) => {
                 await loadImages();
               } catch (error) {
                 logger.error('批量修改分类失败:', error);
-                Alert.alert(t('category.operationFailed'), t('category.changeCategoryError'));
+                Alert.alert(t('settings.operationFailed'), t('category.changeCategoryError'));
               }
             },
           },
@@ -840,7 +840,7 @@ const CategoryScreen = ({ route, navigation }) => {
 
     } catch (error) {
       logger.error('❌ 批量操作失败:', error);
-      Alert.alert(t('category.operationFailed'), error.message);
+      Alert.alert(t('settings.operationFailed'), error.message);
     }
   };
 
@@ -945,7 +945,7 @@ const CategoryScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       logger.error('增强检查失败:', error);
-      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
+      Alert.alert(t('common.error'), error.message || t('settings.operationFailed'));
     }
   };
 
@@ -979,7 +979,7 @@ const CategoryScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('导航到结果页失败:', error);
-      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
+      Alert.alert(t('common.error'), error.message || t('settings.operationFailed'));
     }
   };
 
@@ -1054,7 +1054,7 @@ const CategoryScreen = ({ route, navigation }) => {
     } catch (error) {
       logger.error('❌ 批量修改分类失败:', error);
       setShowUpdateProgress(false);
-      Alert.alert(t('category.operationFailed'), error.message);
+      Alert.alert(t('settings.operationFailed'), error.message);
     }
   };
 
@@ -1137,7 +1137,7 @@ const CategoryScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('❌ 分享操作失败:', error);
-      Alert.alert(t('category.operationFailed'), t('category.shareError'));
+      Alert.alert(t('settings.operationFailed'), t('category.shareError'));
     }
   };
 
@@ -1190,7 +1190,7 @@ const CategoryScreen = ({ route, navigation }) => {
               } catch (error) {
                 logger.error('❌ 批量暂存失败:', error);
                 setShowUpdateProgress(false);
-                Alert.alert(t('category.operationFailed'), t('category.stagingError'));
+                Alert.alert(t('settings.operationFailed'), t('category.stagingError'));
               }
           },
         },
@@ -1249,7 +1249,7 @@ const CategoryScreen = ({ route, navigation }) => {
             } catch (error) {
               logger.error('❌ 批量从暂存箱移除失败:', error);
               setShowUpdateProgress(false);
-              Alert.alert(t('category.operationFailed'), t('category.removeFromStagingError'));
+              Alert.alert(t('settings.operationFailed'), t('category.removeFromStagingError'));
             }
           },
         },
@@ -1349,7 +1349,7 @@ const CategoryScreen = ({ route, navigation }) => {
                   t('category.deleteFailedMessage')
                 );
               } else {
-                Alert.alert(t('category.operationFailed'), t('category.deleteError'));
+                Alert.alert(t('settings.operationFailed'), t('category.deleteError'));
               }
             }
           },

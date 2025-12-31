@@ -943,7 +943,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       );
     } catch (error) {
       logger.error('增强检查失败:', error);
-      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
+      Alert.alert(t('common.error'), error.message || t('settings.operationFailed'));
     }
   };
 
@@ -974,7 +974,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       logger.error('导航到结果页失败:', error);
-      Alert.alert(t('common.error'), error.message || t('category.operationFailed'));
+      Alert.alert(t('common.error'), error.message || t('settings.operationFailed'));
     }
   };
 

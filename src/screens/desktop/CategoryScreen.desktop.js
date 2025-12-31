@@ -1013,7 +1013,7 @@ const CategoryScreen = ({
                 
               } catch (error) {
                 logger.error('批量修改分类失败:', error);
-                Alert.alert(t('category.operationFailed'), t('category.changeCategoryFailed'));
+                Alert.alert(t('settings.operationFailed'), t('category.changeCategoryFailed'));
               }
             },
           },
@@ -1022,7 +1022,7 @@ const CategoryScreen = ({
       
     } catch (error) {
       logger.error('批量修改分类失败:', error);
-      Alert.alert(t('common.error'), t('category.operationFailed'));
+      Alert.alert(t('common.error'), t('settings.operationFailed'));
     }
   }, [filterType, filterValue, loadImages, t]);
 
@@ -1141,7 +1141,7 @@ const CategoryScreen = ({
               Alert.alert(t('category.operationComplete'), t('category.addToStagingBoxSuccess', { count: processed }));
               
             } catch (error) {
-              Alert.alert(t('category.operationFailed'), t('category.addToStagingBoxFailed'));
+              Alert.alert(t('settings.operationFailed'), t('category.addToStagingBoxFailed'));
             }
           },
         },
@@ -1188,7 +1188,7 @@ const CategoryScreen = ({
               
             } catch (error) {
               logger.error('从暂存箱移除失败:', error);
-              Alert.alert(t('category.operationFailed'), `${t('category.removeFromStagingBoxFailed')}: ${error.message}`);
+              Alert.alert(t('settings.operationFailed'), `${t('category.removeFromStagingBoxFailed')}: ${error.message}`);
             }
           },
         },
@@ -1254,7 +1254,7 @@ const CategoryScreen = ({
               
             } catch (error) {
               setShowDeleteProgress(false);
-              Alert.alert(t('category.operationFailed'), t('category.deleteFailed'));
+              Alert.alert(t('settings.operationFailed'), t('category.deleteFailed'));
             }
           },
         },
