@@ -147,9 +147,9 @@ const HomeScreen = () => {
         cityImagesMap[cityName] = images;
       });
       
-      // 加载各颜色的最近图片（按数量排序取前10个）
+      // 加载各颜色的最近图片（加载所有颜色，不限制数量）
       const sortedColors = Object.entries(colorCountsData).sort(([,a], [,b]) => b - a);
-      const colorIds = sortedColors.slice(0, 10).map(([colorName]) => colorName);
+      const colorIds = sortedColors.map(([colorName]) => colorName);
       const colorImagesPromises = colorIds.map(async (colorName) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByColor(colorName, 1);

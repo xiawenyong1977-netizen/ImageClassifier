@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import i18n, { getDefaultPresets, getCameraSettingsCategoryTranslation } from '../../i18n';
+import i18n, { getDefaultPresets, getCameraSettingsCategoryTranslation, getOrientationNameTranslation } from '../../i18n';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, Alert, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -299,6 +299,22 @@ const ImagePreviewScreen = ({
         images = await UnifiedDataService.readImagesByOrientation(finalFilterValue);
         contextType = '方向';
         contextValue = finalFilterValue;
+      } else if (finalFilterType === 'iso') {
+        images = await UnifiedDataService.readImagesByFilter('iso', finalFilterValue);
+        contextType = 'ISO';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'aperture') {
+        images = await UnifiedDataService.readImagesByFilter('aperture', finalFilterValue);
+        contextType = '光圈';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'shutter') {
+        images = await UnifiedDataService.readImagesByFilter('shutter', finalFilterValue);
+        contextType = '快门';
+        contextValue = finalFilterValue;
+      } else if (finalFilterType === 'focalLength') {
+        images = await UnifiedDataService.readImagesByFilter('focalLength', finalFilterValue);
+        contextType = '焦距';
+        contextValue = finalFilterValue;
       } else {
         // 默认加载最近照片
         images = await UnifiedDataService.readRecentImages(50);
@@ -360,6 +376,18 @@ const ImagePreviewScreen = ({
       } else if (finalFilterType === 'orientation') {
         logger.debug('从方向重新加载...');
         updatedImages = await UnifiedDataService.readImagesByOrientation(finalFilterValue);
+      } else if (finalFilterType === 'iso') {
+        logger.debug('从ISO分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByFilter('iso', finalFilterValue);
+      } else if (finalFilterType === 'aperture') {
+        logger.debug('从光圈分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByFilter('aperture', finalFilterValue);
+      } else if (finalFilterType === 'shutter') {
+        logger.debug('从快门分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByFilter('shutter', finalFilterValue);
+      } else if (finalFilterType === 'focalLength') {
+        logger.debug('从焦距分类重新加载...');
+        updatedImages = await UnifiedDataService.readImagesByFilter('focalLength', finalFilterValue);
       } else {
         logger.warn('⚠️ 无法确定来源，无法重新加载');
         return false;
@@ -1063,7 +1091,15 @@ const ImagePreviewScreen = ({
             } else if (finalFilterType === 'resolution') {
               categoryText = finalFilterValue || '';
             } else if (finalFilterType === 'orientation') {
-              categoryText = finalFilterValue || '';
+              categoryText = getOrientationNameTranslation(finalFilterValue, currentLang) || '';
+            } else if (finalFilterType === 'iso') {
+              categoryText = getCameraSettingsCategoryTranslation('iso', finalFilterValue, currentLang);
+            } else if (finalFilterType === 'aperture') {
+              categoryText = getCameraSettingsCategoryTranslation('aperture', finalFilterValue, currentLang);
+            } else if (finalFilterType === 'shutter') {
+              categoryText = getCameraSettingsCategoryTranslation('shutter', finalFilterValue, currentLang);
+            } else if (finalFilterType === 'focalLength') {
+              categoryText = getCameraSettingsCategoryTranslation('focalLength', finalFilterValue, currentLang);
             } else if (finalFilterType === 'stagingBox') {
               categoryText = t('imagePreview.stagingBox');
             }
