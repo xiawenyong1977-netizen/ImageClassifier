@@ -1463,7 +1463,6 @@ class ImageClassifierService {
       if (output.cpuData) {
         // CPU数据，直接使用
         outputData = output.cpuData;
-        logger.debug('📊 使用CPU数据，长度:', outputData.length);
       } else if (output.data) {
         // GPU数据，需要转换为CPU数据
         outputData = await output.data();
@@ -1476,8 +1475,6 @@ class ImageClassifierService {
         throw new Error(`无法识别的MobileNetV3输出数据格式: ${JSON.stringify(output)}`);
       }
       
-      logger.debug('📊 输出数据前5个值:', outputData.slice(0, 5));
-      logger.debug('📊 ImageNet类别数量:', this.imagenetClasses ? this.imagenetClasses.length : 'undefined');
       const probabilities = new Array(outputData.length);
 
       // 计算softmax
@@ -1565,7 +1562,6 @@ class ImageClassifierService {
       
       // 详细性能日志（仅在总时间过长时输出）
       if (totalTime > 500) {
-        logger.info(`📊 MobileNetV3推理性能: 总${totalTime}ms (加载${loadTime}ms + 预处理${preprocessTime}ms + 推理${inferenceTime}ms + 后处理${postprocessTime}ms)`);
       }
       
       return {

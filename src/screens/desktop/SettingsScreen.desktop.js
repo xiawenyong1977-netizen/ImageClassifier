@@ -610,7 +610,28 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
             </Text>
           </TouchableOpacity>
 
-          {/* 目录设置 - 与“清空相册信息”区域对齐 */}
+          {/* 本地分类设置 - 子区域 */}
+          <View style={styles.switchPanel}>
+            <Text style={styles.switchPanelTitle}>🔍 {t('settings.localClassification')}</Text>
+            
+            {/* 使用MobileNetV3分类 - 紧凑布局 */}
+            <View style={styles.switchItemCompact}>
+              <View style={styles.switchItemCompactLeft}>
+                <Text style={styles.switchLabelCompact} numberOfLines={1}>📱 {t('settings.enableMobileNetV3')}</Text>
+                <Switch
+                  value={settings.enableMobileNetV3Classification === true}
+                  onValueChange={(value) => updateSetting('enableMobileNetV3Classification', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.switchDescriptionCompact}>
+                {t('settings.enableMobileNetV3Desc')}
+              </Text>
+            </View>
+          </View>
+
+          {/* 目录设置 - 与"清空相册信息"区域对齐 */}
           <View style={styles.actionButton}>
             <Text style={styles.actionButtonText}>{t('settings.directorySettings')}</Text>
             
@@ -725,6 +746,50 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                 <Switch
                   value={settings.showOrientationCategories !== false}
                   onValueChange={(value) => updateSetting('showOrientationCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {/* 🔥 显示ISO分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.isoCategory')}</Text>
+                <Switch
+                  value={settings.showISOCategories !== false}
+                  onValueChange={(value) => updateSetting('showISOCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {/* 🔥 显示光圈分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.apertureCategory')}</Text>
+                <Switch
+                  value={settings.showApertureCategories !== false}
+                  onValueChange={(value) => updateSetting('showApertureCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {/* 🔥 显示快门分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.shutterCategory')}</Text>
+                <Switch
+                  value={settings.showShutterCategories !== false}
+                  onValueChange={(value) => updateSetting('showShutterCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {/* 🔥 显示焦距分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.focalLengthCategory')}</Text>
+                <Switch
+                  value={settings.showFocalLengthCategories !== false}
+                  onValueChange={(value) => updateSetting('showFocalLengthCategories', value)}
                   trackColor={{ false: '#E5E5EA', true: '#34C759' }}
                   thumbColor="#FFFFFF"
                 />
@@ -1153,6 +1218,13 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 16,
   },
+  switchPanelDescription: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 8,
+    paddingHorizontal: 16,
+    lineHeight: 18,
+  },
   switchGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1173,6 +1245,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#333',
     flex: 1,
+  },
+  // 紧凑布局样式（用于本地分类）
+  switchItemCompact: {
+    flexDirection: 'column',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 8,
+  },
+  switchItemCompactLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  switchLabelCompact: {
+    fontSize: 15,
+    color: '#333',
+    flex: 1,
+    marginRight: 12,
+  },
+  switchDescriptionCompact: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+    paddingLeft: 0,
   },
   // 保留旧的样式定义（可能其他地方还在使用）
   settingItem: {

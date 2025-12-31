@@ -2,6 +2,102 @@ import { AsyncStorage, logger, Platform, SQLite } from '../adapters/WebAdapters'
 import configService from './ConfigService.js';
 import { getDefaultPresets } from '../i18n/index.js';
 
+// ========== 拍摄参数分类函数 ==========
+/**
+ * ISO分类：low(<400), medium(400-1600), high(>1600)
+ */
+function categorizeISO(iso) {
+  if (!iso || typeof iso !== 'number' || iso <= 0) return null;
+  if (iso < 400) return 'low';
+  if (iso <= 1600) return 'medium';
+  return 'high';
+}
+
+/**
+ * 光圈分类：wide(<f/2.8), medium(f/2.8-f/5.6), narrow(>f/5.6)
+ */
+function categorizeAperture(fNumber) {
+  if (!fNumber || typeof fNumber !== 'number' || fNumber <= 0) return null;
+  if (fNumber < 2.8) return 'wide';
+  if (fNumber <= 5.6) return 'medium';
+  return 'narrow';
+}
+
+/**
+ * 快门分类：fast(>1/250s), medium(1/30-1/250s), slow(<1/30s)
+ */
+function categorizeShutterSpeed(exposureTime) {
+  if (!exposureTime || typeof exposureTime !== 'number' || exposureTime <= 0) return null;
+  if (exposureTime > 1/250) return 'fast';
+  if (exposureTime >= 1/30) return 'medium';
+  return 'slow';
+}
+
+/**
+ * 焦距分类：wide(<35mm), standard(35-85mm), telephoto(>85mm)
+ */
+function categorizeFocalLength(focalLength) {
+  if (!focalLength || typeof focalLength !== 'number' || focalLength <= 0) return null;
+  if (focalLength < 35) return 'wide';
+  if (focalLength <= 85) return 'standard';
+  return 'telephoto';
+}
+
+/**
+ * 根据 cameraSettings 计算分类
+ * @param {Object|string|null} cameraSettings - 拍摄参数对象或JSON字符串
+ * @returns {Object} 包含 isoCategory, apertureCategory, shutterCategory, focalLengthCategory
+ */
+function calculateCameraSettingsCategories(cameraSettings) {
+  if (!cameraSettings) {
+    return {
+      isoCategory: null,
+      apertureCategory: null,
+      shutterCategory: null,
+      focalLengthCategory: null
+    };
+  }
+  
+  // 如果 cameraSettings 是字符串，尝试解析
+  let settings = cameraSettings;
+  if (typeof cameraSettings === 'string') {
+    try {
+      settings = JSON.parse(cameraSettings);
+    } catch (e) {
+      logger.debug('解析 cameraSettings JSON 失败:', e);
+      return {
+        isoCategory: null,
+        apertureCategory: null,
+        shutterCategory: null,
+        focalLengthCategory: null
+      };
+    }
+  }
+  
+  if (!settings || typeof settings !== 'object') {
+    return {
+      isoCategory: null,
+      apertureCategory: null,
+      shutterCategory: null,
+      focalLengthCategory: null
+    };
+  }
+  
+  const result = {
+    isoCategory: categorizeISO(settings.iso),
+    apertureCategory: categorizeAperture(settings.aperture),
+    shutterCategory: categorizeShutterSpeed(settings.shutterSpeed),
+    focalLengthCategory: categorizeFocalLength(settings.focalLength)
+  };
+  
+  // 🔥 调试日志：记录分类计算过程
+  if (settings.iso || settings.aperture || settings.shutterSpeed || settings.focalLength) {
+    logger.debug(`📷 [分类计算] ISO=${settings.iso} -> ${result.isoCategory}, 光圈=${settings.aperture} -> ${result.apertureCategory}, 快门=${settings.shutterSpeed} -> ${result.shutterCategory}, 焦距=${settings.focalLength} -> ${result.focalLengthCategory}`);
+  }
+  
+  return result;
+}
+
 // SQLite 适配器类（移动端）
 class SQLiteAdapter {
   constructor() {
@@ -173,7 +269,14 @@ class SQLiteAdapter {
         imageDimensions TEXT,
         message TEXT,
         -- 背景颜色
-        background_color TEXT
+        background_color TEXT,
+        -- 拍摄参数（JSON字符串）
+        cameraSettings TEXT,
+        -- 拍摄参数分类
+        isoCategory TEXT,
+        apertureCategory TEXT,
+        shutterCategory TEXT,
+        focalLengthCategory TEXT
       );
 
       -- 索引优化
@@ -181,6 +284,10 @@ class SQLiteAdapter {
       CREATE INDEX IF NOT EXISTS idx_city ON images(city);
       CREATE INDEX IF NOT EXISTS idx_timestamp ON images(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_takenAt ON images(takenAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_isoCategory ON images(isoCategory);
+      CREATE INDEX IF NOT EXISTS idx_apertureCategory ON images(apertureCategory);
+      CREATE INDEX IF NOT EXISTS idx_shutterCategory ON images(shutterCategory);
+      CREATE INDEX IF NOT EXISTS idx_focalLengthCategory ON images(focalLengthCategory);
 
       -- 设置表
       CREATE TABLE IF NOT EXISTS settings (
@@ -230,6 +337,9 @@ class SQLiteAdapter {
     // 迁移：添加 background_color 字段（如果不存在）
     await this.migrateAddBackgroundColor();
     
+    // 迁移：添加拍摄参数字段（如果不存在）
+    await this.migrateAddCameraSettings();
+    
     // 迁移：将现有的 tobecleaned 分类迁移到 staging_box 表
     await this.migrateStagingBox();
     
@@ -270,6 +380,68 @@ class SQLiteAdapter {
         logger.debug('✅ background_color 字段已存在，跳过迁移');
       } else {
         logger.warn('⚠️ 迁移 background_color 字段时出错（可能字段已存在）:', error.message);
+      }
+    }
+  }
+
+  /**
+   * 迁移：添加拍摄参数字段
+   * 如果字段已存在则跳过
+   */
+  async migrateAddCameraSettings() {
+    const fields = [
+      { name: 'cameraSettings', type: 'TEXT' },
+      { name: 'isoCategory', type: 'TEXT' },
+      { name: 'apertureCategory', type: 'TEXT' },
+      { name: 'shutterCategory', type: 'TEXT' },
+      { name: 'focalLengthCategory', type: 'TEXT' }
+    ];
+    
+    try {
+      const pragmaResult = await this.db.executeSql('PRAGMA table_info(images)');
+      const tableInfo = pragmaResult && pragmaResult.length > 0 ? pragmaResult[0] : null;
+      
+      if (tableInfo && tableInfo.rows) {
+        const existingColumns = new Set();
+        for (let i = 0; i < tableInfo.rows.length; i++) {
+          const column = tableInfo.rows.item(i);
+          existingColumns.add(column.name);
+        }
+        
+        for (const field of fields) {
+          if (!existingColumns.has(field.name)) {
+            logger.debug(`🔄 迁移：添加 ${field.name} 字段到 images 表`);
+            await this.db.executeSql(`ALTER TABLE images ADD COLUMN ${field.name} ${field.type}`);
+            logger.debug(`✅ 迁移完成：${field.name} 字段已添加`);
+          } else {
+            logger.debug(`✅ ${field.name} 字段已存在，跳过迁移`);
+          }
+        }
+        
+        // 添加索引
+        const indexes = [
+          'idx_isoCategory',
+          'idx_apertureCategory',
+          'idx_shutterCategory',
+          'idx_focalLengthCategory'
+        ];
+        
+        for (const indexName of indexes) {
+          try {
+            const fieldName = indexName.replace('idx_', '');
+            await this.db.executeSql(`CREATE INDEX IF NOT EXISTS ${indexName} ON images(${fieldName})`);
+          } catch (error) {
+            if (!error.message || !error.message.includes('already exists')) {
+              logger.warn(`⚠️ 创建索引 ${indexName} 失败:`, error.message);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error.message && error.message.includes('duplicate column')) {
+        logger.debug('✅ 拍摄参数字段已存在，跳过迁移');
+      } else {
+        logger.warn('⚠️ 迁移拍摄参数字段时出错（可能字段已存在）:', error.message);
       }
     }
   }
@@ -465,14 +637,25 @@ class SQLiteAdapter {
           }
 
           for (const image of value) {
+            // 🔥 如果提供了 cameraSettings 但没有分类字段，则计算分类
+            const categories = image.isoCategory !== undefined && image.apertureCategory !== undefined
+              ? {
+                  isoCategory: image.isoCategory || null,
+                  apertureCategory: image.apertureCategory || null,
+                  shutterCategory: image.shutterCategory || null,
+                  focalLengthCategory: image.focalLengthCategory || null
+                }
+              : calculateCameraSettingsCategories(image.cameraSettings);
+            
             const sql = `
               INSERT OR REPLACE INTO images (
                 id, uri, fileName, category, confidence, timestamp, takenAt,
                 size, mimeType, width, height, createdAt, updatedAt,
                 latitude, longitude, altitude, accuracy,
                 address, city, country, province, district, street, locationSource, cityDistance,
-                idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message,
+                cameraSettings, isoCategory, apertureCategory, shutterCategory, focalLengthCategory
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
             
             tx.executeSql(
@@ -507,7 +690,13 @@ class SQLiteAdapter {
                 image.generalDetections ? JSON.stringify(image.generalDetections) : null,
                 image.mobileNetV3Detections ? JSON.stringify(image.mobileNetV3Detections) : null,
                 image.imageDimensions ? JSON.stringify(image.imageDimensions) : null,
-                image.message
+                image.message,
+                // 🔥 拍摄参数和分类（如果已有分类则使用，否则根据 cameraSettings 计算）
+                image.cameraSettings ? (typeof image.cameraSettings === 'string' ? image.cameraSettings : JSON.stringify(image.cameraSettings)) : null,
+                categories.isoCategory,
+                categories.apertureCategory,
+                categories.shutterCategory,
+                categories.focalLengthCategory
               ],
               (tx, result) => {
                 completed++;
@@ -693,8 +882,9 @@ class SQLiteAdapter {
         size, mimeType, width, height, createdAt, updatedAt,
         latitude, longitude, altitude, accuracy,
         address, city, country, province, district, street, locationSource, cityDistance,
-        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message, background_color
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message, background_color,
+        cameraSettings, isoCategory, apertureCategory, shutterCategory, focalLengthCategory
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
     await this.db.executeSql(sql, [
@@ -728,7 +918,13 @@ class SQLiteAdapter {
       imageData.mobileNetV3Detections ? JSON.stringify(imageData.mobileNetV3Detections) : null,
       imageData.imageDimensions ? JSON.stringify(imageData.imageDimensions) : null,
       imageData.message,
-      imageData.background_color || null
+      imageData.background_color || null,
+      // 🔥 拍摄参数和分类
+      imageData.cameraSettings ? JSON.stringify(imageData.cameraSettings) : null,
+      imageData.isoCategory || null,
+      imageData.apertureCategory || null,
+      imageData.shutterCategory || null,
+      imageData.focalLengthCategory || null
     ]);
     
     return true;
@@ -1219,6 +1415,23 @@ class IndexedDBAdapter {
               const naCount = results.filter(img => img.category === 'NA').length;
               const screenshotCount = results.filter(img => img.category === 'screenshot').length;
               logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: NA=${naCount}, screenshot=${screenshotCount}`);
+              
+              // 🔥 调试：检查拍摄参数分类字段
+              const imagesWithCategories = results.filter(img => img.isoCategory || img.apertureCategory || img.shutterCategory || img.focalLengthCategory);
+              if (imagesWithCategories.length > 0) {
+                logger.debug(`📷 [数据库读取] 找到 ${imagesWithCategories.length} 张图片包含分类字段`);
+                imagesWithCategories.slice(0, 3).forEach(img => {
+                  logger.debug(`📷 [数据库读取] 图片: ${img.fileName}, isoCategory=${img.isoCategory}, apertureCategory=${img.apertureCategory}, shutterCategory=${img.shutterCategory}, focalLengthCategory=${img.focalLengthCategory}`);
+                });
+              } else {
+                logger.debug(`📷 [数据库读取] 没有找到包含分类字段的图片`);
+                // 检查第一条记录的所有字段
+                if (results.length > 0) {
+                  const sample = results[0];
+                  logger.debug(`📷 [数据库读取] 第一条记录的所有字段: ${Object.keys(sample).join(', ')}`);
+                  logger.debug(`📷 [数据库读取] 第一条记录的 isoCategory: ${sample.isoCategory}, apertureCategory: ${sample.apertureCategory}`);
+                }
+              }
             }
           } else {
             logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回暂存箱数组，数量=${results.length}`);
@@ -1292,6 +1505,12 @@ class IndexedDBAdapter {
         const existingImage = getRequest.result;
         
         if (existingImage) {
+          // 🔥 调试：检查更新前的数据
+          if (imageData.isoCategory || imageData.apertureCategory) {
+            logger.debug(`📷 [更新前] 现有图片: ${existingImage.fileName}, isoCategory=${existingImage.isoCategory}, apertureCategory=${existingImage.apertureCategory}`);
+            logger.debug(`📷 [更新前] 新数据: isoCategory=${imageData.isoCategory}, apertureCategory=${imageData.apertureCategory}, shutterCategory=${imageData.shutterCategory}, focalLengthCategory=${imageData.focalLengthCategory}`);
+          }
+          
           // 更新现有记录，保留原有ID和创建时间
           const updatedImage = {
             ...existingImage,
@@ -1300,6 +1519,11 @@ class IndexedDBAdapter {
             createdAt: existingImage.createdAt, // 保持原有创建时间
             updatedAt: new Date().toISOString()
           };
+          
+          // 🔥 调试：检查更新后的数据
+          if (updatedImage.isoCategory || updatedImage.apertureCategory) {
+            logger.debug(`📷 [更新后] 合并结果: isoCategory=${updatedImage.isoCategory}, apertureCategory=${updatedImage.apertureCategory}, shutterCategory=${updatedImage.shutterCategory}, focalLengthCategory=${updatedImage.focalLengthCategory}`);
+          }
           
           store.put(updatedImage);
           logger.debug(`✅ 更新图片: ${imageData.fileName}`);
@@ -1918,6 +2142,26 @@ class ImageStorageService {
         if (imageData.category === 'NA') naCount++;
         if (imageData.category === 'screenshot') screenshotCount++;
         
+        // 🔥 如果提供了 cameraSettings 但没有分类字段，则计算分类
+        const categories = imageData.isoCategory !== undefined && imageData.apertureCategory !== undefined
+          ? {
+              isoCategory: imageData.isoCategory || null,
+              apertureCategory: imageData.apertureCategory || null,
+              shutterCategory: imageData.shutterCategory || null,
+              focalLengthCategory: imageData.focalLengthCategory || null
+            }
+          : calculateCameraSettingsCategories(imageData.cameraSettings);
+        
+        // 🔥 调试日志：记录分类计算结果
+        if (imageData.cameraSettings && (categories.isoCategory || categories.apertureCategory || categories.shutterCategory || categories.focalLengthCategory)) {
+          const categoryParts = [];
+          if (categories.isoCategory) categoryParts.push(`ISO=${categories.isoCategory}`);
+          if (categories.apertureCategory) categoryParts.push(`光圈=${categories.apertureCategory}`);
+          if (categories.shutterCategory) categoryParts.push(`快门=${categories.shutterCategory}`);
+          if (categories.focalLengthCategory) categoryParts.push(`焦距=${categories.focalLengthCategory}`);
+          logger.debug(`📷 [保存] 计算拍摄参数分类: ${categoryParts.join(', ')} (文件: ${imageData.fileName})`);
+        }
+        
         const imageRecord = {
           id: imageData.id || this.storage.generateStableId(imageData.uri),
           uri: imageData.uri,
@@ -1945,6 +2189,12 @@ class ImageStorageService {
           imageDimensions: imageData.imageDimensions || null,
           message: imageData.message || null,
           background_color: imageData.background_color || null,
+          // 🔥 拍摄参数和分类（如果已有分类则使用，否则根据 cameraSettings 计算）
+          cameraSettings: imageData.cameraSettings ? (typeof imageData.cameraSettings === 'string' ? imageData.cameraSettings : JSON.stringify(imageData.cameraSettings)) : null,
+          isoCategory: categories.isoCategory,
+          apertureCategory: categories.apertureCategory,
+          shutterCategory: categories.shutterCategory,
+          focalLengthCategory: categories.focalLengthCategory,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -1953,10 +2203,30 @@ class ImageStorageService {
         if (!imageRecord.category) {
           logger.warn(`⚠️ [诊断] 图片缺少category字段: ${imageRecord.uri}`);
         }
+        
+        // 🔥 调试：检查分类字段是否存在于 imageRecord 中
+        if (imageRecord.cameraSettings || imageRecord.isoCategory) {
+          logger.debug(`📷 [保存前] 图片: ${imageRecord.fileName}, isoCategory=${imageRecord.isoCategory}, apertureCategory=${imageRecord.apertureCategory}, shutterCategory=${imageRecord.shutterCategory}, focalLengthCategory=${imageRecord.focalLengthCategory}`);
+        }
 
         // 使用IndexedDB的单条插入方法
         await this.storage.addOrUpdateSingleImage(imageRecord);
         newCount++; // IndexedDB的addOrUpdateSingleImage会处理新增/更新逻辑
+        
+        // 🔥 调试：保存后立即验证
+        if (imageRecord.isoCategory || imageRecord.apertureCategory) {
+          try {
+            const savedImage = await this.storage.getItem('images');
+            if (savedImage && Array.isArray(savedImage)) {
+              const found = savedImage.find(img => img.id === imageRecord.id);
+              if (found) {
+                logger.debug(`📷 [保存后验证] 图片: ${found.fileName}, isoCategory=${found.isoCategory}, apertureCategory=${found.apertureCategory}, shutterCategory=${found.shutterCategory}, focalLengthCategory=${found.focalLengthCategory}`);
+              }
+            }
+          } catch (e) {
+            // 忽略验证错误
+          }
+        }
       } catch (error) {
         logger.error(`❌ IndexedDB批量插入单条记录失败 (${i + 1}/${imageDataArray.length}):`, error);
         // 继续处理下一条记录
@@ -1980,9 +2250,9 @@ class ImageStorageService {
 
   // 移动端：SQLite批量插入实现
   async _performBatchInsertSQLite(imageDataArray) {
-    // 构建批量SQL语句
+    // 构建批量SQL语句（添加了5个拍摄参数字段）
     const placeholders = imageDataArray.map(() => 
-      '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).join(', ');
 
     const sql = `
@@ -1991,13 +2261,24 @@ class ImageStorageService {
         size, mimeType, width, height, createdAt, updatedAt,
         latitude, longitude, altitude, accuracy,
         address, city, country, province, district, street, locationSource, cityDistance,
-        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message
+        idCardDetections, generalDetections, mobileNetV3Detections, imageDimensions, message,
+        cameraSettings, isoCategory, apertureCategory, shutterCategory, focalLengthCategory
       ) VALUES ${placeholders}
     `;
 
     // 构建参数数组
     const params = [];
     for (const imageData of imageDataArray) {
+      // 🔥 如果提供了 cameraSettings 但没有分类字段，则计算分类
+      const categories = imageData.isoCategory !== undefined && imageData.apertureCategory !== undefined
+        ? {
+            isoCategory: imageData.isoCategory || null,
+            apertureCategory: imageData.apertureCategory || null,
+            shutterCategory: imageData.shutterCategory || null,
+            focalLengthCategory: imageData.focalLengthCategory || null
+          }
+        : calculateCameraSettingsCategories(imageData.cameraSettings);
+      
       const imageRecord = {
         id: imageData.id || this.storage.generateStableId(imageData.uri),
         uri: imageData.uri,
@@ -2024,6 +2305,12 @@ class ImageStorageService {
         mobileNetV3Detections: imageData.mobileNetV3Detections || null,
         imageDimensions: imageData.imageDimensions || null,
         message: imageData.message || null,
+        // 🔥 拍摄参数和分类（如果已有分类则使用，否则根据 cameraSettings 计算）
+        cameraSettings: imageData.cameraSettings || null,
+        isoCategory: categories.isoCategory,
+        apertureCategory: categories.apertureCategory,
+        shutterCategory: categories.shutterCategory,
+        focalLengthCategory: categories.focalLengthCategory,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -2060,7 +2347,13 @@ class ImageStorageService {
         imageRecord.generalDetections ? JSON.stringify(imageRecord.generalDetections) : null,
         imageRecord.mobileNetV3Detections ? JSON.stringify(imageRecord.mobileNetV3Detections) : null,
         imageRecord.imageDimensions ? JSON.stringify(imageRecord.imageDimensions) : null,
-        imageRecord.message
+        imageRecord.message,
+        // 🔥 拍摄参数和分类
+        imageRecord.cameraSettings ? JSON.stringify(imageRecord.cameraSettings) : null,
+        imageRecord.isoCategory,
+        imageRecord.apertureCategory,
+        imageRecord.shutterCategory,
+        imageRecord.focalLengthCategory
       );
     }
 
@@ -2510,6 +2803,12 @@ class ImageStorageService {
           background_color: img.background_color || null, // 背景颜色字段
           mimeType: img.mimeType || null, // 格式统计需要
           imageDimensions: img.imageDimensions || null, // 保留原始 imageDimensions 字段
+          // 🔥 拍摄参数分类字段（用于统计和筛选）
+          isoCategory: img.isoCategory || null,
+          apertureCategory: img.apertureCategory || null,
+          shutterCategory: img.shutterCategory || null,
+          focalLengthCategory: img.focalLengthCategory || null,
+          cameraSettings: img.cameraSettings || null, // 保留原始 cameraSettings 字段
           // 只保留界面显示必需字段，其他按需加载
         };
       });

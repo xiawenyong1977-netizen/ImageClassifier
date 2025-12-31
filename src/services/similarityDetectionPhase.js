@@ -134,7 +134,7 @@ export async function similarityDetectionPhase(context) {
     // 发送开始处理消息
     // 第三个参数是相似组数量（初始为0），第四个参数是总分类目标（可选，Android版本使用）
     try {
-      await sendProgressMessage('similarity_detection', 0, totalFoundThisPhase, 0, totalImagesToBeClassified);
+        await sendProgressMessage('similarity_detection', 0, totalFoundThisPhase, 0, totalImagesToBeClassified);
     } catch (error) {
       logger.warn(`⚠️ 发送相似度检测开始消息失败: ${error.message}`);
     }
@@ -183,7 +183,7 @@ export async function similarityDetectionPhase(context) {
       // 发送相似度检测完成消息
       // 第三个参数是最终相似组数量，第四个参数是总分类目标（可选，Android版本使用）
       const totalWindows = result.windows || 0;
-      await sendProgressMessage('similarity_detection', totalWindows, totalWindows, result.groups.length, totalImagesToBeClassified);
+        await sendProgressMessage('similarity_detection', totalWindows, totalWindows, result.groups.length, totalImagesToBeClassified);
     } else {
       logger.error(`❌ 阶段6失败: 相似度检测失败: ${result.error}`);
     }

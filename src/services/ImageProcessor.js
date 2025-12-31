@@ -10,7 +10,7 @@
  */
 
 import { Buffer } from 'buffer';
-import { logger, Platform, ImageResizer, RNFS, jpegJs, RNImage } from '../adapters/WebAdapters';
+import { logger, Platform, ImageResizer, RNFS, jpegJs, RNImage, getWebAccessibleUriAsync } from '../adapters/WebAdapters';
 
 // 注意：ImageResizer, RNFS, jpegJs, RNImage 在移动端通过 WebAdapters.native.js 导入
 // 在 PC 端这些会是 undefined，但没关系，因为 Platform.OS === 'web' 时不会使用它们
@@ -73,6 +73,19 @@ class ImageProcessor {
         // 不是同一张图片，重新加载
         img = new Image();
         img.crossOrigin = 'anonymous';
+        
+        // 🔥 处理 file:// 路径：浏览器无法直接加载，需要转换为 blob URL
+        let imageSrc = imageUri;
+        if (imageUri.startsWith('file://')) {
+          try {
+            const { readImageFileAsBlob } = require('../adapters/WebAdapters');
+            const blob = await readImageFileAsBlob(imageUri);
+            imageSrc = URL.createObjectURL(blob);
+          } catch (error) {
+            logger.error(`❌ [Canvas] 读取文件失败: ${imageUri}`, error);
+            throw new Error(`图片加载失败: ${error.message}`);
+          }
+        }
         
         await new Promise((resolve, reject) => {
           img.onload = resolve;

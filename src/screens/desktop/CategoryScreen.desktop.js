@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getCurrentLanguage, getColorNameTranslation, getOrientationNameTranslation, getDefaultPresets } from '../../i18n';
+import { getCurrentLanguage, getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation, getDefaultPresets } from '../../i18n';
 import { useFocusEffect, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Modal, Platform, TextInput, ScrollView } from 'react-native';
 // 分页方案实现
@@ -1329,6 +1329,14 @@ const CategoryScreen = ({
           ? tHeader('category.resolutionWithCount', { resolution: filterValue, count: allImages.length })
           : filterType === 'orientation'
           ? tHeader('category.orientationWithCount', { orientation: getOrientationNameTranslation(filterValue, i18n.language || 'zh'), count: allImages.length })
+          : filterType === 'iso'
+          ? tHeader('category.isoWithCount', { iso: getCameraSettingsCategoryTranslation('iso', filterValue, i18n.language || 'zh'), count: allImages.length })
+          : filterType === 'aperture'
+          ? tHeader('category.apertureWithCount', { aperture: getCameraSettingsCategoryTranslation('aperture', filterValue, i18n.language || 'zh'), count: allImages.length })
+          : filterType === 'shutter'
+          ? tHeader('category.shutterWithCount', { shutter: getCameraSettingsCategoryTranslation('shutter', filterValue, i18n.language || 'zh'), count: allImages.length })
+          : filterType === 'focalLength'
+          ? tHeader('category.focalLengthWithCount', { focalLength: getCameraSettingsCategoryTranslation('focalLength', filterValue, i18n.language || 'zh'), count: allImages.length })
           : tHeader('category.imageList')
         }
       </Text>

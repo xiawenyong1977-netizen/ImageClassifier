@@ -514,4 +514,126 @@ export const getOrientationNameTranslation = (orientationName, language = null) 
   return orientationName;
 };
 
+/**
+ * 获取拍摄参数分类值的翻译（根据当前语言）
+ * @param {string} categoryType - 分类类型 ('iso', 'aperture', 'shutter', 'focalLength')
+ * @param {string} categoryValue - 分类值（如 'low', 'medium', 'high', 'wide', 'narrow', 'fast', 'slow', 'standard', 'telephoto'）
+ * @param {string} language - 目标语言 ('zh' 或 'en')，默认为当前语言
+ * @returns {string} 翻译后的分类值，如果找不到映射则返回原始值
+ */
+export const getCameraSettingsCategoryTranslation = (categoryType, categoryValue, language = null) => {
+  if (!categoryType || !categoryValue || typeof categoryValue !== 'string') {
+    return categoryValue;
+  }
+
+  const targetLang = language || getCurrentLanguage();
+  const normalizedValue = categoryValue.trim().toLowerCase();
+
+  try {
+    // 🔥 直接使用导入的翻译对象，而不是通过 getResourceBundle（可能缓存问题）
+    const translationObj = targetLang === 'zh' ? zh : en;
+    
+    // 🔥 详细调试日志
+    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
+      console.log(`📷 [调试开始] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, targetLang=${targetLang}`);
+      console.log(`📷 [调试] translationObj存在=${!!translationObj}, settings存在=${!!translationObj?.settings}, cameraSettings存在=${!!translationObj?.settings?.cameraSettings}`);
+      if (translationObj?.settings) {
+        console.log(`📷 [调试] settings的所有键=${Object.keys(translationObj.settings).slice(0, 30).join(',')}`);
+      }
+      if (translationObj?.settings?.cameraSettings) {
+        console.log(`📷 [调试] cameraSettings keys=${Object.keys(translationObj.settings.cameraSettings).join(',')}`);
+        if (translationObj.settings.cameraSettings[categoryType]) {
+          console.log(`📷 [调试] ${categoryType} keys=${Object.keys(translationObj.settings.cameraSettings[categoryType]).join(',')}`);
+          console.log(`📷 [调试] ${categoryType}.${normalizedValue}=${translationObj.settings.cameraSettings[categoryType][normalizedValue]}`);
+        }
+      }
+    }
+    
+    // 优先从 settings.cameraSettings 读取
+    if (translationObj && translationObj.settings && translationObj.settings.cameraSettings && 
+        translationObj.settings.cameraSettings[categoryType] && 
+        translationObj.settings.cameraSettings[categoryType][normalizedValue]) {
+      const translated = translationObj.settings.cameraSettings[categoryType][normalizedValue];
+      
+      // 🔥 调试日志（仅在开发环境）
+      if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
+        console.log(`📷 [翻译成功-直接访问] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translated=${translated}, targetLang=${targetLang}`);
+      }
+      
+      return translated;
+    }
+    
+    // 如果 settings.cameraSettings 不存在，尝试从 category.cameraSettings 读取（向后兼容）
+    if (translationObj && translationObj.category && translationObj.category.cameraSettings && 
+        translationObj.category.cameraSettings[categoryType] && 
+        translationObj.category.cameraSettings[categoryType][normalizedValue]) {
+      const translated = translationObj.category.cameraSettings[categoryType][normalizedValue];
+      
+      // 🔥 调试日志（仅在开发环境）
+      if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
+        console.log(`📷 [翻译成功-向后兼容category] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translated=${translated}, targetLang=${targetLang}`);
+      }
+      
+      return translated;
+    }
+    
+    // 如果直接访问失败，尝试使用 getResourceBundle
+    const resources = i18n.getResourceBundle(targetLang, 'common');
+    if (resources && resources.settings && resources.settings.cameraSettings && 
+        resources.settings.cameraSettings[categoryType] && 
+        resources.settings.cameraSettings[categoryType][normalizedValue]) {
+      const translated = resources.settings.cameraSettings[categoryType][normalizedValue];
+      return translated;
+    }
+    
+    // 向后兼容：尝试从 category.cameraSettings 读取
+    if (resources && resources.category && resources.category.cameraSettings && 
+        resources.category.cameraSettings[categoryType] && 
+        resources.category.cameraSettings[categoryType][normalizedValue]) {
+      const translated = resources.category.cameraSettings[categoryType][normalizedValue];
+      return translated;
+    }
+    
+    // 如果直接访问失败，尝试使用 i18n.t
+    const translationKey = `settings.cameraSettings.${categoryType}.${normalizedValue}`;
+    const translated = i18n.t(translationKey, { 
+      lng: targetLang,
+      defaultValue: categoryValue // 如果翻译不存在，使用原始值
+    });
+    
+    // 🔥 调试日志（仅在开发环境）
+    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
+      console.log(`📷 [翻译-i18n.t] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translationKey=${translationKey}, translated=${translated}, targetLang=${targetLang}`);
+      console.log(`📷 [调试] translationObj存在=${!!translationObj}, settings存在=${!!translationObj?.settings}, cameraSettings存在=${!!translationObj?.settings?.cameraSettings}`);
+      if (translationObj?.settings?.cameraSettings) {
+        console.log(`📷 [调试] cameraSettings keys=${Object.keys(translationObj.settings.cameraSettings).join(',')}`);
+      }
+    }
+    
+    // 如果翻译成功（返回值不等于键名且不等于原始值），返回翻译
+    if (translated && translated !== translationKey && translated !== categoryValue) {
+      return translated;
+    }
+    
+    // 向后兼容：尝试使用 category.cameraSettings 的翻译键
+    const categoryTranslationKey = `category.cameraSettings.${categoryType}.${normalizedValue}`;
+    const categoryTranslated = i18n.t(categoryTranslationKey, { 
+      lng: targetLang,
+      defaultValue: categoryValue
+    });
+    
+    if (categoryTranslated && categoryTranslated !== categoryTranslationKey && categoryTranslated !== categoryValue) {
+      return categoryTranslated;
+    }
+  } catch (e) {
+    // 翻译失败，继续使用原始值
+    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
+      console.error(`❌ [翻译失败] categoryType=${categoryType}, categoryValue=${categoryValue}:`, e);
+    }
+  }
+
+  // 如果找不到映射，返回原始值（首字母大写）
+  return categoryValue.charAt(0).toUpperCase() + categoryValue.slice(1).toLowerCase();
+};
+
 export default i18n;

@@ -827,6 +827,166 @@ class UnifiedDataService {
   }
 
   /**
+   * 🔥 获取ISO统计
+   */
+  async readISOCounts() {
+    try {
+      await this.imageCache.buildCache();
+      const cache = this.imageCache.getCache();
+      return cache.isoCounts || {};
+    } catch (error) {
+      logger.error('读取ISO统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 获取光圈统计
+   */
+  async readApertureCounts() {
+    try {
+      await this.imageCache.buildCache();
+      const cache = this.imageCache.getCache();
+      return cache.apertureCounts || {};
+    } catch (error) {
+      logger.error('读取光圈统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 获取快门统计
+   */
+  async readShutterCounts() {
+    try {
+      await this.imageCache.buildCache();
+      const cache = this.imageCache.getCache();
+      return cache.shutterCounts || {};
+    } catch (error) {
+      logger.error('读取快门统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 获取焦距统计
+   */
+  async readFocalLengthCounts() {
+    try {
+      await this.imageCache.buildCache();
+      const cache = this.imageCache.getCache();
+      return cache.focalLengthCounts || {};
+    } catch (error) {
+      logger.error('读取焦距统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 根据ISO分类获取图片
+   */
+  async readImagesByISO(isoCategory, limit = null) {
+    try {
+      await this.imageCache.buildCache();
+      const images = this.imageCache.getImagesByISO(isoCategory);
+      const sorted = images.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      return limit ? sorted.slice(0, limit) : sorted;
+    } catch (error) {
+      logger.error('读取ISO图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 根据光圈分类获取图片
+   */
+  async readImagesByAperture(apertureCategory, limit = null) {
+    try {
+      await this.imageCache.buildCache();
+      const images = this.imageCache.getImagesByAperture(apertureCategory);
+      const sorted = images.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      return limit ? sorted.slice(0, limit) : sorted;
+    } catch (error) {
+      logger.error('读取光圈图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 根据快门分类获取图片
+   */
+  async readImagesByShutter(shutterCategory, limit = null) {
+    try {
+      await this.imageCache.buildCache();
+      const images = this.imageCache.getImagesByShutter(shutterCategory);
+      const sorted = images.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      return limit ? sorted.slice(0, limit) : sorted;
+    } catch (error) {
+      logger.error('读取快门图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 根据焦距分类获取图片
+   */
+  async readImagesByFocalLength(focalLengthCategory, limit = null) {
+    try {
+      await this.imageCache.buildCache();
+      const images = this.imageCache.getImagesByFocalLength(focalLengthCategory);
+      const sorted = images.sort((a, b) => {
+        const timeA = a.takenAt ? new Date(a.takenAt).getTime() : a.timestamp;
+        const timeB = b.takenAt ? new Date(b.takenAt).getTime() : b.timestamp;
+        return timeB - timeA;
+      });
+      return limit ? sorted.slice(0, limit) : sorted;
+    } catch (error) {
+      logger.error('读取焦距图片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 获取指定ISO分类的最近图片
+   */
+  async readRecentImagesByISO(isoCategory, limit = 4) {
+    return await this.readImagesByISO(isoCategory, limit);
+  }
+
+  /**
+   * 🔥 获取指定光圈分类的最近图片
+   */
+  async readRecentImagesByAperture(apertureCategory, limit = 4) {
+    return await this.readImagesByAperture(apertureCategory, limit);
+  }
+
+  /**
+   * 🔥 获取指定快门分类的最近图片
+   */
+  async readRecentImagesByShutter(shutterCategory, limit = 4) {
+    return await this.readImagesByShutter(shutterCategory, limit);
+  }
+
+  /**
+   * 🔥 获取指定焦距分类的最近图片
+   */
+  async readRecentImagesByFocalLength(focalLengthCategory, limit = 4) {
+    return await this.readImagesByFocalLength(focalLengthCategory, limit);
+  }
+
+  /**
    * 获取指定方向的最近图片
    */
   async readRecentImagesByOrientation(orientation, limit = 4) {
@@ -1720,6 +1880,34 @@ class UnifiedDataService {
           }
           return await this.readImagesByOrientation(filterValue);
         
+        case 'iso':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: iso 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByISO(filterValue);
+        
+        case 'aperture':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: aperture 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByAperture(filterValue);
+        
+        case 'shutter':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: shutter 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByShutter(filterValue);
+        
+        case 'focalLength':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: focalLength 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          return await this.readImagesByFocalLength(filterValue);
+        
         default:
           logger.error(`readImagesByFilter: 未知的 filterType: ${filterType}`);
           return [];
@@ -1826,6 +2014,38 @@ class UnifiedDataService {
           const orientationImages = this.imageCache.getImagesByOrientation(filterValue);
           return orientationImages.filter(img => img.selected === true);
         
+        case 'iso':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: iso 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          const isoImages = this.imageCache.getImagesByISO(filterValue);
+          return isoImages.filter(img => img.selected === true);
+        
+        case 'aperture':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: aperture 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          const apertureImages = this.imageCache.getImagesByAperture(filterValue);
+          return apertureImages.filter(img => img.selected === true);
+        
+        case 'shutter':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: shutter 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          const shutterImages = this.imageCache.getImagesByShutter(filterValue);
+          return shutterImages.filter(img => img.selected === true);
+        
+        case 'focalLength':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: focalLength 需要 filterValue，但 filterValue 为空');
+            return [];
+          }
+          const focalLengthImages = this.imageCache.getImagesByFocalLength(filterValue);
+          return focalLengthImages.filter(img => img.selected === true);
+        
         default:
           logger.error(`getSelectedImagesByFilter: 未知的 filterType: ${filterType}`);
           return [];
@@ -1911,6 +2131,16 @@ class UnifiedDataService {
   async writeImageDetailedInfo(imageDataArray, updateCache = true) {
     try {
       logger.debug(`💾 开始保存图片详细信息: ${imageDataArray.length}张, updateCache=${updateCache}`);
+      
+      // 🔥 调试：检查是否有拍摄参数
+      const imagesWithCameraSettings = imageDataArray.filter(img => img.cameraSettings);
+      if (imagesWithCameraSettings.length > 0) {
+        logger.debug(`📷 [保存] ${imagesWithCameraSettings.length}张图片包含拍摄参数`);
+        imagesWithCameraSettings.slice(0, 3).forEach(img => {
+          logger.debug(`📷 [保存] 图片: ${img.fileName}, cameraSettings: ${JSON.stringify(img.cameraSettings)}`);
+        });
+      }
+      
       await this.imageStorageService.saveImageDetailedInfo(imageDataArray);
       logger.debug(`✅ 图片详细信息保存成功: ${imageDataArray.length}张`);
       
@@ -1920,6 +2150,11 @@ class UnifiedDataService {
         // 更新缓存（使用 refreshCache 而不是 buildCache，确保真正重新读取数据库）
         await this.imageCache.refreshCache();
         logger.debug('✅ 缓存刷新完成');
+        
+        // 🔥 调试：检查缓存中的拍摄参数统计
+        const cache = this.imageCache.getCache();
+        logger.debug(`📷 [缓存] ISO统计: ${JSON.stringify(cache.isoCounts)}, 光圈统计: ${JSON.stringify(cache.apertureCounts)}, 快门统计: ${JSON.stringify(cache.shutterCounts)}, 焦距统计: ${JSON.stringify(cache.focalLengthCounts)}`);
+        
         // 通知监听器
         this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
       }

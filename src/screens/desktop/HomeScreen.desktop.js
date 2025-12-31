@@ -18,7 +18,7 @@ import configService from '../../services/ConfigService';
 import cityLocationService from '../../services/CityLocationService';
 import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 import { logger, getUri, Alert, SafeAreaView } from '../../adapters/WebAdapters';
-import { getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
+import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 
 const HomeScreen = () => {
   const { t, i18n } = useTranslation('common');
@@ -38,6 +38,10 @@ const HomeScreen = () => {
   const [formatCounts, setFormatCounts] = useState({});
   const [resolutionCounts, setResolutionCounts] = useState({});
   const [orientationCounts, setOrientationCounts] = useState({});
+  const [isoCounts, setISOCounts] = useState({});
+  const [apertureCounts, setApertureCounts] = useState({});
+  const [shutterCounts, setShutterCounts] = useState({});
+  const [focalLengthCounts, setFocalLengthCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
   const [colorRecentImages, setColorRecentImages] = useState({});
@@ -45,6 +49,10 @@ const HomeScreen = () => {
   const [formatRecentImages, setFormatRecentImages] = useState({});
   const [resolutionRecentImages, setResolutionRecentImages] = useState({});
   const [orientationRecentImages, setOrientationRecentImages] = useState({});
+  const [isoRecentImages, setISORecentImages] = useState({});
+  const [apertureRecentImages, setApertureRecentImages] = useState({});
+  const [shutterRecentImages, setShutterRecentImages] = useState({});
+  const [focalLengthRecentImages, setFocalLengthRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
@@ -56,6 +64,10 @@ const HomeScreen = () => {
   const [showFormatCategories, setShowFormatCategories] = useState(true);
   const [showResolutionCategories, setShowResolutionCategories] = useState(true);
   const [showOrientationCategories, setShowOrientationCategories] = useState(true);
+  const [showISOCategories, setShowISOCategories] = useState(true);
+  const [showApertureCategories, setShowApertureCategories] = useState(true);
+  const [showShutterCategories, setShowShutterCategories] = useState(true);
+  const [showFocalLengthCategories, setShowFocalLengthCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
   const [globalMessage, setGlobalMessage] = useState(''); // 初始化为空字符串，稍后通过 useEffect 设置
@@ -76,7 +88,7 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
+      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, isoCountsData, apertureCountsData, shutterCountsData, focalLengthCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
         UnifiedDataService.readNewDiscoveredImages(12),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readCityCounts(),
@@ -85,6 +97,10 @@ const HomeScreen = () => {
         UnifiedDataService.readFormatCounts(),
         UnifiedDataService.readResolutionCounts(),
         UnifiedDataService.readOrientationCounts(),
+        UnifiedDataService.readISOCounts(),
+        UnifiedDataService.readApertureCounts(),
+        UnifiedDataService.readShutterCounts(),
+        UnifiedDataService.readFocalLengthCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
         UnifiedDataService.readSettings(),
         UnifiedDataService.readAllImages(),
@@ -150,9 +166,9 @@ const HomeScreen = () => {
         colorImagesMap[colorName] = images;
       });
       
-      // 加载各目录的最近图片（按数量排序取前10个）
+      // 加载各目录的最近图片（加载所有目录，不限制数量）
       const sortedDirectories = Object.entries(directoryCountsData).sort(([,a], [,b]) => b - a);
-      const directoryIds = sortedDirectories.slice(0, 10).map(([dirName]) => dirName);
+      const directoryIds = sortedDirectories.map(([dirName]) => dirName);
       const directoryImagesPromises = directoryIds.map(async (dirName) => {
         try {
           const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
@@ -225,6 +241,78 @@ const HomeScreen = () => {
         orientationImagesMap[orientationName] = images;
       });
       
+      // 🔥 加载各ISO分类的最近图片（按数量排序取前10个）
+      const sortedISOs = Object.entries(isoCountsData).sort(([,a], [,b]) => b - a);
+      const isoIds = sortedISOs.slice(0, 10).map(([isoCategory]) => isoCategory);
+      const isoImagesPromises = isoIds.map(async (isoCategory) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByISO(isoCategory, 1);
+          return { isoCategory, images };
+        } catch (error) {
+          logger.error(`加载ISO ${isoCategory} 最近图片失败:`, error);
+          return { isoCategory, images: [] };
+        }
+      });
+      const isoImagesResults = await Promise.all(isoImagesPromises);
+      const isoImagesMap = {};
+      isoImagesResults.forEach(({ isoCategory, images }) => {
+        isoImagesMap[isoCategory] = images;
+      });
+      
+      // 🔥 加载各光圈分类的最近图片
+      const sortedApertures = Object.entries(apertureCountsData).sort(([,a], [,b]) => b - a);
+      const apertureIds = sortedApertures.slice(0, 10).map(([apertureCategory]) => apertureCategory);
+      const apertureImagesPromises = apertureIds.map(async (apertureCategory) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByAperture(apertureCategory, 1);
+          return { apertureCategory, images };
+        } catch (error) {
+          logger.error(`加载光圈 ${apertureCategory} 最近图片失败:`, error);
+          return { apertureCategory, images: [] };
+        }
+      });
+      const apertureImagesResults = await Promise.all(apertureImagesPromises);
+      const apertureImagesMap = {};
+      apertureImagesResults.forEach(({ apertureCategory, images }) => {
+        apertureImagesMap[apertureCategory] = images;
+      });
+      
+      // 🔥 加载各快门分类的最近图片
+      const sortedShutters = Object.entries(shutterCountsData).sort(([,a], [,b]) => b - a);
+      const shutterIds = sortedShutters.slice(0, 10).map(([shutterCategory]) => shutterCategory);
+      const shutterImagesPromises = shutterIds.map(async (shutterCategory) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByShutter(shutterCategory, 1);
+          return { shutterCategory, images };
+        } catch (error) {
+          logger.error(`加载快门 ${shutterCategory} 最近图片失败:`, error);
+          return { shutterCategory, images: [] };
+        }
+      });
+      const shutterImagesResults = await Promise.all(shutterImagesPromises);
+      const shutterImagesMap = {};
+      shutterImagesResults.forEach(({ shutterCategory, images }) => {
+        shutterImagesMap[shutterCategory] = images;
+      });
+      
+      // 🔥 加载各焦距分类的最近图片
+      const sortedFocalLengths = Object.entries(focalLengthCountsData).sort(([,a], [,b]) => b - a);
+      const focalLengthIds = sortedFocalLengths.slice(0, 10).map(([focalLengthCategory]) => focalLengthCategory);
+      const focalLengthImagesPromises = focalLengthIds.map(async (focalLengthCategory) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByFocalLength(focalLengthCategory, 1);
+          return { focalLengthCategory, images };
+        } catch (error) {
+          logger.error(`加载焦距 ${focalLengthCategory} 最近图片失败:`, error);
+          return { focalLengthCategory, images: [] };
+        }
+      });
+      const focalLengthImagesResults = await Promise.all(focalLengthImagesPromises);
+      const focalLengthImagesMap = {};
+      focalLengthImagesResults.forEach(({ focalLengthCategory, images }) => {
+        focalLengthImagesMap[focalLengthCategory] = images;
+      });
+      
       // 处理新发现照片的结果（包含总数和图片列表）
       const recentImagesData = recentImagesResult.images || [];
       const recentImagesTotalCount = recentImagesResult.total || 0;
@@ -242,9 +330,17 @@ const HomeScreen = () => {
       setFormatCounts(formatCountsData);
       setResolutionCounts(resolutionCountsData);
       setOrientationCounts(orientationCountsData);
+      setISOCounts(isoCountsData);
+      setApertureCounts(apertureCountsData);
+      setShutterCounts(shutterCountsData);
+      setFocalLengthCounts(focalLengthCountsData);
       logger.debug('准备更新状态 - 格式统计:', formatCountsData);
       logger.debug('准备更新状态 - 分辨率统计:', resolutionCountsData);
       logger.debug('准备更新状态 - 方向统计:', orientationCountsData);
+      logger.debug('📷 准备更新状态 - ISO统计:', isoCountsData);
+      logger.debug('📷 准备更新状态 - 光圈统计:', apertureCountsData);
+      logger.debug('📷 准备更新状态 - 快门统计:', shutterCountsData);
+      logger.debug('📷 准备更新状态 - 焦距统计:', focalLengthCountsData);
       setStagingBoxCount(stagingBoxCountData);
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
@@ -254,6 +350,10 @@ const HomeScreen = () => {
       setFormatRecentImages(formatImagesMap);
       setResolutionRecentImages(resolutionImagesMap);
       setOrientationRecentImages(orientationImagesMap);
+      setISORecentImages(isoImagesMap);
+      setApertureRecentImages(apertureImagesMap);
+      setShutterRecentImages(shutterImagesMap);
+      setFocalLengthRecentImages(focalLengthImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
       // 只有当用户明确设置为 false 时才显示空分类
       const shouldHide = settings.hideEmptyCategories !== false;
@@ -267,6 +367,10 @@ const HomeScreen = () => {
       const shouldShowFormats = settings.showFormatCategories !== false;
       const shouldShowResolutions = settings.showResolutionCategories !== false;
       const shouldShowOrientations = settings.showOrientationCategories !== false;
+      const shouldShowISOs = settings.showISOCategories !== false;
+      const shouldShowApertures = settings.showApertureCategories !== false;
+      const shouldShowShutters = settings.showShutterCategories !== false;
+      const shouldShowFocalLengths = settings.showFocalLengthCategories !== false;
       const shouldShowSimilarity = settings.showSimilarityGroups !== false;
       const shouldShowRecent = settings.showRecentPhotos !== false;
       setShowCityCategories(shouldShowCities);
@@ -275,6 +379,10 @@ const HomeScreen = () => {
       setShowFormatCategories(shouldShowFormats);
       setShowResolutionCategories(shouldShowResolutions);
       setShowOrientationCategories(shouldShowOrientations);
+      setShowISOCategories(shouldShowISOs);
+      setShowApertureCategories(shouldShowApertures);
+      setShowShutterCategories(shouldShowShutters);
+      setShowFocalLengthCategories(shouldShowFocalLengths);
       setShowSimilarityGroups(shouldShowSimilarity);
       setShowRecentPhotos(shouldShowRecent);
       
@@ -669,6 +777,10 @@ const HomeScreen = () => {
   const handleFormatPress = (format) => handleFilterPress('format', format);
   const handleResolutionPress = (resolution) => handleFilterPress('resolution', resolution);
   const handleOrientationPress = (orientation) => handleFilterPress('orientation', orientation);
+  const handleISOPress = (isoCategory) => handleFilterPress('iso', isoCategory);
+  const handleAperturePress = (apertureCategory) => handleFilterPress('aperture', apertureCategory);
+  const handleShutterPress = (shutterCategory) => handleFilterPress('shutter', shutterCategory);
+  const handleFocalLengthPress = (focalLengthCategory) => handleFilterPress('focalLength', focalLengthCategory);
 
   // 处理刷新
   const onRefresh = useCallback(async () => {
@@ -1218,6 +1330,151 @@ const HomeScreen = () => {
                         count={count}
                         recentImages={recentImages}
                         onPress={handleOrientationPress}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 🔥 ISO分类卡片 */}
+        {showISOCategories && (() => {
+          if (!isoCounts || Object.keys(isoCounts).length === 0) return null;
+          
+          const filteredISOCounts = Object.entries(isoCounts).filter(([iso]) => {
+            return iso && typeof iso === 'string' && iso.trim() !== '';
+          });
+          
+          if (filteredISOCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📷 {t('home.byISO')}</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredISOCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([isoCategory, count]) => {
+                    const recentImages = isoRecentImages[isoCategory] || [];
+                    const translatedCategory = getCameraSettingsCategoryTranslation('iso', isoCategory);
+                    logger.debug(`📷 [ISO分类] 原始值=${isoCategory}, 翻译后=${translatedCategory}`);
+                    return (
+                      <CategoryCard
+                        key={isoCategory}
+                        category={translatedCategory}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={() => handleISOPress(isoCategory)}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 🔥 光圈分类卡片 */}
+        {showApertureCategories && (() => {
+          if (!apertureCounts || Object.keys(apertureCounts).length === 0) return null;
+          
+          const filteredApertureCounts = Object.entries(apertureCounts).filter(([aperture]) => {
+            return aperture && typeof aperture === 'string' && aperture.trim() !== '';
+          });
+          
+          if (filteredApertureCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📷 {t('home.byAperture')}</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredApertureCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([apertureCategory, count]) => {
+                    const recentImages = apertureRecentImages[apertureCategory] || [];
+                    const translatedCategory = getCameraSettingsCategoryTranslation('aperture', apertureCategory);
+                    return (
+                      <CategoryCard
+                        key={apertureCategory}
+                        category={translatedCategory}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={() => handleAperturePress(apertureCategory)}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 🔥 快门分类卡片 */}
+        {showShutterCategories && (() => {
+          if (!shutterCounts || Object.keys(shutterCounts).length === 0) return null;
+          
+          const filteredShutterCounts = Object.entries(shutterCounts).filter(([shutter]) => {
+            return shutter && typeof shutter === 'string' && shutter.trim() !== '';
+          });
+          
+          if (filteredShutterCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📷 {t('home.byShutter')}</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredShutterCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([shutterCategory, count]) => {
+                    const recentImages = shutterRecentImages[shutterCategory] || [];
+                    const translatedCategory = getCameraSettingsCategoryTranslation('shutter', shutterCategory);
+                    return (
+                      <CategoryCard
+                        key={shutterCategory}
+                        category={translatedCategory}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={() => handleShutterPress(shutterCategory)}
+                      />
+                    );
+                  })}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 🔥 焦距分类卡片 */}
+        {showFocalLengthCategories && (() => {
+          if (!focalLengthCounts || Object.keys(focalLengthCounts).length === 0) return null;
+          
+          const filteredFocalLengthCounts = Object.entries(focalLengthCounts).filter(([focalLength]) => {
+            return focalLength && typeof focalLength === 'string' && focalLength.trim() !== '';
+          });
+          
+          if (filteredFocalLengthCounts.length === 0) return null;
+          
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📷 {t('home.byFocalLength')}</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {filteredFocalLengthCounts
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([focalLengthCategory, count]) => {
+                    const recentImages = focalLengthRecentImages[focalLengthCategory] || [];
+                    const translatedCategory = getCameraSettingsCategoryTranslation('focalLength', focalLengthCategory);
+                    return (
+                      <CategoryCard
+                        key={focalLengthCategory}
+                        category={translatedCategory}
+                        count={count}
+                        recentImages={recentImages}
+                        onPress={() => handleFocalLengthPress(focalLengthCategory)}
                       />
                     );
                   })}

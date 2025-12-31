@@ -15,11 +15,11 @@ import WeChatAuthService from './WeChatAuthService';
 class ImageEnhanceService {
   constructor() {
     this.apiConfig = {
-      baseURL: 'https://www.xintxiangce.top',
+      baseURL: 'http://123.57.68.4:8000',
       endpoints: {
-        submit: '/api/v1/image-edit/submit',
-        taskStatus: '/api/v1/image-edit/task',
-        batchCheckCache: '/api/v1/image-edit/batch-check-cache'
+        submit: '/api/v2/image-edit/batch',
+        taskStatus: '/api/v2/image-edit/task',
+        batchCheckCache: '/api/v1/image-edit/batch-check-cache' // v2文档中未提及，保留v1
       },
       timeout: 30000 // 30秒超时
     };
@@ -74,10 +74,10 @@ class ImageEnhanceService {
   // ========== API交互 ==========
   
   /**
-   * 提交增强任务（支持批量：1-9张）
-   * @param {Array<{file: Blob, hash: string, fileName: string}>} preparedImages - 预处理后的图片数组
+   * 提交增强任务（支持批量：1-9张，v2接口）
+   * @param {Array<{file: Blob, hash: string, fileName: string, localUri: string, originalFileName: string}>} preparedImages - 预处理后的图片数组
    * @param {string} presetId - 增强方案ID（如 'portrait', 'custom' 等），提示词从配置中获取
-   * @returns {Promise<{task_id: string, total_images: number, estimated_time_ms: number}>}
+   * @returns {Promise<{task_id: string, total_images: number, request_id: string}>}
    */
   async submitEnhanceTask(preparedImages, presetId) {
     try {
@@ -113,7 +113,16 @@ class ImageEnhanceService {
       
       const formData = new FormData();
 
-      // 添加所有图片文件（API要求用 'images' 复数，多次append同一个key）
+      // 获取客户端ID
+      const clientId = await this.getClientId();
+      // 必填校验：无 client_id 直接失败
+      if (!clientId) {
+        logger.error('❌ 提交任务失败：缺少 client_id');
+        throw new Error('缺少 client_id，无法提交增强任务');
+      }
+
+      // 🔥 v2接口：构建 image_metadata（包含图片元数据和提示词）
+      const imageMetadataItems = [];
       const filesSummary = [];
       const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
       const isBrowserLike = typeof window !== 'undefined' && !isReactNative;
@@ -122,14 +131,22 @@ class ImageEnhanceService {
       for (let index = 0; index < preparedImages.length; index++) {
         const prepared = preparedImages[index];
         const fileName = prepared.originalFileName || `image_${index + 1}.jpg`;
+        const imageUri = prepared.localUri || '';
+        const imageHash = prepared.hash || '';
+
+        // 添加到 image_metadata items
+        imageMetadataItems.push({
+          index,
+          image_uri: imageUri,
+          image_hash: imageHash || '' // v2接口需要hash，如果没有则传空字符串
+        });
 
         if (isBrowserLike) {
           let fileToAppend;
           try {
-            const uri = prepared.localUri || '';
-            if (/^https?:\/\//i.test(uri)) {
+            if (/^https?:\/\//i.test(imageUri)) {
               // http(s) 链接，直接拉取为 Blob
-              const res = await fetch(uri);
+              const res = await fetch(imageUri);
               const blob = await res.blob();
               // 使用 File，携带文件名
               fileToAppend = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
@@ -139,7 +156,7 @@ class ImageEnhanceService {
               if (!fs) {
                 throw new Error('Electron fs 不可用');
               }
-              const candidate = uri || prepared.filePath || '';
+              const candidate = imageUri || prepared.filePath || '';
               const absPath = normalizeFilePath ? normalizeFilePath(candidate) : candidate.replace(/^file:\/\/*/i, '');
               const buffer = await fs.promises.readFile(absPath);
               const blob2 = new Blob([buffer], { type: 'image/jpeg' });
@@ -150,23 +167,28 @@ class ImageEnhanceService {
             throw new Error(`加载图片失败: ${fileName}`);
           }
           formData.append('images', fileToAppend, fileName);
-          filesSummary.push({ index, name: fileName, uri: prepared.localUri || '[blob]', type: 'image/jpeg' });
+          filesSummary.push({ index, name: fileName, uri: imageUri || '[blob]', type: 'image/jpeg' });
         } else {
           // React Native
           const rnFileObj = {
-            uri: prepared.localUri,
+            uri: imageUri,
             type: 'image/jpeg',
             name: fileName,
           };
           formData.append('images', rnFileObj);
-          filesSummary.push({ index, name: fileName, uri: prepared.localUri, type: 'image/jpeg' });
+          filesSummary.push({ index, name: fileName, uri: imageUri, type: 'image/jpeg' });
         }
 
         logger.debug(`  - 图片${index + 1}: ${fileName}`);
       }
       
-      formData.append('edit_type', 'enhance');
-      formData.append('edit_params', JSON.stringify({ prompt }));
+      // 🔥 v2接口：添加 image_metadata 字段（JSON字符串）
+      const imageMetadata = {
+        items: imageMetadataItems,
+        prompt: prompt,
+        user_id: clientId
+      };
+      formData.append('image_metadata', JSON.stringify(imageMetadata));
 
       const controller = new AbortController();
       // 动态超时：基础30秒 + 每张图片额外15秒（上传和处理时间）
@@ -174,27 +196,16 @@ class ImageEnhanceService {
       logger.debug(`⏱️ 设置超时时间: ${dynamicTimeout}ms (${imageCount}张图片)`);
       const timeoutId = setTimeout(() => controller.abort(), dynamicTimeout);
 
-      // 获取客户端ID
-      const clientId = await this.getClientId();
-      // 必填校验：无 client_id 直接失败
-      if (!clientId) {
-        logger.error('❌ 提交任务失败：缺少 client_id');
-        throw new Error('缺少 client_id，无法提交增强任务');
-      }
-      // 按需求：将 client_id 作为表单字段提交
-      formData.append('client_id', clientId);
-      // 构建请求头（不再附带 openid）
+      // 🔥 v2接口：构建请求头（只使用 X-User-ID，不再使用 client_id 表单字段）
       const headers = { 'X-User-ID': clientId };
       
       const submitUrl = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.submit}`;
       // 打印原始请求信息（不打印文件二进制，仅打印概要）
-      logger.debug('🛰️ 提交增强任务请求', {
+      logger.debug('🛰️ 提交增强任务请求 (v2)', {
         url: submitUrl,
         method: 'POST',
         headers,
-        edit_type: 'enhance',
-        edit_params: { prompt },
-        client_id: clientId || null,
+        image_metadata: imageMetadata,
         files: filesSummary
       });
 
@@ -221,13 +232,26 @@ class ImageEnhanceService {
       } catch (e) {
         throw new Error(`响应解析失败: 非JSON: ${rawText?.slice?.(0, 256)}`);
       }
-      logger.debug('✅ 批量任务已提交:', {
+      
+      // 🔥 v2接口：检查 error_type，如果不为 success 则抛出错误
+      if (result.error_type !== 'success') {
+        const errorMsg = result.error || '提交任务失败';
+        logger.error('❌ API返回错误:', errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      logger.debug('✅ 批量任务已提交 (v2):', {
         task_id: result.task_id,
         total_images: result.total_images,
-        estimated_time_ms: result.estimated_time_ms
+        request_id: result.request_id
       });
       
-      return result;
+      // v2接口返回格式：{error_type, error, task_id, total_images, request_id}
+      return {
+        task_id: result.task_id,
+        total_images: result.total_images,
+        request_id: result.request_id
+      };
       
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -279,8 +303,20 @@ class ImageEnhanceService {
       } catch (e) {
         throw new Error(`任务状态解析失败: 非JSON: ${rawText?.slice?.(0, 256)}`);
       }
-      logger.debug(`📊 任务状态: ${result.status}, 进度: ${result.progress || 0}%`);
-      return result;
+      
+      // 🔥 v2接口：响应格式包含 results 数组，每个结果有 index, image_uri, status, result_url, error, from_cache
+      // v2接口：计算进度百分比（completed_images / total_images）
+      const progress = result.total_images > 0 
+        ? Math.round((result.completed_images || 0) / result.total_images * 100)
+        : 0;
+      
+      logger.debug(`📊 任务状态 (v2): ${result.status}, 进度: ${progress}% (${result.completed_images || 0}/${result.total_images})`);
+      
+      // 返回兼容格式（包含 progress 字段，方便现有代码使用）
+      return {
+        ...result,
+        progress: progress
+      };
       
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -328,13 +364,14 @@ class ImageEnhanceService {
         consecutiveErrors = 0;
         
         // 详细日志：显示后端返回的所有字段（每10次轮询记录一次详细日志，避免日志过多）
+        // 🔥 v2接口：响应包含 results 数组，每个结果有 index, image_uri, status, result_url, error, from_cache
         if (pollCount % 10 === 0 || status.status !== 'processing') {
-          logger.debug(`📊 第${pollCount}次轮询:`, {
+          logger.debug(`📊 第${pollCount}次轮询 (v2):`, {
             status: status.status,
             progress: status.progress,
             completed_images: status.completed_images,
             total_images: status.total_images,
-            current_image_index: status.current_image_index
+            results_count: status.results ? status.results.length : 0
           });
         }
         

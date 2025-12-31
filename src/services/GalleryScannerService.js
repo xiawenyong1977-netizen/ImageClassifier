@@ -418,7 +418,38 @@ const extractExifData = async (filePath, fileName, contentUri) => {
         }
       }
 
-      return { takenTime, locationInfo, imageDimensions };
+      // 🔥 提取拍摄参数（ISO、光圈、快门、焦距）
+      const cameraSettings = {
+        iso: exifData.tags?.ISOSpeedRatings || exifData.tags?.ISO || null,
+        aperture: exifData.tags?.FNumber || null, // f-stop值，如 2.8
+        shutterSpeed: exifData.tags?.ExposureTime || null, // 秒，如 0.008 (1/125秒)
+        focalLength: exifData.tags?.FocalLength || null // 毫米，如 50
+      };
+
+      // 🔥 记录拍摄参数提取日志
+      if (cameraSettings.iso || cameraSettings.aperture || cameraSettings.shutterSpeed || cameraSettings.focalLength) {
+        const params = [];
+        if (cameraSettings.iso) params.push(`ISO=${cameraSettings.iso}`);
+        if (cameraSettings.aperture) params.push(`光圈=f/${cameraSettings.aperture}`);
+        if (cameraSettings.shutterSpeed) {
+          // 将秒转换为更易读的格式（如 1/125s）
+          const shutterDisplay = cameraSettings.shutterSpeed >= 1 
+            ? `${cameraSettings.shutterSpeed}s`
+            : `1/${Math.round(1 / cameraSettings.shutterSpeed)}s`;
+          params.push(`快门=${shutterDisplay}`);
+        }
+        if (cameraSettings.focalLength) params.push(`焦距=${cameraSettings.focalLength}mm`);
+        logger.debug(`📷 [EXIF] 提取拍摄参数: ${params.join(', ')} (文件: ${finalFileName})`);
+      } else {
+        logger.debug(`📷 [EXIF] 未找到拍摄参数 (文件: ${finalFileName})`);
+      }
+
+      return { 
+        takenTime, 
+        locationInfo, 
+        imageDimensions,
+        cameraSettings
+      };
 
     } catch (parseError) {
       logger.warn(`⚠️ exif-parser 提取失败: ${parseError.message}, 文件: ${finalFileName}`);
@@ -786,6 +817,10 @@ class GalleryScannerService {
         logger.debug('🔄 开始重建缓存...');
         await UnifiedDataService.imageCache.refreshCache();
         logger.debug('✅ 缓存重建完成');
+        
+        // 🔥 调试：检查缓存中的拍摄参数统计
+        const cache = UnifiedDataService.imageCache.getCache();
+        logger.debug(`📷 [缓存刷新后] ISO统计: ${JSON.stringify(cache.isoCounts)}, 光圈统计: ${JSON.stringify(cache.apertureCounts)}, 快门统计: ${JSON.stringify(cache.shutterCounts)}, 焦距统计: ${JSON.stringify(cache.focalLengthCounts)}`);
       } catch (error) {
         logger.error('❌ 缓存重建失败:', error);
       }
@@ -1496,6 +1531,9 @@ class GalleryScannerService {
             // 直接使用exifData中的位置信息，不再获取位置信息（位置信息应在基础扫描阶段获取）
             const locationInfo = exifData?.locationInfo || createDefaultLocationInfo('none');
             
+            // 🔥 提取拍摄参数（分类将在 ImageStorageService 中计算）
+            const cameraSettings = exifData?.cameraSettings || {};
+            
             // 位置信息：只保存 GPS 坐标和 location_id（存储在 city 字段）
             saveData = {
               uri: extractOriginalUri(imageData),
@@ -1518,6 +1556,8 @@ class GalleryScannerService {
               mobileNetV3Detections: classification.mobileNetV3Detections || null,
               // 保存图像尺寸信息
               imageDimensions: exifData?.imageDimensions || null,
+              // 🔥 保存拍摄参数（分类将在 ImageStorageService 中根据 cameraSettings 计算）
+              cameraSettings: cameraSettings,
               // 保存大模型推理描述
               message: classification.message || null,
               // 保存背景颜色
@@ -1688,10 +1728,6 @@ class GalleryScannerService {
         
         logger.debug(`✅ 批次 ${batchNumber}: EXIF提取完成 ${batchExifMap.size} 张`);
         
-        // 更新进度
-        const currentProcessed = Math.min(i + batchSize, newImages.length);
-        this.sendProgressMessage('screenshot_detection', currentProcessed, newImages.length);
-        
         // ========== 节点2: 位置获取（依赖EXIF提取的结果）==========
         const batchLocationMap = new Map();
         
@@ -1813,7 +1849,63 @@ class GalleryScannerService {
         
         logger.debug(`✅ 批次 ${batchNumber}: 分类检测完成 (截图: ${batchScreenshotCount}, 待分类: ${batchSaveResults.length - batchScreenshotCount})`);
         
-        // ========== 节点4: 批量保存（当前批次的结果）==========
+        // ========== 节点4: MobileNetV3分类（对每张图片进行分类）==========
+        // 🔥 检查设置，如果禁用则跳过MobileNetV3分类
+        const settings = await UnifiedDataService.readSettings();
+        const enableMobileNetV3 = settings.enableMobileNetV3Classification === true; // 默认关闭
+        
+        if (!enableMobileNetV3) {
+          logger.debug(`⏭️ 批次 ${batchNumber}: MobileNetV3分类已禁用，跳过`);
+        } else {
+          logger.debug(`🔍 批次 ${batchNumber}: 开始MobileNetV3分类 ${batchSaveResults.length} 张图片`);
+          
+          // 确保ImageClassifierService已初始化
+          if (!this.imageClassifier.isInitialized) {
+            try {
+              await this.imageClassifier.initialize();
+              logger.debug(`✅ ImageClassifierService初始化完成`);
+            } catch (error) {
+              logger.error(`❌ ImageClassifierService初始化失败: ${error.message}`);
+              // 初始化失败时跳过MobileNetV3分类，继续后续流程
+            }
+          }
+          
+          // 并行处理所有图片的MobileNetV3分类
+          const mobileNetV3Promises = batchSaveResults.map(async (saveResult) => {
+            try {
+              // 如果ImageClassifierService未初始化，跳过分类
+              if (!this.imageClassifier.isInitialized) {
+                return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: 'ImageClassifierService未初始化' };
+              }
+              
+              // 🔥 使用 getUri 获取正确的 URI 格式（与本地识别阶段保持一致）
+              // getUri 会自动处理 file:// URI 转换，确保 Electron 环境能正确加载
+              const imageUri = getUri(saveResult.imageData);
+              if (!imageUri) {
+                return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: '无法获取图片URI' };
+              }
+              const mobileNetV3Result = await this.imageClassifier.classifyImageWithMobileNetV3(imageUri);
+              
+              // 将MobileNetV3分类结果添加到classification对象中
+              if (!saveResult.classification.mobileNetV3Detections) {
+                saveResult.classification.mobileNetV3Detections = mobileNetV3Result.success ? mobileNetV3Result : null;
+              }
+              
+              return { success: true, imageUri };
+            } catch (error) {
+              logger.error(`❌ MobileNetV3分类失败: ${extractOriginalUri(saveResult.imageData)}`, error);
+              // 即使失败也继续，不阻塞后续流程
+              return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: error.message };
+            }
+          });
+          
+          // 等待所有MobileNetV3分类完成
+          const mobileNetV3Results = await Promise.all(mobileNetV3Promises);
+          const mobileNetV3SuccessCount = mobileNetV3Results.filter(r => r.success).length;
+          logger.debug(`✅ 批次 ${batchNumber}: MobileNetV3分类完成 ${mobileNetV3SuccessCount}/${batchSaveResults.length} 张`);
+        }
+        
+        // ========== 节点5: 批量保存（当前批次的结果）==========
         if (batchSaveResults.length > 0) {
           logger.debug(`💾 批次 ${batchNumber}: 开始批量保存 ${batchSaveResults.length} 张图片到数据库`);
           
@@ -1832,6 +1924,10 @@ class GalleryScannerService {
             batchFailedCount += batchSaveResults.length;
           }
         }
+        
+        // 更新进度（在照片信息保存后）
+        const currentProcessed = Math.min(i + batchSize, newImages.length);
+        this.sendProgressMessage('screenshot_detection', currentProcessed, newImages.length);
         
         // ========== 返回批次统计结果 ==========
         return {
@@ -2612,8 +2708,6 @@ class GalleryScannerService {
     }
     
     // 第2层和第3层：根据远程服务是否可用，决定执行缓存查询和远程推理
-    let remainingImages = naImages; // 初始剩余图片为所有NA分类图片
-    
     if (this.useRemoteInference) {
       // 第2层：远程缓存查询（处理NA分类图片，查询远程缓存）
       const { remainingImages: afterCache, processedCount: cacheCount, failedCount: cacheFailed } = 
@@ -2634,36 +2728,28 @@ class GalleryScannerService {
       totalProcessed += remoteCount;
       totalFailed += remoteFailed;
       
-      // 更新剩余图片列表，用于后续本地推理降级
-      remainingImages = afterRemote;
-      
       if (afterRemote.length === 0) {
         logger.info(`✅ 漏斗处理完成：远程推理已覆盖，已处理 ${totalProcessed} 张`);
         // 发送完成消息
         this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
         return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
       }
+      
+      // 如果还有剩余图片（远程推理失败），这些图片将继续保持为NA分类
+      if (afterRemote.length > 0) {
+        logger.info(`⚠️ 远程推理完成，但仍有 ${afterRemote.length} 张图片分类失败，将继续保持为待分类（NA）状态`);
+      }
     } else {
-      logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将直接进入本地推理`);
+      logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将继续保持为待分类状态`);
     }
     
-    // 第4层：本地推理降级（处理远程推理失败或跳过的图片）
-    if (remainingImages.length > 0) {
-      const { processedCount: localCount, failedCount: localFailed } = 
-        await this.localInferenceFallbackPhase(remainingImages, scanStartTime);
-      totalProcessed += localCount;
-      totalFailed += localFailed;
-    }
-    
-    logger.info(`✅ 漏斗处理完成：总共处理 ${totalProcessed} 张，失败 ${totalFailed} 张`);
-    
-    const similarityCandidates = naImages;
+    logger.info(`✅ 漏斗处理完成：总共处理 ${totalProcessed} 张，失败 ${totalFailed} 张，剩余图片保持为待分类状态`);
     
     // 发送完成消息
     this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
     
     // 阶段3-4完成
-    return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates };
+    return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
   }
   
   /**

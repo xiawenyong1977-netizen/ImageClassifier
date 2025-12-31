@@ -13,6 +13,10 @@ class GlobalImageCache {
       formatCounts: {}, // 格式统计
       resolutionCounts: {}, // 分辨率统计（完整数据，包含所有分辨率）
       orientationCounts: {}, // 方向统计（横屏、竖屏、全景）
+      isoCounts: {}, // ISO统计
+      apertureCounts: {}, // 光圈统计
+      shutterCounts: {}, // 快门统计
+      focalLengthCounts: {}, // 焦距统计
       recentImages: [],
       selectedCategoryCounts: {}, // 选中图片的分类统计
       selectedCityCounts: {}, // 选中图片的城市统计
@@ -105,6 +109,8 @@ class GlobalImageCache {
       } else {
         // 🆕 在构建缓存时，从 imageDimensions 提取 width 和 height 到精简信息中
         this.cache.allImages = allImages.map(img => {
+          let processedImg = { ...img };
+          
           // 从 imageDimensions 字段提取尺寸信息，赋值到 width 和 height
           if (img.imageDimensions) {
             // imageDimensions 可能是对象或 JSON 字符串
@@ -119,16 +125,29 @@ class GlobalImageCache {
             }
             
             if (dimensions && typeof dimensions === 'object') {
-              return {
-                ...img,
-                width: dimensions.width || img.width || null,
-                height: dimensions.height || img.height || null
-              };
+              processedImg.width = dimensions.width || img.width || null;
+              processedImg.height = dimensions.height || img.height || null;
             }
           }
           
-          // 如果没有 imageDimensions，保持原有数据（可能已经有 width/height）
-          return img;
+          // 🔥 解析 cameraSettings JSON 字符串
+          if (img.cameraSettings && typeof img.cameraSettings === 'string') {
+            try {
+              processedImg.cameraSettings = JSON.parse(img.cameraSettings);
+            } catch (e) {
+              logger.debug('解析 cameraSettings JSON 失败:', e);
+              processedImg.cameraSettings = null;
+            }
+          }
+          
+          // 🔥 确保分类字段被包含在精简信息中（这些字段可能直接从数据库读取，不需要解析）
+          // isoCategory, apertureCategory, shutterCategory, focalLengthCategory 已经是字符串，直接保留
+          if (img.isoCategory !== undefined) processedImg.isoCategory = img.isoCategory;
+          if (img.apertureCategory !== undefined) processedImg.apertureCategory = img.apertureCategory;
+          if (img.shutterCategory !== undefined) processedImg.shutterCategory = img.shutterCategory;
+          if (img.focalLengthCategory !== undefined) processedImg.focalLengthCategory = img.focalLengthCategory;
+          
+          return processedImg;
         });
       }
       
@@ -164,6 +183,7 @@ class GlobalImageCache {
       this._rebuildFormatCounts();
       this._rebuildResolutionCounts();
       this._rebuildOrientationCounts();
+      this._rebuildCameraSettingsCounts();
       
       // 加载相似组数据到图片对象中
       await this._loadSimilarityGroupData();
@@ -276,6 +296,20 @@ class GlobalImageCache {
         }
       }
       
+      // 🔥 拍摄参数统计
+      if (image.isoCategory) {
+        this.cache.isoCounts[image.isoCategory] = (this.cache.isoCounts[image.isoCategory] || 0) + 1;
+      }
+      if (image.apertureCategory) {
+        this.cache.apertureCounts[image.apertureCategory] = (this.cache.apertureCounts[image.apertureCategory] || 0) + 1;
+      }
+      if (image.shutterCategory) {
+        this.cache.shutterCounts[image.shutterCategory] = (this.cache.shutterCounts[image.shutterCategory] || 0) + 1;
+      }
+      if (image.focalLengthCategory) {
+        this.cache.focalLengthCounts[image.focalLengthCategory] = (this.cache.focalLengthCounts[image.focalLengthCategory] || 0) + 1;
+      }
+      
       // 更新最近图片列表（保持前20张）
       this.cache.recentImages = this.cache.allImages
         .sort((a, b) => {
@@ -340,6 +374,7 @@ class GlobalImageCache {
       this._rebuildDirectoryCounts();
       this._rebuildFormatCounts();
       this._rebuildResolutionCounts();
+      this._rebuildCameraSettingsCounts();
     
       
       logger.debug(`✅ 图片分类更新完成: ${oldCategory} -> ${newCategory}`);
@@ -656,6 +691,7 @@ class GlobalImageCache {
       this._rebuildFormatCounts();
       this._rebuildResolutionCounts();
       this._rebuildOrientationCounts();
+      this._rebuildCameraSettingsCounts();
       this._rebuildRecentImages();
       
       logger.debug(`✅ 图片删除完成: ${imageToDelete.fileName}`);
@@ -939,6 +975,30 @@ class GlobalImageCache {
     });
   }
 
+  // 🔥 根据ISO分类获取图片
+  getImagesByISO(isoCategory) {
+    if (!isoCategory) return [];
+    return this.cache.allImages.filter(img => img.isoCategory === isoCategory);
+  }
+
+  // 🔥 根据光圈分类获取图片
+  getImagesByAperture(apertureCategory) {
+    if (!apertureCategory) return [];
+    return this.cache.allImages.filter(img => img.apertureCategory === apertureCategory);
+  }
+
+  // 🔥 根据快门分类获取图片
+  getImagesByShutter(shutterCategory) {
+    if (!shutterCategory) return [];
+    return this.cache.allImages.filter(img => img.shutterCategory === shutterCategory);
+  }
+
+  // 🔥 根据焦距分类获取图片
+  getImagesByFocalLength(focalLengthCategory) {
+    if (!focalLengthCategory) return [];
+    return this.cache.allImages.filter(img => img.focalLengthCategory === focalLengthCategory);
+  }
+
   // 获取图片方向分类（横屏、竖屏、全景、正方形）
   _getOrientationCategory(width, height) {
     if (!width || !height || width <= 0 || height <= 0) {
@@ -994,6 +1054,48 @@ class GlobalImageCache {
     if (Object.keys(this.cache.orientationCounts).length > 0) {
       logger.debug(`🔄 方向统计详情:`, this.cache.orientationCounts);
     }
+  }
+
+  // 🔥 重新构建拍摄参数统计
+  _rebuildCameraSettingsCounts() {
+    this.cache.isoCounts = {};
+    this.cache.apertureCounts = {};
+    this.cache.shutterCounts = {};
+    this.cache.focalLengthCounts = {};
+    
+    let imagesWithCameraSettings = 0;
+    let imagesWithCategories = 0;
+    
+    // 🔥 调试：检查前几张图片的分类字段
+    const sampleImages = this.cache.allImages.slice(0, 3);
+    sampleImages.forEach((img, idx) => {
+      if (img.cameraSettings || img.isoCategory || img.apertureCategory) {
+        logger.debug(`📷 [缓存重建] 图片${idx}: fileName=${img.fileName}, isoCategory=${img.isoCategory}, apertureCategory=${img.apertureCategory}, shutterCategory=${img.shutterCategory}, focalLengthCategory=${img.focalLengthCategory}, cameraSettings=${typeof img.cameraSettings === 'string' ? img.cameraSettings.substring(0, 50) : JSON.stringify(img.cameraSettings)}`);
+      }
+    });
+    
+    this.cache.allImages.forEach(img => {
+      if (img.isoCategory) {
+        this.cache.isoCounts[img.isoCategory] = (this.cache.isoCounts[img.isoCategory] || 0) + 1;
+        imagesWithCameraSettings++;
+      }
+      if (img.apertureCategory) {
+        this.cache.apertureCounts[img.apertureCategory] = (this.cache.apertureCounts[img.apertureCategory] || 0) + 1;
+      }
+      if (img.shutterCategory) {
+        this.cache.shutterCounts[img.shutterCategory] = (this.cache.shutterCounts[img.shutterCategory] || 0) + 1;
+      }
+      if (img.focalLengthCategory) {
+        this.cache.focalLengthCounts[img.focalLengthCategory] = (this.cache.focalLengthCounts[img.focalLengthCategory] || 0) + 1;
+      }
+      
+      // 统计有分类字段的图片数量
+      if (img.isoCategory || img.apertureCategory || img.shutterCategory || img.focalLengthCategory) {
+        imagesWithCategories++;
+      }
+    });
+    
+    logger.debug(`📷 拍摄参数统计完成: 有拍摄参数=${imagesWithCameraSettings}/${this.cache.allImages.length}, 有分类字段=${imagesWithCategories}/${this.cache.allImages.length}, ISO=${Object.keys(this.cache.isoCounts).length}种(${JSON.stringify(this.cache.isoCounts)}), 光圈=${Object.keys(this.cache.apertureCounts).length}种(${JSON.stringify(this.cache.apertureCounts)}), 快门=${Object.keys(this.cache.shutterCounts).length}种(${JSON.stringify(this.cache.shutterCounts)}), 焦距=${Object.keys(this.cache.focalLengthCounts).length}种(${JSON.stringify(this.cache.focalLengthCounts)})`);
   }
 
   // 根据方向获取图片
@@ -1082,6 +1184,7 @@ class GlobalImageCache {
       this._rebuildFormatCounts();
       this._rebuildResolutionCounts();
       this._rebuildOrientationCounts();
+      this._rebuildCameraSettingsCounts();
       this._rebuildSelectedStats();
       this._rebuildRecentImages();
       
@@ -1334,6 +1437,10 @@ class GlobalImageCache {
       formatCounts: {},
       resolutionCounts: {},
       orientationCounts: {},
+      isoCounts: {},
+      apertureCounts: {},
+      shutterCounts: {},
+      focalLengthCounts: {},
       recentImages: [],
       selectedCategoryCounts: {},
       selectedCityCounts: {},
