@@ -334,13 +334,6 @@ const HomeScreen = () => {
       setApertureCounts(apertureCountsData);
       setShutterCounts(shutterCountsData);
       setFocalLengthCounts(focalLengthCountsData);
-      logger.debug('准备更新状态 - 格式统计:', formatCountsData);
-      logger.debug('准备更新状态 - 分辨率统计:', resolutionCountsData);
-      logger.debug('准备更新状态 - 方向统计:', orientationCountsData);
-      logger.debug('📷 准备更新状态 - ISO统计:', isoCountsData);
-      logger.debug('📷 准备更新状态 - 光圈统计:', apertureCountsData);
-      logger.debug('📷 准备更新状态 - 快门统计:', shutterCountsData);
-      logger.debug('📷 准备更新状态 - 焦距统计:', focalLengthCountsData);
       setStagingBoxCount(stagingBoxCountData);
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
@@ -1359,7 +1352,6 @@ const HomeScreen = () => {
                   .map(([isoCategory, count]) => {
                     const recentImages = isoRecentImages[isoCategory] || [];
                     const translatedCategory = getCameraSettingsCategoryTranslation('iso', isoCategory);
-                    logger.debug(`📷 [ISO分类] 原始值=${isoCategory}, 翻译后=${translatedCategory}`);
                     return (
                       <CategoryCard
                         key={isoCategory}

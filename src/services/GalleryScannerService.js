@@ -426,23 +426,6 @@ const extractExifData = async (filePath, fileName, contentUri) => {
         focalLength: exifData.tags?.FocalLength || null // 毫米，如 50
       };
 
-      // 🔥 记录拍摄参数提取日志
-      if (cameraSettings.iso || cameraSettings.aperture || cameraSettings.shutterSpeed || cameraSettings.focalLength) {
-        const params = [];
-        if (cameraSettings.iso) params.push(`ISO=${cameraSettings.iso}`);
-        if (cameraSettings.aperture) params.push(`光圈=f/${cameraSettings.aperture}`);
-        if (cameraSettings.shutterSpeed) {
-          // 将秒转换为更易读的格式（如 1/125s）
-          const shutterDisplay = cameraSettings.shutterSpeed >= 1 
-            ? `${cameraSettings.shutterSpeed}s`
-            : `1/${Math.round(1 / cameraSettings.shutterSpeed)}s`;
-          params.push(`快门=${shutterDisplay}`);
-        }
-        if (cameraSettings.focalLength) params.push(`焦距=${cameraSettings.focalLength}mm`);
-        logger.debug(`📷 [EXIF] 提取拍摄参数: ${params.join(', ')} (文件: ${finalFileName})`);
-      } else {
-        logger.debug(`📷 [EXIF] 未找到拍摄参数 (文件: ${finalFileName})`);
-      }
 
       return { 
         takenTime, 

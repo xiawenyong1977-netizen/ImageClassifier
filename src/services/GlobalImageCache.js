@@ -1066,14 +1066,6 @@ class GlobalImageCache {
     let imagesWithCameraSettings = 0;
     let imagesWithCategories = 0;
     
-    // 🔥 调试：检查前几张图片的分类字段
-    const sampleImages = this.cache.allImages.slice(0, 3);
-    sampleImages.forEach((img, idx) => {
-      if (img.cameraSettings || img.isoCategory || img.apertureCategory) {
-        logger.debug(`📷 [缓存重建] 图片${idx}: fileName=${img.fileName}, isoCategory=${img.isoCategory}, apertureCategory=${img.apertureCategory}, shutterCategory=${img.shutterCategory}, focalLengthCategory=${img.focalLengthCategory}, cameraSettings=${typeof img.cameraSettings === 'string' ? img.cameraSettings.substring(0, 50) : JSON.stringify(img.cameraSettings)}`);
-      }
-    });
-    
     this.cache.allImages.forEach(img => {
       if (img.isoCategory) {
         this.cache.isoCounts[img.isoCategory] = (this.cache.isoCounts[img.isoCategory] || 0) + 1;
@@ -1094,8 +1086,6 @@ class GlobalImageCache {
         imagesWithCategories++;
       }
     });
-    
-    logger.debug(`📷 拍摄参数统计完成: 有拍摄参数=${imagesWithCameraSettings}/${this.cache.allImages.length}, 有分类字段=${imagesWithCategories}/${this.cache.allImages.length}, ISO=${Object.keys(this.cache.isoCounts).length}种(${JSON.stringify(this.cache.isoCounts)}), 光圈=${Object.keys(this.cache.apertureCounts).length}种(${JSON.stringify(this.cache.apertureCounts)}), 快门=${Object.keys(this.cache.shutterCounts).length}种(${JSON.stringify(this.cache.shutterCounts)}), 焦距=${Object.keys(this.cache.focalLengthCounts).length}种(${JSON.stringify(this.cache.focalLengthCounts)})`);
   }
 
   // 根据方向获取图片

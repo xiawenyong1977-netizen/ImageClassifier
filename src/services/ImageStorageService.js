@@ -34,13 +34,18 @@ function categorizeShutterSpeed(exposureTime) {
 }
 
 /**
- * 焦距分类：wide(<35mm), standard(35-85mm), telephoto(>85mm)
+ * 焦距分类：
+ * - ultrawide(<3mm): 超广角/微距（手机贴得比较近的时候）
+ * - wide(3-35mm): 广角（正常拍摄）
+ * - standard(35-85mm): 标准
+ * - telephoto(>85mm): 长焦
  */
 function categorizeFocalLength(focalLength) {
   if (!focalLength || typeof focalLength !== 'number' || focalLength <= 0) return null;
-  if (focalLength < 35) return 'wide';
-  if (focalLength <= 85) return 'standard';
-  return 'telephoto';
+  if (focalLength < 3) return 'ultrawide';  // 手机微距/超广角模式
+  if (focalLength < 35) return 'wide';       // 正常广角
+  if (focalLength <= 85) return 'standard';  // 标准
+  return 'telephoto';                        // 长焦
 }
 
 /**
@@ -89,11 +94,6 @@ function calculateCameraSettingsCategories(cameraSettings) {
     shutterCategory: categorizeShutterSpeed(settings.shutterSpeed),
     focalLengthCategory: categorizeFocalLength(settings.focalLength)
   };
-  
-  // 🔥 调试日志：记录分类计算过程
-  if (settings.iso || settings.aperture || settings.shutterSpeed || settings.focalLength) {
-    logger.debug(`📷 [分类计算] ISO=${settings.iso} -> ${result.isoCategory}, 光圈=${settings.aperture} -> ${result.apertureCategory}, 快门=${settings.shutterSpeed} -> ${result.shutterCategory}, 焦距=${settings.focalLength} -> ${result.focalLengthCategory}`);
-  }
   
   return result;
 }
@@ -1392,7 +1392,6 @@ class IndexedDBAdapter {
 
   async getItem(key) {
     await this.init();
-    logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 开始读取 key="${key}"`);
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction([key], 'readonly');
       const store = transaction.objectStore(key);
@@ -1400,42 +1399,10 @@ class IndexedDBAdapter {
       
       request.onsuccess = () => {
         const results = request.result;
-        logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: getAll 成功, key="${key}", 结果数量=${results.length}`);
         if (results.length === 0) {
-          logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 结果为空，返回 null`);
           resolve(null);
         } else if (key === 'images' || key === 'stagingBox') {
           // 对于图片数据和暂存箱数据，返回数组（因为它们都是数组结构，不是键值对）
-          if (key === 'images') {
-            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回图片数组，数量=${results.length}`);
-            // 🔍 诊断：检查第一条记录的 category
-            if (results.length > 0) {
-              const firstItem = results[0];
-              logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 第一条记录 category="${firstItem.category}", id="${firstItem.id}"`);
-              const naCount = results.filter(img => img.category === 'NA').length;
-              const screenshotCount = results.filter(img => img.category === 'screenshot').length;
-              logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: NA=${naCount}, screenshot=${screenshotCount}`);
-              
-              // 🔥 调试：检查拍摄参数分类字段
-              const imagesWithCategories = results.filter(img => img.isoCategory || img.apertureCategory || img.shutterCategory || img.focalLengthCategory);
-              if (imagesWithCategories.length > 0) {
-                logger.debug(`📷 [数据库读取] 找到 ${imagesWithCategories.length} 张图片包含分类字段`);
-                imagesWithCategories.slice(0, 3).forEach(img => {
-                  logger.debug(`📷 [数据库读取] 图片: ${img.fileName}, isoCategory=${img.isoCategory}, apertureCategory=${img.apertureCategory}, shutterCategory=${img.shutterCategory}, focalLengthCategory=${img.focalLengthCategory}`);
-                });
-              } else {
-                logger.debug(`📷 [数据库读取] 没有找到包含分类字段的图片`);
-                // 检查第一条记录的所有字段
-                if (results.length > 0) {
-                  const sample = results[0];
-                  logger.debug(`📷 [数据库读取] 第一条记录的所有字段: ${Object.keys(sample).join(', ')}`);
-                  logger.debug(`📷 [数据库读取] 第一条记录的 isoCategory: ${sample.isoCategory}, apertureCategory: ${sample.apertureCategory}`);
-                }
-              }
-            }
-          } else {
-            logger.debug(`🔍 [诊断] IndexedDBAdapter.getItem: 返回暂存箱数组，数量=${results.length}`);
-          }
           resolve(results);
         } else {
           // 对于其他数据，返回第一个结果的值
@@ -1505,12 +1472,6 @@ class IndexedDBAdapter {
         const existingImage = getRequest.result;
         
         if (existingImage) {
-          // 🔥 调试：检查更新前的数据
-          if (imageData.isoCategory || imageData.apertureCategory) {
-            logger.debug(`📷 [更新前] 现有图片: ${existingImage.fileName}, isoCategory=${existingImage.isoCategory}, apertureCategory=${existingImage.apertureCategory}`);
-            logger.debug(`📷 [更新前] 新数据: isoCategory=${imageData.isoCategory}, apertureCategory=${imageData.apertureCategory}, shutterCategory=${imageData.shutterCategory}, focalLengthCategory=${imageData.focalLengthCategory}`);
-          }
-          
           // 更新现有记录，保留原有ID和创建时间
           const updatedImage = {
             ...existingImage,
@@ -1519,11 +1480,6 @@ class IndexedDBAdapter {
             createdAt: existingImage.createdAt, // 保持原有创建时间
             updatedAt: new Date().toISOString()
           };
-          
-          // 🔥 调试：检查更新后的数据
-          if (updatedImage.isoCategory || updatedImage.apertureCategory) {
-            logger.debug(`📷 [更新后] 合并结果: isoCategory=${updatedImage.isoCategory}, apertureCategory=${updatedImage.apertureCategory}, shutterCategory=${updatedImage.shutterCategory}, focalLengthCategory=${updatedImage.focalLengthCategory}`);
-          }
           
           store.put(updatedImage);
           logger.debug(`✅ 更新图片: ${imageData.fileName}`);
@@ -2154,12 +2110,6 @@ class ImageStorageService {
         
         // 🔥 调试日志：记录分类计算结果
         if (imageData.cameraSettings && (categories.isoCategory || categories.apertureCategory || categories.shutterCategory || categories.focalLengthCategory)) {
-          const categoryParts = [];
-          if (categories.isoCategory) categoryParts.push(`ISO=${categories.isoCategory}`);
-          if (categories.apertureCategory) categoryParts.push(`光圈=${categories.apertureCategory}`);
-          if (categories.shutterCategory) categoryParts.push(`快门=${categories.shutterCategory}`);
-          if (categories.focalLengthCategory) categoryParts.push(`焦距=${categories.focalLengthCategory}`);
-          logger.debug(`📷 [保存] 计算拍摄参数分类: ${categoryParts.join(', ')} (文件: ${imageData.fileName})`);
         }
         
         const imageRecord = {
@@ -2203,30 +2153,10 @@ class ImageStorageService {
         if (!imageRecord.category) {
           logger.warn(`⚠️ [诊断] 图片缺少category字段: ${imageRecord.uri}`);
         }
-        
-        // 🔥 调试：检查分类字段是否存在于 imageRecord 中
-        if (imageRecord.cameraSettings || imageRecord.isoCategory) {
-          logger.debug(`📷 [保存前] 图片: ${imageRecord.fileName}, isoCategory=${imageRecord.isoCategory}, apertureCategory=${imageRecord.apertureCategory}, shutterCategory=${imageRecord.shutterCategory}, focalLengthCategory=${imageRecord.focalLengthCategory}`);
-        }
 
         // 使用IndexedDB的单条插入方法
         await this.storage.addOrUpdateSingleImage(imageRecord);
         newCount++; // IndexedDB的addOrUpdateSingleImage会处理新增/更新逻辑
-        
-        // 🔥 调试：保存后立即验证
-        if (imageRecord.isoCategory || imageRecord.apertureCategory) {
-          try {
-            const savedImage = await this.storage.getItem('images');
-            if (savedImage && Array.isArray(savedImage)) {
-              const found = savedImage.find(img => img.id === imageRecord.id);
-              if (found) {
-                logger.debug(`📷 [保存后验证] 图片: ${found.fileName}, isoCategory=${found.isoCategory}, apertureCategory=${found.apertureCategory}, shutterCategory=${found.shutterCategory}, focalLengthCategory=${found.focalLengthCategory}`);
-              }
-            }
-          } catch (e) {
-            // 忽略验证错误
-          }
-        }
       } catch (error) {
         logger.error(`❌ IndexedDB批量插入单条记录失败 (${i + 1}/${imageDataArray.length}):`, error);
         // 继续处理下一条记录

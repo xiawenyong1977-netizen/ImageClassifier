@@ -533,33 +533,11 @@ export const getCameraSettingsCategoryTranslation = (categoryType, categoryValue
     // 🔥 直接使用导入的翻译对象，而不是通过 getResourceBundle（可能缓存问题）
     const translationObj = targetLang === 'zh' ? zh : en;
     
-    // 🔥 详细调试日志
-    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
-      console.log(`📷 [调试开始] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, targetLang=${targetLang}`);
-      console.log(`📷 [调试] translationObj存在=${!!translationObj}, settings存在=${!!translationObj?.settings}, cameraSettings存在=${!!translationObj?.settings?.cameraSettings}`);
-      if (translationObj?.settings) {
-        console.log(`📷 [调试] settings的所有键=${Object.keys(translationObj.settings).slice(0, 30).join(',')}`);
-      }
-      if (translationObj?.settings?.cameraSettings) {
-        console.log(`📷 [调试] cameraSettings keys=${Object.keys(translationObj.settings.cameraSettings).join(',')}`);
-        if (translationObj.settings.cameraSettings[categoryType]) {
-          console.log(`📷 [调试] ${categoryType} keys=${Object.keys(translationObj.settings.cameraSettings[categoryType]).join(',')}`);
-          console.log(`📷 [调试] ${categoryType}.${normalizedValue}=${translationObj.settings.cameraSettings[categoryType][normalizedValue]}`);
-        }
-      }
-    }
-    
     // 优先从 settings.cameraSettings 读取
     if (translationObj && translationObj.settings && translationObj.settings.cameraSettings && 
         translationObj.settings.cameraSettings[categoryType] && 
         translationObj.settings.cameraSettings[categoryType][normalizedValue]) {
       const translated = translationObj.settings.cameraSettings[categoryType][normalizedValue];
-      
-      // 🔥 调试日志（仅在开发环境）
-      if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
-        console.log(`📷 [翻译成功-直接访问] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translated=${translated}, targetLang=${targetLang}`);
-      }
-      
       return translated;
     }
     
@@ -568,12 +546,6 @@ export const getCameraSettingsCategoryTranslation = (categoryType, categoryValue
         translationObj.category.cameraSettings[categoryType] && 
         translationObj.category.cameraSettings[categoryType][normalizedValue]) {
       const translated = translationObj.category.cameraSettings[categoryType][normalizedValue];
-      
-      // 🔥 调试日志（仅在开发环境）
-      if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
-        console.log(`📷 [翻译成功-向后兼容category] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translated=${translated}, targetLang=${targetLang}`);
-      }
-      
       return translated;
     }
     
@@ -601,14 +573,6 @@ export const getCameraSettingsCategoryTranslation = (categoryType, categoryValue
       defaultValue: categoryValue // 如果翻译不存在，使用原始值
     });
     
-    // 🔥 调试日志（仅在开发环境）
-    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.location?.hostname === 'localhost')) {
-      console.log(`📷 [翻译-i18n.t] categoryType=${categoryType}, categoryValue=${categoryValue}, normalizedValue=${normalizedValue}, translationKey=${translationKey}, translated=${translated}, targetLang=${targetLang}`);
-      console.log(`📷 [调试] translationObj存在=${!!translationObj}, settings存在=${!!translationObj?.settings}, cameraSettings存在=${!!translationObj?.settings?.cameraSettings}`);
-      if (translationObj?.settings?.cameraSettings) {
-        console.log(`📷 [调试] cameraSettings keys=${Object.keys(translationObj.settings.cameraSettings).join(',')}`);
-      }
-    }
     
     // 如果翻译成功（返回值不等于键名且不等于原始值），返回翻译
     if (translated && translated !== translationKey && translated !== categoryValue) {

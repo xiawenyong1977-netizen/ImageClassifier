@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import i18n, { getDefaultPresets } from '../../i18n';
+import i18n, { getDefaultPresets, getCameraSettingsCategoryTranslation } from '../../i18n';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, Alert, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -1289,21 +1289,6 @@ const ImagePreviewScreen = ({
                 <Text style={styles.infoValue}>
                   {currentImage.takenAt ? formatDate(currentImage.takenAt) : t('imagePreview.unknown')}
                 </Text>
-                {logger.debug('当前图片EXIF数据:', {
-                  takenAt: currentImage.takenAt,
-                  timestamp: currentImage.timestamp,
-                  uri: currentImage.uri,
-                  latitude: currentImage.latitude,
-                  longitude: currentImage.longitude,
-                  altitude: currentImage.altitude,
-                  accuracy: currentImage.accuracy,
-                  address: currentImage.address,
-                  city: currentImage.city,
-                  province: currentImage.province,
-                  country: currentImage.country,
-                  cityDistance: currentImage.cityDistance,
-                  locationSource: currentImage.locationSource
-                })}
               </View>
 
               <View style={styles.infoRow}>
@@ -1378,6 +1363,107 @@ const ImagePreviewScreen = ({
                   {formatFileSize(currentImage.size || 0)}
                 </Text>
               </View>
+
+              {/* 拍摄参数信息 */}
+              {(() => {
+                // 🔍 调试信息：检查拍摄参数数据
+                const hasCameraSettings = !!currentImage.cameraSettings;
+                
+                // 解析 cameraSettings：可能是字符串（JSON）或对象
+                let cameraSettingsData = {};
+                if (currentImage.cameraSettings) {
+                  if (typeof currentImage.cameraSettings === 'string') {
+                    try {
+                      cameraSettingsData = JSON.parse(currentImage.cameraSettings);
+                    } catch (e) {
+                      logger.error('📷 [拍摄参数] 解析 cameraSettings JSON 失败:', e);
+                      cameraSettingsData = {};
+                    }
+                  } else if (typeof currentImage.cameraSettings === 'object') {
+                    cameraSettingsData = currentImage.cameraSettings;
+                  }
+                }
+                
+                const hasISOCategory = !!currentImage.isoCategory;
+                const hasApertureCategory = !!currentImage.apertureCategory;
+                const hasShutterCategory = !!currentImage.shutterCategory;
+                const hasFocalLengthCategory = !!currentImage.focalLengthCategory;
+                
+                const shouldShowCameraSettings = hasCameraSettings && (
+                  cameraSettingsData.iso || 
+                  cameraSettingsData.aperture || 
+                  cameraSettingsData.shutterSpeed || 
+                  cameraSettingsData.focalLength
+                ) || hasISOCategory || hasApertureCategory || hasShutterCategory || hasFocalLengthCategory;
+                
+                logger.debug('📷 [拍摄参数调试]', {
+                  hasCameraSettings,
+                  cameraSettingsRaw: currentImage.cameraSettings,
+                  cameraSettingsType: typeof currentImage.cameraSettings,
+                  cameraSettingsParsed: cameraSettingsData,
+                  hasISOCategory,
+                  isoCategory: currentImage.isoCategory,
+                  hasApertureCategory,
+                  apertureCategory: currentImage.apertureCategory,
+                  hasShutterCategory,
+                  shutterCategory: currentImage.shutterCategory,
+                  hasFocalLengthCategory,
+                  focalLengthCategory: currentImage.focalLengthCategory,
+                  shouldShowCameraSettings,
+                  imageId: currentImage.id,
+                  fileName: currentImage.fileName
+                });
+                
+                if (!shouldShowCameraSettings) {
+                  return null;
+                }
+                
+                return (
+                  <>
+                    {cameraSettingsData.iso && (
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>📷 ISO:</Text>
+                        <Text style={styles.infoValue}>
+                          {cameraSettingsData.iso}
+                          {currentImage.isoCategory && ` (${getCameraSettingsCategoryTranslation('iso', currentImage.isoCategory)})`}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {cameraSettingsData.aperture && (
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>📷 {t('imagePreview.aperture')}:</Text>
+                        <Text style={styles.infoValue}>
+                          f/{cameraSettingsData.aperture}
+                          {currentImage.apertureCategory && ` (${getCameraSettingsCategoryTranslation('aperture', currentImage.apertureCategory)})`}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {cameraSettingsData.shutterSpeed && (
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>📷 {t('imagePreview.shutterSpeed')}:</Text>
+                        <Text style={styles.infoValue}>
+                          {cameraSettingsData.shutterSpeed >= 1
+                            ? `${cameraSettingsData.shutterSpeed}s`
+                            : `1/${Math.round(1 / cameraSettingsData.shutterSpeed)}s`}
+                          {currentImage.shutterCategory && ` (${getCameraSettingsCategoryTranslation('shutter', currentImage.shutterCategory)})`}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {cameraSettingsData.focalLength && (
+                      <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>📷 {t('imagePreview.focalLength')}:</Text>
+                        <Text style={styles.infoValue}>
+                          {cameraSettingsData.focalLength}mm
+                          {currentImage.focalLengthCategory && ` (${getCameraSettingsCategoryTranslation('focalLength', currentImage.focalLengthCategory)})`}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
 
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>{t('category.category')}:</Text>
@@ -1485,18 +1571,7 @@ const ImagePreviewScreen = ({
                     </View>
                   )}
                 </>
-              ) : (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
-                  <Text style={styles.infoValue}>
-                    {/* 如果有 message 且不是默认消息，显示 AI 描述 */}
-                    {currentImage.message && currentImage.message !== i18n.t('imagePreview.classificationComplete') ? 
-                      currentImage.message : 
-                      t('imagePreview.noObjectsDetected')
-                    }
-                  </Text>
-                </View>
-              )}
+              ) : null}
             </View>
 
             {/* GPS位置信息 */}

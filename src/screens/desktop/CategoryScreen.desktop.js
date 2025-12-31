@@ -67,7 +67,7 @@ const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPr
         <Text style={styles.timelineDate}>{formattedDate}</Text>
         <Text style={styles.timelineCount}>
           ({t('category.photosCount', { count: imagesForDate.length })}
-          {someSelected && ` · ${t('category.selectedCount', { count: selectedCount })}`}
+          {someSelected && ` · ${t('category.selectedCountSimple', { count: selectedCount })}`}
           )
         </Text>
       </View>
