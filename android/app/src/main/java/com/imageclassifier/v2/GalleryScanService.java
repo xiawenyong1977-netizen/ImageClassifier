@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -43,6 +44,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Collections;
 
 import java.io.OutputStream;
 import java.io.BufferedReader;
@@ -59,12 +67,19 @@ import org.json.JSONObject;
 public class GalleryScanService {
     private static final String TAG = "GalleryScanService";
     
+    // 🔥 API配置（与PC版本保持一致）
+    private static final String API_BASE_URL = "http://123.57.68.4:8000/";
+    
     private final ReactApplicationContext reactContext;
     private final Context context;
     private final ImageDataService imageDataService;
     private final MediaStoreModule mediaStoreModule;
     private final ExecutorService executorService;
     private final Handler mainHandler;
+    
+    // 🔥 并发控制：限制同时进行的HTTP请求数量（避免过多连接）
+    private static final int MAX_CONCURRENT_REQUESTS = 3;
+    private final Semaphore httpRequestSemaphore = new Semaphore(MAX_CONCURRENT_REQUESTS);
     
     // 扫描状态
     private String currentScanId = null;
@@ -73,9 +88,12 @@ public class GalleryScanService {
     
     // 全局扫描统计变量（在整个扫描任务期间共享，所有阶段都会使用）
     private int totalImagesToBeClassified = 0; // 这次扫描任务一共需要分类的图片总数
-                                                      // 在startScan中计算后，在整个扫描任务结束前都不会发生变化
+                                                      // 在startBasicImageScan或startAiImageClassifyByContent中计算后，在整个扫描任务结束前都不会发生变化
     private int imagesClassified = 0; // 目前已经分类成功的图片数量（整个扫描过程累加）
                                             // 在各个阶段（截图检测、缓存查询、远程推理）中累加
+    
+    // 🔥 用户ID（用于API请求）
+    private String userId = null;
     
     public GalleryScanService(ReactApplicationContext reactContext) {
         this.reactContext = reactContext;
@@ -92,32 +110,32 @@ public class GalleryScanService {
     public static class ScanStartResult {
         public String scanId;
         public int totalImagesToBeClassified;
+        public boolean hasNewImages; // 🔥 是否有新增照片
         
         public ScanStartResult(String scanId, int totalImagesToBeClassified) {
             this.scanId = scanId;
             this.totalImagesToBeClassified = totalImagesToBeClassified;
+            this.hasNewImages = totalImagesToBeClassified > 0; // 根据总数量判断是否有新增照片
+        }
+        
+        public ScanStartResult(String scanId, int totalImagesToBeClassified, boolean hasNewImages) {
+            this.scanId = scanId;
+            this.totalImagesToBeClassified = totalImagesToBeClassified;
+            this.hasNewImages = hasNewImages;
         }
     }
     
     /**
-     * 启动扫描
-     * 同步执行阶段1（目录扫描）和阶段2（文件比对），返回总数量
-     * 然后在后台线程执行后续阶段（截图检测、缓存查询、远程推理）
+     * 🆕 启动基础扫描（阶段1、2、3a）
+     * 执行目录扫描、文件比对、EXIF提取、截图检测，不执行AI分类
+     * 注意：位置信息补全（根据GPS坐标查找城市）由JS层处理，原生层只提取GPS坐标
      * 
      * @param scanPaths 扫描路径列表（相对路径，如 "DCIM/Camera"）
      * @param compareLimit 文件比对限制（0表示不限制）
-     *                     用于阶段2：限制参与文件比对的图片数量
-     *                     用途：性能优化，在扫描大量图片时只比对最新的图片
-     *                     逻辑：按时间排序后取最新的N张进行比对
-     *                     示例：compareLimit=100 表示只比对最新的100张图片（快速测试）
-     *                           compareLimit=1000 表示只比对最新的1000张图片（正常使用）
-     *                           compareLimit=0 表示比对所有图片（完整扫描）
-     * @param remoteApiUrl 远程推理API地址
-     * @param cacheApiUrl 远端缓存API地址
      * @return 扫描启动结果（包含scanId和totalImagesToBeClassified）
      */
-    public ScanStartResult startScan(List<String> scanPaths, int compareLimit, String remoteApiUrl, String cacheApiUrl, String language) {
-        currentScanId = "scan_" + System.currentTimeMillis();
+    public ScanStartResult startBasicImageScan(List<String> scanPaths, int compareLimit) {
+        currentScanId = "basic_scan_" + System.currentTimeMillis();
         
         // 重置扫描状态计数器
         totalFoundThisPhase = 0;
@@ -144,71 +162,132 @@ public class GalleryScanService {
             imageDataService.removeImagesByUris(deletedUris);
         }
         
-        // 查询数据库中分类为NA的照片（上次遗留下来没有分类完成的照片）
-        List<Map<String, Object>> naImagesMap = imageDataService.getImagesByCategory("NA");
-        int naCount = naImagesMap != null ? naImagesMap.size() : 0;
+        // 计算总数量：新增照片数量
+        totalImagesToBeClassified = newImages.size();
+        boolean hasNewImages = !newImages.isEmpty();
         
-        // 🔥 将 NA 分类的图片转换为 ImageInfo 列表（用于缓存查询阶段）
-        List<ImageInfo> naImages = new ArrayList<>();
-        if (naImagesMap != null && !naImagesMap.isEmpty()) {
-            for (Map<String, Object> imageMap : naImagesMap) {
-                ImageInfo imageInfo = new ImageInfo();
-                imageInfo.uri = (String) imageMap.get("uri");
-                imageInfo.fileName = (String) imageMap.get("fileName");
-                imageInfo.path = (String) imageMap.get("path");
-                // id 字段在数据库中可能是 String 或 Long，需要转换为 String
-                Object idObj = imageMap.get("id");
-                if (idObj != null) {
-                    imageInfo.id = idObj instanceof String ? (String) idObj : String.valueOf(idObj);
-                }
-                naImages.add(imageInfo);
-            }
-            Log.d(TAG, "查询到 " + naCount + " 张 NA 分类图片，将在缓存查询阶段处理");
+        Log.d(TAG, "基础扫描总数量: " + totalImagesToBeClassified + " 张，是否有新增照片: " + hasNewImages);
+        
+        // 🔥 如果没有新增照片，直接返回，不启动后台扫描
+        if (!hasNewImages) {
+            Log.d(TAG, "✅ 没有新增照片，跳过基础扫描流程");
+            return new ScanStartResult(currentScanId, totalImagesToBeClassified, false);
         }
         
-        // 计算总数量：新增照片 + 数据库中分类为NA的照片
-        totalImagesToBeClassified = newImages.size() + naCount;
-        
-        Log.d(TAG, "总数量计算: 新增 " + newImages.size() + " 张 + NA分类 " + naCount + " 张 = 总计 " + totalImagesToBeClassified + " 张");
-        
-        // 在后台线程执行后续扫描阶段
-        // 注意：newImages 进入完整流程（截图检测 -> 缓存查询 -> 远程推理）
-        //      naImages 只进入缓存查询阶段（跳过截图检测）
-        final List<ImageInfo> finalNaImages = naImages; // 需要在 lambda 中使用，需要 final
-        final String finalLanguage = language != null ? language : "zh"; // 需要在 lambda 中使用，需要 final
+        // 在后台线程执行基础扫描阶段（EXIF提取、截图检测）
         executorService.execute(() -> {
             try {
-                performScan(currentScanId, newImages, finalNaImages, remoteApiUrl, cacheApiUrl, finalLanguage);
+                performBasicScan(currentScanId, newImages);
             } catch (Exception e) {
-                Log.e(TAG, "扫描过程发生错误", e);
-                sendErrorEvent(currentScanId, "扫描失败: " + e.getMessage());
+                Log.e(TAG, "基础扫描过程发生错误", e);
+                sendErrorEvent(currentScanId, "基础扫描失败: " + e.getMessage());
             }
         });
+        
+        return new ScanStartResult(currentScanId, totalImagesToBeClassified, true);
+    }
+    
+    /**
+     * 🆕 启动AI分类（阶段3b、3c）
+     * 对NA分类图片或指定图片进行缓存查询和远程推理
+     * 
+     * @param scanId 扫描ID（可选，如果为null则自动生成）
+     * @param imagesToClassify 指定需要分类的图片列表（可选，如果为null则读取所有NA分类图片）
+     * @param userId 用户ID（可选，用于API请求）
+     * @return 扫描启动结果（包含scanId和totalImagesToBeClassified）
+     */
+    public ScanStartResult startAiImageClassifyByContent(String scanId, List<ImageInfo> imagesToClassify, String userId) {
+        // 如果没有提供scanId，生成新的
+        if (scanId == null || scanId.isEmpty()) {
+            currentScanId = "ai_classify_" + System.currentTimeMillis();
+        } else {
+            currentScanId = scanId;
+        }
+        
+        // 重置扫描状态计数器
+        totalFoundThisPhase = 0;
+        processedThisPhase = 0;
+        totalImagesToBeClassified = 0;
+        imagesClassified = 0;
+        
+        // 准备需要分类的图片列表
+        List<ImageInfo> naImages = new ArrayList<>();
+        
+        if (imagesToClassify != null && !imagesToClassify.isEmpty()) {
+            // 如果指定了图片列表，直接使用
+            naImages = imagesToClassify;
+            Log.d(TAG, "使用指定的 " + naImages.size() + " 张图片进行AI分类");
+        } else {
+            // 如果没有指定，读取所有NA分类的图片
+            Log.d(TAG, "🔍 开始查询NA分类图片...");
+            List<Map<String, Object>> naImagesMap = imageDataService.getImagesByCategory("NA");
+            int naCount = naImagesMap != null ? naImagesMap.size() : 0;
+            Log.d(TAG, "🔍 查询结果: naImagesMap=" + (naImagesMap != null ? "非空" : "null") + ", naCount=" + naCount);
+            
+            // 将 NA 分类的图片转换为 ImageInfo 列表
+            if (naImagesMap != null && !naImagesMap.isEmpty()) {
+                for (Map<String, Object> imageMap : naImagesMap) {
+                    ImageInfo imageInfo = new ImageInfo();
+                    imageInfo.uri = (String) imageMap.get("uri");
+                    imageInfo.fileName = (String) imageMap.get("fileName");
+                    imageInfo.path = (String) imageMap.get("path");
+                    // id 字段在数据库中可能是 String 或 Long，需要转换为 String
+                    Object idObj = imageMap.get("id");
+                    if (idObj != null) {
+                        imageInfo.id = idObj instanceof String ? (String) idObj : String.valueOf(idObj);
+                    }
+                    naImages.add(imageInfo);
+                }
+                Log.d(TAG, "查询到 " + naCount + " 张 NA 分类图片，将进行AI分类");
+            } else {
+                Log.w(TAG, "⚠️ 未查询到NA分类图片，可能原因：1) 数据库中没有NA分类的图片 2) 所有图片都已分类完成");
+            }
+        }
+        
+        // 🔥 保存用户ID（用于API请求）
+        this.userId = userId;
+        
+        // 计算总数量
+        totalImagesToBeClassified = naImages.size();
+        
+        Log.d(TAG, "AI分类总数量: " + totalImagesToBeClassified + " 张");
+        if (userId != null && !userId.isEmpty()) {
+            Log.d(TAG, "用户ID: " + userId);
+        }
+        
+        // 在后台线程执行AI分类阶段（缓存查询、远程推理）
+        final List<ImageInfo> finalNaImages = naImages; // 需要在 lambda 中使用，需要 final
+        executorService.execute(() -> {
+            try {
+                performAiClassification(currentScanId, finalNaImages);
+            } catch (Exception e) {
+                Log.e(TAG, "AI分类过程发生错误", e);
+                sendErrorEvent(currentScanId, "AI分类失败: " + e.getMessage());
+            }
+        });
+        
+        if (naImages.isEmpty()) {
+            Log.d(TAG, "没有图片需要AI分类（已启动后台线程，将发送完成事件）");
+        }
         
         return new ScanStartResult(currentScanId, totalImagesToBeClassified);
     }
     
     /**
-     * 执行扫描流程（后续阶段）
-     * 从阶段3开始：截图检测 -> 远端缓存查询 -> 远程推理
+     * 🆕 执行基础扫描流程（阶段3a：照片基础信息扫描）
      * @param scanId 扫描ID
-     * @param newImages 新增图片（需要完整流程：截图检测 -> 缓存查询 -> 远程推理）
-     * @param naImages NA分类图片（只需要缓存查询 -> 远程推理，跳过截图检测）
-     * @param remoteApiUrl 远程推理API地址
-     * @param cacheApiUrl 缓存查询API地址
+     * @param newImages 新增图片（需要基础信息扫描）
      */
-    private void performScan(String scanId, List<ImageInfo> newImages, List<ImageInfo> naImages,
-                            String remoteApiUrl, String cacheApiUrl, String language) {
+    private void performBasicScan(String scanId, List<ImageInfo> newImages) {
         long scanStartTime = System.currentTimeMillis();
-        Log.d(TAG, "开始后续扫描阶段: " + scanId + ", 新增图片: " + newImages.size() + " 张, NA分类图片: " + (naImages != null ? naImages.size() : 0) + " 张");
+        Log.d(TAG, "开始基础扫描阶段: " + scanId + ", 新增图片: " + newImages.size() + " 张");
         
         try {
-            // 阶段3a: 截图检测（只处理新增图片，NA分类图片跳过此阶段）
-            List<ImageInfo> naImagesAfterScreenshot = new ArrayList<>();
+            // 阶段3a: 照片基础信息扫描（只处理新增图片）
             if (!newImages.isEmpty()) {
-                // 注意：进度事件在 detectScreenshots 函数内部发送（开始和完成事件）
-                naImagesAfterScreenshot = detectScreenshots(newImages, remoteApiUrl, language);
-                Log.d(TAG, "阶段3a完成: 检测完成，剩余待处理: " + naImagesAfterScreenshot.size() + " 张");
+                // 注意：进度事件在 scanBasicImageInfo 函数内部发送（开始和完成事件）
+                scanBasicImageInfo(newImages);
+                Log.d(TAG, "阶段3a完成: 基础信息扫描完成");
                 
                 // 等待一小段时间，确保阶段3a的完成事件先被处理（避免事件顺序混乱）
                 try {
@@ -217,27 +296,39 @@ public class GalleryScanService {
                     Thread.currentThread().interrupt();
                 }
             } else {
-                Log.d(TAG, "阶段3a: 没有新增图片，跳过截图检测");
+                Log.d(TAG, "阶段3a: 没有新增图片，跳过基础信息扫描");
             }
             
-            // 阶段3b: 远端缓存查询
-            // 合并新增图片（经过截图检测后）和 NA 分类图片一起进行缓存查询
-            List<ImageInfo> imagesForCacheQuery = new ArrayList<>();
-            imagesForCacheQuery.addAll(naImagesAfterScreenshot);
-            if (naImages != null && !naImages.isEmpty()) {
-                imagesForCacheQuery.addAll(naImages);
-                Log.d(TAG, "合并 NA 分类图片到缓存查询: " + naImages.size() + " 张");
-            }
+            // 基础扫描完成（原生层部分完成，发送事件通知JS层继续处理位置信息补全）
+            // JS层收到事件后会执行位置信息补全，然后发送最终完成消息
+            completeBasicScan(scanId);
             
-            if (imagesForCacheQuery.isEmpty()) {
-                Log.d(TAG, "扫描完成: 没有图片需要缓存查询");
-                completeScan(scanId);
+        } catch (Exception e) {
+            Log.e(TAG, "基础扫描过程发生错误", e);
+            sendErrorEvent(scanId, "基础扫描失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 🆕 执行AI分类流程（阶段3b、3c：缓存查询、远程推理）
+     * @param scanId 扫描ID
+     * @param naImages NA分类图片（需要缓存查询和远程推理）
+     */
+    private void performAiClassification(String scanId, List<ImageInfo> naImages) {
+        long scanStartTime = System.currentTimeMillis();
+        Log.d(TAG, "开始AI分类阶段: " + scanId + ", NA分类图片: " + (naImages != null ? naImages.size() : 0) + " 张");
+        
+        try {
+            if (naImages == null || naImages.isEmpty()) {
+                Log.d(TAG, "AI分类完成: 没有图片需要分类");
+                completeAiClassification(scanId);
                 return;
             }
             
+            // 阶段3b: 远端缓存查询
             // 注意：进度事件在 queryRemoteCache 函数内部发送（开始和完成事件）
-            CacheResult cacheResult = queryRemoteCache(imagesForCacheQuery, cacheApiUrl);
-            Log.d(TAG, "阶段3b完成: 缓存命中 " + cacheResult.hitCount + " 张");
+            CacheResult cacheResult = queryRemoteCache(naImages);
+            Log.d(TAG, "阶段3b完成: 缓存命中 " + cacheResult.hitCount + " 张，未命中 " + cacheResult.naImages.size() + " 张，总计 " + naImages.size() + " 张");
             
             // 等待一小段时间，确保阶段3b的完成事件先被处理（避免事件顺序混乱）
             try {
@@ -248,15 +339,16 @@ public class GalleryScanService {
             
             // 阶段3c: 远程推理
             // 注意：进度事件在 performRemoteInference 函数内部发送，确保消息能正确显示
-            RemoteInferenceResult inferenceResult = performRemoteInference(cacheResult.naImages, remoteApiUrl);
+            // 🔥 直接传递 cacheResult，包含 naImages 和 uriToHashMap（基于原图的hash，因为上传的是压缩后的图片）
+            RemoteInferenceResult inferenceResult = performRemoteInference(cacheResult);
             Log.d(TAG, "阶段3c完成: 推理成功 " + inferenceResult.successCount + " 张");
             
-            // 扫描完成
-            completeScan(scanId);
+            // AI分类完成
+            completeAiClassification(scanId);
             
         } catch (Exception e) {
-            Log.e(TAG, "扫描过程发生错误", e);
-            sendErrorEvent(scanId, "扫描失败: " + e.getMessage());
+            Log.e(TAG, "AI分类过程发生错误", e);
+            sendErrorEvent(scanId, "AI分类失败: " + e.getMessage());
         }
     }
     
@@ -268,6 +360,25 @@ public class GalleryScanService {
         List<ImageInfo> images = new ArrayList<>();
         
         try {
+            Log.d(TAG, "🔍 开始MediaStore查询，scanPaths=" + (scanPaths != null ? scanPaths.toString() : "null"));
+            
+            // 检查权限
+            boolean hasPermission = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Android 13+ (API 33+)
+                hasPermission = reactContext.checkSelfPermission("android.permission.READ_MEDIA_IMAGES") == PackageManager.PERMISSION_GRANTED;
+                Log.d(TAG, "📋 Android 13+ 权限检查: READ_MEDIA_IMAGES=" + hasPermission);
+            } else {
+                // Android 12 及以下
+                hasPermission = reactContext.checkSelfPermission("android.permission.READ_EXTERNAL_STORAGE") == PackageManager.PERMISSION_GRANTED;
+                Log.d(TAG, "📋 Android 12- 权限检查: READ_EXTERNAL_STORAGE=" + hasPermission);
+            }
+            
+            if (!hasPermission) {
+                Log.e(TAG, "❌ 没有相册访问权限，无法扫描图片");
+                return images;
+            }
+            
             ContentResolver contentResolver = context.getContentResolver();
             String[] projection = new String[]{
                 MediaStore.Images.Media._ID,
@@ -293,7 +404,14 @@ public class GalleryScanService {
             );
             
             if (cursor != null) {
+                int cursorCount = cursor.getCount();
+                Log.d(TAG, "📊 MediaStore查询结果: Cursor总数=" + cursorCount);
+                
+                int processedCount = 0;
+                int filteredCount = 0;
+                
                 while (cursor.moveToNext()) {
+                    processedCount++;
                     
                     long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID));
                     String displayName = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME));
@@ -329,6 +447,30 @@ public class GalleryScanService {
                     // 使用辅助函数构建拼装URI
                     imageInfo.uri = buildCombinedUri(contentUri.toString(), filePath);
                     
+                    // 🔧 确保 fileName 不为 null：如果 MediaStore 的 DISPLAY_NAME 为 null，从路径中提取
+                    if (displayName == null || displayName.isEmpty()) {
+                        // 尝试从路径中提取文件名
+                        if (path != null && !path.isEmpty()) {
+                            int lastSlash = path.lastIndexOf('/');
+                            if (lastSlash >= 0 && lastSlash < path.length() - 1) {
+                                displayName = path.substring(lastSlash + 1);
+                            } else {
+                                displayName = path;
+                            }
+                        } else if (relativePath != null && !relativePath.isEmpty()) {
+                            // 从相对路径中提取
+                            int lastSlash = relativePath.lastIndexOf('/');
+                            if (lastSlash >= 0 && lastSlash < relativePath.length() - 1) {
+                                displayName = relativePath.substring(lastSlash + 1);
+                            } else {
+                                displayName = relativePath;
+                            }
+                        } else {
+                            // 最后的后备方案：使用 ID 生成文件名
+                            displayName = "image_" + id + ".jpg";
+                            Log.w(TAG, "⚠️ MediaStore DISPLAY_NAME 为空，使用后备文件名: " + displayName);
+                        }
+                    }
                     imageInfo.fileName = displayName;
                     imageInfo.path = path;
                     imageInfo.relativePath = relativePath;
@@ -348,14 +490,23 @@ public class GalleryScanService {
                     // 路径过滤（如果指定了扫描路径）
                     if (scanPaths == null || scanPaths.isEmpty() || isPathMatched(imageInfo, scanPaths)) {
                         images.add(imageInfo);
+                    } else {
+                        filteredCount++;
                     }
                 }
+                
+                Log.d(TAG, "📊 MediaStore扫描完成: 处理=" + processedCount + ", 过滤=" + filteredCount + ", 最终=" + images.size());
                 cursor.close();
+            } else {
+                Log.w(TAG, "⚠️ MediaStore查询返回null Cursor，可能没有权限或MediaStore未初始化");
             }
+        } catch (SecurityException e) {
+            Log.e(TAG, "❌ 目录扫描权限错误: " + e.getMessage(), e);
         } catch (Exception e) {
-            Log.e(TAG, "目录扫描失败", e);
+            Log.e(TAG, "❌ 目录扫描失败: " + e.getMessage(), e);
         }
         
+        Log.d(TAG, "✅ scanDirectories返回 " + images.size() + " 张图片");
         return images;
     }
     
@@ -452,18 +603,17 @@ public class GalleryScanService {
     }
     
     /**
-     * 阶段3a: 截图检测
-     * 包含EXIF数据提取和截图检测
+     * 阶段3a: 照片基础信息扫描
+     * 包含EXIF数据提取、截图检测、保存基础信息
+     * 注意：位置信息补全（根据GPS坐标查找城市）由JS层处理，原生层只提取GPS坐标
      * 使用批量保存优化性能
-     * @param images 待检测的图片列表
-     * @param baseApiUrl API基础URL（用于位置信息获取，可为null）
-     * @return 分类为NA的图片列表（需要继续处理的图片）
+     * @param images 待扫描的图片列表
      */
-    private List<ImageInfo> detectScreenshots(List<ImageInfo> images, String baseApiUrl, String language) {
+    private void scanBasicImageInfo(List<ImageInfo> images) {
         // 初始化阶段级统计变量
         processedThisPhase = 0;
         totalFoundThisPhase = images.size();
-        Log.d(TAG, "阶段3a开始: 截图检测，待处理图片: " + totalFoundThisPhase + " 张");
+        Log.d(TAG, "阶段3a开始: 照片基础信息扫描，待处理图片: " + totalFoundThisPhase + " 张");
         
         // 发送阶段开始进度事件
         if (totalFoundThisPhase > 0) {
@@ -490,12 +640,19 @@ public class GalleryScanService {
                 // 🔥 新增：如果EXIF没有尺寸，使用BitmapFactory作为降级方案
                 if (exifData.dimensions == null || exifData.dimensions.width <= 0 || exifData.dimensions.height <= 0) {
                     ImageDimensions bitmapDimensions = getImageDimensionsWithBitmapFactory(image);
-                    if (bitmapDimensions != null) {
+                    if (bitmapDimensions != null && bitmapDimensions.width > 0 && bitmapDimensions.height > 0) {
                         exifData.dimensions = bitmapDimensions;
                         bitmapFactoryFallbackCount++;
                     } else {
-                        // BitmapFactory也失败了，记录但没有详细日志（避免日志过多）
+                        // ❌ BitmapFactory也失败了，这是异常情况
+                        // 记录详细错误信息，帮助诊断问题
                         noDimensionsCount++;
+                        Log.w(TAG, "⚠️ 图片尺寸获取失败（EXIF和BitmapFactory都失败）: fileName=" + image.fileName + 
+                              ", uri=" + image.uri +
+                              ", MediaStoreWidth=" + image.width + 
+                              ", MediaStoreHeight=" + image.height +
+                              " - 将在保存时再次尝试从MediaStore获取");
+                        // 不设置exifData.dimensions，让后续代码尝试使用MediaStore的尺寸
                     }
                 }
                 
@@ -524,9 +681,12 @@ public class GalleryScanService {
                 } else {
                     naImages.add(image);
                 }
+
+
                 
                 // 处理计数累加（每处理一张图片就累加）
                 processedThisPhase++;
+
                 
                 // 数据存储逻辑统一（只有category和confidence值不同）
                 ImageDataWithExif imageData = new ImageDataWithExif();
@@ -556,7 +716,14 @@ public class GalleryScanService {
                 // 4. 批量保存（每批100张或最后一张）
                 if (batchSaveData.size() >= batchSize || i == images.size() - 1) {
                     if (!batchSaveData.isEmpty()) {
-                        batchSaveImages(batchSaveData, baseApiUrl, language);
+                        try {
+                            batchSaveImages(batchSaveData);
+                        } catch (RuntimeException e) {
+                            // ❌ 数据验证失败：记录错误并停止处理，不在源头做兼容处理
+                            // RuntimeException 包含了 IllegalArgumentException 和 IllegalStateException
+                            Log.e(TAG, "❌ 批量保存失败，停止处理: " + e.getMessage(), e);
+                            throw e; // 重新抛出，停止整个扫描流程
+                        }
                         batchSaveData.clear();
                     }
                     
@@ -565,60 +732,98 @@ public class GalleryScanService {
                 }
                 
             } catch (Exception e) {
-                Log.e(TAG, "处理图片失败: " + image.uri, e);
-                // 出错时也保存为NA
-                naImages.add(image);
-                ImageDataWithExif imageData = new ImageDataWithExif();
-                imageData.image = image;
-                imageData.category = "NA";
-                imageData.confidence = 0.0;
-                imageData.exifData = null;
-                batchSaveData.add(imageData);
-                // 处理计数累加（即使出错也算处理了）
-                processedThisPhase++;
+                // ❌ 严格错误处理：记录详细错误信息，不保存错误数据
+                Log.e(TAG, "❌ 处理图片失败，跳过保存: uri=" + image.uri + 
+                      ", fileName=" + (image.fileName != null ? image.fileName : "null") + 
+                      ", id=" + image.id, e);
+                // 不添加到 batchSaveData，让错误在源头就被发现和处理
+                // 处理计数不累加，因为这张图片没有被成功处理
+                // 如果需要，可以添加到失败列表用于后续重试
             }
         }
         
         // 保存最后剩余的批次（如果还有）
         if (!batchSaveData.isEmpty()) {
-            batchSaveImages(batchSaveData, baseApiUrl, language);
+            batchSaveImages(batchSaveData);
         }
         
         // 🔥 输出统计信息
-        Log.i(TAG, "📊 截图检测阶段统计: 总处理=" + images.size() + 
+        Log.i(TAG, "📊 照片基础信息扫描阶段统计: 总处理=" + images.size() + 
               ", BitmapFactory降级=" + bitmapFactoryFallbackCount + 
               ", 无尺寸=" + noDimensionsCount + 
+              ", 截图分类=" + imagesClassified + 
               ", 剩余待处理=" + naImages.size());
-        
-        return naImages;
     }
     
     /**
-     * 批量保存图片数据
-     */
-    /**
      * 批量保存图片数据到数据库
+     * 注意：位置信息补全（根据GPS坐标查找城市）由JS层处理，原生层只保存GPS坐标
      * @param imageDataList 图片数据列表
      */
     private void batchSaveImages(List<ImageDataWithExif> imageDataList) {
-        batchSaveImages(imageDataList, null, "zh");
-    }
-    
-    /**
-     * 批量保存图片数据到数据库（带位置信息获取）
-     * @param imageDataList 图片数据列表
-     * @param baseApiUrl API基础URL（用于位置信息获取，可为null）
-     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
-     */
-    private void batchSaveImages(List<ImageDataWithExif> imageDataList, String baseApiUrl, String language) {
         try {
             List<Map<String, Object>> saveDataList = new ArrayList<>();
             
             for (ImageDataWithExif item : imageDataList) {
+                // ❌ 严格数据验证：发现错误立即抛出异常，不做兼容处理
+                
+                // 1. 验证必填字段：uri
+                if (item.image.uri == null || item.image.uri.isEmpty()) {
+                    throw new IllegalArgumentException("图片数据验证失败: uri 为空, id=" + item.image.id);
+                }
+                
+                // 2. 验证必填字段：fileName
+                String fileName = item.image.fileName;
+                if (fileName == null || fileName.isEmpty()) {
+                    throw new IllegalArgumentException("图片数据验证失败: fileName 为空, uri=" + item.image.uri + 
+                          ", id=" + item.image.id);
+                }
+                
+                // 3. 验证必填字段：category
+                String category = item.category;
+                if (category == null || category.isEmpty()) {
+                    throw new IllegalArgumentException("图片数据验证失败: category 为空, uri=" + item.image.uri + 
+                          ", fileName=" + fileName + ", id=" + item.image.id);
+                }
+                
+                // 4. 验证关键字段：尺寸（width 和 height 必须 > 0）
+                int finalWidth = 0;
+                int finalHeight = 0;
+                String dimensionSource = "unknown";
+                boolean hasValidDimensions = false;
+                
+                if (item.exifData != null && item.exifData.dimensions != null && 
+                    item.exifData.dimensions.width > 0 && item.exifData.dimensions.height > 0) {
+                    finalWidth = item.exifData.dimensions.width;
+                    finalHeight = item.exifData.dimensions.height;
+                    dimensionSource = "exifData.dimensions";
+                    hasValidDimensions = true;
+                } else if (item.image.width > 0 && item.image.height > 0) {
+                    finalWidth = item.image.width;
+                    finalHeight = item.image.height;
+                    dimensionSource = "MediaStore";
+                    hasValidDimensions = true;
+                }
+                
+                if (!hasValidDimensions) {
+                    throw new IllegalStateException("图片数据验证失败: 尺寸获取失败（所有方法都失败）" +
+                          ", fileName=" + fileName +
+                          ", uri=" + item.image.uri +
+                          ", id=" + item.image.id +
+                          ", hasExifData=" + (item.exifData != null) +
+                          ", hasExifDimensions=" + (item.exifData != null && item.exifData.dimensions != null) +
+                          ", exifWidth=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.width : 0) +
+                          ", exifHeight=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.height : 0) +
+                          ", MediaStoreWidth=" + item.image.width + 
+                          ", MediaStoreHeight=" + item.image.height +
+                          " - 这通常表示：1) 文件损坏 2) 权限问题 3) MediaStore数据不完整");
+                }
+                
+                // 数据验证通过，开始构建保存数据
                 Map<String, Object> imageData = new HashMap<>();
                 imageData.put("uri", item.image.uri);
-                imageData.put("fileName", item.image.fileName);
-                imageData.put("category", item.category);
+                imageData.put("fileName", fileName);
+                imageData.put("category", category);
                 imageData.put("confidence", item.confidence);
                 // timestamp 使用图片的创建时间（优先 dateTaken，否则 dateModified 或 dateAdded）
                 long timestamp = item.image.dateTaken > 0 ? item.image.dateTaken : 
@@ -637,38 +842,15 @@ public class GalleryScanService {
                 imageData.put("size", item.image.size);
                 imageData.put("mimeType", item.image.mimeType);
                 
-                // 优先使用EXIF中的尺寸，如果没有则使用MediaStore的尺寸
-                int finalWidth = 0;
-                int finalHeight = 0;
-                String dimensionSource = "unknown";
-                if (item.exifData != null && item.exifData.dimensions != null) {
-                    finalWidth = item.exifData.dimensions.width;
-                    finalHeight = item.exifData.dimensions.height;
-                    dimensionSource = "exifData.dimensions";
-                } else {
-                    finalWidth = item.image.width;
-                    finalHeight = item.image.height;
-                    dimensionSource = "MediaStore";
-                }
-                
+                // 设置已验证的尺寸字段（已验证 > 0）
                 imageData.put("width", finalWidth);
                 imageData.put("height", finalHeight);
                 
-                // 🔥 同时保存 imageDimensions 字段（JS层使用此字段）
-                if (finalWidth > 0 && finalHeight > 0) {
-                    Map<String, Object> imageDimensions = new HashMap<>();
-                    imageDimensions.put("width", finalWidth);
-                    imageDimensions.put("height", finalHeight);
-                    imageData.put("imageDimensions", imageDimensions);
-                }
-                
-                // 🔍 只记录有问题的情况（尺寸为0）
-                if (finalWidth <= 0 || finalHeight <= 0) {
-                    Log.w(TAG, "⚠️ 保存时尺寸为0: fileName=" + item.image.fileName + 
-                          ", width=" + finalWidth + ", height=" + finalHeight + 
-                          ", hasExifDimensions=" + (item.exifData != null && item.exifData.dimensions != null) +
-                          ", MediaStoreWidth=" + item.image.width + ", MediaStoreHeight=" + item.image.height);
-                }
+                // 设置 imageDimensions 字段（JS层使用此字段）
+                Map<String, Object> imageDimensions = new HashMap<>();
+                imageDimensions.put("width", finalWidth);
+                imageDimensions.put("height", finalHeight);
+                imageData.put("imageDimensions", imageDimensions);
                 
                 // GPS信息
                 if (item.exifData != null && item.exifData.hasGPS && item.exifData.gps != null) {
@@ -679,194 +861,66 @@ public class GalleryScanService {
                     }
                 }
                 
+                // 🔥 拍摄参数（ISO、光圈、快门速度、焦距）- 与PC端对齐
+                if (item.exifData != null && item.exifData.cameraSettings != null) {
+                    CameraSettings settings = item.exifData.cameraSettings;
+                    
+                    // 🔧 验证并只保存有效的参数值（> 0）
+                    boolean hasAnySetting = false;
+                    JSONObject jsonObject = new JSONObject();
+                    
+                    // ISO必须 > 0
+                    if (settings.iso != null && settings.iso > 0) {
+                        jsonObject.put("iso", settings.iso);
+                        hasAnySetting = true;
+                    }
+                    
+                    // 光圈必须 > 0
+                    if (settings.aperture != null && settings.aperture > 0) {
+                        jsonObject.put("aperture", settings.aperture);
+                        hasAnySetting = true;
+                    }
+                    
+                    // 快门速度必须 > 0
+                    if (settings.shutterSpeed != null && settings.shutterSpeed > 0) {
+                        jsonObject.put("shutterSpeed", settings.shutterSpeed);
+                        hasAnySetting = true;
+                    }
+                    
+                    // 焦距必须 > 0
+                    if (settings.focalLength != null && settings.focalLength > 0) {
+                        jsonObject.put("focalLength", settings.focalLength);
+                        hasAnySetting = true;
+                    }
+            
+                    // 如果至少有一个有效参数，保存为JSON字符串（与PC端格式一致）
+                    if (hasAnySetting) {
+                        try {
+                            imageData.put("cameraSettings", jsonObject.toString());
+                        } catch (Exception e) {
+                            Log.w(TAG, "序列化cameraSettings失败: " + item.image.fileName, e);
+                        }
+                    }
+                }
+                
                 saveDataList.add(imageData);
-            }
+                        }
             
-            // 如果有API URL，尝试批量获取位置信息并补全到saveDataList中
-            if (baseApiUrl != null && !baseApiUrl.isEmpty()) {
-                batchGetLocationInfo(baseApiUrl, saveDataList, language);
-            }
-            
-            // 批量保存到数据库
+            // 批量保存到数据库（位置信息补全由JS层处理）
             if (!saveDataList.isEmpty()) {
                 imageDataService.writeImageDetailedInfo(saveDataList);
                 Log.d(TAG, "批量保存完成: " + saveDataList.size() + " 张图片");
             }
             
+        } catch (RuntimeException e) {
+            // ❌ 数据验证失败或其他运行时异常：立即抛出异常，不在源头做兼容处理
+            // RuntimeException 包含了 IllegalArgumentException 和 IllegalStateException
+            Log.e(TAG, "❌ 批量保存图片失败：数据验证失败或运行时异常", e);
+            throw e; // 重新抛出，让调用方知道数据有问题
         } catch (Exception e) {
-            Log.e(TAG, "批量保存图片失败", e);
-        }
-    }
-    
-    /**
-     * 批量获取位置信息并补全到图片数据列表中（简化版本，仅调用远程API）
-     * 直接修改传入的saveDataList，为有GPS坐标但没有位置信息的图片补全位置信息
-     * @param baseApiUrl API基础URL
-     * @param saveDataList 即将被存储的图片信息列表（会被直接修改，补全位置信息）
-     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
-     */
-    private void batchGetLocationInfo(String baseApiUrl, List<Map<String, Object>> saveDataList, String language) {
-        if (baseApiUrl == null || baseApiUrl.isEmpty() || saveDataList.isEmpty()) {
-            return;
-        }
-        
-        try {
-            // 构建API URL
-            String apiUrl = baseApiUrl;
-            if (!apiUrl.endsWith("/")) {
-                apiUrl += "/";
-            }
-            apiUrl += "api/v1/location/nearby-cities";
-            
-            // 找出有GPS坐标但没有位置信息的图片
-            List<Map<String, Object>> imagesNeedingLocation = new ArrayList<>();
-            for (Map<String, Object> imageData : saveDataList) {
-                // 检查是否有GPS坐标
-                Object latitudeObj = imageData.get("latitude");
-                Object longitudeObj = imageData.get("longitude");
-                if (latitudeObj == null || longitudeObj == null) {
-                    continue;
-                }
-                
-                // 检查是否已有位置信息
-                Object city = imageData.get("city");
-                Object country = imageData.get("country");
-                if (city == null || country == null) {
-                    imagesNeedingLocation.add(imageData);
-                }
-            }
-            
-            if (imagesNeedingLocation.isEmpty()) {
-                return;
-            }
-            
-            // 为每张图片查询位置信息（逐个查询，获取失败则留给JS层处理）
-            for (Map<String, Object> imageData : imagesNeedingLocation) {
-                Object latitudeObj = imageData.get("latitude");
-                Object longitudeObj = imageData.get("longitude");
-                
-                if (latitudeObj == null || longitudeObj == null) {
-                    continue;
-                }
-                
-                double latitude;
-                double longitude;
-                try {
-                    latitude = latitudeObj instanceof Number ? ((Number) latitudeObj).doubleValue() : Double.parseDouble(latitudeObj.toString());
-                    longitude = longitudeObj instanceof Number ? ((Number) longitudeObj).doubleValue() : Double.parseDouble(longitudeObj.toString());
-                } catch (Exception e) {
-                    Log.w(TAG, "解析GPS坐标失败: " + imageData.get("uri"), e);
-                    continue;
-                }
-                
-                try {
-                    Map<String, String> location = getLocationInfoFromApi(apiUrl, latitude, longitude, language);
-                    if (location != null && !location.isEmpty()) {
-                        // 直接将位置信息添加到imageData中
-                        imageData.put("city", location.get("city"));
-                        imageData.put("country", location.get("country"));
-                        if (location.containsKey("province")) {
-                            imageData.put("province", location.get("province"));
-                        }
-                    }
-                } catch (Exception e) {
-                    // 获取失败，不添加位置信息，留给JS层处理
-                    Log.d(TAG, "获取位置信息失败: " + imageData.get("uri") + ", " + e.getMessage());
-                }
-            }
-            
-        } catch (Exception e) {
-            Log.e(TAG, "批量获取位置信息失败", e);
-        }
-    }
-    
-    /**
-     * 从API获取单个坐标的位置信息
-     * @param apiUrl API完整URL
-     * @param latitude 纬度
-     * @param longitude 经度
-     * @param language 语言设置（'zh' 表示中文，'en' 表示英文，用于城市名称选择）
-     * @return 位置信息Map，包含city、country、province，如果获取失败返回null
-     */
-    private Map<String, String> getLocationInfoFromApi(String apiUrl, double latitude, double longitude, String language) throws Exception {
-        // 构建查询URL
-        String queryUrl = apiUrl + "?latitude=" + latitude + "&longitude=" + longitude + "&limit=10&max_distance_km=50";
-        
-        URL url = new URL(queryUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(5000); // 5秒连接超时
-        connection.setReadTimeout(5000); // 5秒读取超时
-        
-        try {
-            int responseCode = connection.getResponseCode();
-            if (responseCode != HttpURLConnection.HTTP_OK) {
-                throw new Exception("HTTP错误: " + responseCode);
-            }
-            
-            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
-            }
-            reader.close();
-            
-            // 解析JSON响应
-            JSONArray citiesArray = new JSONArray(response.toString());
-            
-            if (citiesArray.length() == 0) {
-                return null;
-            }
-            
-            // 按人口排序，选择人口最多的城市
-            JSONObject mainCity = null;
-            int maxPopulation = 0;
-            for (int i = 0; i < citiesArray.length(); i++) {
-                JSONObject city = citiesArray.getJSONObject(i);
-                int population = city.optInt("population", 0);
-                if (population > maxPopulation) {
-                    maxPopulation = population;
-                    mainCity = city;
-                }
-            }
-            
-            if (mainCity == null) {
-                return null;
-            }
-            
-            // 🔥 解耦：根据JS层传递的语言设置选择城市名称和省份名称
-            String cityName;
-            String provinceName;
-            if ("en".equals(language)) {
-                // 英文：优先使用英文名，如果没有则使用中文名
-                cityName = mainCity.optString("name", mainCity.optString("name_zh", ""));
-                // 省份：优先使用admin1（省份英文名），如果没有则尝试admin1_zh，最后fallback到城市名称
-                provinceName = mainCity.optString("admin1", 
-                    mainCity.optString("admin1_zh", 
-                        mainCity.optString("name_zh", mainCity.optString("name", ""))));
-            } else {
-                // 中文（默认）：优先使用中文名，如果没有则使用英文名
-                cityName = mainCity.optString("name_zh", mainCity.optString("name", ""));
-                // 省份：优先使用admin1_zh（省份中文名），如果没有则尝试admin1，最后fallback到城市名称
-                provinceName = mainCity.optString("admin1_zh", 
-                    mainCity.optString("admin1", 
-                        mainCity.optString("name_zh", mainCity.optString("name", ""))));
-                // 标准化城市名称：移除"市"后缀（仅中文）
-                if (cityName.endsWith("市")) {
-                    cityName = cityName.substring(0, cityName.length() - 1);
-                }
-            }
-            
-            Map<String, String> location = new HashMap<>();
-            location.put("city", cityName);
-            location.put("country", "en".equals(language) ? "China" : "中国"); // 根据语言设置国家名称
-            location.put("province", provinceName);
-            
-            return location;
-            
-        } finally {
-            connection.disconnect();
+            // 其他异常（如数据库错误）也抛出，不在源头做兼容处理
+            Log.e(TAG, "❌ 批量保存图片失败：数据库操作异常", e);
+            throw new RuntimeException("批量保存图片失败", e);
         }
     }
     
@@ -1053,6 +1107,101 @@ public class GalleryScanService {
             }
             // 如果EXIF没有尺寸，不记录日志（避免日志过多，会在阶段结束时统计）
             
+            // 🔥 提取拍摄参数（ISO、光圈、快门速度、焦距）- 与PC端对齐
+            exifData.cameraSettings = new CameraSettings();
+            
+            // ISO感光度（必须 > 0）
+            String isoStr = exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS);
+            if (isoStr != null && !isoStr.isEmpty()) {
+                try {
+                    // ISO值可能是字符串，如 "100" 或 "ISO 100"，尝试提取数字
+                    String isoNumStr = isoStr.replaceAll("[^0-9]", "");
+                    if (!isoNumStr.isEmpty()) {
+                        int isoValue = Integer.parseInt(isoNumStr);
+                        // 🔧 验证：ISO必须 > 0
+                        if (isoValue > 0) {
+                            exifData.cameraSettings.iso = isoValue;
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    // 忽略解析失败
+                }
+            }
+            
+            // 光圈值（FNumber，必须 > 0）
+            String fNumberStr = exif.getAttribute(ExifInterface.TAG_F_NUMBER);
+            if (fNumberStr != null && !fNumberStr.isEmpty()) {
+                try {
+                    // FNumber格式通常是 "f/2.8" 或 "2.8"，提取数字部分
+                    String fNumStr = fNumberStr.replaceAll("[^0-9.]", "");
+                    if (!fNumStr.isEmpty()) {
+                        double apertureValue = Double.parseDouble(fNumStr);
+                        // 🔧 验证：光圈必须 > 0
+                        if (apertureValue > 0) {
+                            exifData.cameraSettings.aperture = apertureValue;
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    // 忽略解析失败
+                }
+            }
+            
+            // 快门速度（ExposureTime，必须 > 0）
+            String exposureTimeStr = exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME);
+            if (exposureTimeStr != null && !exposureTimeStr.isEmpty()) {
+                try {
+                    // ExposureTime格式通常是分数，如 "1/125" 或小数 "0.008"
+                    double shutterSpeedValue = 0.0;
+                    if (exposureTimeStr.contains("/")) {
+                        String[] parts = exposureTimeStr.split("/");
+                        if (parts.length == 2) {
+                            double numerator = Double.parseDouble(parts[0]);
+                            double denominator = Double.parseDouble(parts[1]);
+                            if (denominator > 0) {
+                                shutterSpeedValue = numerator / denominator;
+                            }
+                        }
+                    } else {
+                        shutterSpeedValue = Double.parseDouble(exposureTimeStr);
+                    }
+                    
+                    // 🔧 验证：快门速度必须 > 0
+                    if (shutterSpeedValue > 0) {
+                        exifData.cameraSettings.shutterSpeed = shutterSpeedValue;
+                    }
+                } catch (NumberFormatException e) {
+                    // 忽略解析失败
+                }
+            }
+            
+            // 焦距（FocalLength，必须 > 0）
+            String focalLengthStr = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH);
+            if (focalLengthStr != null && !focalLengthStr.isEmpty()) {
+                try {
+                    // FocalLength格式通常是分数，如 "50/1" 或小数 "50.0"
+                    double focalLengthValue = 0.0;
+                    if (focalLengthStr.contains("/")) {
+                        String[] parts = focalLengthStr.split("/");
+                        if (parts.length == 2) {
+                            double numerator = Double.parseDouble(parts[0]);
+                            double denominator = Double.parseDouble(parts[1]);
+                            if (denominator > 0) {
+                                focalLengthValue = numerator / denominator;
+                            }
+                        }
+                    } else {
+                        focalLengthValue = Double.parseDouble(focalLengthStr);
+                    }
+                    
+                    // 🔧 验证：焦距必须 > 0
+                    if (focalLengthValue > 0) {
+                        exifData.cameraSettings.focalLength = focalLengthValue;
+                    }
+                } catch (NumberFormatException e) {
+                    // 忽略解析失败
+                }
+            }
+            
         } catch (IOException e) {
             Log.w(TAG, "读取EXIF失败: " + uriString, e);
         } catch (Exception e) {
@@ -1232,15 +1381,18 @@ public class GalleryScanService {
     }
     
     /**
-     * 阶段3b: 远端缓存查询
+     * 阶段3b: 远端缓存查询（流水线版本）
      * 注意：当缓存命中并分类成功时，需要累加 imagesClassified 计数器
-     * 优化：按100张图片分批处理，每批：计算Hash -> 远程查询 -> 保存结果
+     * 🔥 流水线优化：3个节点并行处理
+     *   节点1：计算Hash（CPU密集型）
+     *   节点2：远程查询（网络IO）
+     *   节点3：保存结果（数据库IO）
      */
-    private CacheResult queryRemoteCache(List<ImageInfo> naImages, String cacheApiUrl) {
+    private CacheResult queryRemoteCache(List<ImageInfo> naImages) {
         // 初始化阶段级统计变量
         processedThisPhase = 0;
         totalFoundThisPhase = naImages.size();
-        Log.d(TAG, "阶段3b开始: 远端缓存查询，待处理图片: " + totalFoundThisPhase + " 张");
+        Log.d(TAG, "阶段3b开始（流水线版本）: 远端缓存查询，待处理图片: " + totalFoundThisPhase + " 张");
         
         // 发送阶段开始进度事件
         if (totalFoundThisPhase > 0) {
@@ -1248,323 +1400,548 @@ public class GalleryScanService {
         }
         
         CacheResult result = new CacheResult();
-        result.hitImages = new ArrayList<>();
-        result.naImages = new ArrayList<>();
+        // 使用线程安全的集合
+        result.hitImages = Collections.synchronizedList(new ArrayList<>());
+        result.naImages = Collections.synchronizedList(new ArrayList<>());
         result.hitCount = 0;
+        result.uriToHashMap = new ConcurrentHashMap<>(); // 线程安全的Map
         
-        if (cacheApiUrl == null || cacheApiUrl.isEmpty() || naImages.isEmpty()) {
-            // 没有缓存API或没有待处理图片，直接返回
+        if (naImages.isEmpty()) {
             result.naImages = naImages;
             return result;
         }
         
+        // 按100张图片分批处理
+        int batchSize = 100;
+        int totalBatches = (naImages.size() + batchSize - 1) / batchSize;
+        Log.d(TAG, "🚀 开始流水线缓存查询: " + totalFoundThisPhase + " 张图片，批次大小: " + batchSize + "，共 " + totalBatches + " 批");
+        
+        // 创建流水线组件（每个节点1个线程，简化并发控制）
+        ExecutorService hashExecutor = Executors.newFixedThreadPool(1); // 节点1：Hash计算
+        ExecutorService queryExecutor = Executors.newFixedThreadPool(1); // 节点2：远程查询
+        ExecutorService saveExecutor = Executors.newFixedThreadPool(1); // 节点3：保存结果
+        
+        BlockingQueue<HashTask> hashToQueryQueue = new LinkedBlockingQueue<>(); // Hash结果 → 查询
+        BlockingQueue<QueryTask> queryToSaveQueue = new LinkedBlockingQueue<>(); // 查询结果 → 保存
+        
+        // 线程安全的计数器
+        AtomicInteger processedCount = new AtomicInteger(0);
+        AtomicInteger hitCount = new AtomicInteger(0);
+        AtomicInteger completedBatches = new AtomicInteger(0);
+        AtomicInteger submittedBatches = new AtomicInteger(0); // 已提交的批次数量
+        
+        // 启动节点2：远程查询工作线程（单线程）
+        queryExecutor.submit(() -> {
+            boolean shouldExit = false;
+            while (!shouldExit) {
+                    try {
+                        // 使用take()阻塞等待，避免循环轮询的性能开销
+                        HashTask hashTask = hashToQueryQueue.take();
+                        
+                        // 执行远程查询
+                        Map<String, Object> cacheResponse = null;
+                        Exception queryError = null;
+                        
+                        // 如果hashToUriMap为空，跳过查询（但仍需创建QueryTask传递给节点3）
+                        if (hashTask.hashToUriMap == null || hashTask.hashToUriMap.isEmpty()) {
+                            Log.d(TAG, "⏭️ [节点2] 批次 " + (hashTask.batchIndex + 1) + " 没有有效的Hash，跳过查询");
+                        } else {
+                            try {
+                                Log.d(TAG, "🔗 [节点2] 开始查询远端缓存，批次 " + (hashTask.batchIndex + 1) + "/" + totalBatches + "，Hash数量: " + hashTask.hashToUriMap.size());
+                                cacheResponse = batchCheckCache(hashTask.hashToUriMap);
+                                Log.d(TAG, "✅ [节点2] 远端缓存查询成功，批次 " + (hashTask.batchIndex + 1));
+                            } catch (Exception e) {
+                                queryError = e;
+                                String errorMessage = e.getMessage();
+                                if (errorMessage != null && errorMessage.contains("timeout")) {
+                                    Log.e(TAG, "❌ [节点2] 批次 " + (hashTask.batchIndex + 1) + " 远端缓存查询超时: " + errorMessage, e);
+                                } else {
+                                    Log.e(TAG, "❌ [节点2] 批次 " + (hashTask.batchIndex + 1) + " 远端缓存查询异常: " + errorMessage, e);
+                                }
+                            }
+                        }
+                        
+                        // 将查询结果传递给节点3（即使hashToUriMap为空也要传递，确保节点3能处理）
+                        QueryTask queryTask = new QueryTask(
+                            hashTask.batchIndex,
+                            hashTask.batchImages,
+                            hashTask.isLastBatch, // 传递isLastBatch标记
+                            hashTask.hashToUriMap,
+                            hashTask.uriToHashMap,
+                            hashTask.hashFailedImages
+                        );
+                        queryTask.cacheResponse = cacheResponse;
+                        queryTask.queryError = queryError;
+                        queryToSaveQueue.put(queryTask); // 阻塞直到队列有空间
+                        
+                        // 如果是最后一个批次，处理完后退出
+                        if (hashTask.isLastBatch) {
+                            Log.d(TAG, "🔍 [节点2] 处理完最后一个批次，退出");
+                            shouldExit = true;
+                        }
+                        
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        Log.d(TAG, "🔍 [节点2] 线程被中断，退出");
+                        break;
+                    } catch (Exception e) {
+                        Log.e(TAG, "[节点2] 处理异常", e);
+                        // 异常时继续处理下一个任务，不退出
+                    }
+                }
+            });
+        
+        // 启动节点3：保存结果工作线程（单线程）
+        saveExecutor.submit(() -> {
+            boolean shouldExit = false;
+            while (!shouldExit) {
+                try {
+                    // 使用take()阻塞等待，避免循环轮询的性能开销
+                    QueryTask queryTask = queryToSaveQueue.take();
+                        
+                        // 处理查询结果并保存
+                        try {
+                            processAndSaveQueryResult(queryTask, result, processedCount, hitCount);
+                            
+                            int currentCompleted = completedBatches.incrementAndGet();
+                            Log.d(TAG, "🔍 [节点3] 批次 " + (queryTask.batchIndex + 1) + " 处理完成，已完成批次: " + currentCompleted + "/" + totalBatches);
+                            
+                            // 发送进度更新（可能乱序，但不影响最终结果）
+                            int currentProcessed = processedCount.get();
+                            sendProgressEvent("cache_check", currentProcessed, totalFoundThisPhase, currentScanId);
+                        } catch (Exception e) {
+                            // 处理异常时也要增加completedBatches，避免节点3一直等待
+                            Log.e(TAG, "[节点3] 批次 " + (queryTask.batchIndex + 1) + " 处理异常", e);
+                            // 将这批图片加入未命中列表（因为处理失败）
+                            synchronized (result.naImages) {
+                                for (ImageInfo image : queryTask.batchImages) {
+                                    if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
+                                        result.naImages.add(image);
+                                        processedCount.incrementAndGet();
+                                    }
+                                }
+                            }
+                            int currentCompleted = completedBatches.incrementAndGet();
+                            Log.d(TAG, "🔍 [节点3] 批次 " + (queryTask.batchIndex + 1) + " 异常处理完成，已完成批次: " + currentCompleted + "/" + totalBatches);
+                        }
+                        
+                        // 如果是最后一个批次，处理完后退出
+                        if (queryTask.isLastBatch) {
+                            Log.d(TAG, "🔍 [节点3] 处理完最后一个批次，退出");
+                            shouldExit = true;
+                        }
+                        
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    Log.d(TAG, "🔍 [节点3] 线程被中断，退出");
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "[节点3] 外层异常", e);
+                    // 异常时继续处理下一个任务，不退出（除非是最后一个批次）
+                }
+            }
+        });
+        
+        // 节点1：提交所有批次到Hash计算队列
         try {
-            // 按100张图片分批处理
-            int batchSize = 100;
-            int totalBatches = (naImages.size() + batchSize - 1) / batchSize;
-            
             for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-                // 🔥 优化：定期保持线程活跃
-                // 1. 检查线程是否被中断
                 if (Thread.currentThread().isInterrupted()) {
                     Log.w(TAG, "扫描线程被中断，停止处理");
                     break;
                 }
                 
-                // 2. 短暂睡眠让线程进入可调度状态（比 Thread.yield() 更可靠）
-                if (batchIndex > 0) {
-                    SystemClock.sleep(5); // 5ms睡眠，让系统有机会调度
-                }
-                
                 int startIndex = batchIndex * batchSize;
                 int endIndex = Math.min(startIndex + batchSize, naImages.size());
-                List<ImageInfo> batchImages = naImages.subList(startIndex, endIndex);
+                List<ImageInfo> batchImages = new ArrayList<>(naImages.subList(startIndex, endIndex));
                 
-                Log.d(TAG, "处理批次 " + (batchIndex + 1) + "/" + totalBatches + "，图片数量: " + batchImages.size());
-                
-                // 步骤1: 计算当前批次的Hash
-                Map<String, List<String>> hashToUriMap = new HashMap<>(); // Hash -> URI列表的MAP（支持一个Hash对应多个URI）
-                Map<String, String> uriToHashMap = new HashMap<>(); // URI -> Hash的MAP
-                
-                // 提取URI列表
-                List<String> uriList = new ArrayList<>();
-                for (ImageInfo image : batchImages) {
-                    String contentUri = extractContentUri(image.uri);
-                    if (contentUri != null) {
-                        uriList.add(contentUri);
-                    } else {
-                        uriList.add(image.uri);
-                    }
-                }
-                
-                // 调用MediaStoreModule的批量计算方法
-                List<MediaStoreModule.HashResult> hashResults = mediaStoreModule.batchCalculateHashesInternal(uriList);
-                
-                // 构建Hash到URI的MAP和URI到Hash的MAP
-                for (int i = 0; i < hashResults.size() && i < batchImages.size(); i++) {
-                    MediaStoreModule.HashResult hashResult = hashResults.get(i);
-                    ImageInfo image = batchImages.get(i);
-                    String imageUri = image.uri;
-                    
-                    if (hashResult.success && hashResult.hash != null && !hashResult.hash.isEmpty()) {
-                        String hash = hashResult.hash;
+                final int finalBatchIndex = batchIndex;
+                hashExecutor.submit(() -> {
+                    try {
+                        Log.d(TAG, "🔢 [节点1] 开始计算Hash，批次 " + (finalBatchIndex + 1) + "/" + totalBatches + "，图片数量: " + batchImages.size());
                         
-                        // 构建Hash到URI的MAP（支持一个Hash对应多个URI）
-                        hashToUriMap.computeIfAbsent(hash, k -> new ArrayList<>()).add(imageUri);
-                        uriToHashMap.put(imageUri, hash);
-                    } else {
-                        // 哈希计算失败，直接加入未命中列表
-                        result.naImages.add(image);
-                        processedThisPhase++;
-                    }
-                }
-                
-                // 从hashToUriMap的keySet获取去重后的哈希值列表用于查询
-                List<String> validHashes = new ArrayList<>(hashToUriMap.keySet());
-                
-                if (validHashes.isEmpty()) {
-                    Log.d(TAG, "批次 " + (batchIndex + 1) + " 没有有效的哈希值，跳过缓存查询");
-                    continue;
-                }
-                
-                // 步骤2: 远程查询缓存
-                try {
-                    Log.d(TAG, "🔗 开始查询远端缓存，批次 " + (batchIndex + 1) + "/" + totalBatches + "，Hash数量: " + validHashes.size());
-                    Map<String, Object> cacheResponse = batchCheckCache(cacheApiUrl, validHashes);
-                    Log.d(TAG, "✅ 远端缓存查询成功，批次 " + (batchIndex + 1));
-                    
-                    // 记录服务器返回结果中出现的Hash（用于后续检查哪些Hash没有返回结果）
-                    Set<String> processedHashes = new HashSet<>();
-                    List<Map<String, Object>> batchUpdateData = new ArrayList<>(); // 收集需要批量更新的数据
-                    
-                    if (cacheResponse != null && cacheResponse.containsKey("items")) {
-                        List<Map<String, Object>> items = (List<Map<String, Object>>) cacheResponse.get("items");
+                        // 计算Hash
+                        Map<String, List<String>> hashToUriMap = new HashMap<>();
+                        Map<String, String> uriToHashMap = new HashMap<>();
+                        List<ImageInfo> hashFailedImages = new ArrayList<>();
                         
-                        // 处理缓存结果
-                        for (Map<String, Object> item : items) {
-                            String imageHash = (String) item.get("image_hash");
-                            Boolean cached = (Boolean) item.get("cached");
-                            
-                            // 记录这个Hash已经被处理
-                            if (imageHash != null && !imageHash.isEmpty()) {
-                                processedHashes.add(imageHash);
-                            }
-                            
-                            // 根据Hash到URI的MAP找到所有对应的URI（支持一个Hash对应多个URI）
-                            List<String> imageUris = hashToUriMap.get(imageHash);
-                            if (imageUris == null || imageUris.isEmpty()) {
-                                continue; // 找不到对应的URI，跳过
-                            }
-                            
-                            // 处理该Hash对应的所有URI
-                            for (String imageUri : imageUris) {
-                                // 根据URI找到对应的ImageInfo
-                                ImageInfo image = null;
-                                for (ImageInfo img : batchImages) {
-                                    if (img.uri.equals(imageUri)) {
-                                        image = img;
-                                        break;
-                                    }
-                                }
-                                
-                                if (image == null) {
-                                    continue; // 找不到对应的ImageInfo，跳过
-                                }
-                                
-                                if (cached != null && cached && item.containsKey("data")) {
-                                    // 缓存命中
-                                    Map<String, Object> cacheData = (Map<String, Object>) item.get("data");
-                                    
-                                    // 避免重复处理
-                                    if (result.hitImages.contains(image)) {
-                                        continue;
-                                    }
-                                    
-                                    // 收集分类数据，准备批量更新
-                                    Map<String, Object> classificationData = new HashMap<>();
-                                    classificationData.put("uri", image.uri);
-                                    classificationData.put("id", image.id);
-                                    
-                                    // 从缓存数据中提取分类信息
-                                    String category = (String) cacheData.get("category");
-                                    if (category == null || category.isEmpty()) {
-                                        category = "NA";
-                                    }
-                                    classificationData.put("category", category);
-                                    
-                                    Object confidenceObj = cacheData.get("confidence");
-                                    double confidence = 0.9; // 默认置信度
-                                    if (confidenceObj != null) {
-                                        if (confidenceObj instanceof Number) {
-                                            confidence = ((Number) confidenceObj).doubleValue();
-                                        } else {
-                                            try {
-                                                confidence = Double.parseDouble(confidenceObj.toString());
-                                            } catch (NumberFormatException e) {
-                                                // 使用默认值
-                                            }
-                                        }
-                                    }
-                                    classificationData.put("confidence", confidence);
-                                    
-                                    // 保存描述信息（message）
-                                    Object messageObj = cacheData.get("description");
-                                    if (messageObj == null) {
-                                        messageObj = cacheData.get("message");
-                                    }
-                                    if (messageObj != null) {
-                                        classificationData.put("message", messageObj.toString());
-                                    }
-                                    
-                                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
-                                    Object backgroundColorObj = cacheData.get("background_color");
-                                    if (backgroundColorObj != null) {
-                                        String backgroundColor = backgroundColorObj.toString();
-                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
-                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
-                                            classificationData.put("background_color", backgroundColor);
-                                        }
-                                    }
-                                    
-                                    // 缓存命中时没有小模型检测结果，设置为空
-                                    classificationData.put("idCardDetections", new ArrayList<>());
-                                    classificationData.put("generalDetections", new ArrayList<>());
-                                    classificationData.put("mobileNetV3Detections", null);
-                                    
-                                    batchUpdateData.add(classificationData);
-                                    result.hitImages.add(image);
-                                    
-                                    // 统计：只有非NA分类才算分类成功，累加计数器
-                                    if (!category.equals("NA")) {
-                                        imagesClassified++;
-                                    }
-                                    processedThisPhase++;
-                                } else {
-                                    // 缓存未命中
-                                    if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
-                                        result.naImages.add(image);
-                                        processedThisPhase++;
-                                    }
-                                }
+                        // 提取URI列表
+                        List<String> uriList = new ArrayList<>();
+                        for (ImageInfo image : batchImages) {
+                            String contentUri = extractContentUri(image.uri);
+                            if (contentUri != null) {
+                                uriList.add(contentUri);
+                            } else {
+                                uriList.add(image.uri);
                             }
                         }
-                    }
-                    
-                    // 处理服务器没有返回结果的Hash（这些Hash对应的图片应该加入未命中列表）
-                    for (String hash : validHashes) {
-                        if (!processedHashes.contains(hash)) {
-                            // 这个Hash在查询列表中，但服务器没有返回结果，视为缓存未命中
-                            List<String> imageUris = hashToUriMap.get(hash);
-                            if (imageUris != null && !imageUris.isEmpty()) {
-                                for (String imageUri : imageUris) {
-                                    // 根据URI找到对应的ImageInfo
-                                    ImageInfo image = null;
-                                    for (ImageInfo img : batchImages) {
-                                        if (img.uri.equals(imageUri)) {
-                                            image = img;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (image != null && !result.naImages.contains(image) && !result.hitImages.contains(image)) {
-                                        result.naImages.add(image);
-                                        processedThisPhase++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 步骤3: 保存结果（批量更新）
-                    if (!batchUpdateData.isEmpty()) {
-                        Map<String, Object> updateResult = imageDataService.batchUpdateClassification(batchUpdateData);
-                        Boolean success = (Boolean) updateResult.get("success");
-                        Integer updatedCount = (Integer) updateResult.get("updatedCount");
                         
-                        if (success != null && success && updatedCount != null) {
-                            result.hitCount += updatedCount;
-                            Log.d(TAG, "批次 " + (batchIndex + 1) + " 批量更新分类完成: " + updatedCount + " 张图片");
-                        } else {
-                            Log.w(TAG, "批次 " + (batchIndex + 1) + " 批量更新分类失败: " + batchUpdateData.size() + " 张图片");
+                        // 调用MediaStoreModule的批量计算方法
+                        List<MediaStoreModule.HashResult> hashResults = mediaStoreModule.batchCalculateHashesInternal(uriList);
+                        
+                        // 构建Hash到URI的MAP
+                        for (int i = 0; i < hashResults.size() && i < batchImages.size(); i++) {
+                            MediaStoreModule.HashResult hashResult = hashResults.get(i);
+                            ImageInfo image = batchImages.get(i);
+                            String imageUri = image.uri;
+                            
+                            if (hashResult.success && hashResult.hash != null && !hashResult.hash.isEmpty()) {
+                                String hash = hashResult.hash;
+                                hashToUriMap.computeIfAbsent(hash, k -> new ArrayList<>()).add(imageUri);
+                                uriToHashMap.put(imageUri, hash);
+                                result.uriToHashMap.put(imageUri, hash); // 线程安全的Map
+                            } else {
+                                hashFailedImages.add(image);
+                            }
+                        }
+                        
+                        Log.d(TAG, "✅ [节点1] Hash计算完成，批次 " + (finalBatchIndex + 1) + "，有效Hash: " + hashToUriMap.size() + "，失败: " + hashFailedImages.size());
+                        
+                        // 判断是否是最后一个批次
+                        boolean isLastBatch = (finalBatchIndex == totalBatches - 1);
+                        
+                        // 将Hash结果传递给节点2
+                        HashTask hashTask = new HashTask(finalBatchIndex, batchImages, isLastBatch);
+                        hashTask.hashToUriMap = hashToUriMap;
+                        hashTask.uriToHashMap = uriToHashMap;
+                        hashTask.hashFailedImages = hashFailedImages;
+                        hashToQueryQueue.put(hashTask);
+                        submittedBatches.incrementAndGet();
+                        Log.d(TAG, "🔍 [节点1] 批次 " + (finalBatchIndex + 1) + " Hash任务已提交到队列，已提交批次: " + submittedBatches.get() + "/" + totalBatches + (isLastBatch ? " (最后一批)" : ""));
+                        
+                    } catch (Exception e) {
+                        Log.e(TAG, "[节点1] 批次 " + (finalBatchIndex + 1) + " Hash计算异常", e);
+                        // Hash计算失败，仍然需要创建HashTask传递给节点2，确保流水线正常结束
+                        boolean isLastBatch = (finalBatchIndex == totalBatches - 1);
+                        HashTask hashTask = new HashTask(finalBatchIndex, batchImages, isLastBatch);
+                        hashTask.hashToUriMap = new HashMap<>(); // 空的Hash映射
+                        hashTask.uriToHashMap = new HashMap<>();
+                        hashTask.hashFailedImages = new ArrayList<>(batchImages); // 所有图片都标记为Hash失败
+                        try {
+                            hashToQueryQueue.put(hashTask);
+                            submittedBatches.incrementAndGet();
+                            Log.d(TAG, "🔍 [节点1] 批次 " + (finalBatchIndex + 1) + " Hash计算异常，但仍提交Hash任务到队列" + (isLastBatch ? " (最后一批)" : ""));
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            Log.w(TAG, "[节点1] 提交Hash任务被中断");
                         }
                     }
-                    
-                } catch (Exception e) {
-                    // 🔥 详细记录远端缓存查询失败的原因
-                    String errorMessage = e.getMessage();
-                    if (errorMessage != null && errorMessage.contains("timeout")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远端缓存查询超时: " + errorMessage, e);
-                    } else if (errorMessage != null && errorMessage.contains("HTTP错误")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远端缓存查询HTTP错误: " + errorMessage, e);
-                    } else if (errorMessage != null && errorMessage.contains("网络")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远端缓存查询网络错误: " + errorMessage, e);
-                    } else {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远端缓存查询异常: " + errorMessage, e);
-                    }
-                    // 查询失败，将这批图片加入未命中列表
-                    for (ImageInfo image : batchImages) {
-                        if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
-                            result.naImages.add(image);
-                            processedThisPhase++;
-                        }
-                    }
-                }
-                
-                // 发送进度更新（每处理一个批次就更新一次，最后一个批次也会在这里发送）
-                sendProgressEvent("cache_check", processedThisPhase, totalFoundThisPhase, currentScanId);
+                });
             }
-            
-            Log.d(TAG, "✅ 阶段3b完成: 缓存命中 " + result.hitCount + " 张，剩余待处理: " + result.naImages.size() + " 张，总计: " + totalFoundThisPhase + " 张");
-            if (result.hitCount == 0 && totalFoundThisPhase > 0) {
-                Log.w(TAG, "⚠️ 警告: 远端缓存查询没有命中任何图片，所有图片将进入远程推理阶段");
-            }
-            
         } catch (Exception e) {
-            Log.e(TAG, "远端缓存查询过程发生错误", e);
-            // 出错时，将所有图片加入未命中列表
-            result.naImages = naImages;
-            result.hitImages.clear();
-            result.hitCount = 0;
+            Log.e(TAG, "提交Hash任务异常", e);
+        }
+        
+        // 等待所有任务完成
+        Log.d(TAG, "🔍 [流水线] 开始等待所有任务完成，已完成批次: " + completedBatches.get() + "/" + totalBatches);
+        hashExecutor.shutdown();
+        queryExecutor.shutdown();
+        saveExecutor.shutdown();
+        
+        try {
+            // 等待所有线程池完成（最多等待30分钟）
+            int waitCount = 0;
+            while (!hashExecutor.isTerminated() || !queryExecutor.isTerminated() || !saveExecutor.isTerminated()) {
+                Thread.sleep(100);
+                waitCount++;
+                if (waitCount % 50 == 0) { // 每5秒打印一次
+                    Log.d(TAG, "🔍 [流水线] 等待中... 已完成批次: " + completedBatches.get() + "/" + totalBatches + 
+                          ", hashExecutor终止: " + hashExecutor.isTerminated() + 
+                          ", queryExecutor终止: " + queryExecutor.isTerminated() + 
+                          ", saveExecutor终止: " + saveExecutor.isTerminated());
+                }
+            }
+            Log.d(TAG, "🔍 [流水线] 所有任务完成，已完成批次: " + completedBatches.get() + "/" + totalBatches);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "等待流水线完成被中断");
+        }
+        
+        result.hitCount = hitCount.get();
+        int finalNaImagesCount = result.naImages.size();
+        int finalHitImagesCount = result.hitImages.size();
+        Log.d(TAG, "✅ 阶段3b完成（流水线版本）: 缓存命中 " + result.hitCount + " 张，命中图片列表: " + finalHitImagesCount + " 张，未命中图片列表: " + finalNaImagesCount + " 张，总计: " + totalFoundThisPhase + " 张");
+        if (finalNaImagesCount == 0 && totalFoundThisPhase > result.hitCount) {
+            Log.w(TAG, "⚠️ 警告: 有 " + (totalFoundThisPhase - result.hitCount) + " 张图片未命中缓存，但未命中列表为空，可能存在问题");
+        }
+        if (result.hitCount == 0 && totalFoundThisPhase > 0) {
+            Log.w(TAG, "⚠️ 警告: 远端缓存查询没有命中任何图片，所有图片将进入远程推理阶段");
         }
         
         return result;
     }
     
     /**
-     * 批量查询缓存API
-     * @param cacheApiUrl 缓存API基础URL
-     * @param imageHashes 图片哈希值列表
-     * @return 缓存查询结果 { items: [...], cached_count: N, total: N }
+     * 处理查询结果并保存（节点3的工作）
      */
-    private Map<String, Object> batchCheckCache(String cacheApiUrl, List<String> imageHashes) throws Exception {
-        // 构建完整的API URL
-        String apiUrl = cacheApiUrl;
-        if (!apiUrl.endsWith("/")) {
-            apiUrl += "/";
-        }
-        apiUrl += "api/v1/classify/batch-check-cache";
+    private void processAndSaveQueryResult(QueryTask queryTask, CacheResult result, 
+                                           AtomicInteger processedCount, AtomicInteger hitCount) {
+        List<ImageInfo> batchImages = queryTask.batchImages;
+        Map<String, List<String>> hashToUriMap = queryTask.hashToUriMap;
+        Map<String, String> uriToHashMap = queryTask.uriToHashMap;
+        List<ImageInfo> hashFailedImages = queryTask.hashFailedImages;
         
-        Log.d(TAG, "🌐 准备远端缓存查询请求: " + apiUrl + ", Hash数量: " + imageHashes.size());
-        
-        URL url = new URL(apiUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "application/json");
-        // 🔥 优化：在后台运行时使用更长的超时时间，防止网络请求被中断
-        connection.setConnectTimeout(120000); // 120秒连接超时（后台运行时可能需要更长时间）
-        connection.setReadTimeout(120000); // 120秒读取超时
-        connection.setDoOutput(true);
-        
-        Log.d(TAG, "🔗 开始建立HTTP连接（远端缓存查询）...");
-        
-        try {
-            // 构建请求体
-            JSONObject requestBody = new JSONObject();
-            JSONArray hashesArray = new JSONArray();
-            for (String hash : imageHashes) {
-                hashesArray.put(hash);
+        // Hash计算失败的图片直接加入未命中列表
+        synchronized (result.naImages) {
+            for (ImageInfo image : hashFailedImages) {
+                if (!result.naImages.contains(image)) {
+                    result.naImages.add(image);
+                    processedCount.incrementAndGet();
+                }
             }
-            requestBody.put("image_hashes", hashesArray);
+        }
+        
+        // 处理查询结果
+        Map<String, Object> cacheResponse = queryTask.cacheResponse;
+        Exception queryError = queryTask.queryError;
+        
+        if (queryError != null) {
+            // 查询失败，将这批图片加入未命中列表
+            synchronized (result.naImages) {
+                for (ImageInfo image : batchImages) {
+                    if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
+                        result.naImages.add(image);
+                        processedCount.incrementAndGet();
+                    }
+                }
+            }
+            return;
+        }
+        
+        if (cacheResponse == null || !cacheResponse.containsKey("items")) {
+            // 没有查询结果，将所有图片加入未命中列表
+            synchronized (result.naImages) {
+                for (ImageInfo image : batchImages) {
+                    if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
+                        result.naImages.add(image);
+                        processedCount.incrementAndGet();
+                    }
+                }
+            }
+            return;
+        }
+        
+        List<Map<String, Object>> items = (List<Map<String, Object>>) cacheResponse.get("items");
+        Set<String> processedHashes = new HashSet<>();
+        List<Map<String, Object>> batchUpdateData = new ArrayList<>();
+        
+        // 处理缓存结果
+        Log.d(TAG, "🔍 [节点3] 开始处理缓存结果，items数量: " + items.size());
+        for (Map<String, Object> item : items) {
+            String imageHash = (String) item.get("image_hash");
+            Boolean cached = (Boolean) item.get("cached");
+            
+            if (imageHash != null && !imageHash.isEmpty()) {
+                processedHashes.add(imageHash);
+            }
+            
+            Log.d(TAG, "🔍 [节点3] 处理item: hash=" + imageHash + ", cached=" + cached);
+            
+            List<String> imageUris = hashToUriMap.get(imageHash);
+            if (imageUris == null || imageUris.isEmpty()) {
+                continue;
+            }
+            
+            for (String imageUri : imageUris) {
+                ImageInfo image = null;
+                for (ImageInfo img : batchImages) {
+                    if (img.uri.equals(imageUri)) {
+                        image = img;
+                        break;
+                    }
+                }
+                
+                if (image == null) continue;
+                
+                if (cached != null && cached && item.containsKey("data")) {
+                    // 缓存命中
+                    Map<String, Object> cacheData = (Map<String, Object>) item.get("data");
+                    
+                    synchronized (result.hitImages) {
+                        if (result.hitImages.contains(image)) {
+                            continue;
+                        }
+                        result.hitImages.add(image);
+                    }
+                    
+                    // 收集分类数据
+                    Map<String, Object> classificationData = new HashMap<>();
+                    classificationData.put("uri", image.uri);
+                    classificationData.put("id", image.id);
+                    
+                    String category = (String) cacheData.get("category");
+                    if (category == null || category.isEmpty()) {
+                        category = "NA";
+                    }
+                    classificationData.put("category", category);
+                    
+                    Object confidenceObj = cacheData.get("confidence");
+                    double confidence = 0.9;
+                    if (confidenceObj != null) {
+                        if (confidenceObj instanceof Number) {
+                            confidence = ((Number) confidenceObj).doubleValue();
+                        } else {
+                            try {
+                                confidence = Double.parseDouble(confidenceObj.toString());
+                            } catch (NumberFormatException e) {
+                                // 使用默认值
+                            }
+                        }
+                    }
+                    classificationData.put("confidence", confidence);
+                    
+                    Object messageObj = cacheData.get("description");
+                    if (messageObj == null) {
+                        messageObj = cacheData.get("message");
+                    }
+                    if (messageObj != null) {
+                        classificationData.put("message", messageObj.toString());
+                    }
+                    
+                    Object backgroundColorObj = cacheData.get("background_color");
+                    if (backgroundColorObj != null) {
+                        String backgroundColor = backgroundColorObj.toString();
+                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                            classificationData.put("background_color", backgroundColor);
+                        }
+                    }
+                    
+                    classificationData.put("idCardDetections", new ArrayList<>());
+                    classificationData.put("generalDetections", new ArrayList<>());
+                    classificationData.put("mobileNetV3Detections", null);
+                    
+                    batchUpdateData.add(classificationData);
+                    
+                    if (!category.equals("NA")) {
+                        imagesClassified++;
+                    }
+                    processedCount.incrementAndGet();
+                } else {
+                    // 缓存未命中
+                    synchronized (result.naImages) {
+                        if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
+                            result.naImages.add(image);
+                            processedCount.incrementAndGet();
+                            Log.d(TAG, "🔍 [节点3] 缓存未命中，添加到未命中列表: " + image.uri + ", cached=" + cached);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 处理服务器没有返回结果的Hash
+        List<String> validHashes = new ArrayList<>(hashToUriMap.keySet());
+        for (String hash : validHashes) {
+            if (!processedHashes.contains(hash)) {
+                List<String> imageUris = hashToUriMap.get(hash);
+                if (imageUris != null && !imageUris.isEmpty()) {
+                    for (String imageUri : imageUris) {
+                        ImageInfo image = null;
+                        for (ImageInfo img : batchImages) {
+                            if (img.uri.equals(imageUri)) {
+                                image = img;
+                                break;
+                            }
+                        }
+                        
+                        if (image != null) {
+                            synchronized (result.naImages) {
+                                if (!result.naImages.contains(image) && !result.hitImages.contains(image)) {
+                                    result.naImages.add(image);
+                                    processedCount.incrementAndGet();
+                                    Log.d(TAG, "🔍 [节点3] Hash未返回结果，添加到未命中列表: " + image.uri + ", hash=" + hash);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 保存结果（批量更新）
+        if (!batchUpdateData.isEmpty()) {
+            try {
+                Map<String, Object> updateResult = imageDataService.batchUpdateClassification(batchUpdateData);
+                Boolean success = (Boolean) updateResult.get("success");
+                Integer updatedCount = (Integer) updateResult.get("updatedCount");
+                
+                if (success != null && success && updatedCount != null) {
+                    hitCount.addAndGet(updatedCount);
+                    Log.d(TAG, "💾 [节点3] 批次 " + (queryTask.batchIndex + 1) + " 批量更新分类完成: " + updatedCount + " 张图片");
+                } else {
+                    Log.w(TAG, "⚠️ [节点3] 批次 " + (queryTask.batchIndex + 1) + " 批量更新分类失败: " + batchUpdateData.size() + " 张图片");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ [节点3] 批次 " + (queryTask.batchIndex + 1) + " 保存结果异常", e);
+            }
+        }
+    }
+    
+    /**
+     * 批量查询缓存API（v2版本）
+     * @param hashToUriMap Hash到URI列表的映射（支持一个Hash对应多个URI）
+     * @return 缓存查询结果 { items: [...], cached_count: N, total: N }（兼容v1格式）
+     */
+    private Map<String, Object> batchCheckCache(Map<String, List<String>> hashToUriMap) throws Exception {
+        // 🔥 获取Semaphore许可（限制并发数）
+        try {
+            httpRequestSemaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Exception("获取HTTP请求许可被中断", e);
+        }
+        
+        HttpURLConnection connection = null;
+        try {
+            // 构建完整的API URL（v2版本）
+            String apiUrl = API_BASE_URL + "api/v2/classify/batch-check-cache";
+            
+            // 构建items列表（每个hash对应一个item，使用第一个URI）
+            List<Map.Entry<String, List<String>>> hashUriEntries = new ArrayList<>(hashToUriMap.entrySet());
+            int totalItems = hashUriEntries.size();
+            
+            Log.d(TAG, "🌐 准备远端缓存查询请求（v2）: " + apiUrl + ", Hash数量: " + totalItems);
+            
+            URL url = new URL(apiUrl);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+            // 🔥 添加用户ID Header（如果存在）
+            if (userId != null && !userId.isEmpty()) {
+                connection.setRequestProperty("X-User-ID", userId);
+                Log.d(TAG, "✅ 已设置 X-User-ID Header: " + userId);
+            }
+            // 🔥 优化：在后台运行时使用更长的超时时间，防止网络请求被中断
+            connection.setConnectTimeout(120000); // 120秒连接超时（后台运行时可能需要更长时间）
+            connection.setReadTimeout(120000); // 120秒读取超时
+            connection.setDoOutput(true);
+            
+            Log.d(TAG, "🔗 开始建立HTTP连接（远端缓存查询v2）...");
+            
+            // 构建v2格式的请求体
+            JSONObject requestBody = new JSONObject();
+            JSONArray itemsArray = new JSONArray();
+            
+            for (int i = 0; i < hashUriEntries.size(); i++) {
+                Map.Entry<String, List<String>> entry = hashUriEntries.get(i);
+                String hash = entry.getKey();
+                List<String> uris = entry.getValue();
+                
+                // 使用第一个URI（v2 API要求必须提供image_uri）
+                String imageUri = uris != null && !uris.isEmpty() ? uris.get(0) : "";
+                
+                JSONObject item = new JSONObject();
+                item.put("index", i);
+                item.put("image_hash", hash);
+                item.put("image_uri", imageUri); // v2 API必填字段
+                itemsArray.put(item);
+            }
+            
+            requestBody.put("items", itemsArray);
+            // 🔥 添加 user_id（如果存在）
+            if (userId != null && !userId.isEmpty()) {
+                requestBody.put("user_id", userId);
+                Log.d(TAG, "✅ 已添加 user_id 到请求体: " + userId);
+            }
             
             // 发送请求
             OutputStream outputStream = connection.getOutputStream();
@@ -1589,40 +1966,54 @@ public class GalleryScanService {
             }
             reader.close();
             
-            // 解析JSON响应
-            Log.d(TAG, "📝 开始解析JSON响应（远端缓存查询），响应长度: " + response.length());
+            // 解析JSON响应（v2格式）
+            Log.d(TAG, "📝 开始解析JSON响应（远端缓存查询v2），响应长度: " + response.length());
             JSONObject jsonResponse = new JSONObject(response.toString());
             
-            // 转换为Map格式
+            // v2接口返回格式：{ results: [...], summary: { total, cached_count, miss_count } }
+            JSONArray resultsArray = jsonResponse.optJSONArray("results");
+            JSONObject summaryObj = jsonResponse.optJSONObject("summary");
+            
+            // 转换为兼容v1格式的Map
             Map<String, Object> result = new HashMap<>();
-            int total = jsonResponse.optInt("total", 0);
-            int cachedCount = jsonResponse.optInt("cached_count", 0);
+            int total = summaryObj != null ? summaryObj.optInt("total", 0) : 0;
+            int cachedCount = summaryObj != null ? summaryObj.optInt("cached_count", 0) : 0;
             result.put("total", total);
             result.put("cached_count", cachedCount);
-            Log.d(TAG, "✅ 远端缓存查询响应解析完成: 总计=" + total + ", 缓存命中=" + cachedCount);
+            Log.d(TAG, "✅ 远端缓存查询响应解析完成（v2）: 总计=" + total + ", 缓存命中=" + cachedCount);
             
-            JSONArray itemsArray = jsonResponse.optJSONArray("items");
+            // 转换results为兼容v1格式的items
             List<Map<String, Object>> items = new ArrayList<>();
-            if (itemsArray != null) {
-                for (int i = 0; i < itemsArray.length(); i++) {
-                    JSONObject itemObj = itemsArray.getJSONObject(i);
+            if (resultsArray != null) {
+                for (int i = 0; i < resultsArray.length(); i++) {
+                    JSONObject resultObj = resultsArray.getJSONObject(i);
                     Map<String, Object> item = new HashMap<>();
-                    item.put("image_hash", itemObj.optString("image_hash", ""));
-                    item.put("cached", itemObj.optBoolean("cached", false));
                     
-                    // 使用 optJSONObject 安全地获取 data 字段（如果为 null 则返回 null，不会抛出异常）
-                    JSONObject dataObj = itemObj.optJSONObject("data");
-                    if (dataObj != null) {
+                    String imageHash = resultObj.optString("image_hash", "");
+                    boolean cached = resultObj.optBoolean("cached", false);
+                    item.put("image_hash", imageHash);
+                    item.put("cached", cached);
+                    
+                    // v2格式：如果cached为true，数据直接在result对象中，不在data字段
+                    if (cached) {
                         Map<String, Object> data = new HashMap<>();
-                        data.put("category", dataObj.optString("category", "NA"));
-                        data.put("confidence", dataObj.optDouble("confidence", 0.9));
-                        data.put("description", dataObj.optString("description", null));
-                        data.put("message", dataObj.optString("message", null));
-                        // 🆕 添加 background_color 字段的解析
-                        String backgroundColor = dataObj.optString("background_color", null);
+                        data.put("category", resultObj.optString("category", "NA"));
+                        data.put("confidence", resultObj.optDouble("confidence", 0.9));
+                        data.put("description", resultObj.optString("description", null));
+                        data.put("message", resultObj.optString("description", null)); // message使用description
+                        
+                        // 添加 background_color 字段
+                        String backgroundColor = resultObj.optString("background_color", null);
                         if (backgroundColor != null && !backgroundColor.isEmpty()) {
                             data.put("background_color", backgroundColor);
                         }
+                        
+                        // 添加 raw_content 字段（如果存在）
+                        String rawContent = resultObj.optString("raw_content", null);
+                        if (rawContent != null && !rawContent.isEmpty()) {
+                            data.put("raw_content", rawContent);
+                        }
+                        
                         item.put("data", data);
                     }
                     
@@ -1634,69 +2025,95 @@ public class GalleryScanService {
             return result;
             
         } finally {
-            connection.disconnect();
+            if (connection != null) {
+                connection.disconnect();
+            }
+            // 🔥 释放Semaphore许可
+            httpRequestSemaphore.release();
         }
     }
     
     /**
-     * 批量远程推理API
-     * @param remoteApiUrl 远程API基础URL
+     * 压缩批次图片（节点1的工作）
      * @param images 图片列表
-     * @return 推理结果 { items: [...], success_count: N, fail_count: N, total: N }
+     * @param uriToHashMap URI到Hash的映射
+     * @return CompressTask 包含压缩后的图片数据和metadata
      */
-    private Map<String, Object> batchRemoteInference(String remoteApiUrl, List<ImageInfo> images) throws Exception {
-        // 构建完整的API URL
-        String apiUrl = remoteApiUrl;
-        if (!apiUrl.endsWith("/")) {
-            apiUrl += "/";
-        }
-        apiUrl += "api/v1/classify/batch";
+    private CompressTask compressBatchImages(List<ImageInfo> images, Map<String, String> uriToHashMap, int batchIndex, boolean isLastBatch) {
+        CompressTask compressTask = new CompressTask(batchIndex, images, isLastBatch, uriToHashMap);
+        compressTask.compressedImages = new HashMap<>();
+        compressTask.compressFailedImages = new ArrayList<>();
         
-        Log.d(TAG, "🌐 准备远程推理请求: " + apiUrl + ", 图片数量: " + images.size());
+        // 🔥 v2格式：构建 image_metadata JSON对象
+        JSONObject imageMetadata = new JSONObject();
+        JSONArray itemsArray = new JSONArray();
         
-        // 检查网络状态（仅在 Release 版本中可能更严格）
-        try {
-            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) reactContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
-            android.net.NetworkInfo networkInfo = cm.getActiveNetworkInfo();
-            if (networkInfo == null || !networkInfo.isConnected()) {
-                Log.w(TAG, "⚠️ 警告: 网络未连接，但继续尝试请求");
-            } else {
-                Log.d(TAG, "✅ 网络状态: " + networkInfo.getTypeName() + ", 已连接");
+        // 添加图片文件并构建metadata（使用实际索引，确保metadata和图片一一对应）
+        int actualIndex = 0; // 实际添加的图片索引
+        for (int i = 0; i < images.size(); i++) {
+            ImageInfo image = images.get(i);
+            String contentUri = extractContentUri(image.uri);
+            String uriString = contentUri != null ? contentUri : image.uri;
+            
+            // 查找hash（先尝试原始uri，再尝试contentUri）
+            String hash = uriToHashMap.get(image.uri);
+            if (hash == null || hash.isEmpty()) {
+                if (contentUri != null) {
+                    hash = uriToHashMap.get(contentUri);
+                }
             }
-        } catch (Exception e) {
-            Log.w(TAG, "⚠️ 无法检查网络状态: " + e.getMessage());
-        }
-        
-        // 生成边界字符串
-        String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-        
-        URL url = new URL(apiUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-        // 🔥 优化：在后台运行时使用更长的超时时间，防止网络请求被中断
-        connection.setConnectTimeout(300000); // 300秒连接超时（后台运行时可能需要更长时间）
-        connection.setReadTimeout(300000); // 300秒读取超时
-        connection.setDoOutput(true);
-        connection.setDoInput(true);
-        
-        Log.d(TAG, "🔗 开始建立HTTP连接...");
-        
-        try {
-            OutputStream outputStream = connection.getOutputStream();
             
-            // 注意：Hash是可选的，主要用于服务端缓存查询
-            // 在远程推理阶段，我们不传递Hash，让服务端自己计算，避免重复计算影响性能
-            // 如果需要在远程推理阶段传递Hash，可以从数据库查询或从缓存查询阶段的uriToHashMap中获取
+            if (hash == null || hash.isEmpty()) {
+                Log.w(TAG, "⚠️ [节点1] 无法找到图片的hash，跳过图片: " + uriString);
+                compressTask.compressFailedImages.add(image);
+                continue; // 跳过没有hash的图片
+            }
             
-            // 添加图片文件
-            for (ImageInfo image : images) {
-                String contentUri = extractContentUri(image.uri);
-                String uriString = contentUri != null ? contentUri : image.uri;
+            // 构建metadata item（使用实际索引）
+            try {
+                JSONObject metadataItem = new JSONObject();
+                metadataItem.put("index", actualIndex);
+                metadataItem.put("image_uri", uriString);
+                metadataItem.put("image_hash", hash);
+                itemsArray.put(metadataItem);
+            } catch (org.json.JSONException e) {
+                Log.e(TAG, "❌ [节点1] 构建metadata item失败: " + uriString, e);
+                compressTask.compressFailedImages.add(image);
+                continue; // 跳过这张图片
+            }
+            
+            try {
+                // 打开图片输入流
+                InputStream imageInputStream = null;
+                if (uriString.startsWith("content://")) {
+                    Uri uri = Uri.parse(uriString);
+                    imageInputStream = reactContext.getContentResolver().openInputStream(uri);
+                } else if (uriString.startsWith("file://")) {
+                    String filePath = uriString.replace("file://", "");
+                    imageInputStream = new FileInputStream(filePath);
+                } else {
+                    imageInputStream = new FileInputStream(uriString);
+                }
                 
+                if (imageInputStream == null) {
+                    Log.w(TAG, "⚠️ [节点1] 无法打开图片文件: " + uriString);
+                    compressTask.compressFailedImages.add(image);
+                    // 从itemsArray中移除对应的metadata item
+                    if (itemsArray.length() > 0) {
+                        itemsArray.remove(itemsArray.length() - 1);
+                    }
+                    continue;
+                }
+                
+                // 🔥 压缩图片（与 JS 层保持一致：1024x1024，质量 90%）
+                byte[] compressedImageData;
                 try {
-                    // 打开图片输入流
-                    InputStream imageInputStream = null;
+                    compressedImageData = compressImage(imageInputStream, 1024, 90);
+                    imageInputStream.close();
+                } catch (Exception compressError) {
+                    Log.e(TAG, "❌ [节点1] 图片压缩失败: " + uriString + ", 使用原始图片", compressError);
+                    // 压缩失败时，重新打开输入流使用原始图片
+                    imageInputStream.close();
                     if (uriString.startsWith("content://")) {
                         Uri uri = Uri.parse(uriString);
                         imageInputStream = reactContext.getContentResolver().openInputStream(uri);
@@ -1706,61 +2123,150 @@ public class GalleryScanService {
                     } else {
                         imageInputStream = new FileInputStream(uriString);
                     }
-                    
-                    if (imageInputStream == null) {
-                        Log.w(TAG, "无法打开图片文件: " + uriString);
-                        continue;
+                    // 读取原始图片数据
+                    ByteArrayOutputStream originalData = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = imageInputStream.read(buffer)) != -1) {
+                        originalData.write(buffer, 0, bytesRead);
                     }
-                    
-                    // 🔥 压缩图片（与 JS 层保持一致：1024x1024，质量 90%）
-                    byte[] compressedImageData;
-                    try {
-                        compressedImageData = compressImage(imageInputStream, 1024, 90);
-                        imageInputStream.close();
-                    } catch (Exception compressError) {
-                        Log.e(TAG, "❌ 图片压缩失败: " + uriString + ", 使用原始图片", compressError);
-                        // 压缩失败时，重新打开输入流使用原始图片
-                        imageInputStream.close();
-                        if (uriString.startsWith("content://")) {
-                            Uri uri = Uri.parse(uriString);
-                            imageInputStream = reactContext.getContentResolver().openInputStream(uri);
-                        } else if (uriString.startsWith("file://")) {
-                            String filePath = uriString.replace("file://", "");
-                            imageInputStream = new FileInputStream(filePath);
-                        } else {
-                            imageInputStream = new FileInputStream(uriString);
-                        }
-                        // 读取原始图片数据
-                        ByteArrayOutputStream originalData = new ByteArrayOutputStream();
-                        byte[] buffer = new byte[8192];
-                        int bytesRead;
-                        while ((bytesRead = imageInputStream.read(buffer)) != -1) {
-                            originalData.write(buffer, 0, bytesRead);
-                        }
-                        compressedImageData = originalData.toByteArray();
-                        imageInputStream.close();
-                    }
-                    
-                    // 写入文件字段头
-                    String fileName = image.fileName != null ? image.fileName : "image.jpg";
-                    String fileField = "--" + boundary + "\r\n";
-                    fileField += "Content-Disposition: form-data; name=\"images\"; filename=\"" + fileName + "\"\r\n";
-                    fileField += "Content-Type: image/jpeg\r\n\r\n";
-                    outputStream.write(fileField.getBytes("UTF-8"));
-                    
-                    // 写入压缩后的图片数据
-                    outputStream.write(compressedImageData);
-                    outputStream.write("\r\n".getBytes("UTF-8"));
-                } catch (Exception e) {
-                    Log.e(TAG, "❌ 读取图片文件失败: " + uriString, e);
-                    Log.e(TAG, "   错误类型: " + e.getClass().getSimpleName());
-                    Log.e(TAG, "   错误消息: " + e.getMessage());
-                    if (e.getCause() != null) {
-                        Log.e(TAG, "   原因: " + e.getCause().getMessage());
-                    }
-                    // 继续处理下一张图片（跳过这张图片）
+                    compressedImageData = originalData.toByteArray();
+                    imageInputStream.close();
+                }
+                
+                // 存储压缩后的图片数据（使用uri作为key）
+                compressTask.compressedImages.put(uriString, compressedImageData);
+                
+                // 成功添加图片后，增加实际索引
+                actualIndex++;
+            } catch (Exception e) {
+                Log.e(TAG, "❌ [节点1] 读取图片文件失败: " + uriString, e);
+                compressTask.compressFailedImages.add(image);
+                // 读取失败时，需要从itemsArray中移除对应的metadata item
+                if (itemsArray.length() > 0) {
+                    itemsArray.remove(itemsArray.length() - 1);
                 }
             }
+        }
+        
+        // 🔥 v2格式：添加 image_metadata 字段
+        try {
+            imageMetadata.put("items", itemsArray);
+            // 🔥 添加 user_id（如果存在）
+            if (userId != null && !userId.isEmpty()) {
+                imageMetadata.put("user_id", userId);
+            }
+        } catch (org.json.JSONException e) {
+            Log.e(TAG, "❌ [节点1] 构建image_metadata失败", e);
+            // 创建一个空的metadata
+            try {
+                imageMetadata = new JSONObject();
+                imageMetadata.put("items", new JSONArray());
+                if (userId != null && !userId.isEmpty()) {
+                    imageMetadata.put("user_id", userId);
+                }
+            } catch (org.json.JSONException e2) {
+                Log.e(TAG, "❌ [节点1] 创建空metadata也失败", e2);
+            }
+        }
+        
+        // 将metadata存储到compressTask中
+        compressTask.metadata = imageMetadata;
+        
+        Log.d(TAG, "✅ [节点1] 批次 " + (batchIndex + 1) + " 压缩完成，成功: " + compressTask.compressedImages.size() + " 张，失败: " + compressTask.compressFailedImages.size() + " 张");
+        
+        return compressTask;
+    }
+    
+    /**
+     * 发送推理请求（节点2的工作）
+     * @param compressTask 包含压缩后的图片数据和metadata
+     * @return 推理结果 { items: [...], success_count: N, fail_count: N, total: N }（兼容v1格式）
+     */
+    private Map<String, Object> sendInferenceRequest(CompressTask compressTask) throws Exception {
+        // 🔥 获取Semaphore许可（限制并发数）
+        try {
+            httpRequestSemaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Exception("获取HTTP请求许可被中断", e);
+        }
+        
+        HttpURLConnection connection = null;
+        try {
+            // 构建完整的API URL（v2版本）
+            String apiUrl = API_BASE_URL + "api/v2/classify/batch";
+            
+            Log.d(TAG, "🌐 [节点2] 准备远程推理请求（v2）: " + apiUrl + ", 图片数量: " + compressTask.batchImages.size());
+            
+            // 检查网络状态
+            try {
+                android.net.ConnectivityManager cm = (android.net.ConnectivityManager) reactContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+                android.net.NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+                if (networkInfo == null || !networkInfo.isConnected()) {
+                    Log.w(TAG, "⚠️ [节点2] 警告: 网络未连接，但继续尝试请求");
+                } else {
+                    Log.d(TAG, "✅ [节点2] 网络状态: " + networkInfo.getTypeName() + ", 已连接");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "⚠️ [节点2] 无法检查网络状态: " + e.getMessage());
+            }
+            
+            // 生成边界字符串
+            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+            
+            URL url = new URL(apiUrl);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            // 🔥 添加用户ID Header（如果存在）
+            if (userId != null && !userId.isEmpty()) {
+                connection.setRequestProperty("X-User-ID", userId);
+                Log.d(TAG, "✅ [节点2] 已设置 X-User-ID Header: " + userId);
+            }
+            // 🔥 优化：在后台运行时使用更长的超时时间，防止网络请求被中断
+            connection.setConnectTimeout(300000); // 300秒连接超时
+            connection.setReadTimeout(300000); // 300秒读取超时
+            connection.setDoOutput(true);
+            connection.setDoInput(true);
+            
+            Log.d(TAG, "🔗 [节点2] 开始建立HTTP连接...");
+            
+            OutputStream outputStream = connection.getOutputStream();
+            
+            // 写入压缩后的图片数据
+            JSONArray itemsArray = compressTask.metadata.optJSONArray("items");
+            int actualIndex = 0;
+            for (int i = 0; i < compressTask.batchImages.size(); i++) {
+                ImageInfo image = compressTask.batchImages.get(i);
+                String contentUri = extractContentUri(image.uri);
+                String uriString = contentUri != null ? contentUri : image.uri;
+                
+                byte[] compressedImageData = compressTask.compressedImages.get(uriString);
+                if (compressedImageData == null) {
+                    continue; // 跳过压缩失败的图片
+                }
+                
+                // 写入文件字段头
+                String fileName = image.fileName != null ? image.fileName : "image.jpg";
+                String fileField = "--" + boundary + "\r\n";
+                fileField += "Content-Disposition: form-data; name=\"images\"; filename=\"" + fileName + "\"\r\n";
+                fileField += "Content-Type: image/jpeg\r\n\r\n";
+                outputStream.write(fileField.getBytes("UTF-8"));
+                
+                // 写入压缩后的图片数据
+                outputStream.write(compressedImageData);
+                outputStream.write("\r\n".getBytes("UTF-8"));
+                
+                actualIndex++;
+            }
+            
+            // 写入 image_metadata 字段
+            String metadataField = "--" + boundary + "\r\n";
+            metadataField += "Content-Disposition: form-data; name=\"image_metadata\"\r\n";
+            metadataField += "Content-Type: application/json\r\n\r\n";
+            metadataField += compressTask.metadata.toString() + "\r\n";
+            outputStream.write(metadataField.getBytes("UTF-8"));
             
             // 写入结束边界
             String endBoundary = "--" + boundary + "--\r\n";
@@ -1769,9 +2275,9 @@ public class GalleryScanService {
             outputStream.close();
             
             // 读取响应
-            Log.d(TAG, "📥 开始读取HTTP响应...");
+            Log.d(TAG, "📥 [节点2] 开始读取HTTP响应...");
             int responseCode = connection.getResponseCode();
-            Log.d(TAG, "📊 HTTP响应码: " + responseCode);
+            Log.d(TAG, "📊 [节点2] HTTP响应码: " + responseCode);
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 String errorText = "";
                 try {
@@ -1786,7 +2292,7 @@ public class GalleryScanService {
                 } catch (Exception e) {
                     // 忽略错误流读取失败
                 }
-                Log.e(TAG, "❌ HTTP错误: " + responseCode + ", 错误信息: " + errorText);
+                Log.e(TAG, "❌ [节点2] HTTP错误: " + responseCode + ", 错误信息: " + errorText);
                 throw new Exception("HTTP错误: " + responseCode + " " + errorText);
             }
             
@@ -1798,124 +2304,80 @@ public class GalleryScanService {
             }
             reader.close();
             
-            // 解析JSON响应
-            Log.d(TAG, "📝 开始解析JSON响应，响应长度: " + response.length());
+            // 解析JSON响应（v2格式）
+            Log.d(TAG, "📝 [节点2] 开始解析JSON响应（v2），响应长度: " + response.length());
             JSONObject jsonResponse = new JSONObject(response.toString());
             
-            // 转换为Map格式
+            // v2接口返回格式：{ results: [...], summary: { total_count, success_count, failed_count, ... } }
+            JSONArray resultsArray = jsonResponse.optJSONArray("results");
+            JSONObject summaryObj = jsonResponse.optJSONObject("summary");
+            
+            // 转换为兼容v1格式的Map
             Map<String, Object> result = new HashMap<>();
-            int total = jsonResponse.optInt("total", 0);
-            int successCount = jsonResponse.optInt("success_count", 0);
-            int failCount = jsonResponse.optInt("fail_count", 0);
+            int total = summaryObj != null ? summaryObj.optInt("total_count", 0) : 0;
+            int successCount = summaryObj != null ? summaryObj.optInt("success_count", 0) : 0;
+            int failCount = summaryObj != null ? summaryObj.optInt("failed_count", 0) : 0;
             result.put("total", total);
             result.put("success_count", successCount);
             result.put("fail_count", failCount);
-            Log.d(TAG, "✅ 远程推理响应解析完成: 总计=" + total + ", 成功=" + successCount + ", 失败=" + failCount);
+            Log.d(TAG, "✅ [节点2] 远程推理响应解析完成（v2）: 总计=" + total + ", 成功=" + successCount + ", 失败=" + failCount);
             
-            JSONArray itemsArray = jsonResponse.optJSONArray("items");
+            // 转换results为兼容v1格式的items
+            // 🔥 根据API V2文档，results数组中的字段直接在顶层，没有嵌套的data对象
             List<Map<String, Object>> items = new ArrayList<>();
-            if (itemsArray != null) {
-                for (int i = 0; i < itemsArray.length(); i++) {
-                    JSONObject itemObj = itemsArray.getJSONObject(i);
+            if (resultsArray != null) {
+                for (int i = 0; i < resultsArray.length(); i++) {
+                    JSONObject resultObj = resultsArray.getJSONObject(i);
                     Map<String, Object> item = new HashMap<>();
-                    item.put("success", itemObj.optBoolean("success", false));
-                    item.put("error", itemObj.optString("error", null));
                     
-                    // 使用 optJSONObject 安全地获取 data 字段（如果为 null 则返回 null，不会抛出异常）
-                    JSONObject dataObj = itemObj.optJSONObject("data");
-                    if (dataObj != null) {
-                        Map<String, Object> data = new HashMap<>();
-                        data.put("category", dataObj.optString("category", null));
-                        data.put("confidence", dataObj.optDouble("confidence", 0.9));
-                        data.put("description", dataObj.optString("description", null));
-                        data.put("message", dataObj.optString("message", null));
-                        // 🆕 添加 background_color 字段的解析
-                        String backgroundColor = dataObj.optString("background_color", null);
-                        if (backgroundColor != null && !backgroundColor.isEmpty()) {
-                            data.put("background_color", backgroundColor);
+                    // 🔥 API V2格式：error字段为null表示成功，非null表示失败
+                    String error = null;
+                    if (resultObj.has("error")) {
+                        if (resultObj.isNull("error")) {
+                            error = null;
+                        } else {
+                            error = resultObj.optString("error", null);
+                            if ("null".equals(error)) {
+                                error = null;
+                            }
                         }
-                        
-                        // 处理小模型推理结果
-                        // 使用 optJSONObject 安全地获取 local_inference_result 字段（如果为 null 则返回 null，不会抛出异常）
-                        JSONObject localResultObj = dataObj.optJSONObject("local_inference_result");
-                        if (localResultObj != null) {
-                            Map<String, Object> localResult = new HashMap<>();
+                    }
+                    
+                    // 根据error字段判断success
+                    boolean success = (error == null || error.isEmpty());
+                    item.put("success", success);
+                    
+                    if (success) {
+                        // 🔥 API V2格式：成功时，category、confidence等字段直接在resultObj顶层
+                        // 检查是否有category字段（有category表示成功）
+                        if (resultObj.has("category")) {
+                            Map<String, Object> data = new HashMap<>();
+                            data.put("category", resultObj.optString("category", "NA"));
+                            data.put("confidence", resultObj.optDouble("confidence", 0.9));
                             
-                            // 解析 idCardDetections
-                            if (localResultObj.has("idCardDetections")) {
-                                JSONArray idCardArray = localResultObj.getJSONArray("idCardDetections");
-                                List<Map<String, Object>> idCardDetections = new ArrayList<>();
-                                for (int j = 0; j < idCardArray.length(); j++) {
-                                    JSONObject detectionObj = idCardArray.getJSONObject(j);
-                                    Map<String, Object> detection = new HashMap<>();
-                                    detection.put("className", detectionObj.optString("className", ""));
-                                    detection.put("confidence", detectionObj.optDouble("confidence", 0.0));
-                                    
-                                    // 🔥 新增：保存 bbox 字段（边界框坐标 [x, y, w, h]）
-                                    if (detectionObj.has("bbox")) {
-                                        try {
-                                            JSONArray bboxArray = detectionObj.getJSONArray("bbox");
-                                            if (bboxArray != null && bboxArray.length() == 4) {
-                                                List<Double> bbox = new ArrayList<>();
-                                                for (int k = 0; k < 4; k++) {
-                                                    bbox.add(bboxArray.getDouble(k));
-                                                }
-                                                detection.put("bbox", bbox);
-                                            }
-                                        } catch (Exception e) {
-                                            Log.w(TAG, "解析 idCard bbox 失败: " + e.getMessage());
-                                        }
-                                    }
-                                    
-                                    idCardDetections.add(detection);
-                                }
-                                localResult.put("idCardDetections", idCardDetections);
+                            String description = resultObj.optString("description", null);
+                            data.put("description", description);
+                            data.put("message", description); // message字段使用description的值
+                            
+                            String backgroundColor = resultObj.optString("background_color", null);
+                            if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                                data.put("background_color", backgroundColor);
                             }
                             
-                            // 解析 generalDetections
-                            if (localResultObj.has("generalDetections")) {
-                                JSONArray generalArray = localResultObj.getJSONArray("generalDetections");
-                                List<Map<String, Object>> generalDetections = new ArrayList<>();
-                                for (int j = 0; j < generalArray.length(); j++) {
-                                    JSONObject detectionObj = generalArray.getJSONObject(j);
-                                    Map<String, Object> detection = new HashMap<>();
-                                    // 同时保存 className 和 classId（如果存在）
-                                    detection.put("className", detectionObj.optString("className", ""));
-                                    if (detectionObj.has("classId")) {
-                                        detection.put("classId", detectionObj.optInt("classId", -1));
-                                    }
-                                    detection.put("confidence", detectionObj.optDouble("confidence", 0.0));
-                                    
-                                    // 🔥 新增：保存 bbox 字段（边界框坐标 [x, y, w, h]）
-                                    if (detectionObj.has("bbox")) {
-                                        try {
-                                            JSONArray bboxArray = detectionObj.getJSONArray("bbox");
-                                            if (bboxArray != null && bboxArray.length() == 4) {
-                                                List<Double> bbox = new ArrayList<>();
-                                                for (int k = 0; k < 4; k++) {
-                                                    bbox.add(bboxArray.getDouble(k));
-                                                }
-                                                detection.put("bbox", bbox);
-                                            }
-                                        } catch (Exception e) {
-                                            Log.w(TAG, "解析 bbox 失败: " + e.getMessage());
-                                        }
-                                    }
-                                    
-                                    generalDetections.add(detection);
-                                }
-                                localResult.put("generalDetections", generalDetections);
+                            String rawContent = resultObj.optString("raw_content", null);
+                            if (rawContent != null && !rawContent.isEmpty()) {
+                                data.put("raw_content", rawContent);
                             }
                             
-                            // 解析 mobileNetV3Detections
-                            if (localResultObj.has("mobileNetV3Detections")) {
-                                localResult.put("mobileNetV3Detections", localResultObj.get("mobileNetV3Detections"));
-                            }
-                            
-                            data.put("local_inference_result", localResult);
+                            item.put("data", data);
+                        } else {
+                            // 没有category字段，即使error为null也视为失败
+                            item.put("error", "缺少category字段");
+                            item.put("success", false);
                         }
-                        
-                        item.put("data", data);
+                    } else {
+                        // 失败时，添加error信息
+                        item.put("error", error);
                     }
                     
                     items.add(item);
@@ -1926,23 +2388,32 @@ public class GalleryScanService {
             return result;
             
         } finally {
-            connection.disconnect();
+            if (connection != null) {
+                connection.disconnect();
+            }
+            // 🔥 释放Semaphore许可
+            httpRequestSemaphore.release();
         }
     }
     
     /**
-     * 阶段3c: 远程推理
+     * 阶段3c: 远程推理（批次并行版本）
      * 注意：当推理成功并分类成功时，需要累加 imagesClassified 计数器
-     * 参照JS层的 batchClassifyRemote 逻辑实现
+     * 🔥 批次并行优化：多个批次并行处理，每个批次内部：压缩图片 -> 上传 -> 保存结果
+     * @param cacheResult 缓存查询结果，包含需要远程推理的图片列表和URI到Hash的映射
      */
-    private RemoteInferenceResult performRemoteInference(List<ImageInfo> naImages, String remoteApiUrl) {
+    private RemoteInferenceResult performRemoteInference(CacheResult cacheResult) {
+        List<ImageInfo> naImages = cacheResult.naImages;
+        Map<String, String> uriToHashMap = cacheResult.uriToHashMap;
+        
+        Log.d(TAG, "🔍 [调试] 阶段3c开始（流水线版本）: cacheResult.naImages.size()=" + naImages.size() + ", cacheResult.hitCount=" + cacheResult.hitCount + ", cacheResult.hitImages.size()=" + cacheResult.hitImages.size());
+        
         // 初始化阶段级统计变量
         processedThisPhase = 0;
         totalFoundThisPhase = naImages.size();
-        Log.d(TAG, "阶段3c开始: 远程推理，待处理图片: " + totalFoundThisPhase + " 张");
+        Log.d(TAG, "阶段3c开始（流水线版本）: 远程推理，待处理图片: " + totalFoundThisPhase + " 张");
         
         // 发送阶段开始进度事件（确保UI能收到"开始处理X张图片"的消息）
-        // 注意：必须在批次处理之前发送，确保开始消息先到达JS层
         if (totalFoundThisPhase > 0) {
             Log.d(TAG, "📤 准备发送远程推理开始事件: 0/" + totalFoundThisPhase);
             sendProgressEvent("remote_inference", 0, totalFoundThisPhase, currentScanId);
@@ -1950,236 +2421,387 @@ public class GalleryScanService {
         }
         
         RemoteInferenceResult result = new RemoteInferenceResult();
-        result.successImages = new ArrayList<>();
-        result.failedImages = new ArrayList<>();
+        // 使用线程安全的集合
+        result.successImages = Collections.synchronizedList(new ArrayList<>());
+        result.failedImages = Collections.synchronizedList(new ArrayList<>());
         result.successCount = 0;
         result.failedCount = 0;
         
-        if (remoteApiUrl == null || remoteApiUrl.isEmpty() || naImages.isEmpty()) {
-            // 没有远程API或没有待处理图片，直接返回
+        if (naImages.isEmpty()) {
             result.failedImages = naImages;
             result.failedCount = naImages.size();
             return result;
         }
         
+        // 按批次处理（每批20张，与JS层保持一致）
+        int batchSize = 20;
+        int totalBatches = (naImages.size() + batchSize - 1) / batchSize;
+        Log.d(TAG, "🚀 开始流水线远程推理: " + totalFoundThisPhase + " 张图片，批次大小: " + batchSize + "，共 " + totalBatches + " 批");
+        
+        // 创建流水线组件（每个节点1个线程，简化并发控制）
+        ExecutorService compressExecutor = Executors.newFixedThreadPool(1); // 节点1：压缩图片（CPU密集型）
+        ExecutorService inferenceExecutor = Executors.newFixedThreadPool(1); // 节点2：发送HTTP请求（网络IO）
+        ExecutorService saveExecutor = Executors.newFixedThreadPool(1); // 节点3：保存结果（数据库IO）
+        
+        BlockingQueue<CompressTask> compressToInferenceQueue = new LinkedBlockingQueue<>(); // 压缩结果 → 推理
+        BlockingQueue<InferenceTask> inferenceToSaveQueue = new LinkedBlockingQueue<>(); // 推理结果 → 保存
+        
+        // 线程安全的计数器
+        AtomicInteger processedCount = new AtomicInteger(0);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failedCount = new AtomicInteger(0);
+        AtomicInteger completedBatches = new AtomicInteger(0);
+        
+        // 启动节点2：发送HTTP请求工作线程（单线程）
+        inferenceExecutor.submit(() -> {
+            boolean shouldExit = false;
+            while (!shouldExit) {
+                    try {
+                        // 使用take()阻塞等待，避免循环轮询的性能开销
+                        CompressTask compressTask = compressToInferenceQueue.take();
+                        
+                        // 执行远程推理请求
+                        Map<String, Object> inferenceResponse = null;
+                        Exception inferenceError = null;
+                        
+                        try {
+                            Log.d(TAG, "🔗 [节点2] 开始发送推理请求，批次 " + (compressTask.batchIndex + 1) + "/" + totalBatches);
+                            inferenceResponse = sendInferenceRequest(compressTask);
+                            Log.d(TAG, "✅ [节点2] 推理请求成功，批次 " + (compressTask.batchIndex + 1));
+                        } catch (Exception e) {
+                            inferenceError = e;
+                            String errorMessage = e.getMessage();
+                            if (errorMessage != null && errorMessage.contains("timeout")) {
+                                Log.e(TAG, "❌ [节点2] 批次 " + (compressTask.batchIndex + 1) + " 推理请求超时: " + errorMessage, e);
+                            } else {
+                                Log.e(TAG, "❌ [节点2] 批次 " + (compressTask.batchIndex + 1) + " 推理请求异常: " + errorMessage, e);
+                            }
+                        }
+                        
+                        // 将推理结果传递给节点3
+                        InferenceTask inferenceTask = new InferenceTask(compressTask);
+                        inferenceTask.inferenceResponse = inferenceResponse;
+                        inferenceTask.inferenceError = inferenceError;
+                        inferenceToSaveQueue.put(inferenceTask);
+                        
+                        // 如果是最后一个批次，处理完后退出
+                        if (compressTask.isLastBatch) {
+                            Log.d(TAG, "🔍 [节点2] 处理完最后一个批次，退出");
+                            shouldExit = true;
+                        }
+                        
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        Log.d(TAG, "🔍 [节点2] 线程被中断，退出");
+                        break;
+                    } catch (Exception e) {
+                        Log.e(TAG, "[节点2] 处理异常", e);
+                        // 异常时继续处理下一个任务，不退出
+                    }
+                }
+            });
+        
+        // 启动节点3：保存结果工作线程（单线程）
+        saveExecutor.submit(() -> {
+            boolean shouldExit = false;
+            while (!shouldExit) {
+                try {
+                    // 使用take()阻塞等待，避免循环轮询的性能开销
+                    InferenceTask inferenceTask = inferenceToSaveQueue.take();
+                    
+                    // 处理推理结果并保存
+                    processAndSaveInferenceResult(inferenceTask, result, processedCount, successCount, failedCount);
+                    
+                    int currentCompleted = completedBatches.incrementAndGet();
+                    int currentProcessed = processedCount.get();
+                    
+                    // 发送进度更新（可能乱序，但不影响最终结果）
+                    sendProgressEvent("remote_inference", currentProcessed, totalFoundThisPhase, currentScanId);
+                    
+                    Log.d(TAG, "🔍 [节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 处理完成，已完成批次: " + currentCompleted + "/" + totalBatches + "，已处理: " + currentProcessed + "/" + totalFoundThisPhase);
+                    
+                    // 如果是最后一个批次，处理完后退出
+                    if (inferenceTask.isLastBatch) {
+                        Log.d(TAG, "🔍 [节点3] 处理完最后一个批次，退出");
+                        shouldExit = true;
+                    }
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    Log.d(TAG, "🔍 [节点3] 线程被中断，退出");
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "[节点3] 处理异常", e);
+                    // 异常时继续处理下一个任务，不退出（除非是最后一个批次）
+                }
+            }
+        });
+        
+        // 节点1：提交所有批次到压缩队列
         try {
-            // 按批次处理（每批20张，与JS层保持一致）
-            int batchSize = 20;
-            int totalBatches = (naImages.size() + batchSize - 1) / batchSize;
-            
             for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-                // 🔥 优化：定期保持线程活跃
-                // 1. 检查线程是否被中断
                 if (Thread.currentThread().isInterrupted()) {
                     Log.w(TAG, "扫描线程被中断，停止处理");
                     break;
                 }
                 
-                // 2. 短暂睡眠让线程进入可调度状态（比 Thread.yield() 更可靠）
-                if (batchIndex > 0) {
-                    SystemClock.sleep(5); // 5ms睡眠，让系统有机会调度
-                }
-                
                 int startIndex = batchIndex * batchSize;
                 int endIndex = Math.min(startIndex + batchSize, naImages.size());
-                List<ImageInfo> batchImages = naImages.subList(startIndex, endIndex);
+                List<ImageInfo> batchImages = new ArrayList<>(naImages.subList(startIndex, endIndex));
                 
-                Log.d(TAG, "处理批次 " + (batchIndex + 1) + "/" + totalBatches + "，图片数量: " + batchImages.size());
+                final int finalBatchIndex = batchIndex;
+                boolean isLastBatch = (batchIndex == totalBatches - 1);
                 
-                try {
-                    // 调用远程推理API
-                    Log.d(TAG, "🔗 开始调用远程推理API，批次 " + (batchIndex + 1) + "/" + totalBatches + "，图片数量: " + batchImages.size());
-                    Map<String, Object> batchResult = batchRemoteInference(remoteApiUrl, batchImages);
-                    Log.d(TAG, "✅ 远程推理API调用成功，批次 " + (batchIndex + 1));
-                    
-                    if (batchResult != null && batchResult.containsKey("items")) {
-                        Log.d(TAG, "📊 远程推理结果: 批次 " + (batchIndex + 1) + "，返回 " + ((List<?>) batchResult.get("items")).size() + " 个结果");
-                        List<Map<String, Object>> items = (List<Map<String, Object>>) batchResult.get("items");
-                        List<Map<String, Object>> batchUpdateData = new ArrayList<>(); // 收集需要批量更新的数据
+                compressExecutor.submit(() -> {
+                    try {
+                        Log.d(TAG, "🗜️ [节点1] 开始压缩批次 " + (finalBatchIndex + 1) + "/" + totalBatches + "，图片数量: " + batchImages.size());
                         
-                        // 处理推理结果
-                        for (int i = 0; i < items.size() && i < batchImages.size(); i++) {
-                            Map<String, Object> item = items.get(i);
-                            ImageInfo image = batchImages.get(i);
-                            
-                            Boolean success = (Boolean) item.get("success");
-                            if (success != null && success && item.containsKey("data")) {
-                                // 推理成功
-                                Map<String, Object> inferenceData = (Map<String, Object>) item.get("data");
-                                
-                                // 判断是大模型还是小模型推理
-                                String category = (String) inferenceData.get("category");
-                                Map<String, Object> localInferenceResult = (Map<String, Object>) inferenceData.get("local_inference_result");
-                                
-                                Map<String, Object> classificationData = new HashMap<>();
-                                classificationData.put("uri", image.uri);
-                                classificationData.put("id", image.id);
-                                
-                                if (category != null && !category.isEmpty()) {
-                                    // 大模型推理
-                                    classificationData.put("category", category);
-                                    
-                                    Object confidenceObj = inferenceData.get("confidence");
-                                    double confidence = 0.9; // 默认置信度
-                                    if (confidenceObj != null) {
-                                        if (confidenceObj instanceof Number) {
-                                            confidence = ((Number) confidenceObj).doubleValue();
-                                        } else {
-                                            try {
-                                                confidence = Double.parseDouble(confidenceObj.toString());
-                                            } catch (NumberFormatException e) {
-                                                // 使用默认值
-                                            }
-                                        }
-                                    }
-                                    classificationData.put("confidence", confidence);
-                                    
-                                    // 保存描述信息（message）
-                                    Object messageObj = inferenceData.get("description");
-                                    if (messageObj == null) {
-                                        messageObj = inferenceData.get("message");
-                                    }
-                                    if (messageObj != null) {
-                                        classificationData.put("message", messageObj.toString());
-                                    }
-                                    
-                                    // 保存背景颜色字段（跳过 null 和 "null" 字符串）
-                                    Object backgroundColorObj = inferenceData.get("background_color");
-                                    if (backgroundColorObj != null) {
-                                        String backgroundColor = backgroundColorObj.toString();
-                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
-                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
-                                            classificationData.put("background_color", backgroundColor);
-                                        }
-                                    }
-                                    
-                                    // 大模型推理没有小模型检测结果
-                                    classificationData.put("idCardDetections", new ArrayList<>());
-                                    classificationData.put("generalDetections", new ArrayList<>());
-                                    classificationData.put("mobileNetV3Detections", null);
-                                } else if (localInferenceResult != null) {
-                                    // 小模型推理：不在这里进行映射，保存原始检测结果，分类设为NA
-                                    // 映射逻辑由JS层处理（依赖配置文件，更灵活）
-                                    classificationData.put("category", "NA");
-                                    classificationData.put("confidence", 0.8);
-                                    
-                                    // 保存小模型检测结果（原始数据，供JS层后续映射使用）
-                                    Object idCardDetections = localInferenceResult.get("idCardDetections");
-                                    Object generalDetections = localInferenceResult.get("generalDetections");
-                                    Object mobileNetV3Detections = localInferenceResult.get("mobileNetV3Detections");
-                                    
-                                    if (idCardDetections != null) {
-                                        classificationData.put("idCardDetections", idCardDetections);
-                                    } else {
-                                        classificationData.put("idCardDetections", new ArrayList<>());
-                                    }
-                                    
-                                    if (generalDetections != null) {
-                                        classificationData.put("generalDetections", generalDetections);
-                                    } else {
-                                        classificationData.put("generalDetections", new ArrayList<>());
-                                    }
-                                    
-                                    classificationData.put("mobileNetV3Detections", mobileNetV3Detections);
-                                    classificationData.put("message", null);
-                                    
-                                    // 保存背景颜色字段（如果存在，跳过 null 和 "null" 字符串）
-                                    Object backgroundColorObj = inferenceData.get("background_color");
-                                    if (backgroundColorObj != null) {
-                                        String backgroundColor = backgroundColorObj.toString();
-                                        // 只有当背景颜色不为空且不是 "null" 字符串时才保存
-                                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
-                                            classificationData.put("background_color", backgroundColor);
-                                        }
-                                    }
-                                    
-                                    // 注意：小模型推理结果暂时保存为NA，JS层会在后续阶段进行映射
-                                    // 这样可以避免在原生层维护复杂的映射逻辑和配置文件
-                                } else {
-                                    // 无法确定分类结果
-                                    Log.w(TAG, "批次 " + (batchIndex + 1) + " 图片 " + image.fileName + " 分类结果构建失败");
-                                    result.failedImages.add(image);
-                                    result.failedCount++;
-                                    processedThisPhase++;
-                                    continue;
-                                }
-                                
-                                batchUpdateData.add(classificationData);
-                                result.successImages.add(image);
-                                result.successCount++;
-                                imagesClassified++; // 累加分类成功计数器
-                                processedThisPhase++;
-                            } else {
-                                // 推理失败
-                                String error = (String) item.get("error");
-                                Log.w(TAG, "批次 " + (batchIndex + 1) + " 图片 " + image.fileName + " 推理失败: " + error);
-                                result.failedImages.add(image);
-                                result.failedCount++;
-                                processedThisPhase++;
-                            }
-                        }
+                        // 压缩批次图片
+                        CompressTask compressTask = compressBatchImages(batchImages, uriToHashMap, finalBatchIndex, isLastBatch);
                         
-                        // 批量更新分类信息
-                        if (!batchUpdateData.isEmpty()) {
-                            Map<String, Object> updateResult = imageDataService.batchUpdateClassification(batchUpdateData);
-                            Boolean success = (Boolean) updateResult.get("success");
-                            Integer updatedCount = (Integer) updateResult.get("updatedCount");
-                            
-                            if (success != null && success && updatedCount != null) {
-                                Log.d(TAG, "批次 " + (batchIndex + 1) + " 批量更新分类完成: " + updatedCount + " 张图片");
-                            } else {
-                                Log.w(TAG, "批次 " + (batchIndex + 1) + " 批量更新分类失败: " + batchUpdateData.size() + " 张图片");
-                            }
-                        }
-                    } else {
-                        // 整个批次失败
-                        Log.e(TAG, "批次 " + (batchIndex + 1) + " 远程推理失败");
-                        for (ImageInfo image : batchImages) {
-                            result.failedImages.add(image);
-                            result.failedCount++;
-                            processedThisPhase++;
+                        // 将压缩结果传递给节点2
+                        compressToInferenceQueue.put(compressTask);
+                        Log.d(TAG, "🔍 [节点1] 批次 " + (finalBatchIndex + 1) + " 压缩任务已提交到队列" + (isLastBatch ? " (最后一批)" : ""));
+                        
+                    } catch (Exception e) {
+                        Log.e(TAG, "[节点1] 批次 " + (finalBatchIndex + 1) + " 压缩异常", e);
+                        // 压缩失败，仍然需要创建CompressTask传递给节点2，确保流水线正常结束
+                        CompressTask compressTask = new CompressTask(finalBatchIndex, batchImages, isLastBatch, uriToHashMap);
+                        compressTask.compressedImages = new HashMap<>();
+                        compressTask.compressFailedImages = new ArrayList<>(batchImages); // 所有图片都标记为压缩失败
+                        compressTask.metadata = new JSONObject();
+                        try {
+                            compressToInferenceQueue.put(compressTask);
+                            Log.d(TAG, "🔍 [节点1] 批次 " + (finalBatchIndex + 1) + " 压缩异常，但仍提交任务到队列" + (isLastBatch ? " (最后一批)" : ""));
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            Log.w(TAG, "[节点1] 提交压缩任务被中断");
                         }
                     }
-                    
-                } catch (Exception e) {
-                    // 🔥 详细记录远程推理失败的原因
-                    String errorMessage = e.getMessage();
-                    if (errorMessage != null && errorMessage.contains("timeout")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远程推理超时: " + errorMessage, e);
-                    } else if (errorMessage != null && errorMessage.contains("HTTP错误")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远程推理HTTP错误: " + errorMessage, e);
-                    } else if (errorMessage != null && errorMessage.contains("网络")) {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远程推理网络错误: " + errorMessage, e);
-                    } else {
-                        Log.e(TAG, "❌ 批次 " + (batchIndex + 1) + " 远程推理异常: " + errorMessage, e);
-                    }
-                    // 批次失败，将所有图片加入失败列表
-                    for (ImageInfo image : batchImages) {
-                        result.failedImages.add(image);
-                        result.failedCount++;
-                        processedThisPhase++;
-                    }
-                }
-                
-                // 发送进度更新（每处理一个批次就更新一次，最后一个批次也会在这里发送）
-                sendProgressEvent("remote_inference", processedThisPhase, totalFoundThisPhase, currentScanId);
+                });
             }
-            
-            Log.d(TAG, "✅ 阶段3c完成: 推理成功 " + result.successCount + " 张，失败: " + result.failedCount + " 张，总计: " + totalFoundThisPhase + " 张");
-            if (result.failedCount > 0) {
-                Log.w(TAG, "⚠️ 警告: 有 " + result.failedCount + " 张图片远程推理失败，将保持NA分类，后续可能需要本地推理");
-            }
-            
         } catch (Exception e) {
-            Log.e(TAG, "远程推理过程发生错误", e);
-            // 出错时，将所有图片加入失败列表
-            result.failedImages = naImages;
-            result.successImages.clear();
-            result.successCount = 0;
-            result.failedCount = naImages.size();
+            Log.e(TAG, "提交压缩任务异常", e);
+        }
+        
+        // 等待所有任务完成
+        Log.d(TAG, "🔍 [流水线] 开始等待所有任务完成，已完成批次: " + completedBatches.get() + "/" + totalBatches);
+        compressExecutor.shutdown();
+        inferenceExecutor.shutdown();
+        saveExecutor.shutdown();
+        
+        try {
+            int waitCount = 0;
+            while (!compressExecutor.isTerminated() || !inferenceExecutor.isTerminated() || !saveExecutor.isTerminated()) {
+                Thread.sleep(100);
+                waitCount++;
+                if (waitCount % 50 == 0) { // 每5秒打印一次
+                    Log.d(TAG, "🔍 [流水线] 等待中... 已完成批次: " + completedBatches.get() + "/" + totalBatches + 
+                          ", compressExecutor终止: " + compressExecutor.isTerminated() + 
+                          ", inferenceExecutor终止: " + inferenceExecutor.isTerminated() + 
+                          ", saveExecutor终止: " + saveExecutor.isTerminated());
+                }
+            }
+            Log.d(TAG, "🔍 [流水线] 所有任务完成，已完成批次: " + completedBatches.get() + "/" + totalBatches);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "等待流水线完成被中断");
+        }
+        
+        result.successCount = successCount.get();
+        result.failedCount = failedCount.get();
+        processedThisPhase = processedCount.get();
+        
+        Log.d(TAG, "✅ 阶段3c完成（流水线版本）: 推理成功 " + result.successCount + " 张，失败: " + result.failedCount + " 张，总计: " + totalFoundThisPhase + " 张");
+        if (result.failedCount > 0) {
+            Log.w(TAG, "⚠️ 警告: 有 " + result.failedCount + " 张图片远程推理失败，将保持NA分类，后续可能需要本地推理");
         }
         
         return result;
+    }
+    
+    /**
+     * 处理推理结果并保存（节点3的工作）
+     */
+    private void processAndSaveInferenceResult(InferenceTask inferenceTask, RemoteInferenceResult result,
+                                               AtomicInteger processedCount, AtomicInteger successCount, AtomicInteger failedCount) {
+        List<ImageInfo> batchImages = inferenceTask.batchImages;
+        List<ImageInfo> compressFailedImages = inferenceTask.compressFailedImages;
+        
+        // 压缩失败的图片直接加入失败列表
+        synchronized (result.failedImages) {
+            for (ImageInfo image : compressFailedImages) {
+                if (!result.failedImages.contains(image) && !result.successImages.contains(image)) {
+                    result.failedImages.add(image);
+                    failedCount.incrementAndGet();
+                    processedCount.incrementAndGet();
+                }
+            }
+        }
+        
+        // 处理推理结果
+        Map<String, Object> inferenceResponse = inferenceTask.inferenceResponse;
+        Exception inferenceError = inferenceTask.inferenceError;
+        
+        if (inferenceError != null) {
+            // 推理失败，将这批图片加入失败列表
+            synchronized (result.failedImages) {
+                for (ImageInfo image : batchImages) {
+                    if (!result.failedImages.contains(image) && !result.successImages.contains(image)) {
+                        result.failedImages.add(image);
+                        failedCount.incrementAndGet();
+                        processedCount.incrementAndGet();
+                    }
+                }
+            }
+            return;
+        }
+        
+        if (inferenceResponse == null || !inferenceResponse.containsKey("items")) {
+            // 没有推理结果，将所有图片加入失败列表
+            synchronized (result.failedImages) {
+                for (ImageInfo image : batchImages) {
+                    if (!result.failedImages.contains(image) && !result.successImages.contains(image)) {
+                        result.failedImages.add(image);
+                        failedCount.incrementAndGet();
+                        processedCount.incrementAndGet();
+                    }
+                }
+            }
+            return;
+        }
+        
+        List<Map<String, Object>> items = (List<Map<String, Object>>) inferenceResponse.get("items");
+        List<Map<String, Object>> batchUpdateData = new ArrayList<>();
+        
+        // 处理推理结果
+        Log.d(TAG, "🔍 [节点3] 开始处理推理结果，items数量: " + items.size());
+        for (int i = 0; i < items.size() && i < batchImages.size(); i++) {
+            Map<String, Object> item = items.get(i);
+            ImageInfo image = batchImages.get(i);
+            
+            // 处理success字段
+            Object successObj = item.get("success");
+            boolean success = false;
+            if (successObj instanceof Boolean) {
+                success = ((Boolean) successObj).booleanValue();
+            } else if (successObj != null) {
+                try {
+                    success = Boolean.parseBoolean(successObj.toString());
+                } catch (Exception e) {
+                    Log.w(TAG, "无法解析success字段: " + successObj);
+                }
+            }
+            
+            if (success && item.containsKey("data")) {
+                // 推理成功
+                Map<String, Object> inferenceData = (Map<String, Object>) item.get("data");
+                String category = (String) inferenceData.get("category");
+                
+                if (category != null && !category.isEmpty()) {
+                    Map<String, Object> classificationData = new HashMap<>();
+                    classificationData.put("uri", image.uri);
+                    classificationData.put("id", image.id);
+                    classificationData.put("category", category);
+                    
+                    Object confidenceObj = inferenceData.get("confidence");
+                    double confidence = 0.9;
+                    if (confidenceObj != null) {
+                        if (confidenceObj instanceof Number) {
+                            confidence = ((Number) confidenceObj).doubleValue();
+                        } else {
+                            try {
+                                confidence = Double.parseDouble(confidenceObj.toString());
+                            } catch (NumberFormatException e) {
+                                // 使用默认值
+                            }
+                        }
+                    }
+                    classificationData.put("confidence", confidence);
+                    
+                    Object messageObj = inferenceData.get("description");
+                    if (messageObj == null) {
+                        messageObj = inferenceData.get("message");
+                    }
+                    if (messageObj != null) {
+                        classificationData.put("message", messageObj.toString());
+                    }
+                    
+                    Object backgroundColorObj = inferenceData.get("background_color");
+                    if (backgroundColorObj != null) {
+                        String backgroundColor = backgroundColorObj.toString();
+                        if (backgroundColor != null && !backgroundColor.isEmpty() && !backgroundColor.equals("null")) {
+                            classificationData.put("background_color", backgroundColor);
+                        }
+                    }
+                    
+                    classificationData.put("idCardDetections", new ArrayList<>());
+                    classificationData.put("generalDetections", new ArrayList<>());
+                    classificationData.put("mobileNetV3Detections", null);
+                    
+                    batchUpdateData.add(classificationData);
+                    
+                    synchronized (result.successImages) {
+                        if (!result.successImages.contains(image)) {
+                            result.successImages.add(image);
+                            successCount.incrementAndGet();
+                            imagesClassified++;
+                            processedCount.incrementAndGet();
+                        }
+                    }
+                } else {
+                    String error = (String) item.get("error");
+                    Log.w(TAG, "[节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 图片 " + image.fileName + " 推理失败：category为空, error=" + error);
+                    synchronized (result.failedImages) {
+                        if (!result.failedImages.contains(image) && !result.successImages.contains(image)) {
+                            result.failedImages.add(image);
+                            failedCount.incrementAndGet();
+                            processedCount.incrementAndGet();
+                        }
+                    }
+                }
+            } else {
+                String error = (String) item.get("error");
+                Log.w(TAG, "[节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 图片 " + image.fileName + " 推理失败: success=" + success + ", hasData=" + item.containsKey("data") + ", error=" + error);
+                synchronized (result.failedImages) {
+                    if (!result.failedImages.contains(image) && !result.successImages.contains(image)) {
+                        result.failedImages.add(image);
+                        failedCount.incrementAndGet();
+                        processedCount.incrementAndGet();
+                    }
+                }
+            }
+        }
+        
+        // 批量更新分类信息
+        if (!batchUpdateData.isEmpty()) {
+            try {
+                Map<String, Object> updateResult = imageDataService.batchUpdateClassification(batchUpdateData);
+                Boolean updateSuccess = (Boolean) updateResult.get("success");
+                Integer updatedCount = (Integer) updateResult.get("updatedCount");
+                
+                if (updateSuccess != null && updateSuccess && updatedCount != null) {
+                    Log.d(TAG, "💾 [节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 批量更新分类完成: " + updatedCount + " 张图片");
+                } else {
+                    Log.w(TAG, "⚠️ [节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 批量更新分类失败: " + batchUpdateData.size() + " 张图片");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ [节点3] 批次 " + (inferenceTask.batchIndex + 1) + " 保存结果异常", e);
+            }
+        }
+    }
+    
+    /**
+     * 批量远程推理API（v2版本）- 保留原方法以兼容，内部调用流水线版本
+     * @param images 图片列表
+     * @param uriToHashMap URI到Hash的映射（必填，因为上传的是压缩后的图片，必须传递基于原图的hash）
+     * @return 推理结果 { items: [...], success_count: N, fail_count: N, total: N }（兼容v1格式）
+     */
+    private Map<String, Object> batchRemoteInference(List<ImageInfo> images, Map<String, String> uriToHashMap) throws Exception {
+        // 为了兼容性，保留原方法，但内部调用新的流水线方法
+        // 注意：这个方法现在主要用于单个批次的完整处理（压缩+推理）
+        CompressTask compressTask = compressBatchImages(images, uriToHashMap, 0, true);
+        return sendInferenceRequest(compressTask);
     }
     
     /**
@@ -2274,23 +2896,46 @@ public class GalleryScanService {
     }
     
     /**
-     * 完成扫描
+     * 🆕 完成基础扫描（原生层部分）
+     * 注意：这只是原生层的基础扫描完成（目录扫描、文件比对、EXIF提取、截图检测）
+     * JS层收到此事件后，会继续执行位置信息补全，然后才发送最终完成消息
      */
-    private void completeScan(String scanId) {
+    private void completeBasicScan(String scanId) {
         try {
             // 更新数据库状态
-            imageDataService.updateSetting("scan_status", "completed");
+            imageDataService.updateSetting("scan_status", "basic_completed");
+            imageDataService.updateSetting("scan_completed_at", String.valueOf(System.currentTimeMillis()));
+            
+            // 发送基础扫描完成进度事件（原生层部分完成）
+            // JS层收到此事件后，会执行位置信息补全，然后发送最终完成消息
+            // AI分类需要用户手动触发，不会自动执行
+            sendProgressEvent("basic_scan_completed", processedThisPhase, totalFoundThisPhase, scanId);
+            
+            Log.d(TAG, "基础扫描完成（原生层）: " + scanId + ", 处理 " + processedThisPhase + "/" + totalFoundThisPhase + " 张图片");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "完成基础扫描失败", e);
+        }
+    }
+    
+    /**
+     * 🆕 完成AI分类
+     */
+    private void completeAiClassification(String scanId) {
+        try {
+            // 更新数据库状态
+            imageDataService.updateSetting("scan_status", "ai_classification_completed");
             imageDataService.updateSetting("scan_completed_at", String.valueOf(System.currentTimeMillis()));
             imageDataService.updateSetting("scan_needs_post_processing", "true");
             
-            // 发送原生层扫描完成进度事件（注意：这只是原生层完成，不是整个扫描流程完成）
-            // JS层收到此事件后会启动后续处理（位置补全、本地推理、规则映射、相似度检测）
-            sendProgressEvent("native_scan_completed", processedThisPhase, totalFoundThisPhase, scanId);
+            // 发送AI分类完成进度事件
+            // JS层收到此事件后，AI分类完成
+            sendProgressEvent("ai_classification_completed", processedThisPhase, totalFoundThisPhase, scanId);
             
-            Log.d(TAG, "扫描完成: " + scanId + ", 处理 " + processedThisPhase + "/" + totalFoundThisPhase + " 张图片");
+            Log.d(TAG, "AI分类完成: " + scanId + ", 处理 " + processedThisPhase + "/" + totalFoundThisPhase + " 张图片");
             
         } catch (Exception e) {
-            Log.e(TAG, "完成扫描失败", e);
+            Log.e(TAG, "完成AI分类失败", e);
         }
     }
     
@@ -2410,12 +3055,58 @@ public class GalleryScanService {
     
     
     /**
+     * 流水线任务类：Hash计算任务
+     */
+    private static class HashTask {
+        final int batchIndex;
+        final List<ImageInfo> batchImages;
+        final boolean isLastBatch; // 是否是最后一个批次
+        Map<String, List<String>> hashToUriMap; // Hash -> URI列表
+        Map<String, String> uriToHashMap; // URI -> Hash
+        List<ImageInfo> hashFailedImages; // Hash计算失败的图片
+        
+        HashTask(int batchIndex, List<ImageInfo> batchImages, boolean isLastBatch) {
+            this.batchIndex = batchIndex;
+            this.batchImages = batchImages;
+            this.isLastBatch = isLastBatch;
+        }
+    }
+    
+    /**
+     * 流水线任务类：查询任务（包含Hash结果和查询结果）
+     */
+    private static class QueryTask {
+        final int batchIndex;
+        final List<ImageInfo> batchImages;
+        final boolean isLastBatch; // 是否是最后一个批次
+        final Map<String, List<String>> hashToUriMap; // Hash -> URI列表
+        final Map<String, String> uriToHashMap; // URI -> Hash
+        final List<ImageInfo> hashFailedImages; // Hash计算失败的图片
+        Map<String, Object> cacheResponse; // 查询结果
+        Exception queryError; // 查询错误（如果有）
+        
+        QueryTask(int batchIndex, List<ImageInfo> batchImages, 
+                  boolean isLastBatch,
+                  Map<String, List<String>> hashToUriMap, 
+                  Map<String, String> uriToHashMap,
+                  List<ImageInfo> hashFailedImages) {
+            this.batchIndex = batchIndex;
+            this.batchImages = batchImages;
+            this.isLastBatch = isLastBatch;
+            this.hashToUriMap = hashToUriMap;
+            this.uriToHashMap = uriToHashMap;
+            this.hashFailedImages = hashFailedImages;
+        }
+    }
+    
+    /**
      * 缓存查询结果类
      */
     public static class CacheResult {
         public List<ImageInfo> hitImages;
         public List<ImageInfo> naImages;
         public int hitCount;
+        public Map<String, String> uriToHashMap; // URI到Hash的映射（用于后续远程推理）
     }
     
     /**
@@ -2429,6 +3120,49 @@ public class GalleryScanService {
     }
     
     /**
+     * 流水线任务类：压缩任务（节点1的输出，节点2的输入）
+     */
+    private static class CompressTask {
+        final int batchIndex;
+        final List<ImageInfo> batchImages;
+        final boolean isLastBatch;
+        final Map<String, String> uriToHashMap; // URI到Hash的映射
+        Map<String, byte[]> compressedImages; // URI -> 压缩后的图片数据
+        List<ImageInfo> compressFailedImages; // 压缩失败的图片
+        JSONObject metadata; // image_metadata JSON对象
+        
+        CompressTask(int batchIndex, List<ImageInfo> batchImages, boolean isLastBatch, Map<String, String> uriToHashMap) {
+            this.batchIndex = batchIndex;
+            this.batchImages = batchImages;
+            this.isLastBatch = isLastBatch;
+            this.uriToHashMap = uriToHashMap;
+        }
+    }
+    
+    /**
+     * 流水线任务类：推理任务（节点2的输出，节点3的输入）
+     */
+    private static class InferenceTask {
+        final int batchIndex;
+        final List<ImageInfo> batchImages;
+        final boolean isLastBatch;
+        final Map<String, String> uriToHashMap;
+        final Map<String, byte[]> compressedImages;
+        final List<ImageInfo> compressFailedImages;
+        Map<String, Object> inferenceResponse; // 推理结果
+        Exception inferenceError; // 推理错误（如果有）
+        
+        InferenceTask(CompressTask compressTask) {
+            this.batchIndex = compressTask.batchIndex;
+            this.batchImages = compressTask.batchImages;
+            this.isLastBatch = compressTask.isLastBatch;
+            this.uriToHashMap = compressTask.uriToHashMap;
+            this.compressedImages = compressTask.compressedImages;
+            this.compressFailedImages = compressTask.compressFailedImages;
+        }
+    }
+    
+    /**
      * EXIF数据类
      */
     public static class ExifData {
@@ -2436,8 +3170,19 @@ public class GalleryScanService {
         public Long takenTime;
         public GpsInfo gps;
         public ImageDimensions dimensions;
+        public CameraSettings cameraSettings; // 🔥 拍摄参数（ISO、光圈、快门速度、焦距）
         public boolean hasGPS;
         public boolean hasTakenTime;
+    }
+    
+    /**
+     * 拍摄参数类（与PC端格式一致）
+     */
+    public static class CameraSettings {
+        public Integer iso;           // ISO感光度
+        public Double aperture;       // 光圈值（f-stop，如 2.8）
+        public Double shutterSpeed;   // 快门速度（秒，如 0.008 表示 1/125秒）
+        public Double focalLength;    // 焦距（毫米，如 50）
     }
     
     /**

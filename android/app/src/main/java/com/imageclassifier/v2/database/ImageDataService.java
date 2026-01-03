@@ -52,8 +52,8 @@ public class ImageDataService {
         }
         
         // 添加重试机制，处理数据库锁定问题
-        int maxRetries = 3;
-        int retryDelay = 200; // 毫秒（增加延迟，给其他连接更多时间释放）
+        int maxRetries = 5; // 增加重试次数
+        int baseRetryDelay = 500; // 基础延迟500ms（增加延迟，给其他连接更多时间释放）
         
         SQLiteDatabase db = null;
         for (int attempt = 0; attempt < maxRetries; attempt++) {
@@ -90,15 +90,32 @@ public class ImageDataService {
                         values.put("uri", uri);
                         values.put("fileName", getStringValue(imageData, "fileName", ""));
                         
-                        // 基础字段
-                        putStringIfNotNull(values, "category", imageData.get("category"));
+                        // 🔧 基础字段：确保 category 不为 null
+                        String category = getStringValue(imageData, "category", null);
+                        if (category == null || category.isEmpty()) {
+                            category = "NA";
+                            Log.w(TAG, "⚠️ writeImageDetailedInfo: category 为空，使用默认值 NA, id=" + id);
+                        }
+                        values.put("category", category);
                         putDoubleIfNotNull(values, "confidence", imageData.get("confidence"));
                         putLongIfNotNull(values, "timestamp", imageData.get("timestamp"));
                         putLongIfNotNull(values, "takenAt", imageData.get("takenAt"));
                         putLongIfNotNull(values, "size", imageData.get("size"));
                         putStringIfNotNull(values, "mimeType", imageData.get("mimeType"));
-                        putIntIfNotNull(values, "width", imageData.get("width"));
-                        putIntIfNotNull(values, "height", imageData.get("height"));
+                        
+                        // 🔧 确保 width 和 height 始终被设置（即使为0或null，也要设置默认值0）
+                        Object widthObj = imageData.get("width");
+                        Object heightObj = imageData.get("height");
+                        int width = 0;
+                        int height = 0;
+                        if (widthObj instanceof Number) {
+                            width = ((Number) widthObj).intValue();
+                        }
+                        if (heightObj instanceof Number) {
+                            height = ((Number) heightObj).intValue();
+                        }
+                        values.put("width", width);
+                        values.put("height", height);
                         
                         // GPS信息
                         putDoubleIfNotNull(values, "latitude", imageData.get("latitude"));
@@ -131,33 +148,135 @@ public class ImageDataService {
                         }
                         putStringIfNotNull(values, "message", imageData.get("message"));
                         
-                        // 时间戳
-                        String now = dateFormat.format(new Date());
-                        String createdAt = getStringValue(imageData, "createdAt", null);
-                        boolean exists = false;
-                        
-                        if (createdAt == null) {
-                            // 检查是否已存在（合并查询，减少事务内的查询次数）
-                            Cursor cursor = db.query("images", new String[]{"createdAt"}, 
-                                "id = ?", new String[]{id}, null, null, null);
-                            if (cursor.moveToFirst()) {
-                                exists = true;
-                                createdAt = cursor.getString(0);
+                        // 🔥 拍摄参数处理（cameraSettings 和分类字段）
+                        Object cameraSettingsObj = imageData.get("cameraSettings");
+                        if (cameraSettingsObj != null) {
+                            // 保存 cameraSettings（可能是字符串或对象）
+                            String cameraSettingsStr;
+                            if (cameraSettingsObj instanceof String) {
+                                cameraSettingsStr = (String) cameraSettingsObj;
                             } else {
-                                exists = false;
-                                createdAt = now;
+                                cameraSettingsStr = jsonToString(cameraSettingsObj);
                             }
-                            cursor.close();
+                            values.put("cameraSettings", cameraSettingsStr);
+                            
+                            // 计算分类字段
+                            Map<String, String> categories = calculateCameraSettingsCategories(cameraSettingsStr);
+                            putStringIfNotNull(values, "isoCategory", categories.get("isoCategory"));
+                            putStringIfNotNull(values, "apertureCategory", categories.get("apertureCategory"));
+                            putStringIfNotNull(values, "shutterCategory", categories.get("shutterCategory"));
+                            putStringIfNotNull(values, "focalLengthCategory", categories.get("focalLengthCategory"));
                         } else {
-                            // 如果提供了 createdAt，仍然需要检查是否存在（用于统计）
-                            Cursor checkCursor = db.query("images", new String[]{"createdAt"}, 
-                                "id = ?", new String[]{id}, null, null, null);
-                            exists = checkCursor.moveToFirst();
-                            checkCursor.close();
+                            // 如果没有 cameraSettings，检查是否直接提供了分类字段
+                            putStringIfNotNull(values, "isoCategory", imageData.get("isoCategory"));
+                            putStringIfNotNull(values, "apertureCategory", imageData.get("apertureCategory"));
+                            putStringIfNotNull(values, "shutterCategory", imageData.get("shutterCategory"));
+                            putStringIfNotNull(values, "focalLengthCategory", imageData.get("focalLengthCategory"));
                         }
                         
-                        values.put("createdAt", createdAt);
-                        values.put("updatedAt", now);
+                        // ❌ 严格数据验证：检查是否只传递了部分字段（部分更新）
+                        // 如果只传递了部分字段，需要先读取现有数据，然后合并更新
+                        boolean isPartialUpdate = false;
+                        Cursor existingCursor = db.query("images", new String[]{
+                            "width", "height", "imageDimensions", "fileName", "category", 
+                            "size", "mimeType", "timestamp", "takenAt", "createdAt"
+                        }, "id = ?", new String[]{id}, null, null, null);
+                        
+                        if (existingCursor.moveToFirst()) {
+                            // 记录已存在
+                            isPartialUpdate = true;
+                            
+                            // ❌ 严格验证：如果只传递了部分字段，必须从现有数据中读取缺失的关键字段
+                            // 关键字段：width, height, imageDimensions, fileName, category
+                            if (!imageData.containsKey("width") || imageData.get("width") == null) {
+                                int existingWidth = existingCursor.getInt(existingCursor.getColumnIndex("width"));
+                                if (existingWidth > 0) {
+                                    values.put("width", existingWidth);
+                                } else {
+                                    throw new IllegalStateException("部分更新时，现有数据的 width 也为0，无法合并更新: id=" + id + ", uri=" + uri);
+                                }
+                            }
+                            if (!imageData.containsKey("height") || imageData.get("height") == null) {
+                                int existingHeight = existingCursor.getInt(existingCursor.getColumnIndex("height"));
+                                if (existingHeight > 0) {
+                                    values.put("height", existingHeight);
+                                } else {
+                                    throw new IllegalStateException("部分更新时，现有数据的 height 也为0，无法合并更新: id=" + id + ", uri=" + uri);
+                                }
+                            }
+                            if (!imageData.containsKey("imageDimensions") || imageData.get("imageDimensions") == null) {
+                                String existingImageDimensions = existingCursor.getString(existingCursor.getColumnIndex("imageDimensions"));
+                                if (existingImageDimensions != null && !existingImageDimensions.isEmpty()) {
+                                    values.put("imageDimensions", existingImageDimensions);
+                                } else {
+                                    throw new IllegalStateException("部分更新时，现有数据的 imageDimensions 也为空，无法合并更新: id=" + id + ", uri=" + uri);
+                                }
+                            }
+                            if (!imageData.containsKey("fileName") || imageData.get("fileName") == null || imageData.get("fileName").toString().isEmpty()) {
+                                String existingFileName = existingCursor.getString(existingCursor.getColumnIndex("fileName"));
+                                if (existingFileName != null && !existingFileName.isEmpty()) {
+                                    values.put("fileName", existingFileName);
+                                } else {
+                                    throw new IllegalStateException("部分更新时，现有数据的 fileName 也为空，无法合并更新: id=" + id + ", uri=" + uri);
+                                }
+                            }
+                            if (!imageData.containsKey("category") || imageData.get("category") == null || imageData.get("category").toString().isEmpty()) {
+                                String existingCategory = existingCursor.getString(existingCursor.getColumnIndex("category"));
+                                if (existingCategory != null && !existingCategory.isEmpty()) {
+                                    values.put("category", existingCategory);
+                                } else {
+                                    throw new IllegalStateException("部分更新时，现有数据的 category 也为空，无法合并更新: id=" + id + ", uri=" + uri);
+                                }
+                            }
+                            
+                            // 可选字段：如果不存在，从现有数据读取
+                            if (!imageData.containsKey("size") || imageData.get("size") == null) {
+                                long existingSize = existingCursor.getLong(existingCursor.getColumnIndex("size"));
+                                if (existingSize > 0) {
+                                    values.put("size", existingSize);
+                                }
+                            }
+                            if (!imageData.containsKey("mimeType") || imageData.get("mimeType") == null) {
+                                String existingMimeType = existingCursor.getString(existingCursor.getColumnIndex("mimeType"));
+                                if (existingMimeType != null && !existingMimeType.isEmpty()) {
+                                    values.put("mimeType", existingMimeType);
+                                }
+                            }
+                            if (!imageData.containsKey("timestamp") || imageData.get("timestamp") == null) {
+                                long existingTimestamp = existingCursor.getLong(existingCursor.getColumnIndex("timestamp"));
+                                if (existingTimestamp > 0) {
+                                    values.put("timestamp", existingTimestamp);
+                                }
+                            }
+                            if (!imageData.containsKey("takenAt") || imageData.get("takenAt") == null) {
+                                long existingTakenAt = existingCursor.getLong(existingCursor.getColumnIndex("takenAt"));
+                                if (existingTakenAt > 0) {
+                                    values.put("takenAt", existingTakenAt);
+                                }
+                            }
+                            
+                            // 保留 createdAt
+                            String existingCreatedAt = existingCursor.getString(existingCursor.getColumnIndex("createdAt"));
+                            if (existingCreatedAt != null && !existingCreatedAt.isEmpty()) {
+                                values.put("createdAt", existingCreatedAt);
+                            } else {
+                                values.put("createdAt", dateFormat.format(new Date()));
+                            }
+                        } else {
+                            // 新记录：必须包含所有必填字段
+                            if (!imageData.containsKey("width") || !imageData.containsKey("height") || 
+                                imageData.get("width") == null || imageData.get("height") == null) {
+                                throw new IllegalArgumentException("新记录必须包含 width 和 height: id=" + id + ", uri=" + uri);
+                            }
+                            if (!imageData.containsKey("imageDimensions") || imageData.get("imageDimensions") == null) {
+                                throw new IllegalArgumentException("新记录必须包含 imageDimensions: id=" + id + ", uri=" + uri);
+                            }
+                            
+                            values.put("createdAt", dateFormat.format(new Date()));
+                        }
+                        existingCursor.close();
+                        
+                        values.put("updatedAt", dateFormat.format(new Date()));
                         
                         // INSERT OR REPLACE
                         long result = db.insertWithOnConflict("images", null, values, 
@@ -166,7 +285,7 @@ public class ImageDataService {
                         if (result == -1) {
                             Log.w(TAG, "插入失败: " + id);
                         } else {
-                            if (exists) {
+                            if (isPartialUpdate) {
                                 updatedCount++;
                             } else {
                                 insertedCount++;
@@ -203,8 +322,8 @@ public class ImageDataService {
                 
                 if (attempt < maxRetries - 1) {
                     try {
-                        // 递增延迟：200ms, 400ms, 600ms
-                        int delay = retryDelay * (attempt + 1);
+                        // 指数递增延迟：500ms, 1000ms, 2000ms, 4000ms, 8000ms
+                        int delay = baseRetryDelay * (1 << attempt); // 2的幂次方
                         Log.w(TAG, "批量写入失败（数据库锁定），等待 " + delay + "ms 后重试 " + (attempt + 2) + "/" + maxRetries);
                         Thread.sleep(delay);
                     } catch (InterruptedException ie) {
@@ -735,10 +854,17 @@ public class ImageDataService {
             image.put("fileName", cursor.getString(fileNameIndex));
         }
         
+        // 🔧 确保 category 不为 null：如果数据库中的 category 为 null，使用默认值 "NA"
         int categoryIndex = cursor.getColumnIndex("category");
-        if (!cursor.isNull(categoryIndex)) {
-            image.put("category", cursor.getString(categoryIndex));
+        String category = null;
+        if (categoryIndex >= 0 && !cursor.isNull(categoryIndex)) {
+            category = cursor.getString(categoryIndex);
         }
+        // 如果 category 为 null 或空，使用默认值 "NA"
+        if (category == null || category.isEmpty()) {
+            category = "NA";
+        }
+        image.put("category", category);
         
         // 数值字段
         putDoubleIfNotNull(image, "confidence", cursor, "confidence");
@@ -746,8 +872,20 @@ public class ImageDataService {
         putLongIfNotNull(image, "takenAt", cursor, "takenAt");
         putLongIfNotNull(image, "size", cursor, "size");
         putStringIfNotNull(image, "mimeType", cursor, "mimeType");
-        putIntIfNotNull(image, "width", cursor, "width");
-        putIntIfNotNull(image, "height", cursor, "height");
+        
+        // 🔧 确保 width 和 height 始终被设置（即使数据库中的值是NULL，也设置默认值0）
+        int widthIndex = cursor.getColumnIndex("width");
+        int heightIndex = cursor.getColumnIndex("height");
+        int width = 0;
+        int height = 0;
+        if (widthIndex >= 0 && !cursor.isNull(widthIndex)) {
+            width = cursor.getInt(widthIndex);
+        }
+        if (heightIndex >= 0 && !cursor.isNull(heightIndex)) {
+            height = cursor.getInt(heightIndex);
+        }
+        image.put("width", width);
+        image.put("height", height);
         putStringIfNotNull(image, "createdAt", cursor, "createdAt");
         putStringIfNotNull(image, "updatedAt", cursor, "updatedAt");
         
@@ -801,6 +939,13 @@ public class ImageDataService {
         }
         
         putStringIfNotNull(image, "message", cursor, "message");
+        
+        // 🔥 拍摄参数字段
+        putStringIfNotNull(image, "cameraSettings", cursor, "cameraSettings");
+        putStringIfNotNull(image, "isoCategory", cursor, "isoCategory");
+        putStringIfNotNull(image, "apertureCategory", cursor, "apertureCategory");
+        putStringIfNotNull(image, "shutterCategory", cursor, "shutterCategory");
+        putStringIfNotNull(image, "focalLengthCategory", cursor, "focalLengthCategory");
         
         return image;
     }
@@ -946,6 +1091,103 @@ public class ImageDataService {
             return ((Number) value).doubleValue();
         }
         return 0.0;
+    }
+    
+    // ==================== 拍摄参数分类计算 ====================
+    
+    /**
+     * ISO分类：low(<400), medium(400-1600), high(>1600)
+     */
+    private String categorizeISO(Integer iso) {
+        if (iso == null || iso <= 0) return null;
+        if (iso < 400) return "low";
+        if (iso <= 1600) return "medium";
+        return "high";
+    }
+    
+    /**
+     * 光圈分类：wide(<f/2.8), medium(f/2.8-f/5.6), narrow(>f/5.6)
+     */
+    private String categorizeAperture(Double fNumber) {
+        if (fNumber == null || fNumber <= 0) return null;
+        if (fNumber < 2.8) return "wide";
+        if (fNumber <= 5.6) return "medium";
+        return "narrow";
+    }
+    
+    /**
+     * 快门分类：fast(>1/250s), medium(1/30-1/250s), slow(<1/30s)
+     */
+    private String categorizeShutterSpeed(Double exposureTime) {
+        if (exposureTime == null || exposureTime <= 0) return null;
+        if (exposureTime > 1.0/250.0) return "fast";
+        if (exposureTime >= 1.0/30.0) return "medium";
+        return "slow";
+    }
+    
+    /**
+     * 焦距分类：
+     * - ultrawide(<3mm): 超广角/微距（手机贴得比较近的时候）
+     * - wide(3-35mm): 广角（正常拍摄）
+     * - standard(35-85mm): 标准
+     * - telephoto(>85mm): 长焦
+     */
+    private String categorizeFocalLength(Double focalLength) {
+        if (focalLength == null || focalLength <= 0) return null;
+        if (focalLength < 3) return "ultrawide";  // 手机微距/超广角模式
+        if (focalLength < 35) return "wide";       // 正常广角
+        if (focalLength <= 85) return "standard";  // 标准
+        return "telephoto";                        // 长焦
+    }
+    
+    /**
+     * 根据 cameraSettings JSON字符串计算分类
+     * @param cameraSettingsStr cameraSettings的JSON字符串
+     * @return 包含 isoCategory, apertureCategory, shutterCategory, focalLengthCategory 的Map
+     */
+    private Map<String, String> calculateCameraSettingsCategories(String cameraSettingsStr) {
+        Map<String, String> result = new HashMap<>();
+        result.put("isoCategory", null);
+        result.put("apertureCategory", null);
+        result.put("shutterCategory", null);
+        result.put("focalLengthCategory", null);
+        
+        if (cameraSettingsStr == null || cameraSettingsStr.isEmpty()) {
+            return result;
+        }
+        
+        try {
+            JSONObject settings = new JSONObject(cameraSettingsStr);
+            
+            // ISO分类
+            if (settings.has("iso") && !settings.isNull("iso")) {
+                Integer iso = settings.getInt("iso");
+                result.put("isoCategory", categorizeISO(iso));
+            }
+            
+            // 光圈分类
+            if (settings.has("aperture") && !settings.isNull("aperture")) {
+                Double aperture = settings.getDouble("aperture");
+                result.put("apertureCategory", categorizeAperture(aperture));
+            }
+            
+            // 快门分类
+            if (settings.has("shutterSpeed") && !settings.isNull("shutterSpeed")) {
+                Double shutterSpeed = settings.getDouble("shutterSpeed");
+                result.put("shutterCategory", categorizeShutterSpeed(shutterSpeed));
+            }
+            
+            // 焦距分类
+            if (settings.has("focalLength") && !settings.isNull("focalLength")) {
+                Double focalLength = settings.getDouble("focalLength");
+                result.put("focalLengthCategory", categorizeFocalLength(focalLength));
+            }
+            
+        } catch (Exception e) {
+            Log.w(TAG, "解析 cameraSettings JSON 失败: " + cameraSettingsStr, e);
+        }
+        
+        return result;
     }
 }
 

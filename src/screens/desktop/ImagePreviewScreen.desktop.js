@@ -1501,14 +1501,15 @@ const ImagePreviewScreen = ({
                 );
               })()}
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>{t('category.category')}:</Text>
-                <Text style={styles.infoValue}>
-                  {getCategoryInfo(currentImage.category).name}
-                  {currentImage.confidence === 'manual' ? ` (${t('imagePreview.manual')})` : 
-                   currentImage.confidence ? ` (${(currentImage.confidence * 100).toFixed(1)}%)` : ''}
-                </Text>
-              </View>
+              {/* AI 描述信息 - 独立显示，即使没有检测结果也显示 */}
+              {currentImage.message && currentImage.message !== i18n.t('imagePreview.classificationComplete') && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>🤖 {t('imagePreview.aiDescription')}:</Text>
+                  <Text style={styles.infoValue}>
+                    {currentImage.message}
+                  </Text>
+                </View>
+              )}
 
               {/* 检测结果显示 */}
               {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) ||
@@ -1518,11 +1519,7 @@ const ImagePreviewScreen = ({
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
                     <Text style={styles.infoValue}>
-                      {/* 如果有 message 且不是默认消息，显示 AI 描述 */}
-                      {currentImage.message && currentImage.message !== i18n.t('imagePreview.classificationComplete') ? 
-                        currentImage.message : 
-                        `${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))}${t('imagePreview.objects')}`
-                      }
+                      {`${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))}${t('imagePreview.objects')}`}
                     </Text>
                   </View>
 

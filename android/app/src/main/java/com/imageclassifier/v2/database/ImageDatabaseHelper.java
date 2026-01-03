@@ -13,7 +13,7 @@ import android.util.Log;
 public class ImageDatabaseHelper extends SQLiteOpenHelper {
     private static final String TAG = "ImageDatabaseHelper";
     private static final String DATABASE_NAME = "ImageClassifier.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2; // 🔥 升级版本号，添加拍摄参数字段
     
     private static ImageDatabaseHelper instance;
     private SQLiteDatabase database;
@@ -42,7 +42,20 @@ public class ImageDatabaseHelper extends SQLiteOpenHelper {
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         // 数据库升级逻辑
         Log.d(TAG, "数据库升级: " + oldVersion + " -> " + newVersion);
-        // 如果需要升级，在这里处理
+        
+        // 版本2：添加拍摄参数字段
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE images ADD COLUMN cameraSettings TEXT");
+                db.execSQL("ALTER TABLE images ADD COLUMN isoCategory TEXT");
+                db.execSQL("ALTER TABLE images ADD COLUMN apertureCategory TEXT");
+                db.execSQL("ALTER TABLE images ADD COLUMN shutterCategory TEXT");
+                db.execSQL("ALTER TABLE images ADD COLUMN focalLengthCategory TEXT");
+                Log.d(TAG, "数据库升级完成：添加拍摄参数字段");
+            } catch (Exception e) {
+                Log.e(TAG, "数据库升级失败", e);
+            }
+        }
     }
     
     /**
@@ -80,7 +93,12 @@ public class ImageDatabaseHelper extends SQLiteOpenHelper {
             "generalDetections TEXT, " +
             "mobileNetV3Detections TEXT, " +
             "imageDimensions TEXT, " +
-            "message TEXT" +
+            "message TEXT, " +
+            "cameraSettings TEXT, " +
+            "isoCategory TEXT, " +
+            "apertureCategory TEXT, " +
+            "shutterCategory TEXT, " +
+            "focalLengthCategory TEXT" +
             ")");
         
         // 索引

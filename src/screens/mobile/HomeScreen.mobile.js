@@ -32,8 +32,9 @@ import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
 import GalleryScannerService from '../../services/GalleryScannerService';
 import WakeLockService from '../../services/WakeLockService';
+import cityLocationService from '../../services/CityLocationService';
 import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
-import { getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
+import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -73,6 +74,22 @@ const HomeScreen = ({ navigation }) => {
   const [orientationCounts, setOrientationCounts] = useState({});
   const [orientationRecentImages, setOrientationRecentImages] = useState({});
   
+  // ISO分类数据
+  const [isoCounts, setISOCounts] = useState({});
+  const [isoRecentImages, setISORecentImages] = useState({});
+  
+  // 光圈分类数据
+  const [apertureCounts, setApertureCounts] = useState({});
+  const [apertureRecentImages, setApertureRecentImages] = useState({});
+  
+  // 快门分类数据
+  const [shutterCounts, setShutterCounts] = useState({});
+  const [shutterRecentImages, setShutterRecentImages] = useState({});
+  
+  // 焦距分类数据
+  const [focalLengthCounts, setFocalLengthCounts] = useState({});
+  const [focalLengthRecentImages, setFocalLengthRecentImages] = useState({});
+  
   // 最近照片
   const [recentImages, setRecentImages] = useState([]);
   const [recentImagesTotal, setRecentImagesTotal] = useState(0); // 新发现照片的总数
@@ -94,6 +111,10 @@ const HomeScreen = ({ navigation }) => {
   const [showFormatCategories, setShowFormatCategories] = useState(true);
   const [showResolutionCategories, setShowResolutionCategories] = useState(true);
   const [showOrientationCategories, setShowOrientationCategories] = useState(true);
+  const [showISOCategories, setShowISOCategories] = useState(true);
+  const [showApertureCategories, setShowApertureCategories] = useState(true);
+  const [showShutterCategories, setShowShutterCategories] = useState(true);
+  const [showFocalLengthCategories, setShowFocalLengthCategories] = useState(true);
   const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
   const [showRecentPhotos, setShowRecentPhotos] = useState(true);
 
@@ -263,6 +284,10 @@ const HomeScreen = ({ navigation }) => {
       setShowFormatCategories(settings.showFormatCategories !== false);
       setShowResolutionCategories(settings.showResolutionCategories !== false);
       setShowOrientationCategories(settings.showOrientationCategories !== false);
+      setShowISOCategories(settings.showISOCategories !== false);
+      setShowApertureCategories(settings.showApertureCategories !== false);
+      setShowShutterCategories(settings.showShutterCategories !== false);
+      setShowFocalLengthCategories(settings.showFocalLengthCategories !== false);
       setShowSimilarityGroups(settings.showSimilarityGroups !== false);
       setShowRecentPhotos(settings.showRecentPhotos !== false);
     } catch (error) {
@@ -279,6 +304,15 @@ const HomeScreen = ({ navigation }) => {
    * 当 hideEmptyCategories 改变时，不需要重新加载分类
    * 因为过滤逻辑在渲染时进行，只需要触发重新渲染即可
    */
+
+  /**
+   * 监听语言变化，重新加载城市列表（城市名称需要根据语言设置显示）
+   */
+  useEffect(() => {
+    if (!loading) {
+      loadCities();
+    }
+  }, [i18n.language]);
 
   /**
    * 初始化数据加载
@@ -319,6 +353,10 @@ const HomeScreen = ({ navigation }) => {
         loadFormats();
         loadResolutions();
         loadOrientations();
+        loadISO();
+        loadAperture();
+        loadShutter();
+        loadFocalLength();
         }, 100);
         
           } catch (error) {
@@ -391,6 +429,7 @@ const HomeScreen = ({ navigation }) => {
 
   /**
    * 加载城市列表（包含最近一张照片）
+   * 根据语言设置获取位置ID的显示名称
    */
   const loadCities = async () => {
     try {
@@ -398,24 +437,32 @@ const HomeScreen = ({ navigation }) => {
       const cityCounts = cache.cityCounts || {};
       const allImages = cache.allImages || [];
       
+      // 获取当前语言设置
+      const currentLanguage = i18n.language || 'zh';
+      
       // 构建城市列表并按数量降序排序
-      const cityList = Object.keys(cityCounts)
-        .map(cityName => {
-          // 找到这个城市最近的一张照片（按时间戳降序）
-          // 暂存箱图片不通过 category 标记，所以不需要过滤
-          const cityImages = allImages
-            .filter(img => img.city === cityName)
-            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          
-          const latestImage = cityImages.length > 0 ? cityImages[0] : null;
-          
-          return {
-            name: cityName,
-            count: cityCounts[cityName],
-            latestImageUri: latestImage ? getUri(latestImage) : null,
-          };
-        })
-        .sort((a, b) => b.count - a.count);
+      const cityListPromises = Object.keys(cityCounts).map(async (locationId) => {
+        // 找到这个城市最近的一张照片（按时间戳降序）
+        // 暂存箱图片不通过 category 标记，所以不需要过滤
+        const cityImages = allImages
+          .filter(img => img.city === locationId)
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        
+        const latestImage = cityImages.length > 0 ? cityImages[0] : null;
+        
+        // 根据语言设置获取位置ID的显示名称
+        const displayName = await cityLocationService.getLocationName(locationId, currentLanguage) || locationId;
+        
+        return {
+          locationId: locationId, // 保存 location_id 用于导航
+          name: displayName, // 显示名称（根据语言设置）
+          count: cityCounts[locationId],
+          latestImageUri: latestImage ? getUri(latestImage) : null,
+        };
+      });
+      
+      const cityList = await Promise.all(cityListPromises);
+      cityList.sort((a, b) => b.count - a.count);
       
       setCities(cityList);
       
@@ -591,6 +638,142 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 加载ISO分类数据
+   */
+  const loadISO = async () => {
+    try {
+      // 加载ISO统计
+      const isoCountsData = await UnifiedDataService.readISOCounts();
+      setISOCounts(isoCountsData);
+      
+      // 加载各ISO的最近图片（按数量排序取前10个）
+      const sortedISO = Object.entries(isoCountsData).sort(([,a], [,b]) => b - a);
+      const isoIds = sortedISO.slice(0, 10).map(([isoName]) => isoName);
+      const isoImagesPromises = isoIds.map(async (isoName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByISO(isoName, 1);
+          return { isoName, images };
+        } catch (error) {
+          logger.error(`加载ISO ${isoName} 最近图片失败:`, error);
+          return { isoName, images: [] };
+        }
+      });
+      
+      const isoImagesResults = await Promise.all(isoImagesPromises);
+      const isoImagesMap = {};
+      isoImagesResults.forEach(({ isoName, images }) => {
+        isoImagesMap[isoName] = images;
+      });
+      
+      setISORecentImages(isoImagesMap);
+    } catch (error) {
+      logger.error('❌ 加载ISO分类失败:', error);
+    }
+  };
+
+  /**
+   * 加载光圈分类数据
+   */
+  const loadAperture = async () => {
+    try {
+      // 加载光圈统计
+      const apertureCountsData = await UnifiedDataService.readApertureCounts();
+      setApertureCounts(apertureCountsData);
+      
+      // 加载各光圈的最近图片（按数量排序取前10个）
+      const sortedAperture = Object.entries(apertureCountsData).sort(([,a], [,b]) => b - a);
+      const apertureIds = sortedAperture.slice(0, 10).map(([apertureName]) => apertureName);
+      const apertureImagesPromises = apertureIds.map(async (apertureName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByAperture(apertureName, 1);
+          return { apertureName, images };
+        } catch (error) {
+          logger.error(`加载光圈 ${apertureName} 最近图片失败:`, error);
+          return { apertureName, images: [] };
+        }
+      });
+      
+      const apertureImagesResults = await Promise.all(apertureImagesPromises);
+      const apertureImagesMap = {};
+      apertureImagesResults.forEach(({ apertureName, images }) => {
+        apertureImagesMap[apertureName] = images;
+      });
+      
+      setApertureRecentImages(apertureImagesMap);
+    } catch (error) {
+      logger.error('❌ 加载光圈分类失败:', error);
+    }
+  };
+
+  /**
+   * 加载快门分类数据
+   */
+  const loadShutter = async () => {
+    try {
+      // 加载快门统计
+      const shutterCountsData = await UnifiedDataService.readShutterCounts();
+      setShutterCounts(shutterCountsData);
+      
+      // 加载各快门的最近图片（按数量排序取前10个）
+      const sortedShutter = Object.entries(shutterCountsData).sort(([,a], [,b]) => b - a);
+      const shutterIds = sortedShutter.slice(0, 10).map(([shutterName]) => shutterName);
+      const shutterImagesPromises = shutterIds.map(async (shutterName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByShutter(shutterName, 1);
+          return { shutterName, images };
+        } catch (error) {
+          logger.error(`加载快门 ${shutterName} 最近图片失败:`, error);
+          return { shutterName, images: [] };
+        }
+      });
+      
+      const shutterImagesResults = await Promise.all(shutterImagesPromises);
+      const shutterImagesMap = {};
+      shutterImagesResults.forEach(({ shutterName, images }) => {
+        shutterImagesMap[shutterName] = images;
+      });
+      
+      setShutterRecentImages(shutterImagesMap);
+    } catch (error) {
+      logger.error('❌ 加载快门分类失败:', error);
+    }
+  };
+
+  /**
+   * 加载焦距分类数据
+   */
+  const loadFocalLength = async () => {
+    try {
+      // 加载焦距统计
+      const focalLengthCountsData = await UnifiedDataService.readFocalLengthCounts();
+      setFocalLengthCounts(focalLengthCountsData);
+      
+      // 加载各焦距的最近图片（按数量排序取前10个）
+      const sortedFocalLength = Object.entries(focalLengthCountsData).sort(([,a], [,b]) => b - a);
+      const focalLengthIds = sortedFocalLength.slice(0, 10).map(([focalLengthName]) => focalLengthName);
+      const focalLengthImagesPromises = focalLengthIds.map(async (focalLengthName) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByFocalLength(focalLengthName, 1);
+          return { focalLengthName, images };
+        } catch (error) {
+          logger.error(`加载焦距 ${focalLengthName} 最近图片失败:`, error);
+          return { focalLengthName, images: [] };
+        }
+      });
+      
+      const focalLengthImagesResults = await Promise.all(focalLengthImagesPromises);
+      const focalLengthImagesMap = {};
+      focalLengthImagesResults.forEach(({ focalLengthName, images }) => {
+        focalLengthImagesMap[focalLengthName] = images;
+      });
+      
+      setFocalLengthRecentImages(focalLengthImagesMap);
+    } catch (error) {
+      logger.error('❌ 加载焦距分类失败:', error);
+    }
+  };
+
+  /**
    * 加载相似组
    */
   const loadSimilarityGroups = async () => {
@@ -635,6 +818,89 @@ const HomeScreen = ({ navigation }) => {
       logger.error('刷新新发现照片失败:', error);
     }
   }, []);
+
+  /**
+   * 启动相似度检测
+   */
+  const handleStartSimilarityDetection = useCallback(async () => {
+    // 检查是否正在扫描
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过相似度检测请求');
+      Alert.alert(t('common.tip'), t('home.scanAlreadyInProgress'));
+      return;
+    }
+
+    try {
+      logger.debug('开始相似度检测');
+      
+      // 设置扫描状态
+      setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.similarityDetectionInProgress'));
+      
+      // 使用唤醒锁防止手机休眠影响检测性能
+      const wakeLockAcquired = await WakeLockService.acquire(30 * 60 * 1000); // 30分钟超时
+      if (wakeLockAcquired) {
+        logger.info('🔋 已获取唤醒锁，防止手机休眠影响相似度检测性能');
+      }
+      
+      // 创建 GalleryScannerService 实例，复用其相似度检测逻辑
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      
+      // 设置进度回调
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('相似度检测进度:', progress);
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || t('home.similarityDetectionInProgress');
+          setGlobalMessage(message);
+          
+          // 检查是否需要刷新页面数据
+          if (progress.shouldRefresh) {
+            setTimeout(async () => {
+              try {
+                await loadAllData();
+              } catch (error) {
+                logger.error('❌ 刷新页面数据失败:', error);
+              }
+            }, 0);
+          }
+        }
+      };
+      
+      // 设置扫描开始时间（用于增量检测）
+      galleryScannerService.scanStartTimestamp = new Date();
+      
+      // 直接调用 similarityDetectionPhase，它会使用内部的 sendProgressMessage
+      await galleryScannerService.similarityDetectionPhase();
+      
+      // 获取相似组统计以显示完成消息
+      const similarityGroupsStats = await UnifiedDataService.getSimilarityGroupsStats();
+      const groupsCount = similarityGroupsStats ? similarityGroupsStats.length : 0;
+      
+      logger.debug(`相似度检测完成: 发现${groupsCount}个相似组`);
+      setGlobalMessage(t('home.similarityDetectionCompleted', { count: groupsCount }));
+      
+      // 刷新数据以显示新的相似组
+      await loadAllData();
+      
+    } catch (error) {
+      logger.error('相似度检测失败:', error);
+      setGlobalMessage(t('home.similarityDetectionFailed', { error: error.message }));
+      Alert.alert(t('home.similarityDetectionFailed', { error: '' }), error.message);
+    } finally {
+      // 释放唤醒锁
+      await WakeLockService.release();
+      setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, loadAllData, t]);
 
   /**
    * 加载最近扫描时间和信息
@@ -859,6 +1125,118 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 处理NA分类的AI分类（长按待分类卡片时触发）
+   */
+  const handleAIClassifyNA = () => {
+    // 检查是否正在扫描中
+    if (isScanning) {
+      Alert.alert(t('common.tip'), t('home.scanAlreadyInProgress'));
+      return;
+    }
+
+    // 从缓存获取待分类照片数量
+    const cache = GlobalImageCache.getCache();
+    const categoryCounts = cache.categoryCounts || {};
+    const naCount = categoryCounts['NA'] || categoryCounts.NA || 0;
+
+    // 显示确认对话框（与PC端保持一致）
+    Alert.alert(
+      t('home.aiClassifyConfirmTitle'),
+      t('home.aiClassifyConfirmMessage', { count: naCount }),
+      [
+        {
+          text: t('common.cancel'),
+          style: 'cancel',
+          onPress: () => {
+            logger.debug('用户取消 AI 分类');
+          }
+        },
+        {
+          text: t('common.confirm'),
+          style: 'default',
+          onPress: async () => {
+            logger.debug('用户确认开始 AI 分类');
+            await executeAIClassify();
+          }
+        }
+      ]
+    );
+  };
+
+  /**
+   * 执行AI分类（确认后执行）
+   */
+  const executeAIClassify = async () => {
+    try {
+      // 先检查并请求权限
+      const hasPermission = await checkAndRequestPermissions();
+      if (!hasPermission) {
+        logger.warn('⚠️ 没有相册访问权限，取消AI分类');
+        return;
+      }
+
+      setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.aiClassificationInProgress'));
+      logger.debug('🤖 开始AI分类（按内容分类）...');
+      
+      // 使用唤醒锁防止手机休眠影响分类性能
+      const wakeLockAcquired = await WakeLockService.acquire(30 * 60 * 1000); // 30分钟超时
+      if (wakeLockAcquired) {
+        logger.info('🔋 已获取唤醒锁，防止手机休眠影响分类性能');
+      }
+      
+      const galleryScannerService = new GalleryScannerService();
+      
+      // 初始化服务
+      await galleryScannerService.initialize();
+      
+      // 🔥 先设置进度回调（必须在调用aiImageClassifyByContent之前设置）
+      galleryScannerService.onProgress = (progress) => {
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || t('home.aiClassificationInProgress');
+          setGlobalMessage(message);
+          
+          // 检查是否需要刷新页面数据
+          if (progress.shouldRefresh) {
+            setTimeout(async () => {
+              try {
+                await loadAllData();
+              } catch (error) {
+                logger.error('❌ 刷新页面数据失败:', error);
+              }
+            }, 0);
+          }
+        }
+      };
+      
+      // 启动AI分类（按内容分类）
+      await galleryScannerService.aiImageClassifyByContent(new Date(), null);
+      
+      logger.debug('✅ AI分类完成');
+      setGlobalMessage(t('home.aiClassificationComplete'));
+      
+      // 分类完成后刷新数据
+      await onRefresh();
+    } catch (error) {
+      logger.error('❌ AI分类失败:', error);
+      setGlobalMessage(t('home.aiClassificationFailed', { error: error.message }));
+      Alert.alert(t('home.aiClassificationFailed', { error: '' }), error.message);
+    } finally {
+      // 释放唤醒锁
+      await WakeLockService.release();
+      setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  };
+
+  /**
    * 触发扫描
    */
   const handleScan = async () => {
@@ -992,6 +1370,9 @@ const HomeScreen = ({ navigation }) => {
     // 动态获取分类名称（根据当前语言）
     const categoryName = getCategoryDisplayName(category.id);
     
+    // 检查是否为NA分类（待分类）
+    const isNACategory = category.id === 'NA';
+    
     return (
       <TouchableOpacity
         key={category.id}
@@ -1013,6 +1394,13 @@ const HomeScreen = ({ navigation }) => {
             });
           } catch (error) {
             logger.error('❌ 分类卡片点击失败:', error);
+          }
+        }}
+        onLongPress={() => {
+          // 长按NA分类卡片时启动AI分类
+          if (isNACategory) {
+            logger.debug('🤖 长按待分类卡片，启动AI分类');
+            handleAIClassifyNA();
           }
         }}
       >
@@ -1134,15 +1522,59 @@ const HomeScreen = ({ navigation }) => {
    * 渲染相似照片区（与"按内容"保持一致：4列网格布局）
    */
   const renderSimilarityGroupsSection = () => {
-    if (similarityGroups.length === 0) return null;
+    // 如果设置中关闭了相似组显示，不渲染
+    if (!showSimilarityGroups) return null;
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🔗 {t('home.similarPhotos')}</Text>
-        <View style={styles.categoriesGrid}>
-          {similarityGroups.map(renderSimilarityGroupCard)}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>🔗 {t('home.similarPhotos')}</Text>
+          </View>
+          {similarityGroups && similarityGroups.length > 0 && (
+            <TouchableOpacity 
+              style={[
+                styles.toggleButton,
+                isScanning && styles.toggleButtonDisabled
+              ]}
+              onPress={handleStartSimilarityDetection}
+              disabled={isScanning}
+            >
+              <Text style={[
+                styles.toggleButtonText,
+                isScanning && styles.toggleButtonTextDisabled
+              ]}>{t('home.recheck')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        </View>
+        
+        {similarityGroups && similarityGroups.length > 0 ? (
+          <View style={styles.categoriesGrid}>
+            {similarityGroups.slice(0, 8).map(renderSimilarityGroupCard)}
+          </View>
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>🔗</Text>
+            <Text style={styles.emptyStateText}>{t('home.noSimilarityGroups')}</Text>
+            <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+            <TouchableOpacity
+              style={[
+                styles.startSimilarityButton,
+                isScanning && styles.startSimilarityButtonDisabled
+              ]}
+              onPress={handleStartSimilarityDetection}
+              disabled={isScanning}
+            >
+              <Text style={[
+                styles.startSimilarityButtonText,
+                isScanning && styles.startSimilarityButtonTextDisabled
+              ]}>
+                {t('home.startSimilarityDetection')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -1556,10 +1988,10 @@ const HomeScreen = ({ navigation }) => {
             return;
           }
           
-          logger.debug('🏙️ 点击城市卡片:', city.name);
+          logger.debug('🏙️ 点击城市卡片:', city.name, 'locationId:', city.locationId);
           navigation.navigate('Category', {
             filterType: 'city',
-            filterValue: city.name,
+            filterValue: city.locationId || city.name, // 使用 locationId 进行过滤
             fromScreen: 'Home',
           });
         } catch (error) {
@@ -1587,6 +2019,330 @@ const HomeScreen = ({ navigation }) => {
       </View>
     </TouchableOpacity>
   );
+
+  /**
+   * 渲染ISO卡片
+   */
+  const renderISOCard = (iso) => {
+    const count = isoCounts[iso] || 0;
+    const recentImages = isoRecentImages[iso] || [];
+    const currentLang = i18n.language || 'zh';
+    const displayName = getCameraSettingsCategoryTranslation('iso', iso, currentLang) || iso;
+    
+    return (
+      <TouchableOpacity
+        key={iso}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!iso || !navigation) {
+              logger.warn('❌ ISO数据无效或导航对象为空:', { iso, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📸 点击ISO卡片:', iso);
+            navigation.navigate('Category', {
+              filterType: 'iso',
+              filterValue: iso,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ ISO卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>📸</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示ISO信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>{displayName}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染ISO分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderISOSection = () => {
+    // 过滤掉无效ISO
+    const filteredISOCounts = Object.entries(isoCounts).filter(([iso]) => {
+      return iso && 
+             typeof iso === 'string' && 
+             iso.trim() !== '' && 
+             iso !== 'null' && 
+             iso !== 'UNKNOWN';
+    });
+    
+    if (filteredISOCounts.length === 0) return null;
+    if (!showISOCategories) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byISO')}</Text>
+        <View style={styles.categoriesGrid}>
+          {filteredISOCounts
+            .sort(([,a], [,b]) => b - a)
+            .map(([iso]) => renderISOCard(iso))}
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * 渲染光圈卡片
+   */
+  const renderApertureCard = (aperture) => {
+    const count = apertureCounts[aperture] || 0;
+    const recentImages = apertureRecentImages[aperture] || [];
+    const currentLang = i18n.language || 'zh';
+    const displayName = getCameraSettingsCategoryTranslation('aperture', aperture, currentLang) || aperture;
+    
+    return (
+      <TouchableOpacity
+        key={aperture}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!aperture || !navigation) {
+              logger.warn('❌ 光圈数据无效或导航对象为空:', { aperture, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📸 点击光圈卡片:', aperture);
+            navigation.navigate('Category', {
+              filterType: 'aperture',
+              filterValue: aperture,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 光圈卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>📸</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示光圈信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>{displayName}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染光圈分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderApertureSection = () => {
+    // 过滤掉无效光圈
+    const filteredApertureCounts = Object.entries(apertureCounts).filter(([aperture]) => {
+      return aperture && 
+             typeof aperture === 'string' && 
+             aperture.trim() !== '' && 
+             aperture !== 'null' && 
+             aperture !== 'UNKNOWN';
+    });
+    
+    if (filteredApertureCounts.length === 0) return null;
+    if (!showApertureCategories) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byAperture')}</Text>
+        <View style={styles.categoriesGrid}>
+          {filteredApertureCounts
+            .sort(([,a], [,b]) => b - a)
+            .map(([aperture]) => renderApertureCard(aperture))}
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * 渲染快门卡片
+   */
+  const renderShutterCard = (shutter) => {
+    const count = shutterCounts[shutter] || 0;
+    const recentImages = shutterRecentImages[shutter] || [];
+    const currentLang = i18n.language || 'zh';
+    const displayName = getCameraSettingsCategoryTranslation('shutter', shutter, currentLang) || shutter;
+    
+    return (
+      <TouchableOpacity
+        key={shutter}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!shutter || !navigation) {
+              logger.warn('❌ 快门数据无效或导航对象为空:', { shutter, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📸 点击快门卡片:', shutter);
+            navigation.navigate('Category', {
+              filterType: 'shutter',
+              filterValue: shutter,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 快门卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>📸</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示快门信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>{displayName}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染快门分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderShutterSection = () => {
+    // 过滤掉无效快门
+    const filteredShutterCounts = Object.entries(shutterCounts).filter(([shutter]) => {
+      return shutter && 
+             typeof shutter === 'string' && 
+             shutter.trim() !== '' && 
+             shutter !== 'null' && 
+             shutter !== 'UNKNOWN';
+    });
+    
+    if (filteredShutterCounts.length === 0) return null;
+    if (!showShutterCategories) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byShutter')}</Text>
+        <View style={styles.categoriesGrid}>
+          {filteredShutterCounts
+            .sort(([,a], [,b]) => b - a)
+            .map(([shutter]) => renderShutterCard(shutter))}
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * 渲染焦距卡片
+   */
+  const renderFocalLengthCard = (focalLength) => {
+    const count = focalLengthCounts[focalLength] || 0;
+    const recentImages = focalLengthRecentImages[focalLength] || [];
+    const currentLang = i18n.language || 'zh';
+    const displayName = getCameraSettingsCategoryTranslation('focalLength', focalLength, currentLang) || focalLength;
+    
+    return (
+      <TouchableOpacity
+        key={focalLength}
+        style={styles.categoryCard}
+        onPress={() => {
+          try {
+            if (!focalLength || !navigation) {
+              logger.warn('❌ 焦距数据无效或导航对象为空:', { focalLength, navigation: !!navigation });
+              return;
+            }
+            
+            logger.debug('📸 点击焦距卡片:', focalLength);
+            navigation.navigate('Category', {
+              filterType: 'focalLength',
+              filterValue: focalLength,
+              fromScreen: 'Home',
+            });
+          } catch (error) {
+            logger.error('❌ 焦距卡片点击失败:', error);
+          }
+        }}
+      >
+        {/* 缩略图占满整个卡片 */}
+        {recentImages.length > 0 ? (
+          <Image
+            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
+            style={styles.thumbnail}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
+            <Text style={styles.emptyThumbnailText}>📸</Text>
+          </View>
+        )}
+        
+        {/* 覆盖层显示焦距信息 */}
+        <View style={styles.categoryOverlay}>
+          <Text style={styles.categoryName}>{displayName}</Text>
+          <Text style={styles.categoryCount}>{count}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 渲染焦距分类区（与"按内容"保持一致：4列网格布局）
+   */
+  const renderFocalLengthSection = () => {
+    // 过滤掉无效焦距
+    const filteredFocalLengthCounts = Object.entries(focalLengthCounts).filter(([focalLength]) => {
+      return focalLength && 
+             typeof focalLength === 'string' && 
+             focalLength.trim() !== '' && 
+             focalLength !== 'null' && 
+             focalLength !== 'UNKNOWN';
+    });
+    
+    if (filteredFocalLengthCounts.length === 0) return null;
+    if (!showFocalLengthCategories) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byFocalLength')}</Text>
+        <View style={styles.categoriesGrid}>
+          {filteredFocalLengthCounts
+            .sort(([,a], [,b]) => b - a)
+            .map(([focalLength]) => renderFocalLengthCard(focalLength))}
+        </View>
+      </View>
+    );
+  };
 
   /**
    * 渲染按城市区（与"按内容"保持一致：4列网格布局）
@@ -1755,6 +2511,10 @@ const HomeScreen = ({ navigation }) => {
         {renderFormatsSection()}
         {renderResolutionsSection()}
         {renderOrientationsSection()}
+        {renderISOSection()}
+        {renderApertureSection()}
+        {renderShutterSection()}
+        {renderFocalLengthSection()}
         {showSimilarityGroups && renderSimilarityGroupsSection()}
         {showRecentPhotos && renderRecentPhotos()}
       </ScrollView>
@@ -1859,10 +2619,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
     borderRadius: 12,
   },
+  toggleButtonDisabled: {
+    backgroundColor: '#E0E0E0',
+    opacity: 0.5,
+  },
   toggleButtonText: {
     fontSize: 11,
     color: '#666666',
     fontWeight: '500',
+  },
+  toggleButtonTextDisabled: {
+    opacity: 0.5,
   },
   sectionMore: {
     fontSize: 14,
@@ -2114,6 +2881,35 @@ const styles = StyleSheet.create({
     color: '#999999',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  // 开始相似度检测按钮样式
+  startSimilarityButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 16,
+    alignSelf: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  startSimilarityButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+    shadowColor: '#CCCCCC',
+    shadowOpacity: 0.2,
+    opacity: 0.6,
+  },
+  startSimilarityButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  startSimilarityButtonTextDisabled: {
+    color: '#999999',
   },
 });
 

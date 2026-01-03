@@ -155,6 +155,9 @@ class SQLiteAdapter {
       // 打开数据库
       this.db = SQLite.openDatabase(this.dbName, '1.0', 'Image Classifier DB', 200000);
       
+      // 保存原生的 executeSql 方法（如果存在），用于执行 PRAGMA
+      const originalExecuteSql = this.db.executeSql ? this.db.executeSql.bind(this.db) : null;
+      
       // 为数据库对象添加executeSql方法（兼容性处理）
       if (!this.db.executeSql) {
         this.db.executeSql = (sql, params = []) => {
@@ -174,14 +177,40 @@ class SQLiteAdapter {
       this._executePragma = (sql) => {
         return new Promise((resolve, reject) => {
           // PRAGMA 必须直接在数据库对象上执行，不能通过 transaction
-          // 使用 readTransaction 或者直接执行
-          this.db.readTransaction((tx) => {
-            tx.executeSql(sql, [], (tx, result) => {
-              resolve(result);
-            }, (tx, error) => {
-              reject(error);
-            });
-          });
+          // WebAdapters.native.js 中的 executeSql 已经处理了 PRAGMA，但为了安全起见，
+          // 我们直接使用原生的 executeSql（如果存在），或者通过 readTransaction 执行
+          
+          // 优先使用原生的 executeSql（WebAdapters.native.js 会正确处理 PRAGMA）
+          if (this.db.executeSql && typeof this.db.executeSql === 'function') {
+            // 检查是否是 PRAGMA 语句
+            const isPragma = sql.trim().toUpperCase().startsWith('PRAGMA');
+            if (isPragma) {
+              // PRAGMA 语句：WebAdapters.native.js 中的 executeSql 应该已经处理了
+              // 但如果仍然失败，说明可能在事务中，我们需要静默失败
+              this.db.executeSql(sql, [])
+                .then((results) => {
+                  // executeSql 返回数组，取第一个结果
+                  resolve(Array.isArray(results) ? results[0] : results);
+                })
+                .catch((error) => {
+                  // PRAGMA 失败不影响功能，静默失败
+                  // 不记录错误日志，避免日志噪音
+                  resolve({ rows: { length: 0 } });
+                });
+            } else {
+              // 非 PRAGMA 语句使用事务
+              this.db.transaction((tx) => {
+                tx.executeSql(sql, [], (tx, result) => {
+                  resolve(result);
+                }, (tx, error) => {
+                  reject(error);
+                });
+              });
+            }
+          } else {
+            // 如果没有 executeSql 方法，PRAGMA 无法执行，静默失败
+            resolve({ rows: { length: 0 } });
+          }
         });
       };
       
@@ -189,37 +218,31 @@ class SQLiteAdapter {
       await this.createTables();
       
       // 数据库优化配置（PRAGMA 必须在事务外执行，使用特殊方法）
+      // 注意：某些 PRAGMA 在 React Native SQLite 中可能不支持或有限制
+      // 尝试设置，但失败不影响主要功能（静默失败，不记录错误日志）
+      logger.debug('📋 设置 SQLite PRAGMA...');
       try {
-        logger.debug('📋 设置 SQLite PRAGMA...');
-        // 注意：某些 PRAGMA 在 React Native SQLite 中可能不支持或有限制
-        // 尝试设置，但失败不影响主要功能
-        try {
-          await this._executePragma('PRAGMA journal_mode = WAL;');  // 写前日志模式
-        } catch (e) {
-          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
-          logger.debug('⚠️ PRAGMA journal_mode 设置跳过:', errorMessage);
-        }
-        try {
-          await this._executePragma('PRAGMA synchronous = NORMAL;');
-        } catch (e) {
-          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
-          logger.debug('⚠️ PRAGMA synchronous 设置跳过:', errorMessage);
-        }
-        try {
-          await this._executePragma('PRAGMA cache_size = 10000;');
-        } catch (e) {
-          const errorMessage = e && typeof e === 'object' ? (e.message || String(e)) : String(e || 'Unknown error');
-          logger.debug('⚠️ PRAGMA cache_size 设置跳过:', errorMessage);
-        }
-        logger.debug('✅ SQLite PRAGMA 设置完成');
-      } catch (pragmaError) {
-        // 安全地处理错误对象，避免访问 undefined 的属性
-        const errorMessage = pragmaError && typeof pragmaError === 'object' 
-          ? (pragmaError.message || JSON.stringify(pragmaError)) 
-          : String(pragmaError || 'Unknown PRAGMA error');
-        logger.warn('⚠️ SQLite PRAGMA 设置失败（非致命错误）:', errorMessage);
-        // PRAGMA 失败不影响主要功能，继续初始化
+        await this._executePragma('PRAGMA journal_mode = WAL;').catch(() => {
+          // 静默失败，不记录日志（某些 SQLite 版本不支持 WAL 模式）
+        });
+      } catch (e) {
+        // 静默失败
       }
+      try {
+        await this._executePragma('PRAGMA synchronous = NORMAL;').catch(() => {
+          // 静默失败，不记录日志（某些 SQLite 版本不支持此设置）
+        });
+      } catch (e) {
+        // 静默失败
+      }
+      try {
+        await this._executePragma('PRAGMA cache_size = 10000;').catch(() => {
+          // 静默失败，不记录日志
+        });
+      } catch (e) {
+        // 静默失败
+      }
+      logger.debug('✅ SQLite PRAGMA 设置完成（部分 PRAGMA 可能未生效，不影响功能）');
       
       this.isInitialized = true;
       logger.debug('✅ SQLite 数据库初始化成功');
@@ -1848,22 +1871,6 @@ class ImageStorageService {
         result = await this._batchUpdateClassificationSQLite(classificationDataArray);
       }
       
-      // 🆕 如果更新后的分类是 tobecleaned，批量清理相似组信息
-      const tobecleanedUpdates = classificationDataArray.filter(item => item.category === 'tobecleaned');
-      if (tobecleanedUpdates.length > 0) {
-        logger.debug(`🧹 批量清理相似组信息: ${tobecleanedUpdates.length}张图片移动到tobecleaned`);
-        try {
-          const imageIds = tobecleanedUpdates
-            .map(item => item.id || this.generateStableId(item.uri))
-            .filter(id => id);
-          if (imageIds.length > 0) {
-            await this.batchRemoveFromSimilarityGroups(imageIds);
-          }
-        } catch (error) {
-          logger.warn(`批量清理相似组信息失败:`, error);
-        }
-      }
-      
       return result;
     } catch (error) {
       logger.error('❌ 批量更新分类信息失败:', error);
@@ -1965,8 +1972,11 @@ class ImageStorageService {
           const setParts = [];
           const params = [];
           
-          setParts.push('category = ?');
-          params.push(classificationData.category);
+          // 🔥 只在明确提供 category 时才更新，避免清空现有分类
+          if (classificationData.category !== undefined) {
+            setParts.push('category = ?');
+            params.push(classificationData.category);
+          }
           
           if (classificationData.confidence !== undefined) {
             setParts.push('confidence = ?');
@@ -2034,6 +2044,161 @@ class ImageStorageService {
           failedCount++;
         }
       }
+    }
+    
+    return { success: true, updatedCount, failedCount };
+  }
+
+  /**
+   * 🔥 批量更新city字段（仅更新位置信息，不查询其他字段）
+   * 用于位置信息补全，避免查询所有数据导致的数据库锁竞争
+   * @param {Array} cityDataArray - 位置数据数组，每个元素包含：
+   *   - uri: 图片 URI（必需）
+   *   - id: 图片 ID（可选，如果有则使用，否则根据 URI 生成）
+   *   - city: location_id（必需）
+   * @returns {Promise<Object>} 更新结果统计 { success: boolean, updatedCount: number, failedCount: number }
+   */
+  async batchUpdateCity(cityDataArray) {
+    try {
+      await this.ensureInitialized();
+      
+      if (!cityDataArray || cityDataArray.length === 0) {
+        return { success: true, updatedCount: 0, failedCount: 0 };
+      }
+      
+      if (Platform.OS === 'web') {
+        // PC端：使用IndexedDB
+        return await this._batchUpdateCityIndexedDB(cityDataArray);
+      } else {
+        // 移动端：使用SQLite
+        return await this._batchUpdateCitySQLite(cityDataArray);
+      }
+    } catch (error) {
+      logger.error('❌ 批量更新city失败:', error);
+      return { success: false, updatedCount: 0, failedCount: cityDataArray.length, error: error.message };
+    }
+  }
+
+  /**
+   * PC端：IndexedDB批量更新city
+   */
+  async _batchUpdateCityIndexedDB(cityDataArray) {
+    await this.storage.init();
+    
+    let updatedCount = 0;
+    let failedCount = 0;
+    
+    for (const cityData of cityDataArray) {
+      try {
+        const imageId = cityData.id || this.storage.generateStableId(cityData.uri);
+        const existingImage = await this.storage.getItem('images').then(images => 
+          images ? images.find(img => img.id === imageId) : null
+        );
+        
+        if (existingImage) {
+          existingImage.city = cityData.city;
+          existingImage.updatedAt = new Date().toISOString();
+          await this.storage.setItem('images', 
+            await this.storage.getItem('images').then(images => 
+              images.map(img => img.id === imageId ? existingImage : img)
+            )
+          );
+          updatedCount++;
+        } else {
+          failedCount++;
+          logger.warn(`⚠️ IndexedDB 未找到图片: ${imageId}, uri: ${cityData.uri}`);
+        }
+      } catch (error) {
+        logger.error(`❌ IndexedDB 更新city失败: ${cityData.uri}`, error);
+        failedCount++;
+      }
+    }
+    
+    return { success: true, updatedCount, failedCount };
+  }
+
+  /**
+   * 移动端：SQLite批量更新city（直接UPDATE，不查询其他字段）
+   * 🔥 使用事务批量执行，减少数据库锁竞争
+   */
+  async _batchUpdateCitySQLite(cityDataArray) {
+    await this.ensureInitialized();
+    
+    let updatedCount = 0;
+    let failedCount = 0;
+    
+    // 批量处理，每批100条
+    const batchSize = 100;
+    for (let i = 0; i < cityDataArray.length; i += batchSize) {
+      const batch = cityDataArray.slice(i, i + batchSize);
+      
+      // 🔥 使用事务批量执行所有UPDATE，减少数据库锁竞争
+      await new Promise((resolve, reject) => {
+        this.storage.db.transaction((tx) => {
+          let completed = 0;
+          let hasError = false;
+          const totalUpdates = batch.length;
+          const updatedAt = new Date().toISOString();
+          
+          const checkComplete = () => {
+            if (completed === totalUpdates && !hasError) {
+              resolve();
+            } else if (hasError && completed === totalUpdates) {
+              reject(new Error('批量更新city失败'));
+            }
+          };
+          
+          for (const cityData of batch) {
+            try {
+              const imageId = cityData.id || this.storage.generateStableId(cityData.uri);
+              
+              if (!cityData.city || cityData.city.trim() === '') {
+                logger.warn(`⚠️ SQLite city为空，跳过: ${imageId}, uri: ${cityData.uri}`);
+                completed++;
+                failedCount++;
+                checkComplete();
+                continue;
+              }
+              
+              // 🔥 在事务中执行UPDATE，只更新city字段，不查询其他字段
+              tx.executeSql(
+                `UPDATE images SET city = ?, updatedAt = ? WHERE id = ?`,
+                [cityData.city, updatedAt, imageId],
+                (tx, result) => {
+                  completed++;
+                  if (result.rowsAffected > 0) {
+                    updatedCount++;
+                  } else {
+                    failedCount++;
+                    logger.warn(`⚠️ SQLite 未找到图片: ${imageId}, uri: ${cityData.uri}`);
+                  }
+                  checkComplete();
+                },
+                (tx, error) => {
+                  if (!hasError) {
+                    hasError = true;
+                    logger.error(`❌ SQLite 更新city失败: ${cityData.uri}`, error);
+                  }
+                  completed++;
+                  failedCount++;
+                  checkComplete();
+                }
+              );
+            } catch (error) {
+              if (!hasError) {
+                hasError = true;
+                logger.error(`❌ SQLite 更新city失败: ${cityData.uri}`, error);
+              }
+              completed++;
+              failedCount++;
+              checkComplete();
+            }
+          }
+        }, (error) => {
+          logger.error('❌ SQLite 批量更新city事务失败:', error);
+          reject(error);
+        });
+      });
     }
     
     return { success: true, updatedCount, failedCount };
@@ -2180,8 +2345,141 @@ class ImageStorageService {
 
   // 移动端：SQLite批量插入实现
   async _performBatchInsertSQLite(imageDataArray) {
+    // ❌ 严格数据验证：检查是否只传递了部分字段（部分更新）
+    // 如果只传递了部分字段，需要先读取现有数据，然后合并更新
+    
+    const validImageDataArray = [];
+    const invalidData = [];
+    
+    // 检查哪些记录需要从数据库读取现有数据
+    const idsToCheck = imageDataArray
+      .filter(img => img.id || img.uri)
+      .map(img => img.id || this.storage.generateStableId(img.uri));
+    
+    // 批量读取现有数据（如果存在）
+    let existingImagesMap = new Map();
+    if (idsToCheck.length > 0) {
+      try {
+        const existingImagesMapResult = await this.getImagesByIds(idsToCheck);
+        // getImagesByIds 返回 Map，直接使用
+        existingImagesMap = existingImagesMapResult;
+      } catch (error) {
+        logger.warn('⚠️ 读取现有数据失败，将进行严格验证:', error);
+      }
+    }
+    
+    for (const imageData of imageDataArray) {
+      // 验证必需字段
+      if (!imageData.uri) {
+        throw new Error(`数据验证失败: uri 为空, data=${JSON.stringify(imageData)}`);
+      }
+      
+      const imageId = imageData.id || this.storage.generateStableId(imageData.uri);
+      const existingImage = existingImagesMap.get(imageId);
+      const isPartialUpdate = !!existingImage;
+      
+      // 确保 fileName 不为空
+      let fileName = imageData.fileName;
+      if (!fileName || fileName.trim() === '') {
+        if (isPartialUpdate && existingImage.fileName) {
+          fileName = existingImage.fileName;
+        } else {
+          // 从 URI 中提取文件名
+          try {
+            const uriObj = new URL(imageData.uri);
+            fileName = uriObj.pathname.split('/').pop() || 'unknown.jpg';
+          } catch (e) {
+            const pathParts = imageData.uri.split('/');
+            fileName = pathParts[pathParts.length - 1] || 'unknown.jpg';
+          }
+        }
+      }
+      
+      // ❌ 严格验证：如果是部分更新，必须从现有数据中读取缺失的关键字段
+      if (isPartialUpdate) {
+        // 关键字段：width, height, imageDimensions, category
+        if (!imageData.hasOwnProperty('width') || imageData.width == null) {
+          if (existingImage.width && existingImage.width > 0) {
+            imageData.width = existingImage.width;
+          } else {
+            throw new Error(`部分更新时，现有数据的 width 也为0或null，无法合并更新: id=${imageId}, uri=${imageData.uri}`);
+          }
+        }
+        if (!imageData.hasOwnProperty('height') || imageData.height == null) {
+          if (existingImage.height && existingImage.height > 0) {
+            imageData.height = existingImage.height;
+          } else {
+            throw new Error(`部分更新时，现有数据的 height 也为0或null，无法合并更新: id=${imageId}, uri=${imageData.uri}`);
+          }
+        }
+        if (!imageData.hasOwnProperty('imageDimensions') || imageData.imageDimensions == null) {
+          if (existingImage.imageDimensions) {
+            imageData.imageDimensions = existingImage.imageDimensions;
+          } else {
+            throw new Error(`部分更新时，现有数据的 imageDimensions 也为空，无法合并更新: id=${imageId}, uri=${imageData.uri}`);
+          }
+        }
+        if (!imageData.hasOwnProperty('category') || !imageData.category || imageData.category.trim() === '') {
+          if (existingImage.category && existingImage.category.trim() !== '') {
+            imageData.category = existingImage.category;
+          } else {
+            throw new Error(`部分更新时，现有数据的 category 也为空，无法合并更新: id=${imageId}, uri=${imageData.uri}`);
+          }
+        }
+        
+        // 可选字段：如果不存在，从现有数据读取
+        if (!imageData.hasOwnProperty('size') || imageData.size == null) {
+          imageData.size = existingImage.size || null;
+        }
+        if (!imageData.hasOwnProperty('mimeType') || imageData.mimeType == null) {
+          imageData.mimeType = existingImage.mimeType || null;
+        }
+        if (!imageData.hasOwnProperty('timestamp') || imageData.timestamp == null) {
+          imageData.timestamp = existingImage.timestamp || null;
+        }
+        if (!imageData.hasOwnProperty('takenAt') || imageData.takenAt == null) {
+          imageData.takenAt = existingImage.takenAt || null;
+        }
+        if (!imageData.hasOwnProperty('createdAt') || imageData.createdAt == null) {
+          imageData.createdAt = existingImage.createdAt || new Date().toISOString();
+        }
+      } else {
+        // 新记录：必须包含所有必填字段
+        if (!imageData.hasOwnProperty('width') || !imageData.hasOwnProperty('height') || 
+            imageData.width == null || imageData.height == null) {
+          throw new Error(`新记录必须包含 width 和 height: id=${imageId}, uri=${imageData.uri}`);
+        }
+        if (!imageData.hasOwnProperty('imageDimensions') || imageData.imageDimensions == null) {
+          throw new Error(`新记录必须包含 imageDimensions: id=${imageId}, uri=${imageData.uri}`);
+        }
+        if (!imageData.hasOwnProperty('category') || !imageData.category || imageData.category.trim() === '') {
+          throw new Error(`新记录必须包含 category: id=${imageId}, uri=${imageData.uri}`);
+        }
+        
+        // 设置默认值
+        if (!imageData.createdAt) {
+          imageData.createdAt = new Date().toISOString();
+        }
+      }
+      
+      validImageDataArray.push({
+        ...imageData,
+        id: imageId,
+        fileName: fileName
+      });
+    }
+    
+    if (invalidData.length > 0) {
+      logger.warn(`⚠️ 过滤了 ${invalidData.length} 条无效数据`);
+    }
+    
+    if (validImageDataArray.length === 0) {
+      logger.warn('⚠️ 没有有效数据可保存');
+      return { newCount: 0, updatedCount: 0 };
+    }
+    
     // 构建批量SQL语句（添加了5个拍摄参数字段）
-    const placeholders = imageDataArray.map(() => 
+    const placeholders = validImageDataArray.map(() => 
       '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).join(', ');
 
@@ -2198,7 +2496,7 @@ class ImageStorageService {
 
     // 构建参数数组
     const params = [];
-    for (const imageData of imageDataArray) {
+    for (const imageData of validImageDataArray) {
       // 🔥 如果提供了 cameraSettings 但没有分类字段，则计算分类
       const categories = imageData.isoCategory !== undefined && imageData.apertureCategory !== undefined
         ? {
@@ -2212,11 +2510,15 @@ class ImageStorageService {
       const imageRecord = {
         id: imageData.id || this.storage.generateStableId(imageData.uri),
         uri: imageData.uri,
-        category: imageData.category,
-        confidence: imageData.confidence,
-        timestamp: imageData.timestamp,
-        fileName: imageData.fileName,
-        size: imageData.size,
+        // 🔧 确保 category 不为 null，如果为空则使用默认值 "NA"
+        category: imageData.category && imageData.category.trim() !== '' ? imageData.category : 'NA',
+        confidence: imageData.confidence || null,
+        timestamp: imageData.timestamp || null,
+        fileName: imageData.fileName, // 已经在验证阶段确保不为空
+        size: imageData.size || null,
+        mimeType: imageData.mimeType || null,
+        width: imageData.width || null,
+        height: imageData.height || null,
         takenAt: imageData.takenAt || null,
         latitude: imageData.latitude || null,
         longitude: imageData.longitude || null,
@@ -2288,11 +2590,37 @@ class ImageStorageService {
     }
 
     // 执行批量插入
-    await this.storage.db.executeSql(sql, params);
+    try {
+      await this.storage.db.executeSql(sql, params);
+    } catch (error) {
+      // 如果批量插入失败，记录详细错误信息
+      logger.error(`❌ SQLite批量插入失败: 有效数据=${validImageDataArray.length}, 无效数据=${invalidData.length}`, error);
+      
+      // 尝试逐个插入，找出有问题的数据
+      if (validImageDataArray.length > 1) {
+        logger.debug('🔄 尝试逐个插入以定位问题数据...');
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const imageData of validImageDataArray) {
+          try {
+            await this._performBatchInsertSQLite([imageData]);
+            successCount++;
+          } catch (singleError) {
+            failCount++;
+            logger.error(`❌ 单条插入失败: uri=${imageData.uri}, fileName=${imageData.fileName}`, singleError);
+          }
+        }
+        
+        logger.debug(`📊 逐个插入结果: 成功=${successCount}, 失败=${failCount}`);
+      }
+      
+      throw error;
+    }
 
     // 由于使用了 INSERT OR REPLACE，我们无法准确区分新增和更新
     // 返回一个估算值
-    return { newCount: imageDataArray.length, updatedCount: 0 };
+    return { newCount: validImageDataArray.length, updatedCount: 0 };
   }
 
   async _performSave(imageDataArray) {
@@ -2733,6 +3061,9 @@ class ImageStorageService {
           background_color: img.background_color || null, // 背景颜色字段
           mimeType: img.mimeType || null, // 格式统计需要
           imageDimensions: img.imageDimensions || null, // 保留原始 imageDimensions 字段
+          // 🔥 GPS坐标字段（用于位置信息补全）
+          latitude: img.latitude || null,
+          longitude: img.longitude || null,
           // 🔥 拍摄参数分类字段（用于统计和筛选）
           isoCategory: img.isoCategory || null,
           apertureCategory: img.apertureCategory || null,
@@ -2933,8 +3264,8 @@ class ImageStorageService {
         // PC端：IndexedDB
         return await this._getImagesByTimestampAfterIndexedDB(sinceTimeStr, sinceTimeNum);
       } else {
-        // 移动端：SQLite
-        return await this._getImagesByTimestampAfterSQLite(sinceTimeStr);
+        // 移动端：SQLite（传入时间戳数字，因为 timestamp 字段是 INTEGER 类型）
+        return await this._getImagesByTimestampAfterSQLite(sinceTimeNum);
       }
       
     } catch (error) {
@@ -2944,7 +3275,8 @@ class ImageStorageService {
   }
 
   // 移动端：SQLite查询（基于 timestamp）
-  async _getImagesByTimestampAfterSQLite(sinceTimeStr) {
+  // @param {number} sinceTimeNum - 时间戳数字（毫秒），因为 timestamp 字段是 INTEGER 类型
+  async _getImagesByTimestampAfterSQLite(sinceTimeNum) {
     try {
       await this.ensureInitialized();
       
@@ -2958,9 +3290,9 @@ class ImageStorageService {
         return [];
       }
       
-      // 🔥 使用文件时间（timestamp）查询
+      // 🔥 使用文件时间（timestamp）查询，timestamp 字段是 INTEGER 类型，需要传入数字
       const sql = `SELECT * FROM images WHERE timestamp > ? ORDER BY timestamp DESC`;
-      const [result] = await this.storage.db.executeSql(sql, [sinceTimeStr]);
+      const [result] = await this.storage.db.executeSql(sql, [sinceTimeNum]);
       
       if (!result || !result.rows) {
         return [];
@@ -3004,7 +3336,7 @@ class ImageStorageService {
         images.push(img);
       }
       
-      logger.debug(`📥 SQLite查询最近文件时间更新的图片: 找到 ${images.length} 张（since: ${sinceTimeStr}）`);
+      logger.debug(`📥 SQLite查询最近文件时间更新的图片: 找到 ${images.length} 张（since: ${new Date(sinceTimeNum).toISOString()}，时间戳: ${sinceTimeNum}）`);
       return images;
       
     } catch (error) {
@@ -3459,12 +3791,30 @@ class ImageStorageService {
           
           for (const [presetId, userPreset] of Object.entries(result.aiEnhancePresets)) {
             if (mergedPresets[presetId]) {
-              // 保留用户的修改（name, description, prompt, enabled）
+              // 🔥 检查并修复翻译 key：如果 name 或 description 是翻译 key（以 settings. 开头），使用默认预设的值
+              const isTranslationKey = (value) => {
+                return typeof value === 'string' && value.startsWith('settings.');
+              };
+              
+              const fixedName = (userPreset.name && !isTranslationKey(userPreset.name)) 
+                ? userPreset.name 
+                : mergedPresets[presetId].name;
+              
+              const fixedDescription = (userPreset.description && !isTranslationKey(userPreset.description)) 
+                ? userPreset.description 
+                : mergedPresets[presetId].description;
+              
+              // 🔥 同样修复 prompt 字段的翻译 key
+              const fixedPrompt = (userPreset.prompt !== undefined && !isTranslationKey(userPreset.prompt)) 
+                ? userPreset.prompt 
+                : mergedPresets[presetId].prompt;
+              
+              // 保留用户的修改（name, description, prompt, enabled），但修复翻译 key
               mergedPresets[presetId] = {
                 ...mergedPresets[presetId],
-                name: userPreset.name || mergedPresets[presetId].name,
-                description: userPreset.description || mergedPresets[presetId].description,
-                prompt: userPreset.prompt !== undefined ? userPreset.prompt : mergedPresets[presetId].prompt,
+                name: fixedName,
+                description: fixedDescription,
+                prompt: fixedPrompt,
                 enabled: userPreset.enabled !== undefined ? userPreset.enabled : mergedPresets[presetId].enabled,
                 sortOrder: userPreset.sortOrder !== undefined ? userPreset.sortOrder : mergedPresets[presetId].sortOrder
               };
@@ -3487,7 +3837,33 @@ class ImageStorageService {
             logger.debug('✅ 已合并 AI 增强预设方案（包含新预设）');
           }
           
+          // 🔥 检查是否有翻译 key 被修复，如果有则保存修复后的数据
+          let hasFixedTranslationKeys = false;
+          for (const [presetId, mergedPreset] of Object.entries(mergedPresets)) {
+            const userPreset = result.aiEnhancePresets[presetId];
+            if (userPreset) {
+              const isTranslationKey = (value) => {
+                return typeof value === 'string' && value.startsWith('settings.');
+              };
+              if (isTranslationKey(userPreset.name) || isTranslationKey(userPreset.description) || isTranslationKey(userPreset.prompt)) {
+                hasFixedTranslationKeys = true;
+                break;
+              }
+            }
+          }
+          
           result.aiEnhancePresets = mergedPresets;
+          
+          // 如果有翻译 key 被修复，自动保存修复后的设置
+          if (hasFixedTranslationKeys) {
+            logger.debug('🔧 检测到翻译 key，已自动修复并保存');
+            try {
+              // 自动保存修复后的设置，避免下次加载时再次显示翻译 key
+              await this.saveSettings(result, true); // 第二个参数表示跳过验证
+            } catch (error) {
+              logger.warn('⚠️ 自动保存修复后的设置失败:', error);
+            }
+          }
         }
         
         // 🆕 初始化默认预设

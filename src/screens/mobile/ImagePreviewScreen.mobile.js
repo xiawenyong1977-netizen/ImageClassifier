@@ -24,11 +24,12 @@ import {
   NativeModules,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { getDefaultPresets, getColorNameTranslation, getOrientationNameTranslation } from '../../i18n';
+import { getDefaultPresets, getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
+import cityLocationService from '../../services/CityLocationService';
 import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -93,6 +94,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const flatListRef = useRef(null);
   const [isInStagingBox, setIsInStagingBox] = useState(false);
   const isNavigatingBackRef = useRef(false); // 防止递归循环的标志
+  const [locationDetail, setLocationDetail] = useState(null); // 位置详细信息
 
   // 使用 getUri 统一获取图片 URI
   const resolveImageUri = useCallback((image) => {
@@ -218,6 +220,28 @@ const ImagePreviewScreen = ({ route, navigation }) => {
     };
     checkStagingBoxStatus();
   }, [currentImage?.id]);
+
+  // 根据 location_id 获取位置详细信息
+  React.useEffect(() => {
+    const loadLocationDetail = async () => {
+      // currentImage.city 字段存储的是 location_id
+      if (!currentImage || !currentImage.city || typeof currentImage.city !== 'string') {
+        setLocationDetail(null);
+        return;
+      }
+
+      try {
+        const currentLanguage = i18n.language || 'zh';
+        const detail = await cityLocationService.getLocationDetail(currentImage.city, currentLanguage);
+        setLocationDetail(detail);
+      } catch (error) {
+        logger.error('加载位置详情失败:', error);
+        setLocationDetail(null);
+      }
+    };
+
+    loadLocationDetail();
+  }, [currentImage?.city, i18n.language]);
 
   // 监听页面移除事件（包括手势返回和按钮返回）
   // 这样无论是点击返回按钮还是手势返回，都能正确传递 returnedImageId
@@ -1062,6 +1086,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           displayName = getOrientationNameTranslation(currentFilterValue, currentLang) || currentFilterValue || t('category.orientation');
           logger.debug('✅ 使用方向名作为标题:', displayName);
           break;
+        case 'iso':
+          displayName = getCameraSettingsCategoryTranslation('iso', currentFilterValue, currentLang) || currentFilterValue || 'ISO';
+          logger.debug('✅ 使用ISO作为标题:', displayName);
+          break;
+        case 'aperture':
+          displayName = getCameraSettingsCategoryTranslation('aperture', currentFilterValue, currentLang) || currentFilterValue || t('settings.apertureCategory');
+          logger.debug('✅ 使用光圈作为标题:', displayName);
+          break;
+        case 'shutter':
+          displayName = getCameraSettingsCategoryTranslation('shutter', currentFilterValue, currentLang) || currentFilterValue || t('settings.shutterCategory');
+          logger.debug('✅ 使用快门作为标题:', displayName);
+          break;
+        case 'focalLength':
+          displayName = getCameraSettingsCategoryTranslation('focalLength', currentFilterValue, currentLang) || currentFilterValue || t('settings.focalLengthCategory');
+          logger.debug('✅ 使用焦距作为标题:', displayName);
+          break;
         case 'similarityGroup':
           displayName = t('category.similarityGroup');
           logger.debug('✅ 使用相似组作为标题');
@@ -1145,7 +1185,48 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               </Text>
             </View>
               
-              {currentImage.city && (
+              {/* 使用 getLocationDetail 接口获取并显示位置信息 */}
+              {locationDetail ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>{t('imagePreview.shootingCity')}:</Text>
+                  <Text style={styles.infoValue}>
+                    {(() => {
+                      const parts = [];
+                      // 城市名称
+                      if (locationDetail.name) {
+                        parts.push(locationDetail.name);
+                      }
+                      // 区/县
+                      if (locationDetail.district && locationDetail.district.trim() !== '') {
+                        parts.push(locationDetail.district);
+                      }
+                      // 省份
+                      if (locationDetail.province && locationDetail.province.trim() !== '' && locationDetail.province !== 'unknown') {
+                        parts.push(locationDetail.province);
+                      }
+                      // 国家名称（根据语言设置）
+                      if (locationDetail.country_code && locationDetail.country_code.trim() !== '') {
+                        const currentLang = i18n.language || 'zh';
+                        // 简单的国家代码映射（主要国家）
+                        const countryMap = {
+                          'CN': currentLang === 'en' ? 'China' : '中国',
+                          'US': currentLang === 'en' ? 'United States' : '美国',
+                          'JP': currentLang === 'en' ? 'Japan' : '日本',
+                          'KR': currentLang === 'en' ? 'South Korea' : '韩国',
+                          'GB': currentLang === 'en' ? 'United Kingdom' : '英国',
+                          'FR': currentLang === 'en' ? 'France' : '法国',
+                          'DE': currentLang === 'en' ? 'Germany' : '德国',
+                        };
+                        const countryName = countryMap[locationDetail.country_code.toUpperCase()] || locationDetail.country_code;
+                        parts.push(countryName);
+                      }
+                      return parts.join(', ');
+                    })()}
+                    {currentImage.cityDistance && ` ${t('imagePreview.distance', { km: currentImage.cityDistance })}`}
+                  </Text>
+                </View>
+              ) : currentImage.city ? (
+                // 如果位置详情加载失败，显示 location_id 作为后备
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>{t('imagePreview.shootingCity')}:</Text>
                   <Text style={styles.infoValue}>
@@ -1154,7 +1235,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                     {currentImage.cityDistance && ` ${t('imagePreview.distance', { km: currentImage.cityDistance })}`}
                   </Text>
                 </View>
-              )}
+              ) : null}
               
               {currentImage.altitude && (
                 <View style={styles.infoRow}>
@@ -1200,16 +1281,131 @@ const ImagePreviewScreen = ({ route, navigation }) => {
               </Text>
             </View>
 
+          {/* 拍摄参数 */}
+          {(() => {
+            const hasCameraSettings = !!currentImage.cameraSettings;
+            
+            // 解析 cameraSettings：可能是字符串（JSON）或对象
+            let cameraSettingsData = {};
+            if (currentImage.cameraSettings) {
+              if (typeof currentImage.cameraSettings === 'string') {
+                try {
+                  cameraSettingsData = JSON.parse(currentImage.cameraSettings);
+                } catch (e) {
+                  logger.error('📷 [拍摄参数] 解析 cameraSettings JSON 失败:', e);
+                  cameraSettingsData = {};
+                }
+              } else if (typeof currentImage.cameraSettings === 'object') {
+                cameraSettingsData = currentImage.cameraSettings;
+              }
+            }
+            
+            const hasISOCategory = !!currentImage.isoCategory;
+            const hasApertureCategory = !!currentImage.apertureCategory;
+            const hasShutterCategory = !!currentImage.shutterCategory;
+            const hasFocalLengthCategory = !!currentImage.focalLengthCategory;
+            
+            // 修复逻辑：检查是否有任何拍摄参数数据（修复运算符优先级问题）
+            const shouldShowCameraSettings = (hasCameraSettings && (
+              cameraSettingsData.iso || 
+              cameraSettingsData.aperture || 
+              cameraSettingsData.shutterSpeed || 
+              cameraSettingsData.focalLength
+            )) || hasISOCategory || hasApertureCategory || hasShutterCategory || hasFocalLengthCategory;
+            
+            if (!shouldShowCameraSettings) {
+              return null;
+            }
+            
+            const currentLang = i18n.language || 'zh';
+            
+            // 修复：使用 'in' 操作符检查字段是否存在，而不是检查值是否为truthy
+            // 这样可以正确处理0值的情况
+            const hasISO = ('iso' in cameraSettingsData && cameraSettingsData.iso != null) || currentImage.isoCategory;
+            const hasAperture = ('aperture' in cameraSettingsData && cameraSettingsData.aperture != null) || currentImage.apertureCategory;
+            const hasShutterSpeed = ('shutterSpeed' in cameraSettingsData && cameraSettingsData.shutterSpeed != null) || currentImage.shutterCategory;
+            const hasFocalLength = ('focalLength' in cameraSettingsData && cameraSettingsData.focalLength != null) || currentImage.focalLengthCategory;
+            
+            return (
+              <>
+                {/* ISO */}
+                {hasISO && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>📷 ISO:</Text>
+                    <Text style={styles.infoValue}>
+                      {('iso' in cameraSettingsData && cameraSettingsData.iso != null) ? cameraSettingsData.iso : ''}
+                      {currentImage.isoCategory && (
+                        ('iso' in cameraSettingsData && cameraSettingsData.iso != null)
+                          ? ` (${getCameraSettingsCategoryTranslation('iso', currentImage.isoCategory, currentLang)})`
+                          : getCameraSettingsCategoryTranslation('iso', currentImage.isoCategory, currentLang)
+                      )}
+                    </Text>
+                  </View>
+                )}
+                
+                {/* 光圈 */}
+                {hasAperture && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>📷 {t('imagePreview.aperture')}:</Text>
+                    <Text style={styles.infoValue}>
+                      {('aperture' in cameraSettingsData && cameraSettingsData.aperture != null) ? `f/${cameraSettingsData.aperture}` : ''}
+                      {currentImage.apertureCategory && (
+                        ('aperture' in cameraSettingsData && cameraSettingsData.aperture != null)
+                          ? ` (${getCameraSettingsCategoryTranslation('aperture', currentImage.apertureCategory, currentLang)})`
+                          : getCameraSettingsCategoryTranslation('aperture', currentImage.apertureCategory, currentLang)
+                      )}
+                    </Text>
+                  </View>
+                )}
+                
+                {/* 快门 */}
+                {hasShutterSpeed && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>📷 {t('imagePreview.shutterSpeed')}:</Text>
+                    <Text style={styles.infoValue}>
+                      {('shutterSpeed' in cameraSettingsData && cameraSettingsData.shutterSpeed != null) ? (
+                        cameraSettingsData.shutterSpeed >= 1
+                          ? `${cameraSettingsData.shutterSpeed}s`
+                          : `1/${Math.round(1 / cameraSettingsData.shutterSpeed)}s`
+                      ) : ''}
+                      {currentImage.shutterCategory && (
+                        ('shutterSpeed' in cameraSettingsData && cameraSettingsData.shutterSpeed != null)
+                          ? ` (${getCameraSettingsCategoryTranslation('shutter', currentImage.shutterCategory, currentLang)})`
+                          : getCameraSettingsCategoryTranslation('shutter', currentImage.shutterCategory, currentLang)
+                      )}
+                    </Text>
+                  </View>
+                )}
+                
+                {/* 焦距 */}
+                {hasFocalLength && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>📷 {t('imagePreview.focalLength')}:</Text>
+                    <Text style={styles.infoValue}>
+                      {('focalLength' in cameraSettingsData && cameraSettingsData.focalLength != null) ? `${cameraSettingsData.focalLength}mm` : ''}
+                      {currentImage.focalLengthCategory && (
+                        ('focalLength' in cameraSettingsData && cameraSettingsData.focalLength != null)
+                          ? ` (${getCameraSettingsCategoryTranslation('focalLength', currentImage.focalLengthCategory, currentLang)})`
+                          : getCameraSettingsCategoryTranslation('focalLength', currentImage.focalLengthCategory, currentLang)
+                      )}
+                    </Text>
+                  </View>
+                )}
+              </>
+            );
+          })()}
+
+          {/* AI 描述信息 - 独立显示，即使没有检测结果也显示 */}
+          {currentImage.message && currentImage.message !== t('imagePreview.classificationComplete') && (
             <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>{t('imagePreview.category')}:</Text>
-            <Text style={styles.infoValue}>
-              {getCategoryDisplayName(currentImage.category)}
-                {currentImage.confidence === 'manual' ? ` (${t('imagePreview.manual')})` : 
-                 currentImage.confidence ? ` (${(currentImage.confidence * 100).toFixed(1)}%)` : ''}
+              <Text style={styles.infoLabel}>🤖 {t('imagePreview.aiDescription') || 'AI 描述'}:</Text>
+              <Text style={styles.infoValue}>
+                {currentImage.message}
               </Text>
             </View>
+          )}
 
-          {/* 检测结果 */}
+          {/* 检测结果 - 只有在检测到物体时才显示 */}
           {(currentImage.idCardDetections && currentImage.idCardDetections.length > 0) ||
            (currentImage.generalDetections && currentImage.generalDetections.length > 0) ||
            (currentImage.mobileNetV3Detections && currentImage.mobileNetV3Detections.predictions && currentImage.mobileNetV3Detections.predictions.length > 0) ? (
@@ -1217,10 +1413,7 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                 <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
                 <Text style={styles.infoValue}>
-                  {currentImage.message && currentImage.message !== t('imagePreview.classificationComplete') ? 
-                    currentImage.message : 
-                    `${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))}${t('imagePreview.objects')}`
-                    }
+                  {`${((currentImage.idCardDetections?.length || 0) + (currentImage.generalDetections?.length || 0) + (currentImage.mobileNetV3Detections?.predictions?.length || 0))}${t('imagePreview.objects')}`}
                   </Text>
                 </View>
                 
@@ -1300,17 +1493,17 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   </View>
                 )}
               </>
-          ) : (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>🔍 {t('imagePreview.detectionResult')}:</Text>
-              <Text style={styles.infoValue}>
-                {currentImage.message && currentImage.message !== t('imagePreview.classificationComplete') ? 
-                  currentImage.message : 
-                  t('imagePreview.noObjectsDetected')
-                }
+          ) : null}
+
+          {/* 分类信息 - 放在最后 */}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>{t('imagePreview.category')}:</Text>
+            <Text style={styles.infoValue}>
+              {getCategoryDisplayName(currentImage.category)}
+                {currentImage.confidence === 'manual' ? ` (${t('imagePreview.manual')})` : 
+                 currentImage.confidence ? ` (${(currentImage.confidence * 100).toFixed(1)}%)` : ''}
               </Text>
             </View>
-          )}
         </ScrollView>
           </View>
     );

@@ -633,7 +633,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
           {/* 目录设置 - 与"清空相册信息"区域对齐 */}
           <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>{t('settings.directorySettings')}</Text>
+            <Text style={styles.actionButtonText}>{t('settings.directorySettings.title')}</Text>
             
             {/* 添加新目录 */}
             <View style={styles.addPathContainer}>

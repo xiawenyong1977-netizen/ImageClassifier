@@ -30,8 +30,9 @@ import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import GlobalImageCache from '../../services/GlobalImageCache';
 import configService from '../../services/ConfigService';
+import cityLocationService from '../../services/CityLocationService';
 import { logger, getUri } from '../../adapters/WebAdapters';
-import { getColorNameTranslation, getOrientationNameTranslation, getDefaultPresets } from '../../i18n';
+import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation, getDefaultPresets } from '../../i18n';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_COLUMNS = 3;
@@ -96,6 +97,9 @@ const CategoryScreen = ({ route, navigation }) => {
   // 分页
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  
+  // 城市显示名称（根据语言设置）
+  const [cityDisplayName, setCityDisplayName] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   
   // 时间轴分组
@@ -194,7 +198,7 @@ const CategoryScreen = ({ route, navigation }) => {
         }
         return t('category.directoryWithCount', { name: t('category.directory'), count });
       case 'city':
-        return t('category.cityWithCount', { city: filterValue || t('category.city'), count });
+        return t('category.cityWithCount', { city: cityDisplayName || filterValue || t('category.city'), count });
       case 'color':
         return t('category.colorWithCount', { 
           color: getColorNameTranslation(filterValue, currentLang) || t('category.color'), 
@@ -207,6 +211,26 @@ const CategoryScreen = ({ route, navigation }) => {
       case 'orientation':
         return t('category.orientationWithCount', { 
           orientation: getOrientationNameTranslation(filterValue, currentLang) || t('category.orientation'), 
+          count 
+        });
+      case 'iso':
+        return t('category.isoWithCount', { 
+          iso: getCameraSettingsCategoryTranslation('iso', filterValue, currentLang) || filterValue || 'ISO', 
+          count 
+        });
+      case 'aperture':
+        return t('category.apertureWithCount', { 
+          aperture: getCameraSettingsCategoryTranslation('aperture', filterValue, currentLang) || filterValue || t('settings.apertureCategory'), 
+          count 
+        });
+      case 'shutter':
+        return t('category.shutterWithCount', { 
+          shutter: getCameraSettingsCategoryTranslation('shutter', filterValue, currentLang) || filterValue || t('settings.shutterCategory'), 
+          count 
+        });
+      case 'focalLength':
+        return t('category.focalLengthWithCount', { 
+          focalLength: getCameraSettingsCategoryTranslation('focalLength', filterValue, currentLang) || filterValue || t('settings.focalLengthCategory'), 
           count 
         });
       case 'stagingBox':
@@ -673,6 +697,28 @@ const CategoryScreen = ({ route, navigation }) => {
       setRefreshing(false);
     }
   };
+
+  /**
+   * 加载城市显示名称（根据语言设置）
+   */
+  useEffect(() => {
+    const loadCityDisplayName = async () => {
+      if (filterType === 'city' && filterValue) {
+        const currentLanguage = i18n.language || 'zh';
+        try {
+          const displayName = await cityLocationService.getLocationName(filterValue, currentLanguage);
+          setCityDisplayName(displayName || filterValue);
+        } catch (error) {
+          logger.error('❌ 加载城市显示名称失败:', error);
+          setCityDisplayName(filterValue);
+        }
+      } else {
+        setCityDisplayName(null);
+      }
+    };
+    
+    loadCityDisplayName();
+  }, [filterType, filterValue, i18n.language]);
 
   /**
    * 下拉刷新

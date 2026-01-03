@@ -282,7 +282,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
         logger.debug(`🔍 检测路径: ${basePath}`);
         const exists = await RNFS.exists(basePath);
         if (exists) {
-          const typeName = type === 'wechat' ? t('settings.wechat') : type === 'qq' ? t('settings.qq') : type === 'camera' ? t('settings.camera') : t('settings.screenshots');
+          const typeName = type === 'wechat' ? t('settings.directorySettings.wechat') : type === 'qq' ? t('settings.directorySettings.qq') : type === 'camera' ? t('settings.directorySettings.camera') : t('settings.directorySettings.screenshots');
           logger.debug(`✅ 检测到${typeName}目录: ${basePath}`);
           foundPaths.push(basePath);
         } else {
@@ -987,12 +987,33 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             handleClearData,
             true
           )}
+
+          {/* 本地分类设置 - 与目录设置平级，使用actionButton样式 */}
+          <View style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>🔍 {t('settings.localClassification')}</Text>
+            
+            {/* 使用MobileNetV3分类 - 子区块 */}
+            <View style={styles.switchItemCompact}>
+              <View style={styles.switchItemCompactLeft}>
+                <Text style={styles.switchLabelCompact} numberOfLines={1}>📱 {t('settings.enableMobileNetV3')}</Text>
+                <Switch
+                  value={settings.enableMobileNetV3Classification === true}
+                  onValueChange={(value) => updateSetting('enableMobileNetV3Classification', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.switchDescriptionCompact}>
+                {t('settings.enableMobileNetV3Desc')}
+              </Text>
+            </View>
+          </View>
           
           {/* 目录设置 - 与"清空相册信息"区域对齐 */}
           <View style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>{t('settings.directorySettings')}</Text>
+            <Text style={styles.actionButtonText}>{t('settings.directorySettings.title')}</Text>
             <Text style={styles.actionButtonDescription}>
-              {t('settings.directorySettingsDescription')}
+              {t('settings.directorySettings.description')}
             </Text>
             
             {/* 目录选择器按钮 */}
@@ -1000,12 +1021,12 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               style={styles.directoryPickerButton}
               onPress={openDirectoryPicker}
             >
-              <Text style={styles.directoryPickerButtonText}>{t('settings.browseSelectDirectory')}</Text>
+              <Text style={styles.directoryPickerButtonText}>{t('settings.directorySettings.browseSelectDirectory')}</Text>
             </TouchableOpacity>
 
             {/* 快捷目录按钮 */}
             <View style={styles.quickDirectoryContainer}>
-              <Text style={styles.quickDirectoryTitle}>{t('settings.quickAddCommonDirectories')}</Text>
+              <Text style={styles.quickDirectoryTitle}>{t('settings.directorySettings.quickAddCommonDirectories')}</Text>
               <View style={styles.quickDirectoryRow}>
                 <TouchableOpacity
                   style={[styles.quickDirectoryButton, detectingDirectory === 'wechat' && styles.quickDirectoryButtonDetecting]}
@@ -1013,7 +1034,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'wechat' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.wechatDirectory')}`}
+                    {detectingDirectory === 'wechat' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.directorySettings.wechatDirectory')}`}
                   </Text>
                 </TouchableOpacity>
 
@@ -1023,7 +1044,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'qq' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.qqDirectory')}`}
+                    {detectingDirectory === 'qq' ? `🔍 ${t('settings.detecting')}` : `💬 ${t('settings.directorySettings.qqDirectory')}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1035,7 +1056,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'camera' ? `🔍 ${t('settings.detecting')}` : `📷 ${t('settings.cameraDirectory')}`}
+                    {detectingDirectory === 'camera' ? `🔍 ${t('settings.detecting')}` : `📷 ${t('settings.directorySettings.cameraDirectory')}`}
                   </Text>
                 </TouchableOpacity>
 
@@ -1045,7 +1066,7 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   disabled={!!detectingDirectory}
                 >
                   <Text style={styles.quickDirectoryButtonText}>
-                    {detectingDirectory === 'screenshots' ? `🔍 ${t('settings.detecting')}` : `📸 ${t('settings.screenshotsDirectory')}`}
+                    {detectingDirectory === 'screenshots' ? `🔍 ${t('settings.detecting')}` : `📸 ${t('settings.directorySettings.screenshotsDirectory')}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1135,6 +1156,50 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                   onValueChange={(value) => updateSetting('showOrientationCategories', value)}
                   trackColor={{ false: '#E5E5EA', true: '#34C759' }}
                   thumbColor={settings.showOrientationCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示ISO分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.isoCategory')}</Text>
+                <Switch
+                  value={settings.showISOCategories !== false}
+                  onValueChange={(value) => updateSetting('showISOCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showISOCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示光圈分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.apertureCategory')}</Text>
+                <Switch
+                  value={settings.showApertureCategories !== false}
+                  onValueChange={(value) => updateSetting('showApertureCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showApertureCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示快门分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.shutterCategory')}</Text>
+                <Switch
+                  value={settings.showShutterCategories !== false}
+                  onValueChange={(value) => updateSetting('showShutterCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showShutterCategories !== false ? '#FFFFFF' : '#FFFFFF'}
+                />
+              </View>
+
+              {/* 显示焦距分类 */}
+              <View style={styles.switchItem}>
+                <Text style={styles.switchLabel}>📷 {t('settings.focalLengthCategory')}</Text>
+                <Switch
+                  value={settings.showFocalLengthCategories !== false}
+                  onValueChange={(value) => updateSetting('showFocalLengthCategories', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor={settings.showFocalLengthCategories !== false ? '#FFFFFF' : '#FFFFFF'}
                 />
               </View>
 
@@ -2042,6 +2107,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#000000',
     flex: 1,
+  },
+  // 紧凑布局样式（用于目录设置中的开关）
+  switchItemCompact: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  switchItemCompactLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  switchLabelCompact: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#000000',
+    flex: 1,
+    marginRight: 12,
+  },
+  switchDescriptionCompact: {
+    fontSize: 13,
+    color: '#8E8E93',
+    lineHeight: 18,
+    marginTop: 4,
   },
   languageOptions: {
     marginTop: 12,

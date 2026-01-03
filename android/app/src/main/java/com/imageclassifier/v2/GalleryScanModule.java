@@ -34,20 +34,17 @@ public class GalleryScanModule extends ReactContextBaseJavaModule {
     }
     
     /**
-     * 启动扫描
+     * 🆕 启动基础扫描（阶段1、2、3a）
      * @param options 扫描选项
      *   - scanPaths: string[] (扫描路径数组，相对路径，如 ["DCIM/Camera"])
-     *   - compareLimit: number (比对限制，0表示不限制，推荐值：100用于快速测试，1000用于正常使用)
-     *   - remoteApiUrl: string (远程推理API地址，可选)
-     *   - cacheApiUrl: string (远端缓存API地址，可选)
-     *   - language: string (语言设置，'zh' 表示中文，'en' 表示英文，用于城市名称选择，默认为 'zh')
+     *   - compareLimit: number (比对限制，0表示不限制)
      * @param promise Promise对象
      * @return 返回对象包含：
      *   - scanId: string (扫描任务ID)
-     *   - totalImagesToBeClassified: number (总需要处理的图片数量 = 新增照片 + 数据库中NA分类的照片)
+     *   - totalImagesToBeClassified: number (总需要处理的图片数量 = 新增照片数量)
      */
     @ReactMethod
-    public void startScan(ReadableMap options, Promise promise) {
+    public void startBasicImageScan(ReadableMap options, Promise promise) {
         try {
             // 解析扫描路径
             List<String> scanPaths = new ArrayList<>();
@@ -65,25 +62,82 @@ public class GalleryScanModule extends ReactContextBaseJavaModule {
             
             // 解析其他选项
             int compareLimit = options.hasKey("compareLimit") ? options.getInt("compareLimit") : 0;
-            String remoteApiUrl = options.hasKey("remoteApiUrl") ? options.getString("remoteApiUrl") : null;
-            String cacheApiUrl = options.hasKey("cacheApiUrl") ? options.getString("cacheApiUrl") : null;
-            // 🔥 解耦：语言设置由JS层传递，用于城市名称选择
-            String language = options.hasKey("language") ? options.getString("language") : "zh"; // 默认为中文
             
-            // 启动扫描（同步执行阶段1和阶段2，返回总数量）
-            GalleryScanService.ScanStartResult result = scanService.startScan(scanPaths, compareLimit, remoteApiUrl, cacheApiUrl, language);
+            // 启动基础扫描（同步执行阶段1和阶段2，返回总数量）
+            GalleryScanService.ScanStartResult result = scanService.startBasicImageScan(scanPaths, compareLimit);
+            
+            // 构建返回对象
+            WritableMap resultMap = Arguments.createMap();
+            resultMap.putString("scanId", result.scanId);
+            resultMap.putInt("totalImagesToBeClassified", result.totalImagesToBeClassified);
+            resultMap.putBoolean("hasNewImages", result.hasNewImages); // 🔥 返回是否有新增照片
+            
+            Log.d(TAG, "基础扫描已启动: " + result.scanId + ", 总数量: " + result.totalImagesToBeClassified + ", 是否有新增照片: " + result.hasNewImages + ", compareLimit=" + compareLimit);
+            promise.resolve(resultMap);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "启动基础扫描失败", e);
+            promise.reject("START_BASIC_SCAN_ERROR", e.getMessage());
+        }
+    }
+    
+    /**
+     * 🆕 启动AI分类（阶段3b、3c）
+     * @param options 分类选项
+     *   - scanId: string (扫描任务ID，可选，如果未提供则自动生成)
+     *   - imagesToClassify: array (指定需要分类的图片数组，可选，如果未提供则读取所有NA分类图片)
+     *     - 每个图片对象包含: uri, fileName, path, id
+     *   - userId: string (用户ID，可选，用于API请求)
+     * @param promise Promise对象
+     * @return 返回对象包含：
+     *   - scanId: string (扫描任务ID)
+     *   - totalImagesToBeClassified: number (总需要处理的图片数量 = NA分类图片数量或指定图片数量)
+     */
+    @ReactMethod
+    public void startAiImageClassifyByContent(ReadableMap options, Promise promise) {
+        try {
+            // 解析scanId（可选）
+            String scanId = options.hasKey("scanId") ? options.getString("scanId") : null;
+            
+            // 解析imagesToClassify（可选）
+            List<GalleryScanService.ImageInfo> imagesToClassify = null;
+            if (options.hasKey("imagesToClassify")) {
+                ReadableArray imagesArray = options.getArray("imagesToClassify");
+                if (imagesArray != null && imagesArray.size() > 0) {
+                    imagesToClassify = new ArrayList<>();
+                    for (int i = 0; i < imagesArray.size(); i++) {
+                        ReadableMap imageMap = imagesArray.getMap(i);
+                        if (imageMap != null) {
+                            GalleryScanService.ImageInfo imageInfo = new GalleryScanService.ImageInfo();
+                            imageInfo.uri = imageMap.hasKey("uri") ? imageMap.getString("uri") : null;
+                            imageInfo.fileName = imageMap.hasKey("fileName") ? imageMap.getString("fileName") : null;
+                            imageInfo.path = imageMap.hasKey("path") ? imageMap.getString("path") : null;
+                            imageInfo.id = imageMap.hasKey("id") ? imageMap.getString("id") : null;
+                            imagesToClassify.add(imageInfo);
+                        }
+                    }
+                }
+            }
+            
+            // 🔥 解析用户ID（可选）
+            String userId = options.hasKey("userId") ? options.getString("userId") : null;
+            
+            // 启动AI分类（API URL在代码中配置，无需传递）
+            GalleryScanService.ScanStartResult result = scanService.startAiImageClassifyByContent(
+                scanId, imagesToClassify, userId
+            );
             
             // 构建返回对象
             WritableMap resultMap = Arguments.createMap();
             resultMap.putString("scanId", result.scanId);
             resultMap.putInt("totalImagesToBeClassified", result.totalImagesToBeClassified);
             
-            Log.d(TAG, "扫描已启动: " + result.scanId + ", 总数量: " + result.totalImagesToBeClassified + ", compareLimit=" + compareLimit);
+            Log.d(TAG, "AI分类已启动: " + result.scanId + ", 总数量: " + result.totalImagesToBeClassified);
             promise.resolve(resultMap);
             
         } catch (Exception e) {
-            Log.e(TAG, "启动扫描失败", e);
-            promise.reject("START_SCAN_ERROR", e.getMessage());
+            Log.e(TAG, "启动AI分类失败", e);
+            promise.reject("START_AI_CLASSIFY_ERROR", e.getMessage());
         }
     }
     

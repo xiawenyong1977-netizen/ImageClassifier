@@ -889,7 +889,7 @@ export const SQLite = {
       if (sql.trim().toUpperCase().startsWith('PRAGMA')) {
         if (!originalExecuteSql) {
           // 如果没有原生的 executeSql，PRAGMA 无法执行，直接返回空结果
-          logger.warn('⚠️ PRAGMA not supported without transaction, skipping:', sql);
+          // 静默失败，不记录日志（PRAGMA 设置不是必需的）
           return Promise.resolve([{ rows: { length: 0 } }]);
         }
         // 直接使用原生的 executeSql（不在 transaction 中）
@@ -901,12 +901,10 @@ export const SQLite = {
               resolve([results]);
             },
             (error) => {
-              // 安全地处理错误对象，避免传递 undefined 给 logger
-              const safeError = error && typeof error === 'object' 
-                ? (error.message || JSON.stringify(error)) 
-                : String(error || 'Unknown error');
-              logger.error('SQLite PRAGMA error:', { sql, error: safeError });
-              reject(error);
+              // PRAGMA 设置失败不影响功能，静默失败
+              // 某些 SQLite 版本或配置可能不支持在事务外设置 PRAGMA
+              // 不记录错误日志，避免日志噪音
+              resolve([{ rows: { length: 0 } }]);
             }
           );
         });

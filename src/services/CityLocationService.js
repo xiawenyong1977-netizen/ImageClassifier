@@ -163,11 +163,21 @@ class CityLocationService {
 
     // 5. 批量请求服务器获取缺失的坐标
     let remoteResults = [];
-    try {
-      remoteResults = await this._fetchAndSaveFromRemote(missingCoordinates);
-    } catch (error) {
-      logger.error('远程API查询失败:', error);
-      // 继续执行，只返回本地结果
+    if (missingCoordinates.length > 0) {
+      try {
+        logger.debug(`📡 准备查询 ${missingCoordinates.length} 个缺失的坐标点`);
+        remoteResults = await this._fetchAndSaveFromRemote(missingCoordinates);
+        logger.debug(`✅ 远程API查询完成，返回 ${remoteResults.length} 个结果`);
+      } catch (error) {
+        logger.error('❌ 远程API查询失败:', {
+          errorName: error.name,
+          errorMessage: error.message,
+          coordinatesCount: missingCoordinates.length,
+          url: `${this.apiConfig.baseURL}${this.apiConfig.endpoints.nearestCities}`,
+          suggestion: '请检查：1) 网络连接是否正常 2) API服务器是否可访问 3) 防火墙是否阻止了请求'
+        });
+        // 继续执行，只返回本地结果（不影响已有位置信息的图片）
+      }
     }
 
     // 6. 合并本地和远程结果
@@ -221,6 +231,15 @@ class CityLocationService {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.apiConfig.timeout);
+      
+      // 添加更详细的请求日志
+      logger.debug('📤 准备发送位置信息批量查询请求:', {
+        url: url,
+        method: 'POST',
+        coordinatesCount: coordinates.length,
+        timeout: this.apiConfig.timeout,
+        requestBodySize: JSON.stringify(requestBody).length
+      });
       
       const response = await fetch(url, {
         method: 'POST',
@@ -350,9 +369,7 @@ class CityLocationService {
           // 保存查询坐标映射（直接调用适配器方法）
           if (coordinateMappings.length > 0) {
             try {
-              // 确保已初始化
-              await locationStorageService.ensureInitialized();
-              // 直接调用适配器方法
+              // 直接调用适配器方法（服务已在应用启动时初始化）
               await locationStorageService.storage.saveCoordinateMappings(coordinateMappings);
               logger.debug(`✅ 已保存 ${coordinateMappings.length} 个查询坐标映射到本地数据库`);
             } catch (error) {
@@ -531,10 +548,7 @@ class CityLocationService {
     }
 
     try {
-      // 确保已初始化
-      await locationStorageService.ensureInitialized();
-      
-      // 先从缓存中查找
+      // 先从缓存中查找（服务已在应用启动时初始化）
       let locationDetail = null;
       if (locationStorageService.locationDetailsCache && locationStorageService.locationDetailsCache.has(locationId)) {
         locationDetail = locationStorageService.locationDetailsCache.get(locationId);
@@ -600,10 +614,7 @@ class CityLocationService {
     }
 
     try {
-      // 确保已初始化
-      await locationStorageService.ensureInitialized();
-      
-      // 先从缓存中查找
+      // 先从缓存中查找（服务已在应用启动时初始化）
       let locationDetail = null;
       if (locationStorageService.locationDetailsCache && locationStorageService.locationDetailsCache.has(locationId)) {
         locationDetail = locationStorageService.locationDetailsCache.get(locationId);

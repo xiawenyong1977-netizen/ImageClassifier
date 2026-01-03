@@ -6,13 +6,13 @@
  * 1. 调用原生层GalleryScanModule启动扫描
  * 2. 监听原生层发送的进度、完成、错误事件
  * 3. 原生层扫描完成后，执行JS层后续处理：
- *    - 阶段4: 位置信息补全
- *    - 阶段5: 本地推理和规则映射（NA分类图片）
- *    - 阶段6: 相似度检测
+ *    - 位置信息补全
+ *    - 本地推理和规则映射（NA分类图片）
+ *    - 相似度检测
  */
 
 import { NativeModules, NativeEventEmitter } from 'react-native';
-import { logger } from '../adapters/WebAdapters';
+import { logger, getUri } from '../adapters/WebAdapters';
 import UnifiedDataService from './UnifiedDataService';
 import ImageClassifierService from './ImageClassifierService';
 import cityLocationService from './CityLocationService';
@@ -20,7 +20,6 @@ import ImageSimilarityService from './ImageSimilarityService';
 import { ScanService } from '../adapters/ScanServiceAdapter';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
 import { localInferencePhase as sharedLocalInference } from './localInferencePhase';
-import { getCurrentLanguageAsync } from '../i18n';
 import i18n from '../i18n';
 
 const { GalleryScanModule } = NativeModules;
@@ -47,6 +46,7 @@ class GalleryScannerService {
     this.lastRefreshCount = 0; // 上次刷新时的分类成功数
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
     this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
+    this.lastLocationRefreshCount = 0; // 上次位置信息补全刷新时的处理数量
     this.scanStartTimestamp = null; // 扫描开始时间戳
     
     // 初始化事件监听器
@@ -179,6 +179,7 @@ class GalleryScannerService {
     this.lastRefreshCount = 0;
     this.lastSimilarityRefreshCount = 0;
     this.lastScreenshotRefreshCount = 0;
+    this.lastLocationRefreshCount = 0;
     this.currentScanId = null;
 
     // 创建 Promise 来等待扫描完成
@@ -191,11 +192,6 @@ class GalleryScannerService {
     this.scanReject = scanReject;
 
     try {
-      // 从ImageClassifierService获取API配置（不需要初始化，getAPIConfig不需要初始化）
-      // 注意：原生扫描不需要初始化ImageClassifierService，因为本地推理在JS层后续处理阶段才需要
-      const apiConfig = this.imageClassifier.getAPIConfig();
-      const baseURL = apiConfig.baseURL || 'https://www.xintxiangce.top';
-      
       // 先设置事件监听器，确保能接收到所有事件
       this.setupEventListeners();
       
@@ -205,24 +201,44 @@ class GalleryScannerService {
       // 发送初始化进度消息
       await this.sendProgressMessage('initializing', 0, 0);
 
-      // 启动原生层扫描
-      logger.info('🚀 启动原生层扫描服务...');
-      // 🔥 获取当前语言设置，传递给原生层用于城市名称选择
-      const currentLanguage = i18n.language || 'zh';
-      const result = await GalleryScanModule.startScan({
+      // 🆕 启动基础扫描（阶段1、2、3a：目录扫描、文件比对、截图检测）
+      logger.info('🚀 启动基础扫描服务...');
+      const result = await GalleryScanModule.startBasicImageScan({
         scanPaths: options.scanPaths || [],
         compareLimit: options.compareLimit || 0,
-        remoteApiUrl: baseURL, // 使用配置中的baseURL
-        cacheApiUrl: baseURL,  // 缓存API和远程推理API使用同一个baseURL
-        language: currentLanguage, // 传递当前语言设置（'zh' 或 'en'）
       });
 
       this.currentScanId = result.scanId;
       this.totalImagesToBeClassified = result.totalImagesToBeClassified || 0;
-      logger.info(`✅ 原生层扫描已启动: ${result.scanId}, 总数量: ${this.totalImagesToBeClassified}`);
+      const hasNewImages = result.hasNewImages !== false; // 默认为true，如果没有这个字段
+      
+      logger.info(`✅ 基础扫描已启动: ${result.scanId}, 总数量: ${this.totalImagesToBeClassified}, 是否有新增照片: ${hasNewImages}`);
 
-      // 等待扫描完成（通过事件监听器 resolve/reject）
+      // 🔥 如果没有新增照片，直接结束扫描，不执行后续流程
+      if (!hasNewImages) {
+        logger.info('✅ 没有新增照片，直接结束扫描');
+        // 清理扫描状态
+        this._cleanupScanState();
+        // 通知等待的 Promise 扫描已完成（无新照片）
+        if (this.scanResolve) {
+          this.scanResolve();
+          this.scanResolve = null;
+          this.scanReject = null;
+        }
+        // 返回结果，不发送任何进展消息
+        return {
+          success: true,
+          scanId: result.scanId,
+          totalImagesToBeClassified: 0,
+          hasNewImages: false
+        };
+      }
+
+      // 等待基础扫描完成（通过事件监听器 resolve/reject）
       await scanPromise;
+
+
+      
 
       // 返回扫描结果
       return {
@@ -307,8 +323,8 @@ class GalleryScannerService {
   async handleProgressEvent(event) {
     const { stage, filesProcessed, filesFound, totalImagesToBeClassified, imagesClassified, scanId } = event;
     
-    // 如果是原生层扫描完成事件，直接启动后续处理，不更新进度和显示消息
-    if (stage === 'native_scan_completed') {
+    // 🆕 如果是基础扫描完成事件，只完成基础扫描，不执行AI分类
+    if (stage === 'basic_scan_completed') {
       // 更新核心指标（从原生层进度事件中获取）
       if (imagesClassified !== undefined) {
         this.imagesClassified = imagesClassified;
@@ -317,18 +333,22 @@ class GalleryScannerService {
         this.totalImagesToBeClassified = totalImagesToBeClassified;
       }
       
-      logger.info(`✅ 原生层扫描完成: ${scanId}, 已分类: ${this.imagesClassified}/${this.totalImagesToBeClassified}`);
+      logger.info(`✅ 基础扫描完成: ${scanId}, 已处理: ${this.imagesClassified}/${this.totalImagesToBeClassified}`);
       
       try {
-        // 🔥 原生扫描完成时，先重建缓存，确保后续处理使用最新数据
-        logger.debug('🔄 原生扫描完成，开始重建缓存...');
-        await UnifiedDataService.imageCache.refreshCache();
-        logger.debug('✅ 缓存重建完成');
+        // 🔥 位置信息补全（在发送 completed 消息之前完成）
+        try {
+          await this.enrichLocationInfo();
+        } catch (error) {
+          logger.error('❌ 位置信息补全失败（不影响基础扫描完成）:', error);
+          // 位置信息补全失败不影响基础扫描完成，继续执行
+        }
         
-        // 执行JS层后续处理（内部会在核心流程完成后发送 completed 事件）
-        await this.performPostScanProcessing();
+        // 发送基础扫描完成消息（AI分类需要用户手动触发）
+        // 注意：completed 消息会触发 processProgressData 自动重建缓存
+        await this.sendProgressMessage('completed', this.imagesClassified, this.totalImagesToBeClassified, this.imagesClassified, this.totalImagesToBeClassified);
         
-        logger.info('✅ 扫描完全结束（包括相似度检测）');
+        logger.info('✅ 基础扫描完全结束（AI分类需要用户手动触发）');
 
       } catch (error) {
         logger.error('❌ 后续处理失败:', error);
@@ -336,7 +356,43 @@ class GalleryScannerService {
       } finally {
         // 清理扫描状态
         this._cleanupScanState();
-        // 通知等待的 Promise 扫描已完成
+        // 通知等待的 Promise 基础扫描已完成
+        if (this.scanResolve) {
+          this.scanResolve();
+          this.scanResolve = null;
+          this.scanReject = null;
+        }
+      }
+      
+      return; // 直接返回，不处理进度更新
+    }
+    
+    // 🆕 如果是AI分类完成事件，完成AI分类流程
+    if (stage === 'ai_classification_completed') {
+      // 更新核心指标（从原生层进度事件中获取）
+      if (imagesClassified !== undefined) {
+        this.imagesClassified = imagesClassified;
+      }
+      if (totalImagesToBeClassified !== undefined) {
+        this.totalImagesToBeClassified = totalImagesToBeClassified;
+      }
+      
+      logger.info(`✅ AI分类完成: ${scanId}, 已分类: ${this.imagesClassified}/${this.totalImagesToBeClassified}`);
+      
+      try {
+        // 发送AI分类完成消息
+        // 注意：completed 消息会触发 processProgressData 自动重建缓存
+        await this.sendProgressMessage('completed', this.imagesClassified, this.totalImagesToBeClassified, this.imagesClassified, this.totalImagesToBeClassified);
+        
+        logger.info('✅ AI分类完全结束');
+
+      } catch (error) {
+        logger.error('❌ AI分类后续处理失败:', error);
+        await this.sendProgressMessage('error', 0, 0);
+      } finally {
+        // 清理扫描状态
+        this._cleanupScanState();
+        // 通知等待的 Promise AI分类已完成
         if (this.scanResolve) {
           this.scanResolve();
           this.scanResolve = null;
@@ -410,175 +466,587 @@ class GalleryScannerService {
   }
 
   /**
-   * 执行后续处理（原生层扫描完成后）
+   * 🆕 AI分类处理阶段 - 对指定图片或所有NA分类图片进行AI分类
+   * @param {string} scanStartTime - 扫描开始时间（可选）
+   * @param {Array} imagesToClassify - 可选，指定需要分类的照片数组。如果未指定，则读取所有NA分类的照片
+   * @returns {Promise<Object>} 处理结果 { processedCount, failedCount }
    */
-  async performPostScanProcessing() {
-    logger.info('🔄 开始JS层后续处理...');
+  async aiImageClassifyByContent(scanStartTime = null, imagesToClassify = null) {
+    // 检查是否已经在扫描中
+    if (this.isScanning) {
+      const errorMsg = i18n.t('home.scanAlreadyInProgress');
+      logger.warn(`⚠️ ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
+    // 检查原生模块是否可用
+    if (!GalleryScanModule) {
+      logger.error('❌ GalleryScanModule 不可用，无法使用原生AI分类');
+      throw new Error(i18n.t('home.galleryScanModuleUnavailable'));
+    }
+    
+    logger.info('🚀 启动AI分类服务 (Native Android AI Classification)');
+
+    // 设置扫描状态和回调
+    this.isScanning = true;
+    
+    // 记录扫描开始时间
+    if (!scanStartTime) {
+      scanStartTime = new Date();
+    }
+    this.scanStartTimestamp = scanStartTime;
+    
+    // 重置统计变量
+    this.lastRefreshCount = 0;
+    this.lastSimilarityRefreshCount = 0;
+    this.lastScreenshotRefreshCount = 0;
+    this.lastLocationRefreshCount = 0;
+    this.currentScanId = null;
+
+    // 创建 Promise 来等待AI分类完成
+    let scanResolve, scanReject;
+    const scanPromise = new Promise((resolve, reject) => {
+      scanResolve = resolve;
+      scanReject = reject;
+    });
+    this.scanResolve = scanResolve;
+    this.scanReject = scanReject;
 
     try {
-      // 阶段4: 位置信息补全
-      await this.phase4_LocationEnrichment();
+      // 先设置事件监听器，确保能接收到所有事件
+      this.setupEventListeners();
+      
+      // Android平台：启动前台服务，支持后台扫描
+      ScanService.start();
 
-      // 阶段5: 本地推理和规则映射（NA分类图片）
-      await this.phase5_LocalInferenceAndRuleMapping();
+      // 发送初始化进度消息
+      await this.sendProgressMessage('initializing', 0, 0);
 
-      // 核心扫描和分类流程已完成，发送 completed 事件
-      await this.sendProgressMessage('completed', 0, 0);
-      logger.info('✅ 核心扫描和分类流程完成');
+      // 准备图片列表（如果需要转换为ImageInfo格式）
+      let imagesToClassifyList = null;
+      if (imagesToClassify && Array.isArray(imagesToClassify) && imagesToClassify.length > 0) {
+        // 转换为原生层需要的格式
+        imagesToClassifyList = imagesToClassify.map(img => ({
+          uri: img.uri,
+          fileName: img.fileName,
+          path: img.path,
+          id: img.id
+        }));
+        logger.info(`📊 使用指定的 ${imagesToClassifyList.length} 张图片进行AI分类`);
+      }
 
-      // 阶段6: 相似度检测（可选的后处理步骤）
-      await this.phase6_SimilarityDetection();
+      // 🔥 获取客户端ID（用于API请求）
+      const clientId = await UnifiedDataService.getClientId();
+      
+      // 🆕 启动原生层AI分类
+      logger.info('🚀 启动原生层AI分类服务...');
+      const result = await GalleryScanModule.startAiImageClassifyByContent({
+        scanId: null, // 自动生成新的scanId
+        imagesToClassify: imagesToClassifyList, // 如果为null，原生层会读取所有NA分类图片
+        userId: clientId || null, // 🔥 传递用户ID
+      });
 
-      logger.info('✅ JS层后续处理完成');
+      this.currentScanId = result.scanId;
+      this.totalImagesToBeClassified = result.totalImagesToBeClassified || 0;
+      logger.info(`✅ 原生层AI分类已启动: ${result.scanId}, 总数量: ${this.totalImagesToBeClassified}`);
+
+      // 等待AI分类完成（通过事件监听器 resolve/reject）
+      await scanPromise;
+
+      // 返回扫描结果
+      return {
+        success: true,
+        scanId: result.scanId,
+        totalImagesToBeClassified: this.totalImagesToBeClassified,
+      };
 
     } catch (error) {
-      logger.error('❌ 后续处理失败:', error);
+      logger.error('❌ 启动AI分类失败:', error);
+      // 确保在错误时清理状态
+      this._cleanupScanState();
+      // 如果 Promise 还没有 resolve/reject，reject 它
+      if (this.scanReject) {
+        this.scanReject(error);
+        this.scanResolve = null;
+        this.scanReject = null;
+      }
       throw error;
     }
   }
 
   /**
-   * 阶段4: 位置信息补全
+   * 位置信息补全
    * 对已有GPS坐标但没有位置信息（city/country）的图片，查询并更新位置信息
    * 注意：原生层扫描时已经提取过EXIF GPS信息，这里直接使用已有的坐标
+   * 使用v2批量接口提高效率
    */
-  async phase4_LocationEnrichment() {
-    logger.info('📍 阶段4: 开始位置信息补全');
+  async enrichLocationInfo() {
+    logger.info('📍 开始位置信息补全（流水线版本）');
 
     try {
       // 查询所有图片，找到有坐标但没有位置信息的图片
       const allImages = await UnifiedDataService.readAllImages();
-      // 过滤：有GPS坐标（latitude和longitude）但没有位置信息（city或country）
-      const imagesWithCoordinatesButNoLocation = allImages.filter(
-        img => img.latitude && img.longitude && (!img.city || !img.country)
-      );
-
-      if (imagesWithCoordinatesButNoLocation.length === 0) {
-        logger.info('✅ 阶段4: 所有有坐标的图片都已补全位置信息，跳过');
+      
+      // 🔥 先排除截图和二维码分类的照片
+      const validImages = allImages.filter(img => {
+        const category = img.category || 'NA';
+        return category !== 'screenshot' && category !== 'qrcode';
+      });
+      
+      // 统计信息：用于日志说明
+      const naCountValid = validImages.filter(img => (img.category || 'NA') === 'NA').length;
+      
+      // 🔥 统计：有坐标但没有位置信息的图片（这些是需要处理的）
+      const imagesWithCoordinatesButNoLocation = validImages.filter(img => {
+        if (!img.latitude || !img.longitude) {
+          return false; // 没有坐标，跳过
+        }
+        const hasCity = img.city && img.city.trim() !== '';
+        const hasCountry = img.country && img.country.trim() !== '';
+        return !hasCity || !hasCountry; // city或country缺失
+      });
+      
+      // 统计NA分类中需要位置补全的数量
+      const naNeedLocation = imagesWithCoordinatesButNoLocation.filter(img => (img.category || 'NA') === 'NA').length;
+      const naWithoutCoordinates = naCountValid - naNeedLocation;
+      
+      logger.debug(`📍 位置信息补全统计: 总图片=${allImages.length}, 有效图片=${validImages.length}（排除截图和二维码）, 界面显示NA=${naCountValid}张, 需要位置补全=${imagesWithCoordinatesButNoLocation.length}张（有坐标但无位置信息）, 其中NA分类=${naNeedLocation}张, NA中无坐标=${naWithoutCoordinates}张`);
+      
+      if (validImages.length === 0) {
+        logger.info('✅ 没有有效图片需要处理，跳过');
         return;
       }
 
-      const totalFoundThisPhase = imagesWithCoordinatesButNoLocation.length;
-      logger.info(`📍 阶段4: 发现 ${totalFoundThisPhase} 张图片需要补全位置信息`);
-      // 发送开始处理消息（filesFound > 0 && filesProcessed === 0 会触发"开始处理X张图片"）
+      const totalFoundThisPhase = validImages.length;
+      logger.info(`📍 开始处理 ${totalFoundThisPhase} 张有效图片（界面显示NA=${naCountValid}张，其中${naNeedLocation}张需要位置补全，${naWithoutCoordinates}张NA图片无GPS坐标）`);
       await this.sendProgressMessage('location_enrichment', 0, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
 
-      let processedThisPhase = 0;
-      const batchSize = 50; // 每批处理50张
+      // 🔥 检查设置，判断是否需要MobileNetV3推理
+      const settings = await UnifiedDataService.readSettings();
+      const enableMobileNetV3 = settings.enableMobileNetV3Classification === true;
 
-      for (let i = 0; i < imagesWithCoordinatesButNoLocation.length; i += batchSize) {
-        const batch = imagesWithCoordinatesButNoLocation.slice(i, i + batchSize);
-        
-        // 并发处理每批内的图片查询（使用 Promise.all）
-        const locationQueries = batch.map(async (image) => {
-          try {
-            // 直接使用原生层已提取的GPS坐标（不需要再次提取EXIF）
-            const latitude = image.latitude;
-            const longitude = image.longitude;
-
-            if (!latitude || !longitude) {
-              return null;
-            }
-
-            // 获取当前语言设置（异步读取，确保获取到最新的语言设置）
-            const currentLanguage = await getCurrentLanguageAsync();
-
-            // 查询地理位置信息（并发执行）
-            const locationInfo = await cityLocationService.findNearestCityAsync(
-              latitude,
-              longitude,
-              200, // 200km范围
-              true, // 使用远程API
-              currentLanguage  // 传递当前语言设置
-            );
-
-            if (locationInfo) {
-              return {
-                uri: image.uri,
-                id: image.id,
-                city: locationInfo.name,
-                country: locationInfo.country || '中国',
-                province: locationInfo.province,
-                latitude: latitude,
-                longitude: longitude,
-              };
-            }
-            return null;
-          } catch (error) {
-            logger.warn(`⚠️ 处理图片位置信息失败: ${image.fileName}`, error);
-            return null;
+      // 确保ImageClassifierService已初始化（如果需要推理）
+      // 🔥 只加载MobileNetV3模型，不加载其他模型
+      if (enableMobileNetV3) {
+        try {
+          // 如果还未初始化配置，先初始化配置（但不加载模型）
+          if (!this.imageClassifier.isInitialized) {
+            await this.imageClassifier.initializeModelConfigs();
+            await this.imageClassifier.initializeONNX();
+            this.imageClassifier.isInitialized = true; // 标记为已初始化，避免重复初始化
           }
-        });
-
-        // 等待所有查询完成
-        const batchResults = (await Promise.all(locationQueries)).filter(result => result !== null);
-
-        // 批量更新位置信息（一次性更新整个批次）
-        if (batchResults.length > 0) {
-          await UnifiedDataService.writeImageDetailedInfo(batchResults, false); // 不立即更新缓存
-          processedThisPhase += batchResults.length;
+          
+          // 只加载MobileNetV3模型
+          if (!this.imageClassifier.models.mobilenetv3?.model) {
+            await this.imageClassifier.loadMobileNetV3Model();
+            logger.debug('✅ MobileNetV3模型加载完成');
+          }
+        } catch (error) {
+          logger.error(`❌ MobileNetV3模型加载失败: ${error.message}`);
+          // 加载失败时跳过MobileNetV3推理，继续后续流程
         }
-
-        // 发送进度：processedThisPhase, totalFoundThisPhase, imagesClassified, totalImagesToBeClassified
-        await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
       }
 
-      logger.info(`✅ 阶段4完成: 补全了 ${processedThisPhase} 张图片的位置信息`);
+      const batchSize = 50; // 每批处理50张
+      const totalBatches = Math.ceil(validImages.length / batchSize);
+      logger.info(`🚀 开始流水线处理: ${totalFoundThisPhase} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批`);
+
+      // 🔥 流水线队列：节点1 -> 节点2 -> 节点3
+      const inferenceQueue = []; // 节点1输出 -> 节点2输入
+      const locationQueue = []; // 节点2输出 -> 节点3输入
+      
+      // 批次任务定义
+      class InferenceTask {
+        constructor(batchIndex, batchImages, isLastBatch) {
+          this.batchIndex = batchIndex;
+          this.batchImages = batchImages;
+          this.isLastBatch = isLastBatch;
+          this.inferenceResults = null; // 节点1的输出
+        }
+      }
+
+      class LocationTask {
+        constructor(batchIndex, batchImages, isLastBatch, inferenceResults) {
+          this.batchIndex = batchIndex;
+          this.batchImages = batchImages;
+          this.isLastBatch = isLastBatch;
+          this.inferenceResults = inferenceResults; // 节点1的输出
+          this.locationResults = null; // 节点2的输出
+        }
+      }
+
+      class SaveTask {
+        constructor(batchIndex, batchImages, isLastBatch, inferenceResults, locationResults) {
+          this.batchIndex = batchIndex;
+          this.batchImages = batchImages;
+          this.isLastBatch = isLastBatch;
+          this.inferenceResults = inferenceResults; // 节点1的输出
+          this.locationResults = locationResults; // 节点2的输出
+        }
+      }
+
+      let processedThisPhase = 0;
+      let completedBatches = 0;
+
+      // ========== 节点1：MobileNetV3推理（单线程）==========
+      const inferenceNode = async () => {
+        let shouldExit = false;
+        while (!shouldExit) {
+          try {
+            // 等待批次任务
+            if (inferenceQueue.length === 0 && completedBatches >= totalBatches) {
+              shouldExit = true;
+              continue;
+            }
+            
+            if (inferenceQueue.length === 0) {
+              await new Promise(resolve => setTimeout(resolve, 10)); // 短暂等待
+              continue;
+            }
+
+            const task = inferenceQueue.shift();
+            const batchNumber = task.batchIndex + 1;
+
+            try {
+              if (enableMobileNetV3 && this.imageClassifier.models?.mobilenetv3?.model) {
+                logger.debug(`🤖 [节点1] 批次 ${batchNumber}/${totalBatches}: 开始MobileNetV3推理 ${task.batchImages.length} 张图片`);
+                
+                // 对每张图片进行MobileNetV3推理
+                const inferencePromises = task.batchImages.map(async (image) => {
+                  try {
+                    // 🔥 使用getUri统一处理URI格式（支持content://和file://）
+                    const imageUri = getUri(image);
+                    if (!imageUri) {
+                      throw new Error(`无法获取图片URI: ${image.uri}`);
+                    }
+                    
+                    const mobileNetV3Result = await this.imageClassifier.classifyImageWithMobileNetV3(imageUri);
+                    return {
+                      success: true,
+                      imageUri: image.uri, // 保存原始URI用于后续匹配
+                      imageId: image.id,
+                      inferenceResult: mobileNetV3Result.success ? mobileNetV3Result : null
+                    };
+                  } catch (error) {
+                    logger.warn(`⚠️ MobileNetV3推理失败: ${image.uri}`, error);
+                    return {
+                      success: false,
+                      imageUri: image.uri,
+                      imageId: image.id,
+                      error: error.message
+                    };
+                  }
+                });
+
+                const inferenceResults = await Promise.all(inferencePromises);
+                task.inferenceResults = inferenceResults;
+                
+                const successCount = inferenceResults.filter(r => r.success).length;
+                logger.debug(`✅ [节点1] 批次 ${batchNumber}: MobileNetV3推理完成 ${successCount}/${task.batchImages.length} 张`);
+              } else {
+                // 跳过推理，直接传递空结果
+                task.inferenceResults = task.batchImages.map(image => ({
+                  success: true,
+                  imageUri: image.uri,
+                  imageId: image.id,
+                  inferenceResult: null
+                }));
+                if (!enableMobileNetV3) {
+                  logger.debug(`⏭️ [节点1] 批次 ${batchNumber}: MobileNetV3推理已禁用，跳过`);
+                } else {
+                  logger.debug(`⏭️ [节点1] 批次 ${batchNumber}: MobileNetV3模型未加载，跳过`);
+                }
+              }
+
+              // 传递给节点2
+              const locationTask = new LocationTask(
+                task.batchIndex,
+                task.batchImages,
+                task.isLastBatch,
+                task.inferenceResults
+              );
+              locationQueue.push(locationTask);
+
+            } catch (error) {
+              logger.error(`❌ [节点1] 批次 ${batchNumber} 处理异常:`, error);
+              // 即使失败也传递给节点2，避免阻塞
+              const locationTask = new LocationTask(
+                task.batchIndex,
+                task.batchImages,
+                task.isLastBatch,
+                null
+              );
+              locationQueue.push(locationTask);
+            }
+
+            if (task.isLastBatch) {
+              shouldExit = true;
+            }
+
+          } catch (error) {
+            logger.error('[节点1] 外层异常:', error);
+          }
+        }
+        logger.debug('🔍 [节点1] 线程退出');
+      };
+
+      // ========== 节点2：位置查询（单线程）==========
+      const locationNode = async () => {
+        let shouldExit = false;
+        while (!shouldExit) {
+          try {
+            // 等待批次任务
+            if (locationQueue.length === 0 && completedBatches >= totalBatches) {
+              shouldExit = true;
+              continue;
+            }
+            
+            if (locationQueue.length === 0) {
+              await new Promise(resolve => setTimeout(resolve, 10)); // 短暂等待
+              continue;
+            }
+
+            const task = locationQueue.shift();
+            const batchNumber = task.batchIndex + 1;
+
+            try {
+              // 🔥 在节点2中判断：只对有坐标但没有位置信息的照片进行位置查询
+              const imagesNeedLocationQuery = task.batchImages.filter(image => {
+                // 必须有坐标
+                if (!image.latitude || !image.longitude) {
+                  return false;
+                }
+                // 没有位置信息（city或country缺失）
+                const hasCity = image.city && image.city.trim() !== '';
+                const hasCountry = image.country && image.country.trim() !== '';
+                return !hasCity || !hasCountry;
+              });
+
+              if (imagesNeedLocationQuery.length === 0) {
+                logger.debug(`📍 [节点2] 批次 ${batchNumber}/${totalBatches}: 无需位置查询（所有照片都有位置信息或无坐标）`);
+                task.locationResults = [];
+                
+                // 传递给节点3
+                const saveTask = new SaveTask(
+                  task.batchIndex,
+                  task.batchImages,
+                  task.isLastBatch,
+                  task.inferenceResults,
+                  task.locationResults
+                );
+                await saveNode(saveTask);
+                continue;
+              }
+
+              logger.debug(`📍 [节点2] 批次 ${batchNumber}/${totalBatches}: 开始位置查询 ${imagesNeedLocationQuery.length}/${task.batchImages.length} 张图片`);
+
+              // 准备批量查询的坐标数组（只查询需要查询的照片）
+              const coordinates = imagesNeedLocationQuery.map(image => ({
+                id: image.uri,
+                latitude: image.latitude,
+                longitude: image.longitude
+              }));
+
+              // 批量获取位置信息
+              const locationResultsArray = await cityLocationService.getLocationsBatch(
+                coordinates,
+                { skipRemote: false }
+              );
+
+              // 处理批量查询结果
+              const locationResults = [];
+              for (const locationResult of locationResultsArray) {
+                const locationId = locationResult.location_id || 
+                                  locationResult.city?.location_id || 
+                                  null;
+                
+                if (locationResult.success && locationId) {
+                  // 🔥 从需要查询的图片列表中查找（locationResultsArray的结果只对应imagesNeedLocationQuery）
+                  const image = imagesNeedLocationQuery.find(img => img.uri === locationResult.id);
+                  if (image) {
+                    locationResults.push({
+                      uri: image.uri,
+                      id: image.id,
+                      locationId: locationId,
+                      latitude: image.latitude,
+                      longitude: image.longitude
+                    });
+                  }
+                }
+              }
+
+              task.locationResults = locationResults;
+              logger.debug(`✅ [节点2] 批次 ${batchNumber}: 位置查询完成 ${locationResults.length}/${task.batchImages.length} 张`);
+
+              // 传递给节点3
+              const saveTask = new SaveTask(
+                task.batchIndex,
+                task.batchImages,
+                task.isLastBatch,
+                task.inferenceResults,
+                task.locationResults
+              );
+              
+              // 节点3直接处理，不需要队列（单线程顺序执行）
+              await saveNode(saveTask);
+
+            } catch (error) {
+              logger.error(`❌ [节点2] 批次 ${batchNumber} 处理异常:`, error);
+              // 即使失败也传递给节点3
+              const saveTask = new SaveTask(
+                task.batchIndex,
+                task.batchImages,
+                task.isLastBatch,
+                task.inferenceResults,
+                null
+              );
+              await saveNode(saveTask);
+            }
+
+            if (task.isLastBatch) {
+              shouldExit = true;
+            }
+
+          } catch (error) {
+            logger.error('[节点2] 外层异常:', error);
+          }
+        }
+        logger.debug('🔍 [节点2] 线程退出');
+      };
+
+      // ========== 节点3：保存结果（单线程）==========
+      const saveNode = async (task) => {
+        const batchNumber = task.batchIndex + 1;
+
+        try {
+          logger.debug(`💾 [节点3] 批次 ${batchNumber}/${totalBatches}: 开始保存结果`);
+
+          const batchResults = [];
+
+          // 合并推理结果和位置信息
+          for (let i = 0; i < task.batchImages.length; i++) {
+            const image = task.batchImages[i];
+            const inferenceResult = task.inferenceResults?.[i];
+            const locationResult = task.locationResults?.find(r => r.uri === image.uri);
+
+            const updateItem = {
+              uri: image.uri,
+              id: image.id
+            };
+
+            // 保存MobileNetV3推理结果
+            if (inferenceResult && inferenceResult.inferenceResult) {
+              updateItem.mobileNetV3Detections = inferenceResult.inferenceResult;
+            }
+
+            // 保存位置信息
+            if (locationResult && locationResult.locationId) {
+              updateItem.city = locationResult.locationId;
+            }
+
+            // 只有有更新内容才添加到批次结果
+            if (updateItem.mobileNetV3Detections || updateItem.city) {
+              batchResults.push(updateItem);
+            }
+          }
+
+          // 批量保存
+          if (batchResults.length > 0) {
+            // 分离位置信息和推理结果，分别保存
+            const cityUpdates = batchResults.filter(item => item.city).map(item => ({
+              uri: item.uri,
+              id: item.id,
+              city: item.city,
+              latitude: task.batchImages.find(img => img.uri === item.uri)?.latitude,
+              longitude: task.batchImages.find(img => img.uri === item.uri)?.longitude
+            }));
+
+            const classificationUpdates = batchResults.filter(item => item.mobileNetV3Detections).map(item => ({
+              uri: item.uri,
+              id: item.id,
+              mobileNetV3Detections: item.mobileNetV3Detections
+            }));
+
+            // 保存位置信息
+            if (cityUpdates.length > 0) {
+              await UnifiedDataService.updateImagesCity(cityUpdates, false);
+            }
+
+            // 保存推理结果
+            if (classificationUpdates.length > 0) {
+              await UnifiedDataService.batchUpdateClassification(classificationUpdates, false);
+            }
+
+            processedThisPhase += batchResults.length;
+            completedBatches++;
+            
+            // 更新进度
+            await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+            
+            logger.debug(`✅ [节点3] 批次 ${batchNumber}: 保存完成 ${batchResults.length} 张`);
+          } else {
+            completedBatches++;
+            logger.debug(`⏭️ [节点3] 批次 ${batchNumber}: 无需保存`);
+          }
+
+        } catch (error) {
+          logger.error(`❌ [节点3] 批次 ${batchNumber} 保存异常:`, error);
+          completedBatches++;
+        }
+      };
+
+      // 启动节点1和节点2（节点3由节点2调用）
+      const node1Promise = inferenceNode();
+      const node2Promise = locationNode();
+
+      // 提交所有批次到节点1（所有有效照片都进入流水线）
+      for (let i = 0; i < validImages.length; i += batchSize) {
+        const batch = validImages.slice(i, i + batchSize);
+        const batchIndex = Math.floor(i / batchSize);
+        const isLastBatch = (batchIndex === totalBatches - 1);
+        
+        const task = new InferenceTask(batchIndex, batch, isLastBatch);
+        inferenceQueue.push(task);
+      }
+
+      // 等待节点1和节点2完成
+      await Promise.all([node1Promise, node2Promise]);
+
+      logger.info(`✅ 位置信息补全完成（流水线版本）: 补全了 ${processedThisPhase} 张图片的位置信息`);
 
     } catch (error) {
-      logger.error('❌ 阶段4失败:', error);
-      throw error;
+      const errorMessage = error?.message || error?.toString() || '未知错误';
+      logger.error('❌ 位置信息补全失败:', errorMessage, error);
+      if (error instanceof Error) {
+        throw error;
+      } else {
+        throw new Error(errorMessage);
+      }
     }
   }
 
   /**
-   * 阶段5: 本地推理和规则映射（NA分类图片）
-   * 1. 找出NA分类的图片
-   * 2. 检查是否已有推理结果，没有就调用本地推理
-   * 3. 统一进行规则映射
+   * 阶段6: 相似度检测（全量检测）
+   * 检测所有图片的相似度
    */
-  async phase5_LocalInferenceAndRuleMapping() {
-    // 🔥 确保 ImageClassifierService 已初始化（本地推理需要）
-    if (!this.imageClassifier.isInitialized) {
-      logger.info('🔧 初始化 ImageClassifierService（本地推理需要）...');
-      try {
-        await this.imageClassifier.initialize();
-        logger.info('✅ ImageClassifierService 初始化完成');
-      } catch (error) {
-        logger.error('❌ ImageClassifierService 初始化失败:', error);
-        // 初始化失败时，本地推理阶段将无法工作，但不影响其他阶段
-        logger.warn('⚠️ 本地推理阶段将跳过（服务未初始化）');
-        return;
-      }
-    }
-    
-    // 查询所有NA分类的图片（精简信息，只包含ID等基本信息）
-    const naImagesSimplified = await UnifiedDataService.readImagesByCategory('NA');
-
-    if (naImagesSimplified.length === 0) {
-      logger.info('✅ 阶段5: 没有NA分类图片，跳过');
-      return;
-    }
-
-    // 使用共享的本地推理函数（统一逻辑：都使用规则映射）
-    await sharedLocalInference({
-      images: naImagesSimplified,
+  async phase6_SimilarityDetection() {
+    // 使用共享的相似度检测函数（全量检测）
+    await sharedSimilarityDetection({
       sendProgressMessage: this.sendProgressMessage.bind(this),
-      imageClassifier: this.imageClassifier,
-      totalImagesToBeClassified: this.totalImagesToBeClassified,
-      imagesClassified: this.imagesClassified,
-      batchSize: 10,
+      similarityService: this.similarityService,
+      totalImagesToBeClassified: this.totalImagesToBeClassified, // Android 版本需要传递此参数
     });
   }
 
   /**
-   * 阶段6: 相似度检测
-   * 只对本次扫描后更新的图片进行相似度检测（优化性能）
+   * 相似度检测阶段（兼容PC端接口）
+   * 供移动端 HomeScreen 直接调用（全量检测）
+   * @param {Date} scanStartTime - 扫描开始时间（可选，已废弃）
+   * @param {Array} candidateImages - 候选图片（可选，已废弃）
    */
-  async phase6_SimilarityDetection() {
-    // 使用共享的相似度检测函数
+  async similarityDetectionPhase(scanStartTime = null, candidateImages = []) {
+    // 调用共享的相似度检测函数（全量检测）
     await sharedSimilarityDetection({
-      scanStartTimestamp: this.scanStartTimestamp,
       sendProgressMessage: this.sendProgressMessage.bind(this),
       similarityService: this.similarityService,
       totalImagesToBeClassified: this.totalImagesToBeClassified, // Android 版本需要传递此参数
@@ -614,15 +1082,19 @@ class GalleryScannerService {
     });
     
     // Android平台：更新前台服务通知
-    // progressData.message 已经包含国际化的消息，如果为空则让原生层使用资源文件的默认消息
-    // 通知标题也由JS层传递，根据应用内语言设置国际化
-    const notificationTitle = i18n.t('home.scanNotificationTitle');
-    ScanService.updateProgress(
-      progressData.message || null, // 传递null让原生层使用资源文件的默认消息（已国际化）
-      processedThisPhase,
-      totalFoundThisPhase,
-      notificationTitle // 传递国际化的通知标题
-    );
+    // 🔥 相似度检测和位置信息补全不使用前台服务，因为它们在JS线程运行，不能后台执行
+    // 只有原生扫描流程（可以后台运行）才使用前台服务
+    if (stage !== 'similarity_detection' && stage !== 'location_enrichment') {
+      // progressData.message 已经包含国际化的消息，如果为空则让原生层使用资源文件的默认消息
+      // 通知标题也由JS层传递，根据应用内语言设置国际化
+      const notificationTitle = i18n.t('home.scanNotificationTitle');
+      ScanService.updateProgress(
+        progressData.message || null, // 传递null让原生层使用资源文件的默认消息（已国际化）
+        processedThisPhase,
+        totalFoundThisPhase,
+        notificationTitle // 传递国际化的通知标题
+      );
+    }
     
     // 调用进度回调（UI更新）
     // 注意：在异步操作后再次检查 onProgress，因为它可能在异步期间被设置为 null
@@ -799,6 +1271,14 @@ class GalleryScannerService {
         shouldRefresh = true;
         this.lastScreenshotRefreshCount = filesProcessed;
         logger.debug(`🔄 截图检测刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
+      }
+    } else if (stage === 'location_enrichment' && filesProcessed && filesProcessed > 0) {
+      // 位置信息补全阶段：每处理完50张图片刷新一次（比较差值）
+      const lastRefresh = this.lastLocationRefreshCount;
+      if (filesProcessed - lastRefresh >= 50) {
+        shouldRefresh = true;
+        this.lastLocationRefreshCount = filesProcessed;
+        logger.debug(`🔄 位置信息补全刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
     } else if (imagesClassified > 0 && imagesClassified - this.lastRefreshCount >= 50) {
       // 其他阶段：每50张成功分类的图片刷新一次

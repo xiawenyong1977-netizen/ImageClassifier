@@ -2606,9 +2606,8 @@ class GalleryScannerService {
    * 对所有已分类的图片进行相似度检测
    */
   async similarityDetectionPhase(scanStartTime, candidateImages = []) {
-    // 使用共享的相似度检测函数
+    // 使用共享的相似度检测函数（全量检测）
     await sharedSimilarityDetection({
-      scanStartTimestamp: this.scanStartTimestamp,
       sendProgressMessage: this.sendProgressMessage.bind(this),
       similarityService: this.similarityService,
       // PC 版本不传递 totalImagesToBeClassified

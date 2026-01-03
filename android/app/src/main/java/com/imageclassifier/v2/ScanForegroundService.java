@@ -71,18 +71,44 @@ public class ScanForegroundService extends Service {
         String action = intent.getAction();
         
         if ("START_SCAN".equals(action)) {
-            // 获取 WakeLock，防止 CPU 休眠
-            // 使用超长超时时间，确保扫描过程中不会释放
-            if (wakeLock != null && !wakeLock.isHeld()) {
-                wakeLock.acquire(60 * 60 * 1000L /*60分钟*/);
-            }
-            // 🔥 初始化进度消息
+            // 🔥 修复：必须在5秒内调用 startForeground()，使用最简单的通知立即调用
+            // 先创建一个最简单的通知，避免任何耗时操作（如 getString()、PendingIntent 等）
+            Notification simpleNotification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Starting...")
+                .setContentText("Starting scan...")
+                .setSmallIcon(android.R.drawable.ic_menu_upload)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build();
+            
+            // 🔥 立即调用 startForeground()，必须在5秒内完成
+            startForeground(NOTIFICATION_ID, simpleNotification);
+            
+            // 初始化进度消息
             lastProgressMessage = DEFAULT_STARTING_MESSAGE;
             lastTitle = null; // 启动时还没有标题，使用资源文件的默认值
             lastProcessed = 0;
             lastTotal = 0;
-            // 启动时使用资源文件的默认标题（已国际化）
-            startForeground(NOTIFICATION_ID, createNotification(DEFAULT_STARTING_MESSAGE, 0, 0, null));
+            
+            // 获取 WakeLock，防止 CPU 休眠（在 startForeground() 之后执行）
+            // 使用超长超时时间，确保扫描过程中不会释放
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(60 * 60 * 1000L /*60分钟*/);
+            }
+            
+            // 🔥 立即更新为完整的通知（包含国际化标题和 PendingIntent）
+            // 使用 post 确保在主线程执行，不阻塞
+            if (handler != null) {
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        updateNotification(DEFAULT_STARTING_MESSAGE, 0, 0, null);
+                    }
+                });
+            } else {
+                // 如果没有 handler，直接更新
+                updateNotification(DEFAULT_STARTING_MESSAGE, 0, 0, null);
+            }
             
             // 启动心跳任务，定期更新通知保持服务活跃
             // 🔥 优化：缩短心跳间隔从30秒到10秒
@@ -231,6 +257,7 @@ public class ScanForegroundService extends Service {
         android.util.Log.d("ScanForegroundService", "⚠️ 应用从最近任务中移除，尝试保持服务运行");
         
         // 如果正在扫描（WakeLock 被持有），重新启动服务
+        // 🔥 注意：这里重新启动服务时，onStartCommand 会被调用，会立即调用 startForeground()
         if (wakeLock != null && wakeLock.isHeld()) {
             Intent restartIntent = new Intent(this, ScanForegroundService.class);
             restartIntent.setAction("START_SCAN");

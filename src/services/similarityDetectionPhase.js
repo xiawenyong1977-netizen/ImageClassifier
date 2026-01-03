@@ -41,18 +41,17 @@ function getExcludedCategoryStats(images) {
 }
 
 /**
- * 相似度检测阶段（增量检测：只处理本次扫描更新的图片）
+ * 相似度检测阶段（增量检测：基于相似组中最新照片的时间）
  * 共享函数，供 GalleryScannerService 和 GalleryScannerService.android 使用
  * 
  * @param {Object} context - 上下文对象，包含服务实例的属性和方法
- * @param {Date} context.scanStartTimestamp - 扫描开始时间戳（Date 对象）
  * @param {Function} context.sendProgressMessage - 发送进度消息的方法
  * @param {Object} context.similarityService - 相似度检测服务实例
  * @param {number} [context.totalImagesToBeClassified] - 总分类目标（可选，Android 版本使用）
  * @returns {Promise<void>}
  */
 export async function similarityDetectionPhase(context) {
-  const { scanStartTimestamp, sendProgressMessage, similarityService, totalImagesToBeClassified } = context;
+  const { sendProgressMessage, similarityService, totalImagesToBeClassified } = context;
   
   logger.info('🔍 阶段6: 开始相似度检测');
   

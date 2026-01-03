@@ -255,6 +255,19 @@ export const getCurrentLanguageAsync = async () => {
 // 获取缺省预设配置（根据语言）
 export const getDefaultPresets = (lang = null) => {
   const currentLang = lang || getCurrentLanguage();
+  
+  // 🔥 调试：检查翻译 key 是否存在
+  const documentName = i18n.t('settings.defaultPresets.document.name', { lng: currentLang });
+  const documentPrompt = i18n.t('settings.defaultPresets.document.prompt', { lng: currentLang });
+  
+  // 如果翻译 key 不存在，会返回 key 本身，这里检查一下
+  if (documentName === 'settings.defaultPresets.document.name') {
+    console.warn('⚠️ 翻译 key settings.defaultPresets.document.name 未找到，当前语言:', currentLang);
+  }
+  if (documentPrompt === 'settings.defaultPresets.document.prompt') {
+    console.warn('⚠️ 翻译 key settings.defaultPresets.document.prompt 未找到，当前语言:', currentLang);
+  }
+  
   const presets = {
     portrait: {
       name: i18n.t('settings.defaultPresets.portrait.name', { lng: currentLang }),
@@ -281,9 +294,9 @@ export const getDefaultPresets = (lang = null) => {
       sortOrder: 3
     },
     document: {
-      name: i18n.t('settings.defaultPresets.document.name', { lng: currentLang }),
+      name: documentName,
       icon: '🪪',
-      prompt: i18n.t('settings.defaultPresets.document.prompt', { lng: currentLang }),
+      prompt: documentPrompt,
       description: i18n.t('settings.defaultPresets.document.description', { lng: currentLang }),
       enabled: true,
       sortOrder: 4

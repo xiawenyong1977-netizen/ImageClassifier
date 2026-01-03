@@ -60,8 +60,7 @@ class GlobalImageCache {
   // 构建缓存
   async buildCache() {
     if (this.isLoading) {
-      // 如果正在加载，等待完成
-      logger.debug('缓存正在构建中，等待完成...');
+      // 如果正在加载，等待完成（不打印日志，避免日志污染）
       return new Promise((resolve) => {
         const checkLoaded = () => {
           if (this.isLoaded) {
@@ -387,6 +386,64 @@ class GlobalImageCache {
     } catch (error) {
       console.error('❌ 更新图片分类失败:', error);
       return false;
+    }
+  }
+  
+  /**
+   * 🔥 批量更新图片分类（优化版本：只重建一次统计）
+   * @param {Array} updates - 更新数组，每个元素包含 { imageId, newCategory, additionalData }
+   */
+  batchUpdateImageClassification(updates) {
+    try {
+      if (!updates || updates.length === 0) {
+        return { success: true, processed: 0 };
+      }
+      
+      logger.debug(`🔄 批量更新图片分类: ${updates.length} 张图片`);
+      
+      let processed = 0;
+      const errors = [];
+      
+      // 批量更新图片分类（不重建统计）
+      for (const update of updates) {
+        const { imageId, newCategory, additionalData = {} } = update;
+        
+        const imageIndex = this.cache.allImages.findIndex(img => img.id === imageId);
+        if (imageIndex === -1) {
+          logger.debug(`⚠️ 未找到图片: ${imageId}`);
+          errors.push({ imageId, error: '图片不存在' });
+          continue;
+        }
+        
+        // 更新图片分类，同时保留其他检测结果信息
+        this.cache.allImages[imageIndex] = {
+          ...this.cache.allImages[imageIndex], // 保留原有数据
+          category: newCategory,               // 更新分类
+          ...additionalData                   // 合并额外数据（如检测结果）
+        };
+        
+        processed++;
+      }
+      
+      // 🔥 批量更新完成后，只重建一次统计（性能优化）
+      this._rebuildCategoryCounts();
+      this._rebuildCityCounts();
+      this._rebuildColorCounts();
+      this._rebuildDirectoryCounts();
+      this._rebuildFormatCounts();
+      this._rebuildResolutionCounts();
+      this._rebuildCameraSettingsCounts();
+      
+      logger.debug(`✅ 批量更新图片分类完成: ${processed} 张成功`);
+      
+      // 通知监听器
+      this.notifyListeners();
+      
+      return { success: errors.length === 0, processed, errors: errors.length > 0 ? errors : undefined };
+      
+    } catch (error) {
+      console.error('❌ 批量更新图片分类失败:', error);
+      return { success: false, processed: 0, errors: [{ error: error.message }] };
     }
   }
   

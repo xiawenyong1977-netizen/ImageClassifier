@@ -109,42 +109,38 @@ class LocationSQLiteAdapter {
   }
 
   async init() {
+    // 如果已经初始化，直接返回
     if (this.isInitialized && this.db) {
       return this.db;
     }
 
-    try {
-      logger.debug('📱 开始初始化位置数据库 SQLite...');
-      
-      // 打开数据库
-      this.db = SQLite.openDatabase(this.dbName, '1.0', 'Location DB', 200000);
-      
-      // 为数据库对象添加executeSql方法（兼容性处理）
-      if (!this.db.executeSql) {
-        this.db.executeSql = (sql, params = []) => {
-          return new Promise((resolve, reject) => {
-            this.db.transaction((tx) => {
-              tx.executeSql(sql, params, (tx, result) => {
-                resolve([result]);
-              }, (tx, error) => {
-                reject(error);
-              });
+    logger.debug('📱 开始初始化位置数据库 SQLite...');
+    
+    // 打开数据库
+    this.db = SQLite.openDatabase(this.dbName, '1.0', 'Location DB', 200000);
+    
+    // 为数据库对象添加executeSql方法（兼容性处理）
+    if (!this.db.executeSql) {
+      this.db.executeSql = (sql, params = []) => {
+        return new Promise((resolve, reject) => {
+          this.db.transaction((tx) => {
+            tx.executeSql(sql, params, (tx, result) => {
+              resolve([result]);
+            }, (tx, error) => {
+              reject(error);
             });
           });
-        };
-      }
-      
-      // 创建表结构
-      await this.createTables();
-      
-      this.isInitialized = true;
-      logger.debug('✅ 位置数据库 SQLite 初始化成功');
-      
-      return this.db;
-    } catch (error) {
-      logger.error('❌ 位置数据库 SQLite 初始化失败:', error);
-      throw error;
+        });
+      };
     }
+    
+    // 创建表结构
+    await this.createTables();
+    
+    this.isInitialized = true;
+    logger.debug('✅ 位置数据库 SQLite 初始化成功');
+    
+    return this.db;
   }
 
   async createTables() {
@@ -246,13 +242,14 @@ class LocationSQLiteAdapter {
       original: c
     }));
     
-    const placeholders = normalizedCoords.map(() => '(?, ?)').join(', ');
+    // SQLite不支持多列IN查询，使用OR条件代替
+    const conditions = normalizedCoords.map(() => '(latitude = ? AND longitude = ?)').join(' OR ');
     const values = normalizedCoords.flatMap(c => [c.lat, c.lng]);
     
     try {
       const [result] = await this.db.executeSql(
         `SELECT latitude, longitude, location_id FROM location_coordinates 
-         WHERE (latitude, longitude) IN (${placeholders})`,
+         WHERE ${conditions}`,
         values
       );
       
@@ -316,15 +313,15 @@ class LocationSQLiteAdapter {
       original: c
     }));
     
-    // 构建IN查询的占位符
-    const placeholders = normalizedCoords.map(() => '(?, ?)').join(', ');
+    // SQLite不支持多列IN查询，使用OR条件代替
+    const conditions = normalizedCoords.map(() => '(latitude = ? AND longitude = ?)').join(' OR ');
     const values = normalizedCoords.flatMap(c => [c.lat, c.lng]);
     
     try {
       // 1. 查询坐标映射表
       const [mappingResult] = await this.db.executeSql(
         `SELECT latitude, longitude, location_id FROM location_coordinates 
-         WHERE (latitude, longitude) IN (${placeholders})`,
+         WHERE ${conditions}`,
         values
       );
       
@@ -636,7 +633,8 @@ class LocationIndexedDBAdapter {
   }
 
   async init() {
-    if (this.isInitialized) {
+    // 如果已经初始化，直接返回
+    if (this.isInitialized && this.db) {
       return this.db;
     }
 
@@ -645,12 +643,7 @@ class LocationIndexedDBAdapter {
       throw new Error('IndexedDB 不可用');
     }
 
-    // 尝试关闭可能存在的旧连接
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-      this.isInitialized = false;
-    }
+    logger.debug('📱 开始初始化位置数据库 IndexedDB...');
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -1099,9 +1092,27 @@ class LocationStorageService {
     }
   }
 
+  /**
+   * 确保服务已初始化（应在应用启动时完成）
+   * 如果未初始化，抛出错误
+   */
   async ensureInitialized() {
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+      return;
+    }
     
+    // 如果未初始化，说明应用启动时没有正确初始化，抛出错误
+    throw new Error('LocationStorageService 未初始化。请在应用启动时（UnifiedDataService.initialize）调用 initialize()');
+  }
+
+  /**
+   * 初始化服务（仅在应用启动时调用一次）
+   */
+  async initialize() {
+    if (this.isInitialized) {
+      return;
+    }
+
     try {
       await this.storage.init();
       
@@ -1143,7 +1154,9 @@ class LocationStorageService {
    * @returns {Promise<Map<string, Object>>} 坐标到位置详情的映射
    */
   async getLocationsBatch(coordinates) {
-    await this.ensureInitialized();
+    if (!this.isInitialized) {
+      throw new Error('LocationStorageService 未初始化');
+    }
     
     // 1. 查询坐标映射表（从数据库）
     const coordinateMappings = await this.storage.getCoordinateMappings(coordinates);
@@ -1167,7 +1180,9 @@ class LocationStorageService {
    * @returns {Promise<Array<Object>>} 保存的位置详情数组
    */
   async saveLocationsBatch(locations) {
-    await this.ensureInitialized();
+    if (!this.isInitialized) {
+      throw new Error('LocationStorageService 未初始化');
+    }
     
     // 保存到数据库
     const savedDetails = await this.storage.saveLocationsBatch(locations);

@@ -1,6 +1,7 @@
 // 统一数据服务 - 封装缓存和数据库的复杂逻辑
 import GlobalImageCache from './GlobalImageCache.js';
 import ImageStorageService from './ImageStorageService.js';
+import locationStorageService from './LocationStorageService.js';
 import configService from './ConfigService.js';
 import { logger, Platform, RNFS, getLocalPath, getUri } from '../adapters/WebAdapters';
 
@@ -47,7 +48,10 @@ class UnifiedDataService {
       // 1. 初始化数据库服务
       await this.imageStorageService.ensureInitialized();
       
-      // 2. 构建缓存
+      // 2. 初始化位置数据库服务（在应用启动时完成，避免并发问题）
+      await locationStorageService.initialize();
+      
+      // 3. 构建缓存
       await this.imageCache.buildCache();
       
       this.isInitialized = true;
@@ -1067,13 +1071,15 @@ class UnifiedDataService {
         errors.push(...result.errors);
       }
       
-      // 批量更新缓存
-      for (const imageId of imageIds) {
-        try {
-          this.imageCache.updateImageClassification(imageId, newCategory, { confidence: newConfidence });
-        } catch (error) {
-          logger.error(`更新缓存失败: ${imageId}`, error);
-        }
+      // 🔥 批量更新缓存（优化：只重建一次统计）
+      const cacheUpdates = imageIds.map(imageId => ({
+        imageId,
+        newCategory,
+        additionalData: { confidence: newConfidence }
+      }));
+      const cacheResult = this.imageCache.batchUpdateImageClassification(cacheUpdates);
+      if (!cacheResult.success && cacheResult.errors) {
+        logger.warn('批量更新缓存部分失败:', cacheResult.errors);
       }
       
       logger.debug('批量更新分类完成:', processed, '张成功');
@@ -2161,6 +2167,33 @@ class UnifiedDataService {
     } catch (error) {
       logger.error('❌ 批量保存图片详细信息失败:', error);
       console.error('❌ 批量保存图片详细信息失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔥 批量更新city字段（仅更新位置信息，不查询其他字段）
+   * 用于位置信息补全，避免查询所有数据导致的数据库锁竞争
+   * @param {Array} cityDataArray - 位置数据数组，每个元素包含：
+   *   - uri: 图片 URI（必需）
+   *   - id: 图片 ID（可选，如果有则使用，否则根据 URI 生成）
+   *   - city: location_id（必需）
+   * @param {boolean} updateCache - 是否立即更新缓存，默认false
+   * @returns {Promise<Object>} 更新结果统计 { success: boolean, updatedCount: number, failedCount: number }
+   */
+  async updateImagesCity(cityDataArray, updateCache = false) {
+    try {
+      const result = await this.imageStorageService.batchUpdateCity(cityDataArray);
+      
+      // 根据参数决定是否立即更新缓存
+      if (updateCache && result.success) {
+        await this.imageCache.refreshCache();
+        this.cacheListeners.forEach(listener => listener(this.imageCache.cache));
+      }
+      
+      return result;
+    } catch (error) {
+      logger.error('❌ 批量更新city失败:', error);
       throw error;
     }
   }
