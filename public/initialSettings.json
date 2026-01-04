@@ -3,13 +3,6 @@
   "description": "ImageClassifierApp 初始配置文件",
   "lastUpdated": "2025-01-20T00:00:00.000Z",
   "models": {
-    "yolo8s": {
-      "name": "YOLOv8s通用检测模型",
-      "path": "./models/yolov8s.onnx",
-      "confidenceThreshold": 0.25,
-      "nmsThreshold": 0.4,
-      "maxDetections": 10
-    },
     "mobilenetv3": {
       "name": "MobileNetV3图像分类模型",
       "path": "./models/mobilenetv3_rw_Opset17.onnx",

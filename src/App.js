@@ -241,7 +241,7 @@ export default function App() {
       // 3. 后台复制模型文件（移动端）
       console.log('📋 [3/3] 复制模型文件...');
       if (ModelPathAdapter && ModelPathAdapter.ensureModelExists) {
-        const models = ['id_card_detection.onnx', 'yolov8s.onnx', 'mobilenetv3_rw_Opset17.onnx'];
+        const models = ['mobilenetv3_rw_Opset17.onnx'];
         for (const model of models) {
           await ModelPathAdapter.ensureModelExists(model);
         }

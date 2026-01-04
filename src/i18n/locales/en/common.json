@@ -263,8 +263,17 @@
     "duration": "Duration",
     "minutes": " minutes",
     "seconds": " seconds",
+    "fileSizeUnits": {
+      "B": "B",
+      "KB": "KB",
+      "MB": "MB",
+      "GB": "GB",
+      "TB": "TB"
+    },
     "aiClassifyConfirmTitle": "AI Smart Classification",
     "aiClassifyConfirmMessage": "Are you sure you want to classify {{count}} uncategorized photos using AI?\n\n⚠️ Important Notes:\n1. Photos will be uploaded to the server for AI classification. The server uses a privacy-preserving processing mechanism that does not save or leak your photos, ensuring privacy security\n2. Processing time depends on the number of photos. You can view the classification progress in real-time at the top of the home page",
+    "naCategoryRightClickHint": "Right-click to start AI classification",
+    "naCategoryRightClickGuide": "💡 Tip: Right-click this card to start AI smart classification",
     "loadingCategoryPage": "Loading category page...",
     "loadingPreview": "Loading preview...",
     "loadingSettings": "Loading settings...",

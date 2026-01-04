@@ -1907,9 +1907,21 @@ class ImageStorageService {
           
           if (existingImage) {
             // 只更新分类相关字段，保留其他字段
+            // 🔧 如果 category 是 null 或空字符串，保留数据库中的原值；如果原值也为空，使用默认值 'NA'
+            let category = classificationData.category;
+            if (!category || (typeof category === 'string' && category.trim() === '')) {
+              // 如果传入的 category 为空，保留数据库中的原值
+              category = existingImage.category;
+              // 如果数据库中的原值也为空，使用默认值 'NA'
+              if (!category || (typeof category === 'string' && category.trim() === '')) {
+                category = 'NA';
+                logger.debug(`⚠️ 图片 ${imageId} 缺少分类信息，使用默认值 'NA'`);
+              }
+            }
+            
             const updatedImage = {
               ...existingImage,
-              category: classificationData.category,
+              category: category,
               confidence: classificationData.confidence !== undefined ? classificationData.confidence : existingImage.confidence,
               idCardDetections: classificationData.idCardDetections !== undefined ? classificationData.idCardDetections : existingImage.idCardDetections,
               generalDetections: classificationData.generalDetections !== undefined ? classificationData.generalDetections : existingImage.generalDetections,
@@ -3038,21 +3050,26 @@ class ImageStorageService {
           return true;
         })
         .map(img => {
-          // 调试：检查原始数据中的分类信息
-          if (!img.category) {
-            logger.warn(`⚠️ 图片 ${img.id} 在数据库中缺少分类信息:`, {
-              id: img.id,
-              fileName: img.fileName,
-              category: img.category,
-              hasCategory: 'category' in img
-            });
+          // 🔧 确保 category 不为空：如果数据库中的 category 是 null 或空字符串，使用默认值 'NA'
+          let category = img.category;
+          if (!category || (typeof category === 'string' && category.trim() === '')) {
+            category = 'NA';
+            // 只在第一次发现时记录警告，避免重复日志
+            if (!this._missingCategoryLogged) {
+              logger.warn(`⚠️ 发现图片缺少分类信息，使用默认值 'NA'`, {
+                id: img.id,
+                fileName: img.fileName,
+                suggestion: '这些图片可能是旧数据，建议重新扫描'
+              });
+              this._missingCategoryLogged = true;
+            }
           }
         
         return {
           id: img.id,
           timestamp: img.timestamp,
           takenAt: img.takenAt,
-          category: img.category,
+          category: category,
           city: img.city || img.location?.city,
           country: img.country || img.location?.country,
           fileName: img.fileName,

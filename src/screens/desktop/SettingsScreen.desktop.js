@@ -81,7 +81,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               // 因为 setInterval 回调可能捕获旧的闭包，需要显式获取当前语言
               const currentLang = i18n.language || 'zh';
               // 使用 i18n 实例的 t 函数，确保使用最新语言
-              Alert.alert(i18n.t('common.success', { lng: currentLang }), i18n.t('settings.memberActivated', { lng: currentLang }));
+              Alert.alert(i18n.t('common.success', { lng: currentLang }), i18n.t('settings.memberActivated', { lng: currentLang }), [
+                { text: i18n.t('common.confirm', { lng: currentLang }), style: 'default' }
+              ]);
             }
             clearInterval(poll);
             setCheckingFollow(false);
@@ -283,7 +285,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('Failed to save settings:', error);
-      Alert.alert(t('common.error'), t('settings.saveSettingsFailed'));
+      Alert.alert(t('common.error'), t('settings.saveSettingsFailed'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     }
   };
 
@@ -295,7 +299,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       
       // 验证路径不能为空数组
       if (!paths || paths.length === 0) {
-        Alert.alert(t('common.error'), t('settings.scanPathCannotBeEmpty'));
+        Alert.alert(t('common.error'), t('settings.scanPathCannotBeEmpty'), [
+          { text: t('common.confirm'), style: 'default' }
+        ]);
         return;
       }
       
@@ -309,7 +315,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
 
     } catch (error) {
       logger.error('Failed to save gallery paths:', error);
-      Alert.alert(t('common.error'), error.message || t('settings.saveDirectoryFailed'));
+      Alert.alert(t('common.error'), error.message || t('settings.saveDirectoryFailed'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     }
   };
 
@@ -329,7 +337,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('文件夹选择失败:', error);
-      Alert.alert(t('common.error'), t('settings.folderSelectionFailed'));
+      Alert.alert(t('common.error'), t('settings.folderSelectionFailed'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     }
   };
 
@@ -340,16 +350,22 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       saveGalleryPaths(updatedPaths);
       setNewPath('');
     } else if (galleryPaths.includes(newPath.trim())) {
-      Alert.alert(t('common.confirm'), t('settings.directoryExists'));
+      Alert.alert(t('common.confirm'), t('settings.directoryExists'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     } else {
-      Alert.alert(t('common.confirm'), t('settings.pleaseEnterValidPath'));
+      Alert.alert(t('common.confirm'), t('settings.pleaseEnterValidPath'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     }
   };
 
   // 删除目录
   const removeGalleryPath = (pathToRemove) => {
     if (galleryPaths.length <= 1) {
-      Alert.alert(t('common.confirm'), t('settings.atLeastOneDirectoryRequired'));
+      Alert.alert(t('common.confirm'), t('settings.atLeastOneDirectoryRequired'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
       return;
     }
     
@@ -488,10 +504,14 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
         }));
       }
       
-              Alert.alert(t('common.success'), t('settings.presetSaved'));
+              Alert.alert(t('common.success'), t('settings.presetSaved'), [
+                { text: t('common.confirm'), style: 'default' }
+              ]);
             } catch (error) {
               logger.error('保存AI增强预设失败:', error);
-              Alert.alert(t('common.error'), t('settings.savePresetFailed'));
+              Alert.alert(t('common.error'), t('settings.savePresetFailed'), [
+                { text: t('common.confirm'), style: 'default' }
+              ]);
     }
   };
 
@@ -520,7 +540,9 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
       }
     } catch (error) {
       logger.error('切换预设状态失败:', error);
-      Alert.alert(t('common.error'), t('settings.operationFailed'));
+      Alert.alert(t('common.error'), t('settings.operationFailed'), [
+        { text: t('common.confirm'), style: 'default' }
+      ]);
     }
   };
 
@@ -556,10 +578,14 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
               
               // 重新加载设置以反映清空后的状态
               await loadSettings();
-              Alert.alert(t('common.success'), t('settings.photoInfoCleared'));
+              Alert.alert(t('common.success'), t('settings.photoInfoCleared'), [
+                { text: t('common.confirm'), style: 'default' }
+              ]);
             } catch (error) {
               logger.error('清空数据失败:', error);
-              Alert.alert(t('common.error'), t('settings.clearDataFailed'));
+              Alert.alert(t('common.error'), t('settings.clearDataFailed'), [
+                { text: t('common.confirm'), style: 'default' }
+              ]);
             }
           }
         }

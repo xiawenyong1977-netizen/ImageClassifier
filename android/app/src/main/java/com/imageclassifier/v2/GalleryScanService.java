@@ -68,7 +68,7 @@ public class GalleryScanService {
     private static final String TAG = "GalleryScanService";
     
     // 🔥 API配置（与PC版本保持一致）
-    private static final String API_BASE_URL = "http://123.57.68.4:8000/";
+    private static final String API_BASE_URL = "https://api.aifuture.net.cn/";
     
     private final ReactApplicationContext reactContext;
     private final Context context;

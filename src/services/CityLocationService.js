@@ -95,7 +95,7 @@ class CityLocationService {
   constructor() {
     // API配置
     this.apiConfig = {
-      baseURL: 'http://123.57.68.4:8000',
+      baseURL: 'https://api.aifuture.net.cn',
       timeout: 10000, // 10秒超时（批量请求可能需要更长时间）
       endpoints: {
         nearestCities: '/api/v2/location/nearest-cities' // 使用v2批量接口

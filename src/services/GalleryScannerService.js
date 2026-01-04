@@ -20,7 +20,6 @@ import ImageProcessor from './ImageProcessor';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
 import { getCurrentLanguageAsync } from '../i18n';
 import i18n from '../i18n';
-import { localInferencePhase as sharedLocalInference } from './localInferencePhase';
 
 
 
@@ -1596,16 +1595,37 @@ class GalleryScannerService {
     logger.info(`📸 基础扫描：处理 ${newImages.length} 张图片`);
     this.sendProgressMessage('screenshot_detection', 0, newImages.length);
     
+    // 🔥 提前初始化模型（如果需要MobileNetV3分类）
+    const settings = await UnifiedDataService.readSettings();
+    const enableMobileNetV3 = settings.enableMobileNetV3Classification === true;
+    
+    if (enableMobileNetV3) {
+      try {
+        if (!this.imageClassifier.isInitialized) {
+          await this.imageClassifier.initialize();
+          logger.debug(`✅ ImageClassifierService初始化完成`);
+        }
+        // 预加载MobileNetV3模型（避免后续批次重复加载）
+        if (!this.imageClassifier.models.mobilenetv3?.model) {
+          await this.imageClassifier.loadMobileNetV3Model();
+          logger.debug(`✅ MobileNetV3模型预加载完成`);
+        }
+      } catch (error) {
+        logger.error(`❌ ImageClassifierService初始化失败: ${error.message}`);
+        // 初始化失败时禁用MobileNetV3分类
+      }
+    }
+    
     let totalProcessedCount = 0;
     let totalFailedCount = 0;
     let totalScreenshotCount = 0;
     
     const batchSize = 100;
     const totalBatches = Math.ceil(newImages.length / batchSize);
-    const maxConcurrentRequests = 3; // 限制同时进行的远程API请求数量（避免过多连接）
-    logger.info(`🚀 开始完整流水线并发处理: ${newImages.length} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批，最大并发请求: ${maxConcurrentRequests}`);
+    const maxConcurrentBatches = 3; // 限制同时进行的批次数量（流水线并发）
+    logger.info(`🚀 开始流水线并发处理: ${newImages.length} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批，最大并发批次: ${maxConcurrentBatches}`);
     
-    // 并发控制：使用信号量模式限制同时进行的远程API请求数量
+    // 并发控制：使用信号量模式限制同时进行的批次数量
     let runningCount = 0;
     const waitingQueue = [];
     
@@ -1628,7 +1648,7 @@ class GalleryScannerService {
           }
         };
         
-        if (runningCount < maxConcurrentRequests) {
+        if (runningCount < maxConcurrentBatches) {
           execute();
         } else {
           waitingQueue.push(execute);
@@ -1644,67 +1664,45 @@ class GalleryScannerService {
       const batch = newImages.slice(i, i + batchSize);
       const batchNumber = Math.floor(i / batchSize) + 1;
       
-      // ========== 完整流水线任务 ==========
+      // ========== 完整流水线任务（批次内顺序处理，批次间并发）==========
       const pipelineTask = executeWithConcurrencyLimit(async () => {
         let batchProcessedCount = 0;
         let batchFailedCount = 0;
         let batchScreenshotCount = 0;
         
-        // ========== 节点1: EXIF提取 ==========
+        // ========== 节点1: EXIF提取（批次内顺序处理）==========
         logger.debug(`🔄 批次 ${batchNumber}: 开始EXIF提取 ${batch.length} 张图片`);
         
-        const batchExifResults = await Promise.all(
-          batch.map(async (image) => {
-            try {
-              const originalUri = extractOriginalUri(image);
-              const localPath = getLocalPath(originalUri);
-              
-              if (!localPath) {
-                throw new Error(`无法获取文件路径: ${image.fileName}`);
-              }
-              
-              // 提取EXIF数据
-              const exifData = await extractExifData(localPath, image.fileName, null);
-              const width = exifData.imageDimensions?.width || null;
-              const height = exifData.imageDimensions?.height || null;
-              
-              const hasGPS = exifData?.locationInfo && 
-                            exifData.locationInfo.latitude && 
-                            exifData.locationInfo.longitude;
-              
-              return {
-                success: true,
-                imageUri: originalUri,
-                imageData: image,
-                exifData: exifData,
-                width: width,
-                height: height,
-                hasGPS: hasGPS
-              };
-            } catch (error) {
-              logger.error(`❌ EXIF提取失败: ${image.fileName}`, error);
-              return {
-                success: false,
-                imageUri: extractOriginalUri(image),
-                imageData: image,
-                error: error.message
-              };
-            }
-          })
-        );
-        
-        // 存储EXIF提取结果
         const batchExifMap = new Map();
-        for (const result of batchExifResults) {
-          if (result.success) {
-            batchExifMap.set(result.imageUri, {
-              imageData: result.imageData,
-              exifData: result.exifData,
-              width: result.width,
-              height: result.height,
-              hasGPS: result.hasGPS
+        
+        // 🔥 批次内顺序处理，不并发
+        for (const image of batch) {
+          try {
+            const originalUri = extractOriginalUri(image);
+            const localPath = getLocalPath(originalUri);
+            
+            if (!localPath) {
+              throw new Error(`无法获取文件路径: ${image.fileName}`);
+            }
+            
+            // 提取EXIF数据
+            const exifData = await extractExifData(localPath, image.fileName, null);
+            const width = exifData.imageDimensions?.width || null;
+            const height = exifData.imageDimensions?.height || null;
+            
+            const hasGPS = exifData?.locationInfo && 
+                          exifData.locationInfo.latitude && 
+                          exifData.locationInfo.longitude;
+            
+            batchExifMap.set(originalUri, {
+              imageData: image,
+              exifData: exifData,
+              width: width,
+              height: height,
+              hasGPS: hasGPS
             });
-          } else {
+          } catch (error) {
+            logger.error(`❌ EXIF提取失败: ${image.fileName}`, error);
             batchFailedCount++;
           }
         }
@@ -1760,11 +1758,14 @@ class GalleryScannerService {
           }
         }
         
-        // ========== 节点3: 分类检测和结果合并 ==========
+        // ========== 节点3: 分类检测和结果合并（批次内顺序处理）==========
         logger.debug(`🔍 批次 ${batchNumber}: 开始规则性分类检测`);
         
         const batchSaveResults = [];
         
+        // 🔥 批次内顺序处理，不并发
+        // 🔥 每处理20张图片就让出控制权，避免阻塞UI线程
+        let classificationProcessedCount = 0;
         for (const [imageUri, exifResult] of batchExifMap.entries()) {
           try {
             const { imageData, exifData, width, height, hasGPS } = exifResult;
@@ -1824,6 +1825,13 @@ class GalleryScannerService {
               exifData: exifData
             });
             
+            classificationProcessedCount++;
+            
+            // 🔥 每处理20张图片就让出控制权，避免阻塞UI线程
+            if (classificationProcessedCount % 20 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            
           } catch (error) {
             logger.error(`❌ 分类检测失败: ${imageUri}`, error);
             batchFailedCount++;
@@ -1832,41 +1840,23 @@ class GalleryScannerService {
         
         logger.debug(`✅ 批次 ${batchNumber}: 分类检测完成 (截图: ${batchScreenshotCount}, 待分类: ${batchSaveResults.length - batchScreenshotCount})`);
         
-        // ========== 节点4: MobileNetV3分类（对每张图片进行分类）==========
-        // 🔥 检查设置，如果禁用则跳过MobileNetV3分类
-        const settings = await UnifiedDataService.readSettings();
-        const enableMobileNetV3 = settings.enableMobileNetV3Classification === true; // 默认关闭
-        
-        if (!enableMobileNetV3) {
-          logger.debug(`⏭️ 批次 ${batchNumber}: MobileNetV3分类已禁用，跳过`);
-        } else {
+        // ========== 节点4: MobileNetV3分类（批次内顺序处理）==========
+        if (enableMobileNetV3 && this.imageClassifier.isInitialized) {
           logger.debug(`🔍 批次 ${batchNumber}: 开始MobileNetV3分类 ${batchSaveResults.length} 张图片`);
           
-          // 确保ImageClassifierService已初始化
-          if (!this.imageClassifier.isInitialized) {
+          // 🔥 批次内顺序处理，不并发（模型已在开始阶段加载）
+          // 🔥 每处理5张图片就让出控制权，避免阻塞UI线程
+          let processedCount = 0;
+          for (const saveResult of batchSaveResults) {
             try {
-              await this.imageClassifier.initialize();
-              logger.debug(`✅ ImageClassifierService初始化完成`);
-            } catch (error) {
-              logger.error(`❌ ImageClassifierService初始化失败: ${error.message}`);
-              // 初始化失败时跳过MobileNetV3分类，继续后续流程
-            }
-          }
-          
-          // 并行处理所有图片的MobileNetV3分类
-          const mobileNetV3Promises = batchSaveResults.map(async (saveResult) => {
-            try {
-              // 如果ImageClassifierService未初始化，跳过分类
-              if (!this.imageClassifier.isInitialized) {
-                return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: 'ImageClassifierService未初始化' };
-              }
-              
               // 🔥 使用 getUri 获取正确的 URI 格式（与本地识别阶段保持一致）
               // getUri 会自动处理 file:// URI 转换，确保 Electron 环境能正确加载
               const imageUri = getUri(saveResult.imageData);
               if (!imageUri) {
-                return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: '无法获取图片URI' };
+                logger.warn(`⚠️ 无法获取图片URI: ${saveResult.imageData.fileName}`);
+                continue;
               }
+              
               const mobileNetV3Result = await this.imageClassifier.classifyImageWithMobileNetV3(imageUri);
               
               // 将MobileNetV3分类结果添加到classification对象中
@@ -1874,18 +1864,23 @@ class GalleryScannerService {
                 saveResult.classification.mobileNetV3Detections = mobileNetV3Result.success ? mobileNetV3Result : null;
               }
               
-              return { success: true, imageUri };
+              processedCount++;
+              
+              // 🔥 每处理5张图片就让出控制权，避免阻塞UI线程
+              if (processedCount % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+              }
             } catch (error) {
               logger.error(`❌ MobileNetV3分类失败: ${extractOriginalUri(saveResult.imageData)}`, error);
               // 即使失败也继续，不阻塞后续流程
-              return { success: false, imageUri: extractOriginalUri(saveResult.imageData), error: error.message };
             }
-          });
+          }
           
-          // 等待所有MobileNetV3分类完成
-          const mobileNetV3Results = await Promise.all(mobileNetV3Promises);
-          const mobileNetV3SuccessCount = mobileNetV3Results.filter(r => r.success).length;
-          logger.debug(`✅ 批次 ${batchNumber}: MobileNetV3分类完成 ${mobileNetV3SuccessCount}/${batchSaveResults.length} 张`);
+          logger.debug(`✅ 批次 ${batchNumber}: MobileNetV3分类完成`);
+        } else if (enableMobileNetV3) {
+          logger.debug(`⏭️ 批次 ${batchNumber}: MobileNetV3分类已禁用（初始化失败），跳过`);
+        } else {
+          logger.debug(`⏭️ 批次 ${batchNumber}: MobileNetV3分类已禁用，跳过`);
         }
         
         // ========== 节点5: 批量保存（当前批次的结果）==========
@@ -1925,7 +1920,7 @@ class GalleryScannerService {
     }
     
     // ========== 等待所有批次完成并汇总统计 ==========
-    logger.info('⏳ 等待所有批次处理完成（完整流水线并发执行）...');
+    logger.info('⏳ 等待所有批次处理完成（流水线并发执行）...');
     const batchResults = await Promise.all(allTasks);
     
     // 汇总所有批次的统计结果
@@ -2582,24 +2577,6 @@ class GalleryScannerService {
     }
   }
 
-  /**
-   * 阶段3d: 本地推理降级
-   * 对远程推理失败的图片进行本地推理
-   */
-  async localInferenceFallbackPhase(remainingImages, scanStartTime) {
-    // 使用共享的本地推理函数
-    return await sharedLocalInference({
-      images: remainingImages,
-      sendProgressMessage: this.sendProgressMessage.bind(this),
-      imageClassifier: this.imageClassifier,
-      extractOriginalUri: extractOriginalUri,
-      onClassifiedSuccessfully: () => {
-        this.imagesClassified++;
-      },
-      enableRuleMapping: false, // PC 版本不使用规则映射，直接使用推理结果中的分类
-      batchSize: 5,
-    });
-  }
 
   /**
    * 阶段6: 相似度检测（增量检测：只处理本次扫描更新的图片）

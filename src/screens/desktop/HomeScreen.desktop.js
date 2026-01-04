@@ -957,13 +957,19 @@ const HomeScreen = () => {
   };
 
 
-  // 格式化文件大小
+  // 格式化文件大小（使用 i18n）
   const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return `0 ${t('home.fileSizeUnits.B')}`;
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const sizeUnits = [
+      t('home.fileSizeUnits.B'),
+      t('home.fileSizeUnits.KB'),
+      t('home.fileSizeUnits.MB'),
+      t('home.fileSizeUnits.GB'),
+      t('home.fileSizeUnits.TB')
+    ];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizeUnits[i];
   };
 
   // 组件挂载时加载最近扫描时间和统计信息，并初始化 globalMessage
@@ -1770,7 +1776,7 @@ const HomeScreen = () => {
 
 // 渲染分类卡片组件
 const CategoryCard = React.memo(({ category, count, recentImages, onPress, onRightClick }) => {
-  const { i18n } = useTranslation('common');
+  const { t, i18n } = useTranslation('common');
   
   // 稳定化图片源对象，避免不必要的重新渲染
   const imageSource = useMemo(() => {
@@ -1864,6 +1870,13 @@ const CategoryCard = React.memo(({ category, count, recentImages, onPress, onRig
         </Text>
         <Text style={styles.categoryCount}>{count}</Text>
       </View>
+      
+      {/* NA分类右键提示 */}
+      {categoryValue === 'NA' && count > 0 && (
+        <View style={styles.naCategoryHint}>
+          <Text style={styles.naCategoryHintText}>🖱️ {t('home.naCategoryRightClickHint')}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 });
@@ -2317,6 +2330,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
+  },
+  // NA分类右键提示样式
+  naCategoryHint: {
+    position: 'absolute',
+    top: 8,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  naCategoryHintText: {
+    fontSize: 11,
+    color: 'white',
+    fontWeight: '600',
   },
   emptyThumbnailText: {
     fontSize: 32,

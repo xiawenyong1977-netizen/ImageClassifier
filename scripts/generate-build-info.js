@@ -26,8 +26,30 @@ const buildVersionCode = `${month}${day}${hour}${minute}`; // MMddHHmm
 const fullYear = now.getFullYear();
 const buildDateFormatted = `${fullYear}-${month}-${day} ${hour}:${minute}`;
 
+// 检测调用目录：根据 process.cwd() 判断是从根目录还是 pc-version-final 目录调用
+// 脚本位于 scripts/ 目录，__dirname 是 scripts 目录的绝对路径
+const scriptsDir = __dirname;
+const rootDir = path.join(scriptsDir, '..');
+const currentWorkingDir = process.cwd();
+
+// 判断是否从 pc-version-final 目录调用（通过检查当前工作目录）
+const isPcVersionFinal = currentWorkingDir.endsWith('pc-version-final') || 
+                         path.basename(currentWorkingDir) === 'pc-version-final';
+
+let packageJsonPath;
+let buildInfoDir;
+
+if (isPcVersionFinal) {
+  // 从 pc-version-final 调用：使用 pc-version-final 的 package.json 和 src/config
+  packageJsonPath = path.join(currentWorkingDir, 'package.json');
+  buildInfoDir = path.join(currentWorkingDir, 'src', 'config');
+} else {
+  // 从根目录调用：使用根目录的 package.json 和 src/config
+  packageJsonPath = path.join(rootDir, 'package.json');
+  buildInfoDir = path.join(rootDir, 'src', 'config');
+}
+
 // 读取 package.json 获取版本名
-const packageJsonPath = path.join(__dirname, '..', 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const buildVersion = packageJson.version || '1.0.0';
 
@@ -42,7 +64,6 @@ export const BUILD_DATE = '${buildDateFormatted}'; // 构建时间（易读格�
 `;
 
 // 确保目录存在
-const buildInfoDir = path.join(__dirname, '..', 'src', 'config');
 if (!fs.existsSync(buildInfoDir)) {
   fs.mkdirSync(buildInfoDir, { recursive: true });
 }

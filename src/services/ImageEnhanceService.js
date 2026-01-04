@@ -15,7 +15,7 @@ import WeChatAuthService from './WeChatAuthService';
 class ImageEnhanceService {
   constructor() {
     this.apiConfig = {
-      baseURL: 'http://123.57.68.4:8000',
+      baseURL: 'https://api.aifuture.net.cn',
       endpoints: {
         submit: '/api/v2/image-edit/batch',
         taskStatus: '/api/v2/image-edit/task',

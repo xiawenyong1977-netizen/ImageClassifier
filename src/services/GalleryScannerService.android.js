@@ -19,7 +19,6 @@ import cityLocationService from './CityLocationService';
 import ImageSimilarityService from './ImageSimilarityService';
 import { ScanService } from '../adapters/ScanServiceAdapter';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
-import { localInferencePhase as sharedLocalInference } from './localInferencePhase';
 import i18n from '../i18n';
 
 const { GalleryScanModule } = NativeModules;
