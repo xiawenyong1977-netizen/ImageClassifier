@@ -161,6 +161,27 @@ exports.default = async function(context) {
       }
     }
     
+    // 移除位置权限（如果存在）
+    // PC版本只需要读取EXIF中的GPS信息，不需要位置权限
+    const locationCapabilityPatterns = [
+      /<Capability[^>]*Name="location"[^>]*\/?>/gi,
+      /<uap:Capability[^>]*Name="location"[^>]*\/?>/gi,
+      /<Capability[^>]*Name="location"[^>]*>[\s\S]*?<\/Capability>/gi,
+      /<uap:Capability[^>]*Name="location"[^>]*>[\s\S]*?<\/uap:Capability>/gi
+    ];
+    
+    let removedLocation = false;
+    for (const pattern of locationCapabilityPatterns) {
+      if (pattern.test(manifestContent)) {
+        manifestContent = manifestContent.replace(pattern, '');
+        removedLocation = true;
+      }
+    }
+    
+    if (removedLocation) {
+      console.log('  ✓ 已移除位置权限声明（PC版本不需要位置权限，只读取EXIF中的GPS信息）');
+    }
+    
     // 写回 manifest
     fs.writeFileSync(manifestPath, manifestContent, 'utf8');
     console.log('  ✓ AppxManifest.xml 已更新');

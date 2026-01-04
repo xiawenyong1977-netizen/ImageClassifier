@@ -111,7 +111,8 @@
       "artifactName": "${productName}-${version}.${ext}",
       "languages": [
         "zh-CN"
-      ]
+      ],
+      "capabilities": []
     },
     "extraFiles": [
       {

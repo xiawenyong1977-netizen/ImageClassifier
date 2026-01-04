@@ -1422,6 +1422,13 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.categoryName} numberOfLines={1}>{categoryName}</Text>
           <Text style={styles.categoryCount}>{category.count}</Text>
         </View>
+        
+        {/* NA分类长按提示 - 右上角徽章 */}
+        {isNACategory && category.count > 0 && (
+          <View style={styles.naCategoryBadge}>
+            <Text style={styles.naCategoryBadgeText}>👆</Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -2910,6 +2917,29 @@ const styles = StyleSheet.create({
   },
   startSimilarityButtonTextDisabled: {
     color: '#999999',
+  },
+  // NA分类长按提示样式 - 右上角徽章
+  naCategoryBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  naCategoryBadgeText: {
+    fontSize: 10,
+    color: '#FFFFFF',
   },
 });
 

@@ -43,6 +43,21 @@ module.exports = async (manifestPath) => {
       }
     }
     
+    // 移除位置权限（如果存在）
+    // 检查是否包含位置权限声明
+    const locationCapabilityPattern = /<Capability[^>]*Name="location"[^>]*\/?>/gi;
+    if (locationCapabilityPattern.test(manifestContent)) {
+      manifestContent = manifestContent.replace(locationCapabilityPattern, '');
+      console.log('  ✓ 已移除位置权限声明');
+    }
+    
+    // 移除位置权限（使用 uap 命名空间）
+    const uapLocationCapabilityPattern = /<uap:Capability[^>]*Name="location"[^>]*\/?>/gi;
+    if (uapLocationCapabilityPattern.test(manifestContent)) {
+      manifestContent = manifestContent.replace(uapLocationCapabilityPattern, '');
+      console.log('  ✓ 已移除 uap:location 权限声明');
+    }
+    
     // 写回 manifest
     fs.writeFileSync(manifestPath, manifestContent, 'utf8');
     console.log('  ✓ AppxManifest.xml 已更新');
