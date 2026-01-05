@@ -36,7 +36,8 @@
     "settings": "Settings",
     "language": "Language",
     "chinese": "中文",
-    "english": "English"
+    "english": "English",
+    "tip": "Tip"
   },
   "category": {
     "imageList": "Image List",
@@ -590,8 +591,13 @@
         "prompt": ""
       }
     },
-    "noPromptSet": "(No prompt set)"
-  },
+    "noPromptSet": "(No prompt set)",
+    "addedDirectories": "Added {{count}} {{type}} directories",
+    "addedDirectoriesWithExisting": "Added {{new}} {{type}} directories\nFound {{total}} directories total, {{existing}} already exist",
+    "noDirectoriesFound": "No {{type}} directories found, the app may not be installed or directory path is different",
+    "directoryAddedSuccess": "Directory added successfully",
+    "directoryNotFound": "Directory not found",
+    "detectionFailed": "Detection failed, please try again",
     "prompt": "Prompt",
     "promptPlaceholder": "Enter AI enhancement prompt, e.g.: Fix facial blemishes and wrinkles, brighten skin tone, keep original appearance",
     "idCard": "ID Card",
@@ -622,12 +628,11 @@
     "confirmDelete": "Confirm Delete",
     "confirmDeletePath": "Are you sure you want to delete path \"{{path}}\"?",
     "allDirectoriesExist": "All directories already exist",
-    "addedDirectories": "Added {{count}} {{type}} directories",
-    "addedDirectoriesWithExisting": "Added {{new}} {{type}} directories\nFound {{total}} directories total, {{existing}} already exist",
-    "noDirectoriesFound": "No {{type}} directories found, the app may not be installed or directory path is different",
-    "directoryAddedSuccess": "Directory added successfully",
-    "directoryNotFound": "Directory not found",
-    "detectionFailed": "Detection failed, please try again",
+    "wechat": "WeChat",
+    "qq": "QQ",
+    "camera": "Camera",
+    "screenshots": "Screenshots"
+  },
   "directoryPicker": {
     "selectScanDirectory": "Select Scan Directory",
     "select": "Select",

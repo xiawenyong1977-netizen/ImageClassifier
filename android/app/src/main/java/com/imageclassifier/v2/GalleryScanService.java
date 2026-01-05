@@ -513,19 +513,101 @@ public class GalleryScanService {
     /**
      * 检查路径是否匹配扫描路径
      */
+    /**
+     * 从绝对路径中提取相对路径部分（去掉外部存储标准前缀）
+     * @param absolutePath 绝对路径，如 "/storage/emulated/0/DCIM/Camera"
+     * @return 相对路径部分，如 "DCIM/Camera"
+     */
+    private String extractRelativePath(String absolutePath) {
+        if (absolutePath == null || absolutePath.isEmpty()) {
+            return absolutePath;
+        }
+        
+        // Android 外部存储的标准路径前缀
+        String[] prefixes = {
+            "/storage/emulated/0/",
+            "/sdcard/",
+            "/mnt/sdcard/",
+            android.os.Environment.getExternalStorageDirectory().getAbsolutePath() + "/"
+        };
+        
+        // 尝试去掉各种前缀
+        for (String prefix : prefixes) {
+            if (absolutePath.startsWith(prefix)) {
+                String relative = absolutePath.substring(prefix.length());
+                // 去掉尾部斜杠（如果有）
+                if (relative.endsWith("/")) {
+                    relative = relative.substring(0, relative.length() - 1);
+                }
+                return relative;
+            }
+        }
+        
+        // 如果没有匹配的前缀，返回原路径（可能是相对路径）
+        return absolutePath;
+    }
+    
+    /**
+     * 规范化路径：去掉尾部斜杠，统一格式
+     * @param path 路径字符串
+     * @return 规范化后的路径
+     */
+    private String normalizePath(String path) {
+        if (path == null || path.isEmpty()) {
+            return path;
+        }
+        // 去掉尾部斜杠
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
+    }
+    
+    /**
+     * 检查图片路径是否匹配扫描路径
+     * 支持绝对路径和相对路径两种格式的匹配
+     * @param imageInfo 图片信息
+     * @param scanPaths 扫描路径列表（绝对路径，如 "/storage/emulated/0/DCIM/Camera"）
+     * @return 是否匹配
+     */
     private boolean isPathMatched(ImageInfo imageInfo, List<String> scanPaths) {
         if (scanPaths == null || scanPaths.isEmpty()) {
             return true;
         }
         
-        String imagePath = imageInfo.relativePath != null ? imageInfo.relativePath : imageInfo.path;
-        if (imagePath == null) {
+        // 如果图片路径都为空，不匹配
+        if (imageInfo.path == null && imageInfo.relativePath == null) {
             return false;
         }
         
         for (String scanPath : scanPaths) {
-            if (imagePath.startsWith(scanPath) || imagePath.contains(scanPath)) {
-                return true;
+            if (scanPath == null || scanPath.isEmpty()) {
+                continue;
+            }
+            
+            // 规范化扫描路径
+            String normalizedScanPath = normalizePath(scanPath);
+            
+            // 情况1：检查绝对路径匹配（如果 imageInfo.path 存在）
+            if (imageInfo.path != null && !imageInfo.path.isEmpty()) {
+                String normalizedImagePath = normalizePath(imageInfo.path);
+                if (normalizedImagePath.startsWith(normalizedScanPath) || 
+                    normalizedImagePath.contains(normalizedScanPath)) {
+                    return true;
+                }
+            }
+            
+            // 情况2：检查相对路径匹配（如果 imageInfo.relativePath 存在）
+            if (imageInfo.relativePath != null && !imageInfo.relativePath.isEmpty()) {
+                // 从绝对路径中提取相对路径部分
+                String scanRelativePath = extractRelativePath(normalizedScanPath);
+                String normalizedImageRelativePath = normalizePath(imageInfo.relativePath);
+                
+                // 匹配相对路径
+                if (normalizedImageRelativePath.startsWith(scanRelativePath) || 
+                    normalizedImageRelativePath.contains(scanRelativePath)) {
+                    return true;
+                }
             }
         }
         

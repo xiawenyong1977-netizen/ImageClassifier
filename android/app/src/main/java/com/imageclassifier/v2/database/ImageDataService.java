@@ -380,6 +380,9 @@ public class ImageDataService {
      * @param classificationDataList 分类数据列表
      * @return 更新结果 { success: boolean, updatedCount: int, failedCount: int }
      */
+    // 🔥 数据库访问同步锁：确保批量更新操作的串行化，避免并发冲突
+    private static final Object batchUpdateLock = new Object();
+    
     public Map<String, Object> batchUpdateClassification(
             List<Map<String, Object>> classificationDataList) {
         if (classificationDataList == null || classificationDataList.isEmpty()) {
@@ -390,23 +393,25 @@ public class ImageDataService {
             return result;
         }
         
-        SQLiteDatabase db = dbHelper.getDatabase();
-        int updatedCount = 0;
-        int failedCount = 0;
-        
-        // 重试机制：最多重试3次，处理数据库锁定
-        int maxRetries = 3;
-        int retryDelayMs = 50; // 每次重试延迟50ms
-        
-        for (int retry = 0; retry < maxRetries; retry++) {
-            boolean transactionStarted = false;
+        // 🔥 使用同步锁确保数据库访问的串行化
+        synchronized (batchUpdateLock) {
+            SQLiteDatabase db = dbHelper.getDatabase();
+            int updatedCount = 0;
+            int failedCount = 0;
             
-            try {
-                // 尝试开始事务
-                db.beginTransaction();
-                transactionStarted = true;
+            // 重试机制：最多重试5次，处理数据库锁定
+            int maxRetries = 5;
+            int baseRetryDelayMs = 200; // 基础延迟200ms，递增延迟
+            
+            for (int retry = 0; retry < maxRetries; retry++) {
+                boolean transactionStarted = false;
                 
-                for (Map<String, Object> classificationData : classificationDataList) {
+                try {
+                    // 尝试开始事务
+                    db.beginTransaction();
+                    transactionStarted = true;
+                    
+                    for (Map<String, Object> classificationData : classificationDataList) {
                     try {
                         String uri = (String) classificationData.get("uri");
                         if (uri == null || uri.isEmpty()) {
@@ -474,93 +479,97 @@ public class ImageDataService {
                     } catch (Exception e) {
                         Log.e(TAG, "更新单条分类数据失败", e);
                         failedCount++;
-                    }
-                }
-                
-                // 标记事务成功
-                db.setTransactionSuccessful();
-                
-                // 成功执行，退出重试循环
-                break;
-                
-            } catch (android.database.sqlite.SQLiteDatabaseLockedException e) {
-                // 数据库锁定异常，需要重试
-                Log.w(TAG, "数据库锁定，重试 " + (retry + 1) + "/" + maxRetries + ": " + e.getMessage());
-                
-                // 确保在重试前结束事务（如果已开始）
-                if (transactionStarted) {
-                    try {
-                        if (db.inTransaction()) {
-                            db.endTransaction();
                         }
-                    } catch (Exception ex) {
-                        // 忽略结束事务时的异常
-                        Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
                     }
-                    transactionStarted = false;
-                }
-                
-                // 如果不是最后一次重试，等待后继续
-                if (retry < maxRetries - 1) {
-                    try {
-                        Thread.sleep(retryDelayMs * (retry + 1)); // 递增延迟
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
+                    
+                    // 标记事务成功
+                    db.setTransactionSuccessful();
+                    
+                    // 成功执行，退出重试循环
+                    break;
+                    
+                } catch (android.database.sqlite.SQLiteDatabaseLockedException e) {
+                    // 数据库锁定异常，需要重试
+                    Log.w(TAG, "数据库锁定，重试 " + (retry + 1) + "/" + maxRetries + ": " + e.getMessage());
+                    
+                    // 确保在重试前结束事务（如果已开始）
+                    if (transactionStarted) {
+                        try {
+                            if (db.inTransaction()) {
+                                db.endTransaction();
+                            }
+                        } catch (Exception ex) {
+                            // 忽略结束事务时的异常
+                            Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
+                        }
+                        transactionStarted = false;
                     }
-                } else {
-                    // 最后一次重试失败
-                    Log.e(TAG, "批量更新分类失败：数据库锁定，已重试 " + maxRetries + " 次", e);
+                    
+                    // 如果不是最后一次重试，等待后继续
+                    if (retry < maxRetries - 1) {
+                        try {
+                            // 递增延迟：200ms, 400ms, 600ms, 800ms
+                            int delay = baseRetryDelayMs * (retry + 1);
+                            Log.d(TAG, "数据库锁定，等待 " + delay + "ms 后重试 " + (retry + 2) + "/" + maxRetries);
+                            Thread.sleep(delay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    } else {
+                        // 最后一次重试失败
+                        Log.e(TAG, "批量更新分类失败：数据库锁定，已重试 " + maxRetries + " 次", e);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", false);
+                        result.put("updatedCount", 0);
+                        result.put("failedCount", classificationDataList.size());
+                        result.put("error", "数据库锁定，重试失败: " + e.getMessage());
+                        return result;
+                    }
+                    
+                } catch (Exception e) {
+                    // 其他异常，不重试
+                    Log.e(TAG, "批量更新分类失败", e);
+                    
+                    // 确保结束事务（如果已开始）
+                    if (transactionStarted) {
+                        try {
+                            if (db.inTransaction()) {
+                                db.endTransaction();
+                            }
+                        } catch (Exception ex) {
+                            // 忽略结束事务时的异常
+                            Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
+                        }
+                    }
+                    
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", false);
                     result.put("updatedCount", 0);
                     result.put("failedCount", classificationDataList.size());
-                    result.put("error", "数据库锁定，重试失败: " + e.getMessage());
+                    result.put("error", e.getMessage());
                     return result;
-                }
-                
-            } catch (Exception e) {
-                // 其他异常，不重试
-                Log.e(TAG, "批量更新分类失败", e);
-                
-                // 确保结束事务（如果已开始）
-                if (transactionStarted) {
-                    try {
-                        if (db.inTransaction()) {
-                            db.endTransaction();
+                } finally {
+                    // 确保结束事务（如果已开始且未在catch中处理）
+                    if (transactionStarted) {
+                        try {
+                            if (db.inTransaction()) {
+                                db.endTransaction();
+                            }
+                        } catch (Exception e) {
+                            // 忽略结束事务时的异常（可能已经在catch中处理过）
+                            Log.w(TAG, "结束事务时出错（可忽略）: " + e.getMessage());
                         }
-                    } catch (Exception ex) {
-                        // 忽略结束事务时的异常
-                        Log.w(TAG, "结束事务时出错（可忽略）: " + ex.getMessage());
-                    }
-                }
-                
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", false);
-                result.put("updatedCount", 0);
-                result.put("failedCount", classificationDataList.size());
-                result.put("error", e.getMessage());
-                return result;
-            } finally {
-                // 确保结束事务（如果已开始且未在catch中处理）
-                if (transactionStarted) {
-                    try {
-                        if (db.inTransaction()) {
-                            db.endTransaction();
-                        }
-                    } catch (Exception e) {
-                        // 忽略结束事务时的异常（可能已经在catch中处理过）
-                        Log.w(TAG, "结束事务时出错（可忽略）: " + e.getMessage());
                     }
                 }
             }
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("updatedCount", updatedCount);
+            result.put("failedCount", failedCount);
+            return result;
         }
-        
-        Map<String, Object> result = new HashMap<>();
-        result.put("success", true);
-        result.put("updatedCount", updatedCount);
-        result.put("failedCount", failedCount);
-        return result;
     }
     
     /**
