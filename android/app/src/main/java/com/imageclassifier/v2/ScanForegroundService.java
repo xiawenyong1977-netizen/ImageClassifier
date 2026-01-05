@@ -121,6 +121,17 @@ public class ScanForegroundService extends Service {
             int total = intent.getIntExtra("total", 0);
             String title = intent.getStringExtra("title"); // 🔥 解耦：通知标题由JS层传递
             
+            // 🔥 修复：如果服务还没有成为前台服务（例如被系统杀死后重新启动），必须先调用 startForeground()
+            // 检查服务是否已经是前台服务（通过检查 WakeLock 是否被持有，或者直接调用 startForeground 确保安全）
+            // 为了安全，总是先创建一个通知并调用 startForeground()
+            Notification progressNotification = createNotification(
+                message != null ? message : DEFAULT_SCANNING_MESSAGE, 
+                processed, 
+                total, 
+                title
+            );
+            startForeground(NOTIFICATION_ID, progressNotification);
+            
             // 🔥 保存进度消息和标题，供心跳机制使用
             if (message != null) {
                 lastProgressMessage = message;
@@ -134,10 +145,16 @@ public class ScanForegroundService extends Service {
             lastProcessed = processed;
             lastTotal = total;
             
-            // 🔥 修复：使用 lastTitle 而不是 title，确保与心跳机制保持一致
-            // 如果 title == null，使用 lastTitle（保持之前的值或null）
-            // 如果 title != null，lastTitle 已被更新，使用 lastTitle（等于 title）
-            updateNotification(message != null ? message : DEFAULT_SCANNING_MESSAGE, processed, total, lastTitle);
+            // 如果 WakeLock 还没有被持有，获取它（服务可能被系统杀死后重新启动）
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(60 * 60 * 1000L /*60分钟*/);
+            }
+            
+            // 启动心跳任务（如果还没有启动）
+            if (handler != null && heartbeatRunnable != null) {
+                handler.removeCallbacks(heartbeatRunnable); // 先移除，避免重复启动
+                handler.postDelayed(heartbeatRunnable, 10000); // 10秒后开始第一次心跳
+            }
         } else if ("STOP_SCAN".equals(action)) {
             // 停止心跳任务
             if (handler != null && heartbeatRunnable != null) {

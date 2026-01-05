@@ -66,12 +66,11 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
                 if (title != null) {
                     intent.putExtra("title", title);
                 }
-                // 使用 startForegroundService 确保服务能正常启动（Android 8.0+）
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent);
-                } else {
-                    context.startService(intent);
-                }
+                // 🔥 修复：使用 startService 而不是 startForegroundService
+                // 服务应该在扫描开始时通过 startScanService() 启动，updateProgress 只用于更新通知
+                // 如果服务没有启动，startService() 会启动服务，然后在 UPDATE_PROGRESS action 中调用 startForeground()
+                // 如果服务已经启动，startService() 只会调用 onStartCommand 更新通知，不会触发5秒超时
+                context.startService(intent);
             }
         } catch (Exception e) {
             Log.e(TAG, "更新扫描进度失败: " + e.getMessage(), e);

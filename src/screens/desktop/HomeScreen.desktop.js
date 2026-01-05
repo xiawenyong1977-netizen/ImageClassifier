@@ -454,7 +454,8 @@ const HomeScreen = () => {
         progress.stage === 'screenshot_detection' || progress.stage === 'cache_checking' ||
         progress.stage === 'remote_inference' || progress.stage === 'local_inference' ||
         progress.stage === 'processing_images' || progress.stage === 'removing_files' ||
-        progress.stage === 'similarity_detection' || progress.stage === 'updating_data') {
+        progress.stage === 'similarity_detection' || progress.stage === 'location_enrichment' ||
+        progress.stage === 'updating_data') {
       setIsScanning(true);
     }
     
@@ -468,6 +469,13 @@ const HomeScreen = () => {
       }
       // 显示扫描完成时间
       loadLastScanTime();
+    }
+    
+    // 位置信息补全阶段：如果shouldRefresh为true，刷新数据
+    if (progress.stage === 'location_enrichment' && progress.shouldRefresh) {
+      setTimeout(() => {
+        loadData();
+      }, 0);
     }
     
     // 防抖：只在消息真正变化时更新
@@ -567,6 +575,10 @@ const HomeScreen = () => {
       
       // 设置扫描状态
       setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
       setGlobalMessage(t('home.initScanning'));
       
       // 创建 GalleryScannerService 实例
@@ -606,6 +618,10 @@ const HomeScreen = () => {
       setGlobalMessage(t('home.scanFailed', { error: error.message }));
     } finally {
       setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
     }
   }, [handleScanProgress, loadData, t]);
 
@@ -622,6 +638,10 @@ const HomeScreen = () => {
       
       // 设置扫描状态
       setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
       setGlobalMessage(t('home.similarityDetectionInProgress'));
       
       // 创建 GalleryScannerService 实例，复用其相似度检测逻辑
@@ -655,6 +675,64 @@ const HomeScreen = () => {
       setGlobalMessage(t('home.similarityDetectionFailed', { error: error.message }));
     } finally {
       setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, loadData, t, handleScanProgress]);
+
+  // 启动位置信息补全
+  const handleStartLocationEnrichment = useCallback(async () => {
+    // 检查是否正在扫描
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过位置信息补全请求');
+      return;
+    }
+
+    try {
+      logger.debug('开始位置信息补全');
+      
+      // 设置扫描状态
+      setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.locationEnrichmentInProgress'));
+      
+      // 创建 GalleryScannerService 实例
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      
+      // 设置进度回调，复用 handleScanProgress
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('位置信息补全进度:', progress);
+        handleScanProgress(progress);
+      };
+      
+      // 调用位置信息补全方法
+      await galleryScannerService.enrichLocationInfo();
+      
+      // 获取城市统计以显示完成消息
+      const cityCountsData = await UnifiedDataService.readCityCounts();
+      const citiesCount = Object.keys(cityCountsData).length;
+      
+      logger.debug(`位置信息补全完成: 发现${citiesCount}个城市`);
+      setGlobalMessage(t('home.locationEnrichmentCompleted', { count: citiesCount }));
+      
+      // 刷新数据以显示新的城市数据
+      await loadData();
+      
+    } catch (error) {
+      logger.error('位置信息补全失败:', error);
+      setGlobalMessage(t('home.locationEnrichmentFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
     }
   }, [isScanning, loadData, t, handleScanProgress]);
 
@@ -833,6 +911,10 @@ const HomeScreen = () => {
 
       // 立即设置扫描状态
       setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
       setGlobalMessage(t('home.initScanning'));
       
       logger.debug('扫描状态已设置，切换到正常显示模式');
@@ -860,10 +942,18 @@ const HomeScreen = () => {
       
       logger.debug('智能扫描完成');
       setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
     } catch (error) {
       logger.error('智能扫描失败:', error);
       setGlobalMessage(t('home.scanFailed', { error: error.message }));
       setIsScanning(false); // 扫描失败时也要重置状态
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
       throw error;
     }
   }, [handleScanProgress, isScanning, loadData]);
@@ -1085,8 +1175,26 @@ const HomeScreen = () => {
         {/* 城市分类卡片 - 根据设置显示 */}
         {showCityCategories && (
           <View style={styles.categoriesSection}>
-            <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
+            <View style={styles.recentSectionHeader}>
+              <View style={styles.sectionTitleContainer}>
+                <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
+              </View>
+              {cityCounts && Object.keys(cityCounts).length > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.refreshButton,
+                    isScanning && styles.refreshButtonDisabled
+                  ]}
+                  onPress={handleStartLocationEnrichment}
+                  disabled={isScanning}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.refreshButtonText,
+                    isScanning && styles.refreshButtonTextDisabled
+                  ]}>🔄</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={styles.categoriesContainer}>
               {cityCounts && Object.keys(cityCounts).length > 0 ? (
@@ -1105,7 +1213,26 @@ const HomeScreen = () => {
                     );
                   })
               ) : (
-                <Text style={styles.emptyMessage}>{t('home.noCityData')}</Text>
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateIcon}>🏙️</Text>
+                  <Text style={styles.emptyStateText}>{t('home.noCityData')}</Text>
+                  <Text style={styles.emptyStateSubtext}>{t('home.startLocationEnrichmentHint')}</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.startSimilarityButton,
+                      isScanning && styles.startSimilarityButtonDisabled
+                    ]}
+                    onPress={handleStartLocationEnrichment}
+                    disabled={isScanning}
+                  >
+                    <Text style={[
+                      styles.startSimilarityButtonText,
+                      isScanning && styles.startSimilarityButtonTextDisabled
+                    ]}>
+                      {t('home.startLocationEnrichment')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -1760,7 +1887,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, isScanning, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, isScanning, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 

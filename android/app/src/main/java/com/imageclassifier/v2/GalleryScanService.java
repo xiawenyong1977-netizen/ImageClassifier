@@ -23,6 +23,7 @@ import androidx.exifinterface.media.ExifInterface;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.FileInputStream;
+import java.io.BufferedInputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -1368,55 +1369,187 @@ public class GalleryScanService {
      * @param quality JPEG 压缩质量（0-100），默认 90
      * @return 压缩后的图片字节数组
      */
-    private byte[] compressImage(InputStream imageInputStream, int maxSize, int quality) throws IOException {
-        // 读取原始图片
-        Bitmap originalBitmap = BitmapFactory.decodeStream(imageInputStream);
-        if (originalBitmap == null) {
-            throw new IOException("无法解码图片");
+    /**
+     * 检查可用内存是否足够（至少需要50MB）
+     */
+    private boolean hasEnoughMemory() {
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long availableMemory = maxMemory - (totalMemory - freeMemory);
+        
+        // 至少需要50MB可用内存
+        long requiredMemory = 50 * 1024 * 1024;
+        boolean hasEnough = availableMemory > requiredMemory;
+        
+        if (!hasEnough) {
+            Log.w(TAG, "⚠️ 内存不足: 可用=" + (availableMemory / 1024 / 1024) + "MB, 需要=" + (requiredMemory / 1024 / 1024) + "MB");
         }
         
+        return hasEnough;
+    }
+    
+    /**
+     * 计算合适的 inSampleSize（必须是2的幂次方）
+     * @param originalWidth 原始宽度
+     * @param originalHeight 原始高度
+     * @param targetSize 目标尺寸（宽或高的最大值）
+     * @return inSampleSize（1, 2, 4, 8, 16...）
+     */
+    private int calculateInSampleSize(int originalWidth, int originalHeight, int targetSize) {
+        int inSampleSize = 1;
+        
+        // 如果原始尺寸已经小于目标尺寸，不需要采样
+        if (originalWidth <= targetSize && originalHeight <= targetSize) {
+            return 1;
+        }
+        
+        // 计算合适的 inSampleSize
+        // 找到最大的 inSampleSize，使得解码后的尺寸仍然 >= targetSize
+        int halfWidth = originalWidth / 2;
+        int halfHeight = originalHeight / 2;
+        
+        while ((halfWidth / inSampleSize) >= targetSize && 
+               (halfHeight / inSampleSize) >= targetSize) {
+            inSampleSize *= 2;
+        }
+        
+        return inSampleSize;
+    }
+    
+    private byte[] compressImage(InputStream imageInputStream, int maxSize, int quality) throws IOException {
+        // 🔥 检查可用内存
+        if (!hasEnoughMemory()) {
+            throw new IOException("内存不足，无法压缩图片");
+        }
+        
+        // 🔥 确保 InputStream 支持 mark/reset（用于重复读取）
+        InputStream inputStream = imageInputStream;
+        if (!inputStream.markSupported()) {
+            // 如果不支持，包装成 BufferedInputStream
+            inputStream = new java.io.BufferedInputStream(inputStream);
+        }
+        
+        // 🔥 第一步：只获取图片尺寸，不加载到内存
+        inputStream.mark(10 * 1024 * 1024); // 标记位置，最多支持10MB的流
+        BitmapFactory.Options boundsOptions = new BitmapFactory.Options();
+        boundsOptions.inJustDecodeBounds = true; // 只读取边界信息，不加载像素数据
+        
         try {
-            int originalWidth = originalBitmap.getWidth();
-            int originalHeight = originalBitmap.getHeight();
+            BitmapFactory.decodeStream(inputStream, null, boundsOptions);
+        } catch (Exception e) {
+            Log.w(TAG, "⚠️ 获取图片尺寸失败", e);
+            throw new IOException("无法获取图片尺寸", e);
+        }
+        
+        int originalWidth = boundsOptions.outWidth;
+        int originalHeight = boundsOptions.outHeight;
+        
+        // 检查图片尺寸是否有效
+        if (originalWidth <= 0 || originalHeight <= 0) {
+            throw new IOException("无效的图片尺寸: " + originalWidth + "x" + originalHeight);
+        }
+        
+        // 🔥 检查图片尺寸，避免超大图片
+        long pixelCount = (long) originalWidth * originalHeight;
+        if (pixelCount > 50 * 1024 * 1024) { // 超过50MP
+            throw new IOException("图片尺寸过大（" + originalWidth + "x" + originalHeight + "），跳过");
+        }
+        
+        // 🔥 第二步：计算合适的 inSampleSize
+        int inSampleSize = calculateInSampleSize(originalWidth, originalHeight, maxSize);
+        
+        // 计算使用 inSampleSize 解码后的尺寸
+        int decodedWidth = originalWidth / inSampleSize;
+        int decodedHeight = originalHeight / inSampleSize;
+        
+        Log.d(TAG, "📷 图片尺寸: " + originalWidth + "x" + originalHeight + 
+              ", inSampleSize=" + inSampleSize + 
+              ", 解码后=" + decodedWidth + "x" + decodedHeight + 
+              ", 目标=" + maxSize);
+        
+        // 🔥 第三步：使用 inSampleSize 直接解码缩小后的图片
+        inputStream.reset(); // 重置流到标记位置
+        BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+        decodeOptions.inSampleSize = inSampleSize;
+        decodeOptions.inJustDecodeBounds = false;
+        
+        Bitmap bitmap = null;
+        Bitmap finalBitmap = null;
+        try {
+            bitmap = BitmapFactory.decodeStream(inputStream, null, decodeOptions);
             
-            // 计算缩放比例，保持宽高比
-            float scale = Math.min((float) maxSize / originalWidth, (float) maxSize / originalHeight);
-            
-            // 如果图片已经小于目标尺寸，不需要缩放
-            if (scale >= 1.0f) {
-                Log.d(TAG, "📷 图片尺寸 " + originalWidth + "x" + originalHeight + " 已小于 " + maxSize + "，无需压缩");
-                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
-                return outputStream.toByteArray();
+            if (bitmap == null) {
+                throw new IOException("无法解码图片");
             }
             
-            // 计算新尺寸
-            int newWidth = Math.round(originalWidth * scale);
-            int newHeight = Math.round(originalHeight * scale);
+            int bitmapWidth = bitmap.getWidth();
+            int bitmapHeight = bitmap.getHeight();
             
-            Log.d(TAG, "📷 压缩图片: " + originalWidth + "x" + originalHeight + " -> " + newWidth + "x" + newHeight);
+            // 🔥 第四步：如果需要进一步缩放到目标尺寸，再进行缩放
+            float scale = Math.min((float) maxSize / bitmapWidth, (float) maxSize / bitmapHeight);
             
-            // 缩放图片
-            Bitmap scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true);
+            finalBitmap = bitmap; // 默认使用解码后的 Bitmap
+            boolean needsScaling = scale < 1.0f;
             
-            try {
-                // 压缩为 JPEG
-                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
-                byte[] compressedData = outputStream.toByteArray();
+            if (needsScaling) {
+                // 需要进一步缩放
+                int finalWidth = Math.round(bitmapWidth * scale);
+                int finalHeight = Math.round(bitmapHeight * scale);
                 
-                Log.d(TAG, "✅ 压缩完成: 原始大小约 " + (originalWidth * originalHeight * 3 / 1024) + " KB -> 压缩后 " + (compressedData.length / 1024) + " KB");
+                Log.d(TAG, "📷 进一步缩放: " + bitmapWidth + "x" + bitmapHeight + " -> " + finalWidth + "x" + finalHeight);
                 
-                return compressedData;
-            } finally {
-                // 释放缩放后的 Bitmap
-                if (scaledBitmap != originalBitmap) {
-                    scaledBitmap.recycle();
+                // 🔥 检查内存是否足够创建缩放后的 Bitmap
+                if (!hasEnoughMemory()) {
+                    throw new IOException("内存不足，无法缩放图片");
                 }
+                
+                try {
+                    finalBitmap = Bitmap.createScaledBitmap(bitmap, finalWidth, finalHeight, true);
+                    
+                    if (finalBitmap == null) {
+                        throw new IOException("无法创建缩放后的图片");
+                    }
+                } catch (OutOfMemoryError e) {
+                    Log.w(TAG, "⚠️ 缩放图片时内存不足", e);
+                    System.gc(); // 建议GC
+                    throw new IOException("内存不足，无法缩放图片", e);
+                }
+            } else {
+                Log.d(TAG, "📷 图片尺寸 " + bitmapWidth + "x" + bitmapHeight + " 已小于等于目标尺寸 " + maxSize + "，无需进一步缩放");
             }
+            
+            // 🔥 第五步：压缩为 JPEG
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            finalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
+            byte[] compressedData = outputStream.toByteArray();
+            
+            Log.d(TAG, "✅ 压缩完成: 原始=" + originalWidth + "x" + originalHeight + 
+                  ", 解码后=" + bitmapWidth + "x" + bitmapHeight + 
+                  ", 最终=" + finalBitmap.getWidth() + "x" + finalBitmap.getHeight() + 
+                  ", 压缩后=" + (compressedData.length / 1024) + " KB");
+            
+            return compressedData;
+        } catch (OutOfMemoryError e) {
+            // 🔥 捕获 OOM，尝试释放内存
+            Log.w(TAG, "⚠️ 解码图片时内存不足（inSampleSize=" + inSampleSize + "），尝试释放内存", e);
+            System.gc(); // 建议GC
+            try {
+                Thread.sleep(100); // 等待GC
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IOException("内存不足，无法解码图片", e);
         } finally {
-            // 释放原始 Bitmap
-            originalBitmap.recycle();
+            // 🔥 释放 Bitmap
+            if (bitmap != null) {
+                bitmap.recycle();
+            }
+            // 如果创建了新的缩放 Bitmap，也需要释放
+            if (finalBitmap != null && finalBitmap != bitmap) {
+                finalBitmap.recycle();
+            }
         }
     }
     
@@ -2126,6 +2259,10 @@ public class GalleryScanService {
         compressTask.compressedImages = new HashMap<>();
         compressTask.compressFailedImages = new ArrayList<>();
         
+        // 🔥 限制缓存总大小：最大50MB（避免内存积累）
+        final long MAX_CACHE_SIZE = 50 * 1024 * 1024; // 50MB
+        long currentCacheSize = 0;
+        
         // 🔥 v2格式：构建 image_metadata JSON对象
         JSONObject imageMetadata = new JSONObject();
         JSONArray itemsArray = new JSONArray();
@@ -2164,9 +2301,11 @@ public class GalleryScanService {
                 continue; // 跳过这张图片
             }
             
+            // 🔥 修复内存泄漏：使用 try-finally 确保 InputStream 始终关闭
+            InputStream imageInputStream = null;
+            ByteArrayOutputStream originalData = null;
             try {
                 // 打开图片输入流
-                InputStream imageInputStream = null;
                 if (uriString.startsWith("content://")) {
                     Uri uri = Uri.parse(uriString);
                     imageInputStream = reactContext.getContentResolver().openInputStream(uri);
@@ -2191,11 +2330,18 @@ public class GalleryScanService {
                 byte[] compressedImageData;
                 try {
                     compressedImageData = compressImage(imageInputStream, 1024, 90);
-                    imageInputStream.close();
                 } catch (Exception compressError) {
                     Log.e(TAG, "❌ [节点1] 图片压缩失败: " + uriString + ", 使用原始图片", compressError);
                     // 压缩失败时，重新打开输入流使用原始图片
-                    imageInputStream.close();
+                    // 🔥 先关闭当前流
+                    try {
+                        imageInputStream.close();
+                    } catch (IOException e) {
+                        // 忽略关闭错误
+                    }
+                    imageInputStream = null;
+                    
+                    // 重新打开输入流
                     if (uriString.startsWith("content://")) {
                         Uri uri = Uri.parse(uriString);
                         imageInputStream = reactContext.getContentResolver().openInputStream(uri);
@@ -2205,19 +2351,52 @@ public class GalleryScanService {
                     } else {
                         imageInputStream = new FileInputStream(uriString);
                     }
-                    // 读取原始图片数据
-                    ByteArrayOutputStream originalData = new ByteArrayOutputStream();
+                    
+                    if (imageInputStream == null) {
+                        throw new IOException("无法重新打开图片文件");
+                    }
+                    
+                    // 🔥 限制读取大小，避免大图片导致OOM（最大10MB）
+                    originalData = new ByteArrayOutputStream();
                     byte[] buffer = new byte[8192];
                     int bytesRead;
+                    long totalBytes = 0;
+                    final long MAX_SIZE = 10 * 1024 * 1024; // 10MB
                     while ((bytesRead = imageInputStream.read(buffer)) != -1) {
+                        totalBytes += bytesRead;
+                        if (totalBytes > MAX_SIZE) {
+                            throw new IOException("图片文件过大（超过10MB），跳过");
+                        }
                         originalData.write(buffer, 0, bytesRead);
                     }
                     compressedImageData = originalData.toByteArray();
-                    imageInputStream.close();
+                }
+                
+                // 🔥 限制单个图片大小：如果压缩后的图片数据超过5MB，跳过（避免内存积累）
+                if (compressedImageData != null && compressedImageData.length > 5 * 1024 * 1024) {
+                    Log.w(TAG, "⚠️ [节点1] 压缩后的图片数据过大（" + (compressedImageData.length / 1024 / 1024) + "MB），跳过: " + uriString);
+                    compressTask.compressFailedImages.add(image);
+                    // 从itemsArray中移除对应的metadata item
+                    if (itemsArray.length() > 0) {
+                        itemsArray.remove(itemsArray.length() - 1);
+                    }
+                    continue;
+                }
+                
+                // 🔥 限制缓存总大小：如果添加这张图片后超过50MB，跳过（避免内存积累）
+                if (compressedImageData != null && (currentCacheSize + compressedImageData.length) > MAX_CACHE_SIZE) {
+                    Log.w(TAG, "⚠️ [节点1] 缓存总大小即将超过限制（当前=" + (currentCacheSize / 1024 / 1024) + "MB, 添加后=" + ((currentCacheSize + compressedImageData.length) / 1024 / 1024) + "MB），跳过: " + uriString);
+                    compressTask.compressFailedImages.add(image);
+                    // 从itemsArray中移除对应的metadata item
+                    if (itemsArray.length() > 0) {
+                        itemsArray.remove(itemsArray.length() - 1);
+                    }
+                    continue;
                 }
                 
                 // 存储压缩后的图片数据（使用uri作为key）
                 compressTask.compressedImages.put(uriString, compressedImageData);
+                currentCacheSize += compressedImageData.length; // 更新缓存大小
                 
                 // 成功添加图片后，增加实际索引
                 actualIndex++;
@@ -2227,6 +2406,22 @@ public class GalleryScanService {
                 // 读取失败时，需要从itemsArray中移除对应的metadata item
                 if (itemsArray.length() > 0) {
                     itemsArray.remove(itemsArray.length() - 1);
+                }
+            } finally {
+                // 🔥 确保 InputStream 和 ByteArrayOutputStream 始终关闭/释放
+                if (imageInputStream != null) {
+                    try {
+                        imageInputStream.close();
+                    } catch (IOException e) {
+                        // 忽略关闭错误
+                    }
+                }
+                if (originalData != null) {
+                    try {
+                        originalData.close();
+                    } catch (IOException e) {
+                        // 忽略关闭错误
+                    }
                 }
             }
         }

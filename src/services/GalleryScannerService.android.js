@@ -650,9 +650,9 @@ class GalleryScannerService {
       const totalBatches = Math.ceil(validImages.length / batchSize);
       logger.info(`🚀 开始流水线处理: ${totalFoundThisPhase} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批`);
 
-      // 🔥 流水线队列：节点1 -> 节点2 -> 节点3
-      const inferenceQueue = []; // 节点1输出 -> 节点2输入
-      const locationQueue = []; // 节点2输出 -> 节点3输入
+      // 🔥 流水线队列：节点1 -> 节点2（每个节点自己负责保存）
+      const inferenceQueue = []; // 节点1输入
+      const locationQueue = []; // 节点2输入
       
       // 批次任务定义
       class InferenceTask {
@@ -673,27 +673,79 @@ class GalleryScannerService {
           this.locationResults = null; // 节点2的输出
         }
       }
-
-      class SaveTask {
-        constructor(batchIndex, batchImages, isLastBatch, inferenceResults, locationResults) {
-          this.batchIndex = batchIndex;
-          this.batchImages = batchImages;
-          this.isLastBatch = isLastBatch;
-          this.inferenceResults = inferenceResults; // 节点1的输出
-          this.locationResults = locationResults; // 节点2的输出
+      
+      // 🔥 保存MobileNetV3推理结果的辅助函数
+      const saveInferenceResults = async (tasks) => {
+        const batchResults = [];
+        
+        for (const task of tasks) {
+          if (!task.inferenceResults) continue;
+          
+          for (let i = 0; i < task.batchImages.length; i++) {
+            const image = task.batchImages[i];
+            const inferenceResult = task.inferenceResults[i];
+            
+            if (inferenceResult && inferenceResult.inferenceResult) {
+              batchResults.push({
+                uri: image.uri,
+                id: image.id,
+                mobileNetV3Detections: inferenceResult.inferenceResult
+              });
+            }
+          }
         }
-      }
+        
+        if (batchResults.length > 0) {
+          await UnifiedDataService.batchUpdateClassification(batchResults, false);
+          logger.debug(`✅ [节点1] 批量保存MobileNetV3推理结果: ${batchResults.length} 张`);
+        }
+      };
+      
+      // 🔥 保存位置信息的辅助函数
+      const saveLocationResults = async (tasks) => {
+        const batchResults = [];
+        
+        for (const task of tasks) {
+          if (!task.locationResults) continue;
+          
+          for (const locationResult of task.locationResults) {
+            const image = task.batchImages.find(img => img.uri === locationResult.uri);
+            if (image && locationResult.locationId) {
+              batchResults.push({
+                uri: image.uri,
+                id: image.id,
+                city: locationResult.locationId,
+                latitude: image.latitude,
+                longitude: image.longitude
+              });
+            }
+          }
+        }
+        
+        if (batchResults.length > 0) {
+          await UnifiedDataService.updateImagesCity(batchResults, false);
+          logger.debug(`✅ [节点2] 批量保存位置信息: ${batchResults.length} 张`);
+        }
+      };
 
       let processedThisPhase = 0;
       let completedBatches = 0;
 
-      // ========== 节点1：MobileNetV3推理（单线程）==========
+      // ========== 节点1：MobileNetV3推理（单线程，每5个批次保存一次）==========
       const inferenceNode = async () => {
+        const SAVE_BATCH_COUNT = 5; // 每5个批次保存一次
+        const pendingTasks = []; // 待保存的任务列表
+        
         let shouldExit = false;
         while (!shouldExit) {
           try {
             // 等待批次任务
             if (inferenceQueue.length === 0 && completedBatches >= totalBatches) {
+              // 处理完所有批次，保存剩余的任务
+              if (pendingTasks.length > 0) {
+                await saveInferenceResults(pendingTasks);
+                pendingTasks.length = 0;
+              }
               shouldExit = true;
               continue;
             }
@@ -757,6 +809,15 @@ class GalleryScannerService {
                 }
               }
 
+              // 累积任务
+              pendingTasks.push(task);
+              
+              // 🔥 每5个批次保存一次（不更新进度，只保存数据）
+              if (pendingTasks.length >= SAVE_BATCH_COUNT || task.isLastBatch) {
+                await saveInferenceResults(pendingTasks);
+                pendingTasks.length = 0;
+              }
+
               // 传递给节点2
               const locationTask = new LocationTask(
                 task.batchIndex,
@@ -789,23 +850,128 @@ class GalleryScannerService {
         logger.debug('🔍 [节点1] 线程退出');
       };
 
-      // ========== 节点2：位置查询（单线程）==========
+      // ========== 节点2：位置查询（单线程，累积到400个后批量查询并保存）==========
       const locationNode = async () => {
+        const BATCH_SIZE = 400; // 累积到400个坐标后再批量查询（接口最多支持500个）
+        const pendingTasks = []; // 待处理的任务列表
+        const pendingCoordinates = []; // 累积的坐标列表
+        let processedBatches = 0; // 已从队列中取出的批次数量（用于判断是否所有批次都已处理）
+        
         let shouldExit = false;
+        
+        // 执行批量位置查询的辅助函数
+        const executeBatchQuery = async () => {
+          if (pendingCoordinates.length === 0) {
+            return;
+          }
+          
+          logger.debug(`📍 [节点2] 执行批量位置查询: ${pendingCoordinates.length} 个坐标`);
+          
+          try {
+            // 批量获取位置信息
+            const locationResultsArray = await cityLocationService.getLocationsBatch(
+              pendingCoordinates,
+              { skipRemote: false }
+            );
+            
+            // 处理批量查询结果，分配给对应的任务
+            const uriToLocationResult = new Map();
+            for (const locationResult of locationResultsArray) {
+              const locationId = locationResult.location_id || 
+                                locationResult.city?.location_id || 
+                                null;
+              
+              if (locationResult.success && locationId && locationResult.id) {
+                uriToLocationResult.set(locationResult.id, {
+                  locationId: locationId,
+                  latitude: locationResult.latitude,
+                  longitude: locationResult.longitude
+                });
+              }
+            }
+            
+            // 将查询结果分配给对应的任务
+            for (const task of pendingTasks) {
+              const locationResults = [];
+              
+              // 从任务中找出需要查询的图片
+              const imagesNeedLocationQuery = task.batchImages.filter(image => {
+                if (!image.latitude || !image.longitude) {
+                  return false;
+                }
+                const hasCity = image.city && image.city.trim() !== '';
+                const hasCountry = image.country && image.country.trim() !== '';
+                return !hasCity || !hasCountry;
+              });
+              
+              // 为每张需要查询的图片查找结果
+              for (const image of imagesNeedLocationQuery) {
+                const result = uriToLocationResult.get(image.uri);
+                if (result) {
+                  locationResults.push({
+                    uri: image.uri,
+                    id: image.id,
+                    locationId: result.locationId,
+                    latitude: result.latitude,
+                    longitude: result.longitude
+                  });
+                }
+              }
+              
+              task.locationResults = locationResults;
+            }
+            
+            logger.debug(`✅ [节点2] 批量位置查询完成: ${locationResultsArray.length} 个结果，分配给 ${pendingTasks.length} 个批次`);
+            
+            // 清空累积的数据
+            pendingCoordinates.length = 0;
+            
+          } catch (error) {
+            logger.error(`❌ [节点2] 批量位置查询失败:`, error);
+            // 失败时，所有待处理任务都标记为无位置结果
+            for (const task of pendingTasks) {
+              task.locationResults = [];
+            }
+            pendingCoordinates.length = 0;
+          }
+        };
+        
         while (!shouldExit) {
           try {
-            // 等待批次任务
-            if (locationQueue.length === 0 && completedBatches >= totalBatches) {
+            // 检查是否应该退出：所有批次都已从队列中取出，且没有待处理的任务
+            if (locationQueue.length === 0 && processedBatches >= totalBatches) {
+              // 处理完所有批次，执行最后一次批量查询并保存
+              if (pendingCoordinates.length > 0) {
+                await executeBatchQuery();
+              }
+              
+              // 处理所有待处理的任务，按批次索引排序确保顺序正确
+              const sortedTasks = [...pendingTasks].sort((a, b) => a.batchIndex - b.batchIndex);
+              
+              // 🔥 保存位置信息
+              await saveLocationResults(sortedTasks);
+              
+              // 更新进度和完成计数
+              const savedCount = sortedTasks.reduce((sum, t) => {
+                return sum + (t.locationResults?.length || 0);
+              }, 0);
+              processedThisPhase += savedCount;
+              completedBatches += sortedTasks.length;
+              
+              await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+              
               shouldExit = true;
               continue;
             }
             
+            // 如果队列为空，短暂等待
             if (locationQueue.length === 0) {
-              await new Promise(resolve => setTimeout(resolve, 10)); // 短暂等待
+              await new Promise(resolve => setTimeout(resolve, 10));
               continue;
             }
 
             const task = locationQueue.shift();
+            processedBatches++; // 标记已从队列中取出一个批次
             const batchNumber = task.batchIndex + 1;
 
             try {
@@ -824,20 +990,11 @@ class GalleryScannerService {
               if (imagesNeedLocationQuery.length === 0) {
                 logger.debug(`📍 [节点2] 批次 ${batchNumber}/${totalBatches}: 无需位置查询（所有照片都有位置信息或无坐标）`);
                 task.locationResults = [];
-                
-                // 传递给节点3
-                const saveTask = new SaveTask(
-                  task.batchIndex,
-                  task.batchImages,
-                  task.isLastBatch,
-                  task.inferenceResults,
-                  task.locationResults
-                );
-                await saveNode(saveTask);
+                completedBatches++;
                 continue;
               }
 
-              logger.debug(`📍 [节点2] 批次 ${batchNumber}/${totalBatches}: 开始位置查询 ${imagesNeedLocationQuery.length}/${task.batchImages.length} 张图片`);
+              logger.debug(`📍 [节点2] 批次 ${batchNumber}/${totalBatches}: 累积位置查询 ${imagesNeedLocationQuery.length}/${task.batchImages.length} 张图片（当前累积: ${pendingCoordinates.length}）`);
 
               // 准备批量查询的坐标数组（只查询需要查询的照片）
               const coordinates = imagesNeedLocationQuery.map(image => ({
@@ -846,64 +1003,43 @@ class GalleryScannerService {
                 longitude: image.longitude
               }));
 
-              // 批量获取位置信息
-              const locationResultsArray = await cityLocationService.getLocationsBatch(
-                coordinates,
-                { skipRemote: false }
-              );
+              // 累积坐标和任务
+              pendingCoordinates.push(...coordinates);
+              pendingTasks.push(task);
 
-              // 处理批量查询结果
-              const locationResults = [];
-              for (const locationResult of locationResultsArray) {
-                const locationId = locationResult.location_id || 
-                                  locationResult.city?.location_id || 
-                                  null;
+              // 🔥 如果累积到400个坐标，或者是最后一个批次，执行批量查询并保存
+              if (pendingCoordinates.length >= BATCH_SIZE || task.isLastBatch) {
+                await executeBatchQuery();
                 
-                if (locationResult.success && locationId) {
-                  // 🔥 从需要查询的图片列表中查找（locationResultsArray的结果只对应imagesNeedLocationQuery）
-                  const image = imagesNeedLocationQuery.find(img => img.uri === locationResult.id);
-                  if (image) {
-                    locationResults.push({
-                      uri: image.uri,
-                      id: image.id,
-                      locationId: locationId,
-                      latitude: image.latitude,
-                      longitude: image.longitude
-                    });
-                  }
-                }
+                // 处理已完成查询的任务
+                const completedTasks = [...pendingTasks];
+                pendingTasks.length = 0;
+                
+                // 按批次索引排序，确保保存顺序正确
+                completedTasks.sort((a, b) => a.batchIndex - b.batchIndex);
+                
+                // 🔥 保存位置信息
+                await saveLocationResults(completedTasks);
+                
+                // 更新进度和完成计数
+                const savedCount = completedTasks.reduce((sum, t) => {
+                  return sum + (t.locationResults?.length || 0);
+                }, 0);
+                processedThisPhase += savedCount;
+                completedBatches += completedTasks.length;
+                
+                await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
               }
-
-              task.locationResults = locationResults;
-              logger.debug(`✅ [节点2] 批次 ${batchNumber}: 位置查询完成 ${locationResults.length}/${task.batchImages.length} 张`);
-
-              // 传递给节点3
-              const saveTask = new SaveTask(
-                task.batchIndex,
-                task.batchImages,
-                task.isLastBatch,
-                task.inferenceResults,
-                task.locationResults
-              );
-              
-              // 节点3直接处理，不需要队列（单线程顺序执行）
-              await saveNode(saveTask);
 
             } catch (error) {
               logger.error(`❌ [节点2] 批次 ${batchNumber} 处理异常:`, error);
-              // 即使失败也传递给节点3
-              const saveTask = new SaveTask(
-                task.batchIndex,
-                task.batchImages,
-                task.isLastBatch,
-                task.inferenceResults,
-                null
-              );
-              await saveNode(saveTask);
+              // 失败时标记为无位置结果
+              task.locationResults = [];
+              completedBatches++;
             }
 
             if (task.isLastBatch) {
-              shouldExit = true;
+              // 最后一个批次，但可能还有累积的数据，会在下次循环中处理
             }
 
           } catch (error) {
@@ -913,88 +1049,7 @@ class GalleryScannerService {
         logger.debug('🔍 [节点2] 线程退出');
       };
 
-      // ========== 节点3：保存结果（单线程）==========
-      const saveNode = async (task) => {
-        const batchNumber = task.batchIndex + 1;
-
-        try {
-          logger.debug(`💾 [节点3] 批次 ${batchNumber}/${totalBatches}: 开始保存结果`);
-
-          const batchResults = [];
-
-          // 合并推理结果和位置信息
-          for (let i = 0; i < task.batchImages.length; i++) {
-            const image = task.batchImages[i];
-            const inferenceResult = task.inferenceResults?.[i];
-            const locationResult = task.locationResults?.find(r => r.uri === image.uri);
-
-            const updateItem = {
-              uri: image.uri,
-              id: image.id
-            };
-
-            // 保存MobileNetV3推理结果
-            if (inferenceResult && inferenceResult.inferenceResult) {
-              updateItem.mobileNetV3Detections = inferenceResult.inferenceResult;
-            }
-
-            // 保存位置信息
-            if (locationResult && locationResult.locationId) {
-              updateItem.city = locationResult.locationId;
-            }
-
-            // 只有有更新内容才添加到批次结果
-            if (updateItem.mobileNetV3Detections || updateItem.city) {
-              batchResults.push(updateItem);
-            }
-          }
-
-          // 批量保存
-          if (batchResults.length > 0) {
-            // 分离位置信息和推理结果，分别保存
-            const cityUpdates = batchResults.filter(item => item.city).map(item => ({
-              uri: item.uri,
-              id: item.id,
-              city: item.city,
-              latitude: task.batchImages.find(img => img.uri === item.uri)?.latitude,
-              longitude: task.batchImages.find(img => img.uri === item.uri)?.longitude
-            }));
-
-            const classificationUpdates = batchResults.filter(item => item.mobileNetV3Detections).map(item => ({
-              uri: item.uri,
-              id: item.id,
-              mobileNetV3Detections: item.mobileNetV3Detections
-            }));
-
-            // 保存位置信息
-            if (cityUpdates.length > 0) {
-              await UnifiedDataService.updateImagesCity(cityUpdates, false);
-            }
-
-            // 保存推理结果
-            if (classificationUpdates.length > 0) {
-              await UnifiedDataService.batchUpdateClassification(classificationUpdates, false);
-            }
-
-            processedThisPhase += batchResults.length;
-            completedBatches++;
-            
-            // 更新进度
-            await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
-            
-            logger.debug(`✅ [节点3] 批次 ${batchNumber}: 保存完成 ${batchResults.length} 张`);
-          } else {
-            completedBatches++;
-            logger.debug(`⏭️ [节点3] 批次 ${batchNumber}: 无需保存`);
-          }
-
-        } catch (error) {
-          logger.error(`❌ [节点3] 批次 ${batchNumber} 保存异常:`, error);
-          completedBatches++;
-        }
-      };
-
-      // 启动节点1和节点2（节点3由节点2调用）
+      // 启动节点1和节点2（每个节点自己负责保存）
       const node1Promise = inferenceNode();
       const node2Promise = locationNode();
 
@@ -1012,6 +1067,11 @@ class GalleryScannerService {
       await Promise.all([node1Promise, node2Promise]);
 
       logger.info(`✅ 位置信息补全完成（流水线版本）: 补全了 ${processedThisPhase} 张图片的位置信息`);
+
+      // 发送完成消息（会触发 processProgressData 自动重建缓存）
+      // 🔥 修复：位置信息补全完成后发送 location_enrichment 阶段消息（与相似度检测保持一致），而不是 completed
+      // 这样 sendProgressMessage 中的判断 stage !== 'location_enrichment' 会排除它，不会调用前台服务
+      await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
 
     } catch (error) {
       const errorMessage = error?.message || error?.toString() || '未知错误';

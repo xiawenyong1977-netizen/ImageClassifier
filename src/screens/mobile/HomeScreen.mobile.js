@@ -10,7 +10,7 @@
  * 6. FAB扫描按钮
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   View,
@@ -100,6 +100,10 @@ const HomeScreen = ({ navigation }) => {
   // 消息提示
   const [globalMessage, setGlobalMessage] = useState(t('home.ready'));
   
+  // 防抖定时器引用（用于避免频繁刷新数据）
+  const loadDataDebounceTimerRef = useRef(null);
+  // 存储最新的 loadAllData 函数引用（用于防抖函数）
+  const loadAllDataRef = useRef(null);
   
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
@@ -364,6 +368,36 @@ const HomeScreen = ({ navigation }) => {
       throw error;
     }
   };
+  
+  // 更新 loadAllData 的引用
+  loadAllDataRef.current = loadAllData;
+
+  /**
+   * 防抖版本的 loadAllData（避免频繁刷新）
+   * 在 AI 分类过程中使用，避免短时间内多次刷新
+   */
+  const loadAllDataDebounced = useCallback(async () => {
+    // 清除之前的定时器
+    if (loadDataDebounceTimerRef.current) {
+      clearTimeout(loadDataDebounceTimerRef.current);
+      loadDataDebounceTimerRef.current = null;
+    }
+    
+    // 设置新的定时器，500ms 内只执行最后一次调用
+    loadDataDebounceTimerRef.current = setTimeout(async () => {
+      try {
+        logger.debug('🔄 执行防抖后的数据刷新');
+        // 使用 ref 中的最新函数引用
+        if (loadAllDataRef.current) {
+          await loadAllDataRef.current();
+        }
+      } catch (error) {
+        logger.error('❌ 防抖刷新数据失败:', error);
+      } finally {
+        loadDataDebounceTimerRef.current = null;
+      }
+    }, 500);
+  }, []);
 
 
   /**
@@ -903,6 +937,76 @@ const HomeScreen = ({ navigation }) => {
   }, [isScanning, loadAllData, t]);
 
   /**
+   * 启动位置信息补全
+   */
+  const handleStartLocationEnrichment = useCallback(async () => {
+    // 检查是否正在扫描
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过位置信息补全请求');
+      Alert.alert(t('common.tip'), t('home.scanAlreadyInProgress'));
+      return;
+    }
+
+    try {
+      logger.debug('开始位置信息补全');
+      
+      // 设置扫描状态
+      setIsScanning(true);
+      // 🔥 设置全局变量，供设置页面检查扫描状态
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.locationEnrichmentInProgress'));
+      
+      // 使用唤醒锁防止手机休眠影响处理性能
+      const wakeLockAcquired = await WakeLockService.acquire(30 * 60 * 1000); // 30分钟超时
+      if (wakeLockAcquired) {
+        logger.info('🔋 已获取唤醒锁，防止手机休眠影响位置信息补全性能');
+      }
+      
+      // 创建 GalleryScannerService 实例
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      
+      // 设置进度回调
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('位置信息补全进度:', progress);
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || t('home.locationEnrichmentInProgress');
+          setGlobalMessage(message);
+          
+          // 检查是否需要刷新页面数据
+          if (progress.shouldRefresh) {
+            setTimeout(async () => {
+              try {
+                await loadAllData();
+              } catch (error) {
+                logger.error('❌ 刷新页面数据失败:', error);
+              }
+            }, 0);
+          }
+        }
+      };
+      
+      // 调用位置信息补全方法（进度消息会通过 onProgress 回调处理，包括缓存刷新和数据加载）
+      await galleryScannerService.enrichLocationInfo();
+      
+    } catch (error) {
+      logger.error('位置信息补全失败:', error);
+      setGlobalMessage(t('home.locationEnrichmentFailed', { error: error.message }));
+      Alert.alert(t('home.locationEnrichmentFailed', { error: '' }), error.message);
+    } finally {
+      // 释放唤醒锁
+      await WakeLockService.release();
+      setIsScanning(false);
+      // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, loadAllData, t]);
+
+  /**
    * 加载最近扫描时间和信息
    */
   const loadLastScanTime = async (preserveCurrentMessage = false) => {
@@ -1200,15 +1304,9 @@ const HomeScreen = ({ navigation }) => {
           const message = progress.simpleMessage || progress.message || t('home.aiClassificationInProgress');
           setGlobalMessage(message);
           
-          // 检查是否需要刷新页面数据
+          // 检查是否需要刷新页面数据（使用防抖版本，避免频繁刷新）
           if (progress.shouldRefresh) {
-            setTimeout(async () => {
-              try {
-                await loadAllData();
-              } catch (error) {
-                logger.error('❌ 刷新页面数据失败:', error);
-              }
-            }, 0);
+            loadAllDataDebounced();
           }
         }
       };
@@ -1219,8 +1317,15 @@ const HomeScreen = ({ navigation }) => {
       logger.debug('✅ AI分类完成');
       setGlobalMessage(t('home.aiClassificationComplete'));
       
-      // 分类完成后刷新数据
-      await onRefresh();
+      // 分类完成后，清除防抖定时器并立即刷新数据（避免与进度回调中的刷新重复）
+      if (loadDataDebounceTimerRef.current) {
+        clearTimeout(loadDataDebounceTimerRef.current);
+        loadDataDebounceTimerRef.current = null;
+      }
+      // 等待一小段时间，确保进度回调中的刷新已完成
+      await new Promise(resolve => setTimeout(resolve, 600));
+      // 执行最终刷新
+      await loadAllData();
     } catch (error) {
       logger.error('❌ AI分类失败:', error);
       setGlobalMessage(t('home.aiClassificationFailed', { error: error.message }));
@@ -2355,15 +2460,59 @@ const HomeScreen = ({ navigation }) => {
    * 渲染按城市区（与"按内容"保持一致：4列网格布局）
    */
   const renderCitiesSection = () => {
-    if (cities.length === 0) return null;
+    // 如果设置中关闭了城市显示，不渲染
+    if (!showCityCategories) return null;
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🏙️ {t('home.byCity')}</Text>
-        <View style={styles.categoriesGrid}>
-          {cities.map(renderCityCard)}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
+          </View>
+          {cities && cities.length > 0 && (
+            <TouchableOpacity 
+              style={[
+                styles.toggleButton,
+                isScanning && styles.toggleButtonDisabled
+              ]}
+              onPress={handleStartLocationEnrichment}
+              disabled={isScanning}
+            >
+              <Text style={[
+                styles.toggleButtonText,
+                isScanning && styles.toggleButtonTextDisabled
+              ]}>{t('home.recheck')}</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        </View>
+        
+        {cities && cities.length > 0 ? (
+          <View style={styles.categoriesGrid}>
+            {cities.map(renderCityCard)}
+          </View>
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>🏙️</Text>
+            <Text style={styles.emptyStateText}>{t('home.noCityData')}</Text>
+            <Text style={styles.emptyStateSubtext}>{t('home.startLocationEnrichmentHint')}</Text>
+            <TouchableOpacity
+              style={[
+                styles.startSimilarityButton,
+                isScanning && styles.startSimilarityButtonDisabled
+              ]}
+              onPress={handleStartLocationEnrichment}
+              disabled={isScanning}
+            >
+              <Text style={[
+                styles.startSimilarityButtonText,
+                isScanning && styles.startSimilarityButtonTextDisabled
+              ]}>
+                {t('home.startLocationEnrichment')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     );
   };
 
