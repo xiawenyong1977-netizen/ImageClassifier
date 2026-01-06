@@ -270,6 +270,8 @@ scp $portableZipLocal "${serverAddress}:${ServerPath}/pc/portable/$portableZipRe
 if ($LASTEXITCODE -ne 0) {
     throw "复制便携版失败"
 }
+# 更新服务器上文件的修改时间为当前时间，确保上传脚本能正确识别最新文件
+ssh "${serverAddress}" "touch '${ServerPath}/pc/portable/$portableZipRemote'"
 
 # 复制安装版
 Write-Host "复制安装版到服务器..." -ForegroundColor Cyan
@@ -277,6 +279,10 @@ scp $setupZipLocal "${serverAddress}:${ServerPath}/pc/setup/$setupZipRemote"
 if ($LASTEXITCODE -ne 0) {
     throw "复制安装版失败"
 }
+# 更新服务器上文件的修改时间为当前时间，确保上传脚本能正确识别最新文件
+ssh "${serverAddress}" "touch '${ServerPath}/pc/setup/$setupZipRemote'"
+# 等待文件系统同步，确保文件已完全写入
+Start-Sleep -Seconds 2
 
 # 复制 Android APK
 Write-Host "复制 Android APK 到服务器..." -ForegroundColor Cyan
@@ -284,6 +290,10 @@ scp $apkFileLocal "${serverAddress}:${ServerPath}/android/$apkFileRemote"
 if ($LASTEXITCODE -ne 0) {
     throw "复制 Android APK 失败"
 }
+# 更新服务器上文件的修改时间为当前时间，确保上传脚本能正确识别最新文件
+ssh "${serverAddress}" "touch '${ServerPath}/android/$apkFileRemote'"
+# 等待文件系统同步，确保所有文件已完全写入
+Start-Sleep -Seconds 2
 
 # 步骤6: 调用服务器上的七牛 CDN 上传脚本
 Write-Host "`n☁️  步骤6: 七牛 CDN 上传..." -ForegroundColor Yellow
@@ -295,66 +305,26 @@ $uploadChoice = Read-Host "请选择 (Y/N)"
 if ($uploadChoice -eq "Y" -or $uploadChoice -eq "y") {
     Write-Host "`n开始上传到七牛 CDN..." -ForegroundColor Yellow
     
-    # 先检查脚本是否存在
-    Write-Host "检查上传脚本是否存在: $QiniuUploadScript" -ForegroundColor Cyan
-    $scriptCheck = ssh "${serverAddress}" "if [ -f '$QiniuUploadScript' ]; then echo 'EXISTS'; else echo 'NOT_FOUND'; fi" 2>&1
-    $scriptCheck = $scriptCheck -join "`n"
+    # 调用独立的七牛上传脚本
+    $uploadScriptPath = Join-Path $scriptDir "upload-to-qiniu.ps1"
     
-    if ($scriptCheck -notmatch "EXISTS") {
-        Write-Host "❌ 错误: 上传脚本不存在或无法访问" -ForegroundColor Red
-        Write-Host "   服务器: ${serverAddress}" -ForegroundColor Yellow
-        Write-Host "   脚本路径: $QiniuUploadScript" -ForegroundColor Yellow
-        Write-Host "`n检查结果: $scriptCheck" -ForegroundColor Gray
-        
-        # 列出可能的脚本位置
-        Write-Host "`n正在查找可能的脚本位置..." -ForegroundColor Cyan
-        $findResult = ssh "${serverAddress}" "find /var/www -name '*qiniu*.sh' -o -name '*qiniu*.py' -o -name '*upload*.sh' -o -name '*upload*.py' 2>/dev/null | head -5" 2>&1
-        if ($findResult) {
-            Write-Host "找到以下可能的脚本:" -ForegroundColor Yellow
-            $findResult | ForEach-Object { Write-Host "   $_" -ForegroundColor Gray }
-        }
-        
-        Write-Host "`n请确认脚本路径是否正确，或手动执行上传" -ForegroundColor Yellow
-        $continue = Read-Host "是否继续尝试执行? (Y/N)"
-        if ($continue -ne "Y" -and $continue -ne "y") {
-            Write-Host "⏭️  已跳过七牛 CDN 上传" -ForegroundColor Gray
-            exit 0
-        }
+    if (-not (Test-Path $uploadScriptPath)) {
+        Write-Host "❌ 错误: 未找到上传脚本: $uploadScriptPath" -ForegroundColor Red
+        Write-Host "   请确保 upload-to-qiniu.ps1 文件存在于项目根目录" -ForegroundColor Yellow
+        exit 1
     }
     
-    # 根据文件扩展名确定执行命令
-    $scriptExt = [System.IO.Path]::GetExtension($QiniuUploadScript).ToLower()
-    if ($scriptExt -eq ".py") {
-        $execCommand = "python3"
-        Write-Host "检测到 Python 脚本，使用 python3 执行" -ForegroundColor Cyan
-    } elseif ($scriptExt -eq ".sh") {
-        $execCommand = "bash"
-        Write-Host "检测到 Shell 脚本，使用 bash 执行" -ForegroundColor Cyan
-    } else {
-        # 默认尝试 python3，如果失败再尝试 bash
-        $execCommand = "python3"
-        Write-Host "未识别脚本类型，尝试使用 python3 执行" -ForegroundColor Cyan
-    }
-    
-    # 获取脚本所在目录
-    $scriptDir = Split-Path $QiniuUploadScript -Parent
-    
-    # 检查脚本是否有执行权限，如果没有则添加
-    Write-Host "检查并设置脚本执行权限..." -ForegroundColor Cyan
-    ssh "${serverAddress}" "chmod +x '$QiniuUploadScript' 2>/dev/null"
-    
-    # 执行上传脚本（先切换到脚本所在目录，确保能找到配置文件）
-    Write-Host "执行上传脚本: $QiniuUploadScript" -ForegroundColor Cyan
-    Write-Host "切换到脚本目录: $scriptDir" -ForegroundColor Gray
-    ssh "${serverAddress}" "cd '$scriptDir' && $execCommand '$QiniuUploadScript'"
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️  警告: 七牛 CDN 上传脚本执行失败" -ForegroundColor Yellow
-        Write-Host "   服务器: ${serverAddress}" -ForegroundColor Yellow
-        Write-Host "   脚本路径: $QiniuUploadScript" -ForegroundColor Yellow
-        Write-Host "   请手动检查脚本和服务器状态" -ForegroundColor Yellow
-    } else {
-        Write-Host "✅ 七牛 CDN 上传完成" -ForegroundColor Green
+    # 调用上传脚本，传递参数
+    try {
+        & $uploadScriptPath -ServerHost $ServerHost -ServerUser $ServerUser -QiniuUploadScript $QiniuUploadScript
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "⚠️  警告: 七牛 CDN 上传脚本执行失败 (退出代码: $LASTEXITCODE)" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "❌ 错误: 调用上传脚本失败: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "   脚本路径: $uploadScriptPath" -ForegroundColor Yellow
+        exit 1
     }
 } else {
     Write-Host "⏭️  已跳过七牛 CDN 上传" -ForegroundColor Gray

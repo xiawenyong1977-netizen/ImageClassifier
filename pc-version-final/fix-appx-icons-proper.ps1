@@ -190,6 +190,29 @@ try {
             Write-Host "    ✓ 已更新 DefaultTile（Wide310x150Logo, Square310x310Logo）" -ForegroundColor Green
         }
         
+        # 移除位置权限（如果存在）
+        # PC版本只需要读取EXIF中的GPS信息，不需要位置权限
+        $locationRemoved = $false
+        $locationPatterns = @(
+            '<Capability[^>]*Name="location"[^>]*/?>',
+            '<uap:Capability[^>]*Name="location"[^>]*/?>',
+            '<Capability[^>]*Name="location"[^>]*>[\s\S]*?</Capability>',
+            '<uap:Capability[^>]*Name="location"[^>]*>[\s\S]*?</uap:Capability>'
+        )
+        
+        foreach ($pattern in $locationPatterns) {
+            if ($manifestContent -match $pattern) {
+                $manifestContent = $manifestContent -replace $pattern, ''
+                $locationRemoved = $true
+            }
+        }
+        
+        if ($locationRemoved) {
+            Write-Host "    ✓ 已移除位置权限声明（PC版本不需要位置权限，只读取EXIF中的GPS信息）" -ForegroundColor Green
+        } else {
+            Write-Host "    ✓ 未发现位置权限声明（正常）" -ForegroundColor Gray
+        }
+        
         # 保存 manifest
         $manifestContent | Set-Content $manifestPath -Encoding UTF8 -NoNewline
         Write-Host "  ✓ AppxManifest.xml 已更新" -ForegroundColor Green
@@ -233,8 +256,9 @@ try {
     
     Write-Host "修改内容:" -ForegroundColor Cyan
     Write-Host "  1. ✓ 修复了 manifest 中的路径大小写 (assets -> Assets)" -ForegroundColor Green
-    Write-Host "  2. ✓ 复制了图标文件到 Assets 目录" -ForegroundColor Green
-    Write-Host "  3. ✓ 使用 MakeAppx.exe 重新打包（保持正确的文件结构）" -ForegroundColor Green
+    Write-Host "  2. ✓ 移除了位置权限声明（PC版本不需要位置权限）" -ForegroundColor Green
+    Write-Host "  3. ✓ 复制了图标文件到 Assets 目录" -ForegroundColor Green
+    Write-Host "  4. ✓ 使用 MakeAppx.exe 重新打包（保持正确的文件结构）" -ForegroundColor Green
     Write-Host "`n现在可以重新签名了:" -ForegroundColor Cyan
     Write-Host "  .\sign-appx-with-test-cert.ps1" -ForegroundColor Gray
     Write-Host "`n备份文件: $backupPath" -ForegroundColor Gray

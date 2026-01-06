@@ -1,6 +1,6 @@
-// electron-builder 构建前脚本和 afterPack 钩子
+// electron-builder 构建前脚本和钩子
 // 1. 将 images 目录复制到 build/appx/Assets 目录
-// 2. 在 afterPack 中修改 manifest，添加 Square310x310Logo
+// 2. 在 appxManifestCreated 钩子中修改 manifest，添加 Square310x310Logo 并移除位置权限
 
 const fs = require('fs');
 const path = require('path');
@@ -85,44 +85,19 @@ function findFile(dir, filename, maxDepth = 3, currentDepth = 0) {
   return null;
 }
 
-// afterPack 钩子：修改 manifest，添加 Square310x310Logo
-exports.default = async function(context) {
-  // 只处理 APPX 包
-  if (context.targets && !context.targets.some(t => t.name === 'appx')) {
+// 修改 manifest 的通用函数
+function modifyAppxManifest(manifestPath) {
+  // 确保 manifestPath 是字符串
+  if (typeof manifestPath !== 'string') {
+    console.warn(`警告: manifest 路径无效，期望字符串，实际类型: ${typeof manifestPath}`, manifestPath);
+    return;
+  }
+  
+  if (!fs.existsSync(manifestPath)) {
+    console.warn(`警告: manifest 文件不存在: ${manifestPath}`);
     return;
   }
 
-  const projectDir = context.projectDir || process.cwd();
-  const appOutDir = context.appOutDir;
-  
-  console.log(`查找 AppxManifest.xml (appOutDir: ${appOutDir})...`);
-  
-  // 扩展搜索路径
-  const searchPaths = [
-    appOutDir,
-    path.join(appOutDir, 'resources'),
-    path.join(projectDir, 'dist', 'win-unpacked'),
-    path.join(projectDir, 'dist'),
-    path.join(projectDir, 'build'),
-  ];
-  
-  let manifestPath = null;
-  for (const searchPath of searchPaths) {
-    if (fs.existsSync(searchPath)) {
-      manifestPath = findFile(searchPath, 'AppxManifest.xml', 5);
-      if (manifestPath) {
-        console.log(`  ✓ 找到: ${manifestPath}`);
-        break;
-      }
-    }
-  }
-  
-  if (!manifestPath) {
-    console.warn('警告: 未找到 AppxManifest.xml，跳过 Square310x310Logo 添加');
-    console.warn(`  已搜索路径: ${searchPaths.join(', ')}`);
-    return;
-  }
-  
   console.log(`修改 AppxManifest.xml: ${manifestPath}`);
   
   try {
@@ -130,7 +105,6 @@ exports.default = async function(context) {
     let manifestContent = fs.readFileSync(manifestPath, 'utf8');
     
     // 修复路径大小写：将 assets\ 改为 Assets\ (Windows APPX 标准)
-    // electron-builder 可能生成小写的 assets\，但实际目录是大写的 Assets\
     manifestContent = manifestContent.replace(/assets\\/gi, 'Assets\\');
     manifestContent = manifestContent.replace(/assets\//gi, 'Assets/');
     console.log('  ✓ 已修复 manifest 中的路径大小写 (assets -> Assets)');
@@ -141,23 +115,17 @@ exports.default = async function(context) {
     } else {
       // 在 DefaultTile 中添加 Square310x310Logo
       if (manifestContent.includes('<uap:DefaultTile')) {
-        // 在 DefaultTile 开始标签中添加 Square310x310Logo 属性
         manifestContent = manifestContent.replace(
           /(<uap:DefaultTile[^>]*)(>)/,
           '$1 Square310x310Logo="Assets\\Square310x310Logo.png"$2'
         );
         console.log('  ✓ 已添加 Square310x310Logo 到 DefaultTile');
-      } else {
-        // 如果没有 DefaultTile，在 VisualElements 后添加
-        if (manifestContent.includes('</uap:VisualElements>')) {
-          manifestContent = manifestContent.replace(
-            /(<\/uap:VisualElements>)/,
-            '<uap:DefaultTile Square310x310Logo="Assets\\Square310x310Logo.png" />\n      $1'
-          );
-          console.log('  ✓ 已添加 DefaultTile 和 Square310x310Logo');
-        } else {
-          console.warn('  ⚠ 未找到 VisualElements 或 DefaultTile，无法添加 Square310x310Logo');
-        }
+      } else if (manifestContent.includes('</uap:VisualElements>')) {
+        manifestContent = manifestContent.replace(
+          /(<\/uap:VisualElements>)/,
+          '<uap:DefaultTile Square310x310Logo="Assets\\Square310x310Logo.png" />\n      $1'
+        );
+        console.log('  ✓ 已添加 DefaultTile 和 Square310x310Logo');
       }
     }
     
@@ -180,6 +148,8 @@ exports.default = async function(context) {
     
     if (removedLocation) {
       console.log('  ✓ 已移除位置权限声明（PC版本不需要位置权限，只读取EXIF中的GPS信息）');
+    } else {
+      console.log('  ✓ 未发现位置权限声明（正常）');
     }
     
     // 写回 manifest
@@ -188,9 +158,57 @@ exports.default = async function(context) {
     
   } catch (error) {
     console.error(`错误: 修改 manifest 失败:`, error.message);
+    throw error;
+  }
+}
+
+// afterPack 钩子：修改 manifest，移除位置权限并添加 Square310x310Logo
+exports.default = async function(context) {
+  // 只处理 APPX 包
+  if (context.targets && !context.targets.some(t => t.name === 'appx')) {
+    return;
+  }
+
+  const projectDir = context.projectDir || process.cwd();
+  const appOutDir = context.appOutDir;
+  
+  console.log(`查找 AppxManifest.xml (appOutDir: ${appOutDir})...`);
+  
+  // 扩展搜索路径（APPX manifest 通常在 appOutDir 的根目录）
+  const searchPaths = [
+    appOutDir,
+    path.join(appOutDir, 'resources'),
+    path.join(appOutDir, 'resources', 'app.asar.unpacked'),
+    path.join(projectDir, 'dist', 'win-unpacked'),
+    path.join(projectDir, 'dist'),
+    path.join(projectDir, 'build'),
+  ];
+  
+  let manifestPath = null;
+  for (const searchPath of searchPaths) {
+    if (fs.existsSync(searchPath)) {
+      manifestPath = findFile(searchPath, 'AppxManifest.xml', 5);
+      if (manifestPath) {
+        console.log(`  ✓ 找到: ${manifestPath}`);
+        break;
+      }
+    }
+  }
+  
+  if (!manifestPath) {
+    console.warn('警告: 未找到 AppxManifest.xml，跳过 manifest 修改');
+    console.warn(`  已搜索路径: ${searchPaths.join(', ')}`);
+    return;
+  }
+  
+  // 调用通用函数修改 manifest
+  try {
+    modifyAppxManifest(manifestPath);
+  } catch (error) {
+    console.error(`错误: 修改 manifest 失败:`, error.message);
     // 不抛出错误，避免中断构建
   }
-};
+}
 
 // 作为独立脚本运行（在构建之前）
 if (require.main === module) {

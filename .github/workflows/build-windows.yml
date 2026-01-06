@@ -1,4 +1,4 @@
-name: Build macOS Desktop App
+name: Build Windows Desktop App
 
 on:
   push:
@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  build-windows:
+    runs-on: windows-latest
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
@@ -24,21 +24,22 @@ jobs:
     - name: Install dependencies
       run: |
         cd pc-version-final
-        npm ci
+        npm install --legacy-peer-deps
         
-    - name: Build macOS app
+    - name: Build Windows app
       run: |
         cd pc-version-final
-        npm run electron:build -- --mac
+        npm run build
+        npm run electron:build-all -- --publish never
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CI: true
         
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: macos-app
+        name: windows-app
         path: |
-          pc-version-final/dist/*.dmg
+          pc-version-final/dist/*.exe
           pc-version-final/dist/*.zip
           
     - name: Create Release (if tagged)
@@ -46,8 +47,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          pc-version-final/dist/*.dmg
-          pc-version-final/dist/*.zip
+          pc-version-final/dist/XinTuAlbum*.exe
+          pc-version-final/dist/XinTuAlbum-Setup-*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

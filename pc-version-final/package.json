@@ -120,7 +120,6 @@
         "filter": ["**/*.png"]
       }
     ],
-    "afterPack": "./copy-appx-icons.js",
     "mac": {
       "icon": "public/icon.icns",
       "target": [
