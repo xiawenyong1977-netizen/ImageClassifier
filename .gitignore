@@ -38,7 +38,10 @@ yarn-error.*
 # Android
 android/app/build/
 android/build/
+android/gradle/wrapper/gradle-wrapper.jar
+android/gradle/wrapper/gradle-wrapper.properties
 android/gradle/
+!android/gradle/wrapper/
 android/gradlew
 android/gradlew.bat
 android/local.properties
