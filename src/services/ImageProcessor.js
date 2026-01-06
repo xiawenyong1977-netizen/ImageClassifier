@@ -143,14 +143,37 @@ class ImageProcessor {
       const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
       const pixelData = imageData.data;
       
-      // 处理完成
+      // 🔥 处理完成后，如果不是同一张图片，清理旧缓存
+      // 注意：如果下一张图片是同一张，保留缓存以提高性能
+      // 这里不立即清理，因为可能连续处理同一张图片
       
       return pixelData;
 
     } catch (error) {
       logger.error(`❌ [Canvas] 图片处理失败: ${imageUri}`, error);
+      // 出错时清理缓存
+      this.clearCache();
       throw new Error(`图片处理失败: ${error.message}`);
     }
+  }
+
+  /**
+   * 清理图片缓存（释放内存）
+   * 在处理完一批图片后调用，避免内存累积
+   */
+  clearCache() {
+    if (Platform.OS === 'web') {
+      // PC端：清理Image对象和blob URL
+      if (this.currentImage && this.currentImage.src && this.currentImage.src.startsWith('blob:')) {
+        try {
+          URL.revokeObjectURL(this.currentImage.src);
+        } catch (e) {
+          // 静默处理
+        }
+      }
+      this.currentImage = null;
+    }
+    this.currentImageUri = null;
   }
 
   /**
@@ -159,6 +182,10 @@ class ImageProcessor {
    * 支持所有图片格式：JPEG, PNG, WebP, HEIC等
    */
   async _getPixelDataWithJimp(imageUri, targetWidth, targetHeight, options = {}) {
+    let resizedImage = null;
+    let buffer = null;
+    let rawImageData = null;
+    
     try {
       if (!ImageResizer || !RNFS || !jpegJs) {
         throw new Error('移动端图片处理模块未加载');
@@ -180,7 +207,7 @@ class ImageProcessor {
       }
       
       // 2. 使用原生模块缩放图片（强制转为JPEG格式）
-      const resizedImage = await ImageResizer.createResizedImage(
+      resizedImage = await ImageResizer.createResizedImage(
         imageUri,
         targetWidth,
         targetHeight,
@@ -194,22 +221,55 @@ class ImageProcessor {
       
       // 3. 读取缩放后的图片数据
       const imageData = await RNFS.readFile(resizedImage.uri, 'base64');
-      const buffer = Buffer.from(imageData, 'base64');
+      buffer = Buffer.from(imageData, 'base64');
       
       // 4. 使用jpeg-js解码获取像素数据
       // 因为我们强制转为JPEG，所以jpeg-js可以处理
-      const rawImageData = jpegJs.decode(buffer);
+      rawImageData = jpegJs.decode(buffer);
       const pixelData = rawImageData.data;
       
-      // 5. 不立即清理临时文件，收集待清理列表
-      // 临时文件会在相似度检测完成后统一批量清理
-      // 这样可以避免文件占用问题，且更高效
+      // 5. 创建返回的像素数组
+      const result = new Uint8ClampedArray(pixelData);
       
-      return new Uint8ClampedArray(pixelData);
+      // 🔥 立即清理临时文件和内存，避免内存泄漏
+      // 清理顺序：先释放像素数据引用，再清理临时文件
+      rawImageData = null;
+      buffer = null;
+      
+      // 清理临时文件
+      if (resizedImage && resizedImage.uri) {
+        try {
+          const tempPath = resizedImage.uri.replace('file://', '');
+          if (await RNFS.exists(tempPath)) {
+            await RNFS.unlink(tempPath);
+            logger.debug(`🧹 已清理临时文件: ${tempPath}`);
+          }
+        } catch (cleanupError) {
+          // 清理失败不影响主流程，静默处理
+          logger.debug(`⚠️ 清理临时文件失败: ${resizedImage.uri}`, cleanupError.message);
+        }
+      }
+      
+      return result;
 
     } catch (error) {
       logger.error(`❌ [Native] 图片处理失败: ${imageUri}`, error);
       throw new Error(`图片处理失败: ${error.message}`);
+    } finally {
+      // 🔥 确保在异常情况下也能清理资源
+      if (resizedImage && resizedImage.uri) {
+        try {
+          const tempPath = resizedImage.uri.replace('file://', '');
+          if (await RNFS.exists(tempPath)) {
+            await RNFS.unlink(tempPath);
+          }
+        } catch (cleanupError) {
+          // 静默处理清理错误
+        }
+      }
+      // 释放内存引用
+      rawImageData = null;
+      buffer = null;
     }
   }
 

@@ -1982,7 +1982,7 @@ class GalleryScannerService {
       const clientId = await UnifiedDataService.getClientId();
       const batchSize = 100; // 每批处理100张图片
       const totalBatches = Math.ceil(naImages.length / batchSize);
-      const maxConcurrentRequests = 3; // 限制同时进行的HTTP请求数量（避免过多连接）
+      const maxConcurrentRequests = 1; // 限制同时进行的HTTP请求数量（避免内存压力）
       logger.info(`🚀 开始流水线并发处理: ${naImages.length} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批，最大并发请求: ${maxConcurrentRequests}`);
       
       // 并发控制：使用信号量模式限制同时进行的HTTP请求数量
@@ -2186,14 +2186,32 @@ class GalleryScannerService {
               naImages.length
             );
             
-            return {
+            // 🔥 批次处理完成，释放内存并给GC时间
+            const result = {
               processedCount: batchProcessedCount,
               failedCount: batchFailedCount + hashCalculationFailures,
               uncachedImages: batchUncachedImages
             };
             
+            // 清理临时变量引用（在返回结果后）
+            hashResults = null;
+            imageHashMap = null;
+            batchSaveResults = null;
+            
+            // 添加短暂延迟，给GC时间回收内存
+            if (batchNumber % 5 === 0) {
+              // 每5批添加稍长延迟
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } else {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            return result;
+            
           } catch (batchError) {
             logger.error(`❌ 批次 ${batchNumber}: 流水线处理异常:`, batchError);
+            // 异常情况下也添加延迟
+            await new Promise(resolve => setTimeout(resolve, 100));
             return {
               processedCount: 0,
               failedCount: batch.length,
@@ -2356,7 +2374,7 @@ class GalleryScannerService {
       const clientId = await UnifiedDataService.getClientId();
       const batchSize = this.imageClassifier.BATCH_CONFIG.UPLOAD_BATCH_SIZE; // 统一使用20张/批
       const totalBatches = Math.ceil(remainingImages.length / batchSize);
-      const maxConcurrentRequests = 3; // 限制同时进行的HTTP请求数量（避免过多连接）
+      const maxConcurrentRequests = 1; // 限制同时进行的HTTP请求数量（避免内存压力）
       logger.info(`🚀 开始流水线并发处理: ${remainingImages.length} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批，最大并发请求: ${maxConcurrentRequests}`);
       
       // 并发控制：使用信号量模式限制同时进行的HTTP请求数量
@@ -2542,14 +2560,32 @@ class GalleryScannerService {
               remainingImages.length
             );
             
-            return {
+            // 🔥 批次处理完成，释放内存并给GC时间
+            const result = {
               processedCount: batchProcessedCount,
               failedCount: batchFailedCount,
               failedImages: batchFailedImages
             };
             
+            // 清理临时变量引用（在返回结果后）
+            validResults = null;
+            batchResult = null;
+            classificationDataArray = null;
+            
+            // 添加短暂延迟，给GC时间回收内存
+            if (batchNumber % 5 === 0) {
+              // 每5批添加稍长延迟
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } else {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            return result;
+            
           } catch (batchError) {
             logger.error(`❌ 批次 ${batchNumber}: 流水线处理异常:`, batchError);
+            // 异常情况下也添加延迟
+            await new Promise(resolve => setTimeout(resolve, 100));
             return {
               processedCount: 0,
               failedCount: batch.length,

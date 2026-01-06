@@ -1196,6 +1196,10 @@ export const CanvasAdapter = {
   async loadImage(imageUri, canvas = null) {
     logger.debug(`📱 处理图片: ${imageUri}`);
     
+    let resized = null;
+    let imageBuffer = null;
+    let rawImageData = null;
+    
     try {
       const filePath = imageUri.startsWith('file://') 
         ? imageUri.replace('file://', '') 
@@ -1206,7 +1210,7 @@ export const CanvasAdapter = {
       
       // 1. 使用原生 ImageResizer 调整图片大小
       logger.debug(`📋 调整图片大小: ${targetWidth}x${targetHeight}`);
-      const resized = await ImageResizer_Native.createResizedImage(
+      resized = await ImageResizer_Native.createResizedImage(
         filePath,
         targetWidth,
         targetHeight,
@@ -1226,25 +1230,59 @@ export const CanvasAdapter = {
       // 2. 读取调整后的图片为 Buffer
       const resizedPath = resized.uri.replace('file://', '');
       const buffer = await RNFS_Native.readFile(resizedPath, 'base64');
-      const imageBuffer = Buffer.from(buffer, 'base64');
+      imageBuffer = Buffer.from(buffer, 'base64');
       
       logger.debug(`📋 解码 JPEG (${Math.round(imageBuffer.length / 1024)} KB)`);
       
       // 3. 使用 jpeg-js 解码为像素数据
-      const rawImageData = jpeg.decode(imageBuffer, { useTArray: true });
+      rawImageData = jpeg.decode(imageBuffer, { useTArray: true });
       
       logger.debug(`✅ 图片解码成功: ${rawImageData.width}x${rawImageData.height}`);
       
-      // 4. 返回包含像素数据的对象
-      return {
+      // 4. 创建返回对象
+      const result = {
         width: rawImageData.width,
         height: rawImageData.height,
         data: rawImageData.data, // Uint8Array: RGBA 格式
         _rawImageData: rawImageData
       };
+      
+      // 🔥 立即清理临时文件和释放内存引用
+      imageBuffer = null; // 释放 Buffer 引用
+      
+      // 清理临时文件
+      if (resized && resized.uri) {
+        try {
+          const tempPath = resized.uri.replace('file://', '');
+          if (await RNFS_Native.exists(tempPath)) {
+            await RNFS_Native.unlink(tempPath);
+            logger.debug(`🧹 已清理临时文件: ${tempPath}`);
+          }
+        } catch (cleanupError) {
+          // 清理失败不影响主流程，静默处理
+          logger.debug(`⚠️ 清理临时文件失败: ${resized.uri}`, cleanupError.message);
+        }
+      }
+      
+      return result;
     } catch (error) {
       logger.error(`❌ 图片处理失败: ${imageUri}`, error);
       throw error;
+    } finally {
+      // 🔥 确保在异常情况下也能清理资源
+      if (resized && resized.uri) {
+        try {
+          const tempPath = resized.uri.replace('file://', '');
+          if (await RNFS_Native.exists(tempPath)) {
+            await RNFS_Native.unlink(tempPath);
+          }
+        } catch (cleanupError) {
+          // 静默处理清理错误
+        }
+      }
+      // 释放内存引用
+      imageBuffer = null;
+      // 注意：rawImageData 不能在这里设为 null，因为返回的对象中引用了它
     }
   },
 };
