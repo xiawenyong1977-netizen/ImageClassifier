@@ -155,7 +155,6 @@ interface ScanProgressEvent {
     | 'local_inference'      // 本地推理
     | 'similarity_detection' // 相似度检测
     | 'removing_files'       // 移除文件
-    | 'updating_data'        // 数据更新
     | 'completed';          // 完成
   
   // 进度信息

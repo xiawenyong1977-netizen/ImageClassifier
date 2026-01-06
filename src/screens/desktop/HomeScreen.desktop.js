@@ -453,9 +453,8 @@ const HomeScreen = () => {
         progress.stage === 'directory_scanning' || progress.stage === 'file_comparison' ||
         progress.stage === 'screenshot_detection' || progress.stage === 'cache_checking' ||
         progress.stage === 'remote_inference' || progress.stage === 'local_inference' ||
-        progress.stage === 'processing_images' || progress.stage === 'removing_files' ||
-        progress.stage === 'similarity_detection' || progress.stage === 'location_enrichment' ||
-        progress.stage === 'updating_data') {
+        progress.stage === 'removing_files' ||
+        progress.stage === 'similarity_detection' || progress.stage === 'location_enrichment') {
       setIsScanning(true);
     }
     

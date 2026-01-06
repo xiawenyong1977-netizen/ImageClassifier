@@ -350,6 +350,7 @@
     "copyFile": "文件复制",
     "selectCategory": "选择分类",
     "confirmDelete": "确定要删除这张图片吗？\n\n⚠️ 注意：这将永久删除相册中的文件，无法恢复！",
+    "deleteSuccess": "已成功删除图片",
     "confirmAddToStagingBox": "确定要将这张图片添加到暂存箱吗？\n\n图片将被添加到暂存箱，但分类信息不会改变。",
     "confirmRemoveFromStagingBox": "确定要从暂存箱移除这张图片吗？\n\n图片将从暂存箱中移除，但不会删除文件。",
     "noImagesInCategory": "当前分类已无图片",

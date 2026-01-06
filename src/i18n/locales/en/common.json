@@ -350,6 +350,7 @@
     "copyFile": "Copy File",
     "selectCategory": "Select Category",
     "confirmDelete": "Are you sure you want to delete this image?\n\n⚠️ Warning: This will permanently delete the file from the album and cannot be recovered!",
+    "deleteSuccess": "Successfully deleted image",
     "confirmAddToStagingBox": "Are you sure you want to add this image to the staging box?\n\nThe image will be added to the staging box, but the category information will not change.",
     "confirmRemoveFromStagingBox": "Are you sure you want to remove this image from the staging box?\n\nThe image will be removed from the staging box, but the file will not be deleted.",
     "noImagesInCategory": "No images in current category",

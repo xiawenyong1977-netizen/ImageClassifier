@@ -1232,7 +1232,7 @@ const CategoryScreen = ({
               if (result.filesFailed > 0) {
                 // 有文件删除失败，显示权限提示
                 Alert.alert(
-                  t('category.deleteSuccess'), 
+                  t('category.deleteSuccess', { count: result.filesDeleted }), 
                   t('category.deletePartialSuccess', { deleted: result.filesDeleted, failed: result.filesFailed }),
                   [
                     { text: t('common.confirm'), style: 'default' }

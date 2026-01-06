@@ -15,7 +15,10 @@ public class MainActivity extends ReactActivity {
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
+    // 🔥 修复 react-native-screens Fragment 恢复问题
+    // 防止 ScreenFragment 被恢复，这会导致应用崩溃
+    // 参考: https://github.com/software-mansion/react-native-screens/issues/17#issuecomment-424704067
+    super.onCreate(null);
     
     // 获取 WakeLock，保持应用进程活跃（即使进入后台）
     PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
