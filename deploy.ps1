@@ -317,8 +317,8 @@ if ($uploadChoice -eq "Y" -or $uploadChoice -eq "y") {
     # 调用上传脚本，传递参数
     try {
         & $uploadScriptPath -ServerHost $ServerHost -ServerUser $ServerUser -QiniuUploadScript $QiniuUploadScript
-        
-        if ($LASTEXITCODE -ne 0) {
+    
+    if ($LASTEXITCODE -ne 0) {
             Write-Host "⚠️  警告: 七牛 CDN 上传脚本执行失败 (退出代码: $LASTEXITCODE)" -ForegroundColor Yellow
         }
     } catch {

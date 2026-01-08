@@ -114,6 +114,65 @@ public class MultiImageShareModule extends ReactContextBaseJavaModule {
     }
     
     /**
+     * 分享单个文件（使用 FileProvider URI）
+     * @param filePath 文件路径（绝对路径）
+     * @param mimeType MIME类型（如 "text/plain", "text/txt" 等）
+     * @param title 分享标题
+     */
+    @ReactMethod
+    public void shareFile(String filePath, String mimeType, String title, Promise promise) {
+        try {
+            if (filePath == null || filePath.isEmpty()) {
+                promise.reject("INVALID_PATH", "文件路径不能为空");
+                return;
+            }
+            
+            File file = new File(filePath);
+            if (!file.exists() || !file.canRead()) {
+                promise.reject("FILE_NOT_FOUND", "文件不存在或无法读取: " + filePath);
+                return;
+            }
+            
+            // 使用 FileProvider 生成 URI
+            Uri fileUri = FileProvider.getUriForFile(
+                reactContext,
+                reactContext.getPackageName() + ".fileprovider",
+                file
+            );
+            
+            // 创建分享 Intent
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType(mimeType != null && !mimeType.isEmpty() ? mimeType : "text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            // 创建分享选择器
+            Intent chooserIntent = Intent.createChooser(shareIntent, title != null ? title : "分享文件");
+            chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            
+            // 显式授权给所有可能接收的应用
+            try {
+                List<ResolveInfo> resInfoList = reactContext.getPackageManager()
+                    .queryIntentActivities(shareIntent, PackageManager.MATCH_DEFAULT_ONLY);
+                
+                for (ResolveInfo resolveInfo : resInfoList) {
+                    String packageName = resolveInfo.activityInfo.packageName;
+                    reactContext.grantUriPermission(packageName, fileUri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            } catch (Exception e) {
+                // 如果显式授权失败，依赖 FLAG_GRANT_READ_URI_PERMISSION 标志
+            }
+            
+            reactContext.startActivity(chooserIntent);
+            promise.resolve("分享成功");
+            
+        } catch (Exception e) {
+            promise.reject("SHARE_ERROR", "分享文件失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
      * 将 content:// URI 复制到应用缓存目录
      */
     private File copyContentUriToCache(Uri contentUri, ContentResolver contentResolver, int index) {

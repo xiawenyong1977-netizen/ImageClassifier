@@ -689,11 +689,16 @@ public class ImageDataService {
     }
     
     /**
-     * 根据分类获取图片
+     * 根据分类获取图片（优化版：只查询精简字段，避免Cursor窗口溢出）
      * 对应JS层的 getImagesByCategory
      * 
+     * 🔥 优化说明：
+     * - 只查询AI分类需要的字段，不查询大字段（JSON字段）
+     * - 避免当NA分类图片数量多时，Cursor窗口超出2MB限制
+     * - 参考PC端的精简信息机制，只包含必要字段
+     * 
      * @param category 分类ID
-     * @return 图片列表
+     * @return 图片列表（精简结构，只包含必要字段）
      */
     public List<Map<String, Object>> getImagesByCategory(String category) {
         SQLiteDatabase db = dbHelper.getDatabase();
@@ -703,12 +708,46 @@ public class ImageDataService {
             return images;
         }
         
-        Cursor cursor = db.query("images", null, "category = ?", 
+        // 🔥 只查询AI分类需要的字段，避免查询大字段（JSON字段）导致Cursor窗口溢出
+        // 注意：数据库表中没有 path 列，路径信息存储在 uri 字段中（content:// URI）
+        String[] columns = {
+            "id", "uri", "fileName", "width", "height", 
+            "size", "mimeType", "timestamp", "takenAt"
+        };
+        
+        Cursor cursor = db.query("images", columns, "category = ?", 
             new String[]{category}, null, null, "timestamp DESC");
         
         try {
             while (cursor.moveToNext()) {
-                Map<String, Object> image = cursorToImageMap(cursor);
+                Map<String, Object> image = new HashMap<>();
+                
+                // 基础字段
+                putStringIfNotNull(image, "id", cursor, "id");
+                putStringIfNotNull(image, "uri", cursor, "uri");
+                putStringIfNotNull(image, "fileName", cursor, "fileName");
+                // 注意：数据库表中没有 path 列，路径信息存储在 uri 字段中
+                
+                // 尺寸字段
+                int widthIndex = cursor.getColumnIndex("width");
+                int heightIndex = cursor.getColumnIndex("height");
+                int width = 0;
+                int height = 0;
+                if (widthIndex >= 0 && !cursor.isNull(widthIndex)) {
+                    width = cursor.getInt(widthIndex);
+                }
+                if (heightIndex >= 0 && !cursor.isNull(heightIndex)) {
+                    height = cursor.getInt(heightIndex);
+                }
+                image.put("width", width);
+                image.put("height", height);
+                
+                // 其他字段
+                putLongIfNotNull(image, "size", cursor, "size");
+                putStringIfNotNull(image, "mimeType", cursor, "mimeType");
+                putLongIfNotNull(image, "timestamp", cursor, "timestamp");
+                putLongIfNotNull(image, "takenAt", cursor, "takenAt");
+                
                 images.add(image);
             }
         } finally {
@@ -725,20 +764,66 @@ public class ImageDataService {
      * @return URI列表
      */
     public List<String> getImageUris() {
-        SQLiteDatabase db = dbHelper.getDatabase();
-        List<String> uris = new ArrayList<>();
+        int maxRetries = 5;
+        int baseRetryDelayMs = 200;
         
-        Cursor cursor = db.query("images", new String[]{"uri"}, null, null, null, null, null);
-        
-        try {
-            while (cursor.moveToNext()) {
-                uris.add(cursor.getString(0));
+        for (int retry = 0; retry < maxRetries; retry++) {
+            SQLiteDatabase db = null;
+            Cursor cursor = null;
+            
+            try {
+                db = dbHelper.getDatabase();
+                List<String> uris = new ArrayList<>();
+                
+                cursor = db.query("images", new String[]{"uri"}, null, null, null, null, null);
+                
+                while (cursor.moveToNext()) {
+                    uris.add(cursor.getString(0));
+                }
+                
+                cursor.close();
+                return uris;
+                
+            } catch (android.database.sqlite.SQLiteDatabaseLockedException e) {
+                // 数据库锁定异常，需要重试
+                if (cursor != null) {
+                    try {
+                        cursor.close();
+                    } catch (Exception ex) {
+                        // 忽略关闭 cursor 时的异常
+                    }
+                }
+                
+                if (retry < maxRetries - 1) {
+                    try {
+                        // 递增延迟：200ms, 400ms, 600ms, 800ms
+                        int delay = baseRetryDelayMs * (retry + 1);
+                        Log.w(TAG, "获取图片URI失败（数据库锁定），等待 " + delay + "ms 后重试 " + (retry + 2) + "/" + maxRetries);
+                        Thread.sleep(delay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        Log.e(TAG, "获取图片URI重试被中断", ie);
+                        break;
+                    }
+                } else {
+                    Log.e(TAG, "获取图片URI失败（数据库锁定，已重试" + maxRetries + "次）", e);
+                    throw e; // 重试失败，抛出异常
+                }
+            } catch (Exception e) {
+                if (cursor != null) {
+                    try {
+                        cursor.close();
+                    } catch (Exception ex) {
+                        // 忽略关闭 cursor 时的异常
+                    }
+                }
+                Log.e(TAG, "获取图片URI失败", e);
+                throw e; // 其他异常直接抛出
             }
-        } finally {
-            cursor.close();
         }
         
-        return uris;
+        // 如果所有重试都失败，返回空列表
+        return new ArrayList<>();
     }
     
     /**
@@ -957,6 +1042,15 @@ public class ImageDataService {
         putStringIfNotNull(image, "focalLengthCategory", cursor, "focalLengthCategory");
         
         return image;
+    }
+    
+    /**
+     * 生成稳定的ID（基于URI的SHA-256哈希）
+     * 与JS层保持一致
+     * 公共方法，供外部调用
+     */
+    public String generateStableIdFromUri(String uri) {
+        return generateStableId(uri);
     }
     
     /**

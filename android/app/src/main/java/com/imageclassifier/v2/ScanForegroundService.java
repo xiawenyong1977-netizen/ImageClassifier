@@ -265,6 +265,13 @@ public class ScanForegroundService extends Service {
             wakeLock.release();
         }
         notificationManager.cancel(NOTIFICATION_ID);
+        
+        // 刷新日志（服务暂停时保存最后1000条日志）
+        try {
+            FileLogger.getInstance(this).flush();
+        } catch (Exception e) {
+            android.util.Log.e("ScanForegroundService", "刷新日志失败", e);
+        }
     }
     
     // 🔥 新增：当应用从最近任务中移除时，尝试保持服务运行

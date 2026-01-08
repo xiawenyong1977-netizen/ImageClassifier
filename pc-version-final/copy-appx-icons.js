@@ -92,12 +92,12 @@ function modifyAppxManifest(manifestPath) {
     console.warn(`警告: manifest 路径无效，期望字符串，实际类型: ${typeof manifestPath}`, manifestPath);
     return;
   }
-  
+
   if (!fs.existsSync(manifestPath)) {
     console.warn(`警告: manifest 文件不存在: ${manifestPath}`);
     return;
   }
-
+  
   console.log(`修改 AppxManifest.xml: ${manifestPath}`);
   
   try {
@@ -121,11 +121,11 @@ function modifyAppxManifest(manifestPath) {
         );
         console.log('  ✓ 已添加 Square310x310Logo 到 DefaultTile');
       } else if (manifestContent.includes('</uap:VisualElements>')) {
-        manifestContent = manifestContent.replace(
-          /(<\/uap:VisualElements>)/,
-          '<uap:DefaultTile Square310x310Logo="Assets\\Square310x310Logo.png" />\n      $1'
-        );
-        console.log('  ✓ 已添加 DefaultTile 和 Square310x310Logo');
+          manifestContent = manifestContent.replace(
+            /(<\/uap:VisualElements>)/,
+            '<uap:DefaultTile Square310x310Logo="Assets\\Square310x310Logo.png" />\n      $1'
+          );
+          console.log('  ✓ 已添加 DefaultTile 和 Square310x310Logo');
       }
     }
     

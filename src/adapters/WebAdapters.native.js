@@ -112,17 +112,54 @@ class Logger {
   constructor() {
     this.isDevelopment = __DEV__;
     this.isDebug = this.isDevelopment;
+    // 日志收集：最多保存最近1000条日志
+    this.logBuffer = [];
+    this.maxLogSize = 1000;
+    this.loggingEnabled = true; // 是否启用日志收集
   }
 
   setDebugMode(enabled) {
     this.isDebug = enabled;
   }
 
+  setLoggingEnabled(enabled) {
+    this.loggingEnabled = enabled;
+  }
+
+  // 格式化日志参数
+  formatArgs(args) {
+    return args.map(arg => {
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg, null, 2);
+        } catch (e) {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(' ');
+  }
+
   log(level, message, ...args) {
-    if (!this.isDebug) return;
-    
     const timestamp = new Date().toISOString();
     const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
+    
+    // 收集日志（在 release 版本中也收集所有级别的日志，方便调试）
+    // 注意：即使 isDebug 为 false，也收集所有日志，但只输出 error 和 warn 到控制台
+    if (this.loggingEnabled) {
+      const formattedArgs = this.formatArgs(args);
+      const logEntry = `${prefix} ${message}${formattedArgs ? ' ' + formattedArgs : ''}`;
+      
+      this.logBuffer.push(logEntry);
+      
+      // 限制日志缓冲区大小
+      if (this.logBuffer.length > this.maxLogSize) {
+        this.logBuffer.shift(); // 移除最旧的日志
+      }
+    }
+    
+    // 输出到控制台（仅在 debug 模式下，但 error 和 warn 始终输出）
+    if (!this.isDebug && level !== 'error' && level !== 'warn') return;
     
     switch (level) {
       case 'error':
@@ -146,6 +183,21 @@ class Logger {
   warn(message, ...args) { this.log('warn', message, ...args); }
   info(message, ...args) { this.log('info', message, ...args); }
   debug(message, ...args) { this.log('debug', message, ...args); }
+
+  // 获取所有日志
+  getAllLogs() {
+    return this.logBuffer.join('\n');
+  }
+
+  // 清空日志
+  clearLogs() {
+    this.logBuffer = [];
+  }
+
+  // 获取日志数量
+  getLogCount() {
+    return this.logBuffer.length;
+  }
 }
 
 const logger = new Logger();
@@ -184,6 +236,9 @@ const isPermissionDenied = (error) => {
 
 // Platform（直接重新导出）
 export { Platform };
+
+// NativeModules（直接重新导出，用于访问原生模块）
+export { NativeModules };
 
 // AppState（用于监听应用状态变化）
 export const AppState = RNAppState;

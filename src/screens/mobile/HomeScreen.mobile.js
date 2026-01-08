@@ -23,8 +23,9 @@ import {
   StyleSheet,
   Dimensions,
   ActivityIndicator,
+  Share,
 } from 'react-native';
-import { SafeAreaView, Platform, PermissionsAndroid, Alert } from '../../adapters/WebAdapters';
+import { SafeAreaView, Platform, PermissionsAndroid, Alert, RNFS, NativeModules } from '../../adapters/WebAdapters';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import { useFocusEffect } from '@react-navigation/native';
 import UnifiedDataService from '../../services/UnifiedDataService';
@@ -1439,6 +1440,165 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  /**
+   * 导出日志
+   */
+  const handleExportLogs = useCallback(async () => {
+    try {
+      logger.info('开始导出日志...');
+      
+      // 获取 JS 层日志
+      const jsLogs = logger.getAllLogs();
+      const jsLogCount = logger.getLogCount();
+      
+      // 获取原生层日志
+      let nativeLogs = [];
+      let nativeLogCount = 0;
+      let nativeFileLogContent = '';
+      let nativeFileLogPath = '';
+      
+      try {
+        const { NativeLogExportModule } = NativeModules;
+        if (NativeLogExportModule && NativeLogExportModule.exportNativeLogs) {
+          const nativeLogData = await NativeLogExportModule.exportNativeLogs();
+          nativeLogs = nativeLogData.memoryLogs || [];
+          nativeLogCount = nativeLogData.memoryLogCount || 0;
+          nativeFileLogContent = nativeLogData.fileLogContent || '';
+          nativeFileLogPath = nativeLogData.fileLogPath || '';
+        }
+      } catch (nativeLogError) {
+        logger.warn('获取原生日志失败:', nativeLogError);
+      }
+      
+      const totalLogCount = jsLogCount + nativeLogCount;
+      
+      if (totalLogCount === 0) {
+        Alert.alert(t('common.tip'), '暂无日志可导出');
+        return;
+      }
+
+      // 合并日志内容
+      const allLogs = [
+        '=== 芯图相册日志导出 ===',
+        `导出时间: ${new Date().toLocaleString('zh-CN')}`,
+        `JS日志条数: ${jsLogCount}`,
+        `原生日志条数: ${nativeLogCount}`,
+        `总日志条数: ${totalLogCount}`,
+        `平台: ${Platform.OS} ${Platform.Version || ''}`,
+        '',
+        '=== JS层日志 ===',
+        '',
+        jsLogs || '暂无JS日志',
+        '',
+        '=== 原生层内存日志 ===',
+        '',
+        nativeLogs.length > 0 ? nativeLogs.join('\n') : '暂无原生内存日志',
+        '',
+      ];
+      
+      // 添加文件日志（只有一个文件）
+      if (nativeFileLogContent) {
+        allLogs.push('=== 原生层文件日志 ===');
+        if (nativeFileLogPath) {
+          allLogs.push(`文件路径: ${nativeFileLogPath}`);
+        }
+        allLogs.push('');
+        allLogs.push(nativeFileLogContent);
+        allLogs.push('');
+      }
+      
+      const appInfo = allLogs.join('\n');
+
+      // 在开始时获取并验证路径
+      const cacheDir = RNFS.CachesDirectoryPath;
+      if (!cacheDir) {
+        throw new Error('无法获取缓存目录路径');
+      }
+      
+      // 确保目录存在
+      const dirExists = await RNFS.exists(cacheDir);
+      if (!dirExists) {
+        try {
+          await RNFS.mkdir(cacheDir);
+          // 验证目录是否真的创建成功
+          const verifyDirExists = await RNFS.exists(cacheDir);
+          if (!verifyDirExists) {
+            throw new Error('创建缓存目录失败');
+          }
+        } catch (mkdirError) {
+          logger.error('创建缓存目录失败:', mkdirError);
+          throw new Error(`创建缓存目录失败: ${mkdirError.message}`);
+        }
+      }
+
+      // 创建日志文件
+      const fileName = `xintu_logs_${Date.now()}.txt`;
+      const filePath = `${cacheDir}/${fileName}`;
+
+      // 写入文件
+      // 添加 UTF-8 BOM（\uFEFF）确保文本编辑器能正确识别编码，避免中文乱码
+      const contentWithBOM = '\uFEFF' + appInfo;
+      await RNFS.writeFile(filePath, contentWithBOM, 'utf8');
+      
+      // 验证文件是否真的写入了
+      const fileExists = await RNFS.exists(filePath);
+      if (!fileExists) {
+        throw new Error('文件写入失败：文件不存在');
+      }
+      
+      // 验证文件大小
+      const fileStat = await RNFS.stat(filePath);
+      if (fileStat.size === 0) {
+        throw new Error('文件写入失败：文件大小为0');
+      }
+      
+      logger.info(`日志文件已保存: ${filePath}, 大小: ${fileStat.size} 字节`);
+
+      // 使用 FileProvider URI 分享文件
+      try {
+        const { MultiImageShareModule } = NativeModules;
+        if (MultiImageShareModule && MultiImageShareModule.shareFile) {
+          // 使用原生模块分享文件（使用 FileProvider URI）
+          await MultiImageShareModule.shareFile(filePath, 'text/plain', '芯图相册日志');
+          logger.info('✅ 日志文件分享成功');
+          
+          // 提示文件位置
+          setTimeout(() => {
+            Alert.alert(
+              t('common.tip'),
+              `日志文件已保存并分享:\n${filePath}\n\n文件大小: ${(appInfo.length / 1024).toFixed(2)} KB`
+            );
+          }, 500);
+        } else {
+          // 原生模块不可用，回退到文本分享
+          await Share.share({
+            message: appInfo.length > 10000 
+              ? appInfo.substring(0, 10000) + '\n\n... (日志过长，已截断，完整日志已保存到文件)'
+              : appInfo,
+            title: '芯图相册日志',
+          });
+          
+          setTimeout(() => {
+            Alert.alert(
+              t('common.tip'),
+              `日志文件已保存到:\n${filePath}\n\n文件大小: ${(appInfo.length / 1024).toFixed(2)} KB\n\n您可以通过文件管理器访问此文件。`
+            );
+          }, 500);
+        }
+      } catch (shareError) {
+        logger.error('分享日志失败:', shareError);
+        // 如果分享失败，显示文件位置
+        Alert.alert(
+          t('common.tip'),
+          `日志已保存到:\n${filePath}\n\n文件大小: ${(appInfo.length / 1024).toFixed(2)} KB\n\n您可以通过文件管理器访问此文件。`
+        );
+      }
+    } catch (error) {
+      logger.error('导出日志失败:', error);
+      Alert.alert(t('common.error'), `导出日志失败: ${error.message}`);
+    }
+  }, [t]);
+
   // ==================== 渲染函数 ====================
 
 
@@ -2640,7 +2800,12 @@ const HomeScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       {/* 顶部导航栏 */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t('app.name')}</Text>
+        <Pressable
+          onLongPress={handleExportLogs}
+          style={styles.headerTitleContainer}
+        >
+          <Text style={styles.headerTitle}>{t('app.name')}</Text>
+        </Pressable>
       </View>
 
       {/* 消息提示区 */}
@@ -2705,6 +2870,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E5E5EA',
     justifyContent: 'center',
     paddingHorizontal: 16,
+  },
+  headerTitleContainer: {
+    // 让标题可以长按
   },
   headerTitle: {
     fontSize: 20,
