@@ -662,13 +662,13 @@ class UnifiedDataService {
       // 先检查原始统计数据
       const cache = this.imageCache.getCache();
       const rawCounts = cache.resolutionCounts || {};
-      logger.debug(`📐 原始分辨率统计: ${Object.keys(rawCounts).length} 种分辨率`, rawCounts);
+      logger.debug(`📐 原始分辨率统计: ${Object.keys(rawCounts).length} 种分辨率`);
       
       // 使用 getTopResolutions(7) 只返回前7个最多的，其他合并为"其他"
       const topResolutions = this.imageCache.getTopResolutions(7);
       
       if (Object.keys(topResolutions).length > 0) {
-        logger.debug('从缓存读取分辨率统计（前7个）:', topResolutions);
+        logger.debug(`从缓存读取分辨率统计（前7个）: ${Object.keys(topResolutions).length} 种分辨率`);
         return topResolutions;
       }
       

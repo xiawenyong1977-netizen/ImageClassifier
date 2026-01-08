@@ -2688,7 +2688,8 @@ public class GalleryScanService {
         ExecutorService inferenceExecutor = Executors.newFixedThreadPool(1); // 节点2：发送HTTP请求（网络IO）
         ExecutorService saveExecutor = Executors.newFixedThreadPool(1); // 节点3：保存结果（数据库IO）
         
-        BlockingQueue<CompressTask> compressToInferenceQueue = new LinkedBlockingQueue<>(); // 压缩结果 → 推理
+        // 🔥 限制压缩队列大小为3，控制内存中同时存在的压缩任务数量（最多3个批次在队列中等待）
+        BlockingQueue<CompressTask> compressToInferenceQueue = new LinkedBlockingQueue<>(3); // 压缩结果 → 推理
         BlockingQueue<InferenceTask> inferenceToSaveQueue = new LinkedBlockingQueue<>(); // 推理结果 → 保存
         
         // 启动节点2：发送HTTP请求工作线程（单线程）
@@ -2717,8 +2718,13 @@ public class GalleryScanService {
                             }
                         } finally {
                             // 🔥 HTTP请求完成后立即清理压缩数据，释放内存
-                            // 注意：在创建InferenceTask之后清理，因为processAndSaveInferenceResult不使用compressedImages
+                            // sendInferenceRequest方法内部已经清空了compressedImages HashMap
                         }
+                        
+                        // 🔥 在创建InferenceTask之前清理压缩数据，避免InferenceTask持有引用导致内存泄漏
+                        // processAndSaveInferenceResult不使用compressedImages，所以可以安全清理
+                        compressTask.compressedImages = null;
+                        compressTask.metadata = null;
                         
                         // 将推理结果传递给节点3
                         InferenceTask inferenceTask = new InferenceTask(compressTask);
@@ -2726,10 +2732,8 @@ public class GalleryScanService {
                         inferenceTask.inferenceError = inferenceError;
                         inferenceToSaveQueue.put(inferenceTask);
                         
-                        // 🔥 清理compressTask中的非final字段引用（压缩数据已在sendInferenceRequest中清理）
+                        // 🔥 清理compressTask中的其他非final字段引用
                         // 注意：batchImages和uriToHashMap是final的，不能设置为null，会在对象GC时自动释放
-                        compressTask.metadata = null;
-                        compressTask.compressedImages = null;
                         compressTask.compressFailedImages = null;
                         
                         // 如果是最后一个批次，处理完后退出
@@ -3399,7 +3403,8 @@ public class GalleryScanService {
         final List<ImageInfo> batchImages;
         final boolean isLastBatch;
         final Map<String, String> uriToHashMap;
-        final Map<String, byte[]> compressedImages;
+        // 🔥 移除 compressedImages 字段，因为 processAndSaveInferenceResult 不使用它
+        // 这样可以避免 InferenceTask 持有压缩数据引用，防止内存泄漏
         final List<ImageInfo> compressFailedImages;
         Map<String, Object> inferenceResponse; // 推理结果
         Exception inferenceError; // 推理错误（如果有）
@@ -3409,7 +3414,7 @@ public class GalleryScanService {
             this.batchImages = compressTask.batchImages;
             this.isLastBatch = compressTask.isLastBatch;
             this.uriToHashMap = compressTask.uriToHashMap;
-            this.compressedImages = compressTask.compressedImages;
+            // 🔥 不再引用 compressedImages，避免内存泄漏
             this.compressFailedImages = compressTask.compressFailedImages;
         }
     }
