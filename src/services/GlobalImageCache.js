@@ -957,7 +957,7 @@ class GlobalImageCache {
       logger.warn(`⚠️ 发现 ${imagesWithoutDimensions} 张图片缺少尺寸信息，示例:`, sampleImageWithoutDimensions);
     }
     if (Object.keys(this.cache.resolutionCounts).length > 0) {
-      logger.debug(`📐 分辨率统计详情:`, this.cache.resolutionCounts);
+      logger.debug(`📐 分辨率统计详情: ${Object.keys(this.cache.resolutionCounts).length} 种分辨率`);
     } else if (this.cache.allImages.length > 0) {
       logger.warn(`⚠️ 所有 ${this.cache.allImages.length} 张图片都缺少尺寸信息，无法生成分辨率统计`);
     }
