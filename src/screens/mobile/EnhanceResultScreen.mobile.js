@@ -207,6 +207,10 @@ export default function EnhanceResultScreen({ route, navigation }) {
         }
       } catch {}
 
+      // 从原图获取尺寸信息（readImageDetailsById 返回的数据已包含 width 和 height）
+      const width = originalImage?.width || null;
+      const height = originalImage?.height || null;
+      
       // 复制原图的所有元数据，只改变 uri 指向新保存的图片
       const completeImageData = {
         uri: newImageUri, // 新保存的图片 URI
@@ -217,6 +221,9 @@ export default function EnhanceResultScreen({ route, navigation }) {
         timestamp: now, // 文件时间戳使用新保存的时间
         takenAt: originalImage?.takenAt || now, // 保持原图的拍摄时间，如果没有则使用当前时间
         size: fileSize, // 新保存图片的文件大小
+        // 🔥 设置 width 和 height（必需字段）
+        width: width,
+        height: height,
         // 复制原图的所有检测结果和描述信息
         idCardDetections: originalImage?.idCardDetections || [],
         generalDetections: originalImage?.generalDetections || [],
@@ -226,8 +233,6 @@ export default function EnhanceResultScreen({ route, navigation }) {
         ...(originalImage?.imageDimensions && { imageDimensions: originalImage.imageDimensions }),
         ...(originalImage?.city && { city: originalImage.city }),
         ...(originalImage?.color && { color: originalImage.color }),
-        // resolution 和 orientation 是从 width/height 动态计算的，不需要复制
-        // 如果原图有 width/height，它们会通过 imageDimensions 传递，系统会自动计算
       };
       
       // 验证必要字段
@@ -238,6 +243,14 @@ export default function EnhanceResultScreen({ route, navigation }) {
       if (!completeImageData.timestamp) {
         logger.warn('⚠️ 图片数据缺少timestamp，使用当前时间');
         completeImageData.timestamp = now;
+      }
+      // 🔥 验证 width 和 height（必需字段）
+      if (!completeImageData.width || !completeImageData.height) {
+        logger.warn(`⚠️ 图片数据缺少width或height: width=${completeImageData.width}, height=${completeImageData.height}`);
+        // 如果缺少尺寸，尝试从新保存的图片中读取（移动端可能需要使用 ImageProcessor）
+        // 但为了不阻塞保存流程，先使用默认值或从原图获取
+        if (!completeImageData.width) completeImageData.width = 0;
+        if (!completeImageData.height) completeImageData.height = 0;
       }
 
       // 使用 writeImageDetailedInfo 保存图片数据（服务层会自动刷新缓存）
