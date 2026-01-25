@@ -1813,12 +1813,12 @@ const CategoryScreen = ({
           const day = date.getDate();
           const weekday = date.getDay();
           
-          const monthNames = t('category.monthNames', { returnObjects: true });
           const weekdayNames = t('category.weekdayNames', { returnObjects: true });
           
+          // 月份直接使用数字格式，如"11月"而不是"十一月"
           const formattedDate = t('category.dateFormat', {
             year,
-            month: monthNames[month - 1],
+            month: `${month}月`,
             day,
             weekday: weekdayNames[weekday]
           });
