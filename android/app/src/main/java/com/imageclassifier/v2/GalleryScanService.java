@@ -23,7 +23,6 @@ import androidx.exifinterface.media.ExifInterface;
 
 import java.io.InputStream;
 import java.io.IOException;
-import java.io.FileInputStream;
 import java.io.BufferedInputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -395,19 +394,27 @@ public class GalleryScanService {
             }
             
             ContentResolver contentResolver = context.getContentResolver();
-            String[] projection = new String[]{
-                MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DISPLAY_NAME,
-                MediaStore.Images.Media.SIZE,
-                MediaStore.Images.Media.DATE_TAKEN,
-                MediaStore.Images.Media.DATE_MODIFIED,
-                MediaStore.Images.Media.DATE_ADDED,
-                MediaStore.Images.Media.WIDTH,
-                MediaStore.Images.Media.HEIGHT,
-                MediaStore.Images.Media.MIME_TYPE,
-                MediaStore.Images.Media.DATA,
-                MediaStore.Images.Media.RELATIVE_PATH
-            };
+            
+            // 🔥 根据 Android 版本动态构建 projection
+            // Android 10 以下不支持 RELATIVE_PATH，会导致 SQL 查询失败
+            List<String> projectionList = new ArrayList<>();
+            projectionList.add(MediaStore.Images.Media._ID);
+            projectionList.add(MediaStore.Images.Media.DISPLAY_NAME);
+            projectionList.add(MediaStore.Images.Media.SIZE);
+            projectionList.add(MediaStore.Images.Media.DATE_TAKEN);
+            projectionList.add(MediaStore.Images.Media.DATE_MODIFIED);
+            projectionList.add(MediaStore.Images.Media.DATE_ADDED);
+            projectionList.add(MediaStore.Images.Media.WIDTH);
+            projectionList.add(MediaStore.Images.Media.HEIGHT);
+            projectionList.add(MediaStore.Images.Media.MIME_TYPE);
+            projectionList.add(MediaStore.Images.Media.DATA); // 所有版本都查询 DATA
+            
+            // 🔥 Android 10+ (API 29+) 才添加 RELATIVE_PATH
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                projectionList.add(MediaStore.Images.Media.RELATIVE_PATH);
+            }
+            
+            String[] projection = projectionList.toArray(new String[0]);
             
             String sortOrder = MediaStore.Images.Media.DATE_TAKEN + " DESC";
             Cursor cursor = contentResolver.query(
@@ -439,8 +446,15 @@ public class GalleryScanService {
                     String mimeType = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE));
                     String path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
                     
-                    int relativePathColumn = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH);
-                    String relativePath = relativePathColumn >= 0 ? cursor.getString(relativePathColumn) : null;
+                    // 🔥 读取 RELATIVE_PATH（只在 Android 10+ 可用）
+                    int relativePathColumn = -1;
+                    String relativePath = null;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        relativePathColumn = cursor.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH);
+                        if (relativePathColumn >= 0) {
+                            relativePath = cursor.getString(relativePathColumn);
+                        }
+                    }
                     
                     Uri contentUri = ContentUris.withAppendedId(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -815,11 +829,11 @@ public class GalleryScanService {
                     if (!batchSaveData.isEmpty()) {
                         try {
                             batchSaveImages(batchSaveData);
-                        } catch (RuntimeException e) {
-                            // ❌ 数据验证失败：记录错误并停止处理，不在源头做兼容处理
-                            // RuntimeException 包含了 IllegalArgumentException 和 IllegalStateException
-                            fileLogger.e(TAG, "❌ 批量保存失败，停止处理: " + e.getMessage(), e);
-                            throw e; // 重新抛出，停止整个扫描流程
+                        } catch (Exception e) {
+                            // 🔥 改进：批量保存失败时记录错误但继续处理，不停止整个流程
+                            // batchSaveImages 内部已经处理了单张图片失败的情况，这里只处理数据库操作异常
+                            fileLogger.e(TAG, "❌ 批量保存失败，跳过这批图片，继续处理: " + e.getMessage(), e);
+                            // 不重新抛出异常，继续处理后续图片
                         }
                         batchSaveData.clear();
                     }
@@ -841,7 +855,12 @@ public class GalleryScanService {
         
         // 保存最后剩余的批次（如果还有）
         if (!batchSaveData.isEmpty()) {
-            batchSaveImages(batchSaveData);
+            try {
+                batchSaveImages(batchSaveData);
+            } catch (Exception e) {
+                // 🔥 改进：最后批次保存失败时记录错误但继续，不停止整个流程
+                fileLogger.e(TAG, "❌ 最后批次保存失败: " + e.getMessage(), e);
+            }
         }
         
         // 🔥 输出统计信息
@@ -862,59 +881,74 @@ public class GalleryScanService {
             List<Map<String, Object>> saveDataList = new ArrayList<>();
             
             for (ImageDataWithExif item : imageDataList) {
-                // ❌ 严格数据验证：发现错误立即抛出异常，不做兼容处理
-                
-                // 1. 验证必填字段：uri
-                if (item.image.uri == null || item.image.uri.isEmpty()) {
-                    throw new IllegalArgumentException("图片数据验证失败: uri 为空, id=" + item.image.id);
-                }
-                
-                // 2. 验证必填字段：fileName
-                String fileName = item.image.fileName;
-                if (fileName == null || fileName.isEmpty()) {
-                    throw new IllegalArgumentException("图片数据验证失败: fileName 为空, uri=" + item.image.uri + 
-                          ", id=" + item.image.id);
-                }
-                
-                // 3. 验证必填字段：category
-                String category = item.category;
-                if (category == null || category.isEmpty()) {
-                    throw new IllegalArgumentException("图片数据验证失败: category 为空, uri=" + item.image.uri + 
-                          ", fileName=" + fileName + ", id=" + item.image.id);
-                }
-                
-                // 4. 验证关键字段：尺寸（width 和 height 必须 > 0）
-                int finalWidth = 0;
-                int finalHeight = 0;
-                String dimensionSource = "unknown";
-                boolean hasValidDimensions = false;
-                
-                if (item.exifData != null && item.exifData.dimensions != null && 
-                    item.exifData.dimensions.width > 0 && item.exifData.dimensions.height > 0) {
-                    finalWidth = item.exifData.dimensions.width;
-                    finalHeight = item.exifData.dimensions.height;
-                    dimensionSource = "exifData.dimensions";
-                    hasValidDimensions = true;
-                } else if (item.image.width > 0 && item.image.height > 0) {
-                    finalWidth = item.image.width;
-                    finalHeight = item.image.height;
-                    dimensionSource = "MediaStore";
-                    hasValidDimensions = true;
-                }
-                
-                if (!hasValidDimensions) {
-                    throw new IllegalStateException("图片数据验证失败: 尺寸获取失败（所有方法都失败）" +
-                          ", fileName=" + fileName +
-                          ", uri=" + item.image.uri +
-                          ", id=" + item.image.id +
-                          ", hasExifData=" + (item.exifData != null) +
-                          ", hasExifDimensions=" + (item.exifData != null && item.exifData.dimensions != null) +
-                          ", exifWidth=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.width : 0) +
-                          ", exifHeight=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.height : 0) +
-                          ", MediaStoreWidth=" + item.image.width + 
-                          ", MediaStoreHeight=" + item.image.height +
-                          " - 这通常表示：1) 文件损坏 2) 权限问题 3) MediaStore数据不完整");
-                }
+                try {
+                    // 1. 验证必填字段：uri
+                    if (item.image.uri == null || item.image.uri.isEmpty()) {
+                        fileLogger.e(TAG, "❌ 图片数据验证失败: uri 为空, id=" + item.image.id);
+                        continue; // 跳过这张图片，继续处理其他图片
+                    }
+                    
+                    // 2. 验证必填字段：fileName
+                    String fileName = item.image.fileName;
+                    if (fileName == null || fileName.isEmpty()) {
+                        fileLogger.e(TAG, "❌ 图片数据验证失败: fileName 为空, uri=" + item.image.uri + 
+                              ", id=" + item.image.id);
+                        continue; // 跳过这张图片，继续处理其他图片
+                    }
+                    
+                    // 3. 验证必填字段：category
+                    String category = item.category;
+                    if (category == null || category.isEmpty()) {
+                        fileLogger.e(TAG, "❌ 图片数据验证失败: category 为空, uri=" + item.image.uri + 
+                              ", fileName=" + fileName + ", id=" + item.image.id);
+                        continue; // 跳过这张图片，继续处理其他图片
+                    }
+                    
+                    // 4. 验证关键字段：尺寸（width 和 height 必须 > 0）
+                    int finalWidth = 0;
+                    int finalHeight = 0;
+                    String dimensionSource = "unknown";
+                    boolean hasValidDimensions = false;
+                    
+                    if (item.exifData != null && item.exifData.dimensions != null && 
+                        item.exifData.dimensions.width > 0 && item.exifData.dimensions.height > 0) {
+                        finalWidth = item.exifData.dimensions.width;
+                        finalHeight = item.exifData.dimensions.height;
+                        dimensionSource = "exifData.dimensions";
+                        hasValidDimensions = true;
+                    } else if (item.image.width > 0 && item.image.height > 0) {
+                        finalWidth = item.image.width;
+                        finalHeight = item.image.height;
+                        dimensionSource = "MediaStore";
+                        hasValidDimensions = true;
+                    }
+                    
+                    // 🔥 改进：如果尺寸验证失败，尝试最后一次降级方案（Content URI）
+                    if (!hasValidDimensions) {
+                        ImageDimensions bitmapDimensions = getImageDimensionsWithBitmapFactory(item.image);
+                        if (bitmapDimensions != null && bitmapDimensions.width > 0 && bitmapDimensions.height > 0) {
+                            finalWidth = bitmapDimensions.width;
+                            finalHeight = bitmapDimensions.height;
+                            dimensionSource = "BitmapFactory(ContentURI)";
+                            hasValidDimensions = true;
+                        }
+                    }
+                    
+                    // 🔥 改进：如果仍然没有尺寸，记录警告但允许保存（尺寸设为0）
+                    if (!hasValidDimensions) {
+                        fileLogger.w(TAG, "⚠️ 图片尺寸获取失败，所有方法都失败，允许保存但尺寸为0: fileName=" + fileName + 
+                              ", uri=" + item.image.uri +
+                              ", id=" + item.image.id +
+                              ", hasExifData=" + (item.exifData != null) +
+                              ", hasExifDimensions=" + (item.exifData != null && item.exifData.dimensions != null) +
+                              ", exifWidth=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.width : 0) +
+                              ", exifHeight=" + (item.exifData != null && item.exifData.dimensions != null ? item.exifData.dimensions.height : 0) +
+                              ", MediaStoreWidth=" + item.image.width + 
+                              ", MediaStoreHeight=" + item.image.height);
+                        // 不抛出异常，允许保存，但尺寸为0
+                        finalWidth = 0;
+                        finalHeight = 0;
+                    }
                 
                 // 数据验证通过，开始构建保存数据
                 Map<String, Object> imageData = new HashMap<>();
@@ -1001,21 +1035,26 @@ public class GalleryScanService {
                 }
                 
                 saveDataList.add(imageData);
-                        }
-            
-            // 批量保存到数据库（位置信息补全由JS层处理）
-            if (!saveDataList.isEmpty()) {
-                imageDataService.writeImageDetailedInfo(saveDataList);
-                fileLogger.d(TAG, "批量保存完成: " + saveDataList.size() + " 张图片");
+                
+                } catch (Exception e) {
+                    // 🔥 改进：单张图片处理失败时，记录错误但继续处理其他图片
+                    fileLogger.e(TAG, "❌ 处理单张图片失败，跳过: uri=" + item.image.uri + 
+                          ", fileName=" + (item.image.fileName != null ? item.image.fileName : "null") + 
+                          ", id=" + item.image.id, e);
+                    // 继续处理下一张图片，不抛出异常
+                }
             }
             
-        } catch (RuntimeException e) {
-            // ❌ 数据验证失败或其他运行时异常：立即抛出异常，不在源头做兼容处理
-            // RuntimeException 包含了 IllegalArgumentException 和 IllegalStateException
-            fileLogger.e(TAG, "❌ 批量保存图片失败：数据验证失败或运行时异常", e);
-            throw e; // 重新抛出，让调用方知道数据有问题
+            // 批量保存到数据库（只保存成功构建的数据）
+            if (!saveDataList.isEmpty()) {
+                imageDataService.writeImageDetailedInfo(saveDataList);
+                fileLogger.d(TAG, "批量保存完成: " + saveDataList.size() + "/" + imageDataList.size() + " 张图片");
+            } else {
+                fileLogger.w(TAG, "⚠️ 批量保存：没有有效数据可保存，所有图片处理都失败");
+            }
+            
         } catch (Exception e) {
-            // 其他异常（如数据库错误）也抛出，不在源头做兼容处理
+            // 数据库操作异常才抛出
             fileLogger.e(TAG, "❌ 批量保存图片失败：数据库操作异常", e);
             throw new RuntimeException("批量保存图片失败", e);
         }
@@ -1335,6 +1374,7 @@ public class GalleryScanService {
     /**
      * 使用 BitmapFactory 获取图片尺寸（降级方案）
      * 当 EXIF 和 MediaStore 都没有尺寸时使用
+     * 🔥 移动端统一使用 Content URI，不使用文件路径
      * @param image 图片信息
      * @return 图片尺寸，如果获取失败返回 null
      */
@@ -1342,25 +1382,36 @@ public class GalleryScanService {
         ImageDimensions dimensions = null;
         
         try {
-            // 优先使用绝对路径
-            String filePath = image.path;
+            // 🔥 移动端统一使用 Content URI，不使用文件路径
+            String contentUriString = extractContentUri(image.uri);
+            if (contentUriString == null || contentUriString.isEmpty()) {
+                fileLogger.w(TAG, "⚠️ 无法提取Content URI: " + image.uri);
+                return null;
+            }
             
-            // 如果没有绝对路径，尝试从拼装URI中提取
-            if (filePath == null || filePath.isEmpty()) {
-                String uriString = image.uri;
-                if (uriString != null && uriString.contains("||")) {
-                    // 从拼装URI中提取文件路径（格式：content://...||/storage/...）
-                    String[] parts = uriString.split("\\|\\|");
-                    if (parts.length > 1) {
-                        filePath = parts[1];
-                    }
+            Uri uri = Uri.parse(contentUriString);
+            ContentResolver contentResolver = context.getContentResolver();
+            
+            // Android 10+ 需要使用setRequireOriginal获取原始图片（包含完整EXIF）
+            Uri originalUri = uri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    originalUri = MediaStore.setRequireOriginal(uri);
+                } catch (Exception e) {
+                    fileLogger.d(TAG, "无法获取原始图片，使用普通URI: " + e.getMessage());
                 }
             }
             
-            if (filePath != null && !filePath.isEmpty()) {
+            InputStream inputStream = contentResolver.openInputStream(originalUri);
+            if (inputStream == null) {
+                fileLogger.w(TAG, "⚠️ 无法打开图片流: " + contentUriString);
+                return null;
+            }
+            
+            try {
                 BitmapFactory.Options options = new BitmapFactory.Options();
                 options.inJustDecodeBounds = true; // 只解码边界，不加载完整图片到内存
-                BitmapFactory.decodeFile(filePath, options);
+                BitmapFactory.decodeStream(inputStream, null, options);
                 
                 if (options.outWidth > 0 && options.outHeight > 0) {
                     dimensions = new ImageDimensions();
@@ -1368,7 +1419,14 @@ public class GalleryScanService {
                     dimensions.height = options.outHeight;
                     // 不记录成功日志，避免日志过多（统计信息会在阶段结束时输出）
                 }
+            } finally {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    // 忽略关闭错误
+                }
             }
+            
         } catch (Exception e) {
             fileLogger.w(TAG, "⚠️ BitmapFactory获取尺寸失败: " + image.fileName, e);
         }
@@ -2304,19 +2362,33 @@ public class GalleryScanService {
             InputStream imageInputStream = null;
             ByteArrayOutputStream originalData = null;
             try {
-                // 打开图片输入流
-                if (uriString.startsWith("content://")) {
-                    Uri uri = Uri.parse(uriString);
-                    imageInputStream = reactContext.getContentResolver().openInputStream(uri);
-                } else if (uriString.startsWith("file://")) {
-                    String filePath = uriString.replace("file://", "");
-                    imageInputStream = new FileInputStream(filePath);
-                } else {
-                    imageInputStream = new FileInputStream(uriString);
+                // 🔥 移动端统一使用 Content URI，不使用文件路径
+                if (uriString == null || !uriString.startsWith("content://")) {
+                    fileLogger.w(TAG, "⚠️ [节点1] URI不是Content URI，跳过图片: " + uriString);
+                    compressTask.compressFailedImages.add(image);
+                    // 从itemsArray中移除对应的metadata item
+                    if (itemsArray.length() > 0) {
+                        itemsArray.remove(itemsArray.length() - 1);
+                    }
+                    continue;
                 }
                 
+                Uri uri = Uri.parse(uriString);
+                
+                // Android 10+ 需要使用setRequireOriginal获取原始图片
+                Uri originalUri = uri;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        originalUri = MediaStore.setRequireOriginal(uri);
+                    } catch (Exception e) {
+                        fileLogger.d(TAG, "无法获取原始图片，使用普通URI: " + e.getMessage());
+                    }
+                }
+                
+                imageInputStream = reactContext.getContentResolver().openInputStream(originalUri);
+                
                 if (imageInputStream == null) {
-                    fileLogger.w(TAG, "⚠️ [节点1] 无法打开图片文件: " + uriString);
+                    fileLogger.w(TAG, "⚠️ [节点1] 无法打开图片流: " + uriString);
                     compressTask.compressFailedImages.add(image);
                     // 从itemsArray中移除对应的metadata item
                     if (itemsArray.length() > 0) {

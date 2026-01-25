@@ -826,6 +826,10 @@ const HomeScreen = () => {
     if (additionalProps.currentPage !== undefined && additionalProps.currentPage !== null) {
       urlParams.set('currentPage', additionalProps.currentPage.toString());
     }
+    // 🔥 新增：保存 itemsPerPage 到 URL 参数
+    if (additionalProps.itemsPerPage !== undefined && additionalProps.itemsPerPage !== null) {
+      urlParams.set('itemsPerPage', additionalProps.itemsPerPage.toString());
+    }
     if (additionalProps.viewMode) {
       urlParams.set('viewMode', additionalProps.viewMode);
     }
@@ -1828,13 +1832,15 @@ const HomeScreen = () => {
                   const filterType = urlParams.get('filterType');
                   const filterValue = urlParams.get('filterValue');
                   const savedCurrentPage = urlParams.get('currentPage');
+                  const savedItemsPerPage = urlParams.get('itemsPerPage'); // 🔥 新增：读取 itemsPerPage
                   const savedViewMode = urlParams.get('viewMode');
                   
                   // 🆕 根据 filterType 判断是否从 CategoryScreen 返回
                   if (filterType && filterType !== 'Home') {
                     logger.debug('从分类页面返回', { 
                       imageId, 
-                      currentPage: savedCurrentPage, 
+                      currentPage: savedCurrentPage,
+                      itemsPerPage: savedItemsPerPage, // 🔥 新增：记录 itemsPerPage
                       viewMode: savedViewMode,
                       filterType,
                       filterValue
@@ -1849,6 +1855,7 @@ const HomeScreen = () => {
                       filterValue,
                       currentImageId: imageId || null,
                       currentPage: savedCurrentPage ? parseInt(savedCurrentPage, 10) : null,
+                      itemsPerPage: savedItemsPerPage ? parseInt(savedItemsPerPage, 10) : null, // 🔥 新增：恢复 itemsPerPage
                       viewMode: savedViewMode || null
                     }));
                   } else {

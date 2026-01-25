@@ -795,12 +795,13 @@ const CategoryScreen = ({
       const contextProps = {
         filterType,
         filterValue,
-        currentPage // 保存当前页码，返回时恢复
+        currentPage, // 保存当前页码，返回时恢复
+        itemsPerPage // 🔥 新增：保存每页数量，返回时恢复
       };
          
       navigation.onImagePress(image, null, contextProps);
     }
-  }, [navigation, filterType, filterValue, currentPage]);
+  }, [navigation, filterType, filterValue, currentPage, itemsPerPage]); // 🔥 添加 itemsPerPage 依赖
 
   // Image long press handler
   const handleImageLongPress = useCallback((image) => {

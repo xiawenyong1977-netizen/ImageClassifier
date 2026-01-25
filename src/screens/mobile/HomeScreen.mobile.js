@@ -1174,15 +1174,31 @@ const HomeScreen = ({ navigation }) => {
 
       logger.debug('📋 需要检查的权限:', permissions);
 
-      // 检查是否所有权限都已授权
+      // 🔥 改进：只检查必需权限，ACCESS_MEDIA_LOCATION 是可选的
+      // 必需权限：Android 13+ 需要 READ_MEDIA_IMAGES，Android 12- 需要 READ_EXTERNAL_STORAGE
+      const requiredPermissions = Platform.Version >= 33
+        ? [PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES]
+        : [PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE];
+
+      // 检查权限状态
       const checkResults = await Promise.all(
         permissions.map(p => PermissionsAndroid.check(p))
       );
 
       logger.debug('📋 权限检查结果:', checkResults);
+      
+      const requiredPermissionIndices = requiredPermissions.map(p => permissions.indexOf(p));
+      const allRequiredGranted = requiredPermissionIndices.every(
+        index => checkResults[index] === true
+      );
 
-      if (checkResults.every(result => result === true)) {
-        logger.debug('✅ 所有权限已授权');
+      if (allRequiredGranted) {
+        // 检查可选权限（ACCESS_MEDIA_LOCATION）的状态
+        const mediaLocationIndex = permissions.indexOf(PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION);
+        if (mediaLocationIndex >= 0 && !checkResults[mediaLocationIndex]) {
+          logger.debug('⚠️ ACCESS_MEDIA_LOCATION 权限未授予，将无法读取照片GPS信息，但不影响扫描功能');
+        }
+        logger.debug('✅ 必需权限已授权，可以开始扫描');
         return true;
       }
 
@@ -1192,15 +1208,20 @@ const HomeScreen = ({ navigation }) => {
       
       logger.debug('📋 权限请求结果:', grantResults);
       
-      const allGranted = Object.values(grantResults).every(
-        result => result === PermissionsAndroid.RESULTS.GRANTED
+      const allRequiredGrantedAfterRequest = requiredPermissions.every(
+        permission => grantResults[permission] === PermissionsAndroid.RESULTS.GRANTED
       );
 
-      if (allGranted) {
-        logger.debug('✅ 所有权限已授权');
+      if (allRequiredGrantedAfterRequest) {
+        // 检查可选权限（ACCESS_MEDIA_LOCATION）的状态
+        const mediaLocationPermission = grantResults[PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION];
+        if (mediaLocationPermission !== PermissionsAndroid.RESULTS.GRANTED) {
+          logger.debug('⚠️ ACCESS_MEDIA_LOCATION 权限未授予，将无法读取照片GPS信息，但不影响扫描功能');
+        }
+        logger.debug('✅ 必需权限已授权，可以开始扫描');
         return true;
       } else {
-        logger.warn('⚠️ 部分权限被拒绝');
+        logger.warn('⚠️ 必需权限被拒绝');
         const permissionText = Platform.Version >= 33 
           ? t('home.permissionRequiredAndroid13')
           : t('home.permissionRequiredAndroid12');
