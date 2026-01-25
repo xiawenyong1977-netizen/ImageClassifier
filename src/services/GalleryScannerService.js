@@ -2193,12 +2193,9 @@ class GalleryScannerService {
               uncachedImages: batchUncachedImages
             };
             
-            // 清理临时变量引用（在返回结果后）
-            hashResults = null;
-            imageHashMap = null;
-            batchSaveResults = null;
-            
             // 添加短暂延迟，给GC时间回收内存
+            // 注意：hashResults、imageHashMap、batchSaveResults 在函数作用域内，
+            // 函数执行完毕后会自动被垃圾回收，不需要手动设置为 null
             if (batchNumber % 5 === 0) {
               // 每5批添加稍长延迟
               await new Promise(resolve => setTimeout(resolve, 200));
