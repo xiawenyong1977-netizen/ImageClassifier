@@ -47,64 +47,22 @@ class WeChatAuthService {
   }
 
   /**
-   * 查询会员状态
-   * 返回 { isMember: boolean }
+   * 查询会员状态（统一使用 getCredits 接口）
+   * 返回 { isMember: boolean, isFollowed: boolean, memberExpireAt: string|null }
    */
   async getMembershipStatus() {
     try {
-      const clientId = await this.getClientId();
-      if (!clientId) {
-        throw new Error('客户端ID未找到');
-      }
-
-      const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.membership}?client_id=${clientId}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.apiConfig.timeout);
-
-      const response = await fetch(url, { method: 'GET', signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (!response.ok) {
-        const text = await response.text();
-        // 404属于正常情况（可能是用户未关注公众号或其他原因），使用debug日志
-        if (response.status === 404) {
-          // 查询会员状态返回404，用户未关注公众号（正常情况，不需要打印日志）
-          // 404按非会员处理，不抛出错误
-          return { isMember: false };
-        } else {
-          // 其他非404错误情况，使用debug日志（不输出error）
-          logger.debug(`查询会员状态失败 (${response.status}):`, text);
-          throw new Error(`查询会员状态失败: ${response.status}`);
-        }
-      }
-
-      const result = await response.json();
-      // 兼容多种返回格式
-      // 1) { success: true, data: { is_member: true } }
-      // 2) { is_member: true }
-      // 3) { member: true } 或 'TRUE'
-      let isMember = false;
-      if (result && typeof result === 'object') {
-        if (result.data && (typeof result.data.is_member !== 'undefined' || typeof result.data.member !== 'undefined')) {
-          const v = result.data.is_member ?? result.data.member;
-          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
-        } else if (typeof result.is_member !== 'undefined') {
-          const v = result.is_member;
-          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
-        } else if (typeof result.member !== 'undefined') {
-          const v = result.member;
-          isMember = v === true || v === 'TRUE' || v === 'true' || v === 1;
-        }
-      }
-
-      return { isMember: !!isMember };
+      // 统一使用 getCredits 接口获取会员状态和关注状态
+      const creditsResult = await this.getCredits();
+      return {
+        isMember: creditsResult.isMember,
+        isFollowed: creditsResult.isFollowed,
+        memberExpireAt: creditsResult.memberExpireAt
+      };
     } catch (error) {
-      if (error.name === 'AbortError') {
-        logger.debug('查询会员状态超时');
-        throw new Error('查询会员状态超时，请检查网络连接');
-      }
       logger.debug('查询会员状态失败:', error);
-      // 失败时按非会员处理，避免阻塞扫描
-      return { isMember: false };
+      // 失败时按非会员、未关注处理，避免阻塞扫描
+      return { isMember: false, isFollowed: false, memberExpireAt: null };
     }
   }
 
@@ -287,8 +245,8 @@ class WeChatAuthService {
   }
 
   /**
-   * 查询用户额度
-   * @returns {Promise<{total: number, used: number, remaining: number}>}
+   * 查询用户额度和会员状态（统一接口）
+   * @returns {Promise<{total: number, used: number, remaining: number, isFollowed: boolean, isMember: boolean, memberExpireAt: string|null}>}
    */
   async getCredits() {
     try {
@@ -298,7 +256,7 @@ class WeChatAuthService {
         throw new Error('客户端ID未找到');
       }
 
-      logger.debug('💰 正在查询额度...');
+      logger.debug('💰 正在查询额度和会员状态...');
 
       // 仅使用 client_id，不再使用 openid
       const url = `${this.apiConfig.baseURL}${this.apiConfig.endpoints.credits}?client_id=${encodeURIComponent(clientId)}`;
@@ -315,6 +273,19 @@ class WeChatAuthService {
 
       if (!response.ok) {
         const errorText = await response.text();
+        // 404且是"用户未关注公众号"的情况，属于正常业务逻辑，使用debug级别
+        if (response.status === 404) {
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.detail && errorJson.detail.includes('未关注公众号')) {
+              logger.debug(`📡 用户未关注公众号，返回404（正常情况）`);
+              // 返回默认值，不抛出错误
+              return { total: 0, used: 0, remaining: 0, isFollowed: false, isMember: false, memberExpireAt: null };
+            }
+          } catch (e) {
+            // 解析失败，继续使用error级别
+          }
+        }
         logger.error(`❌ 查询额度失败 (${response.status}):`, errorText);
         throw new Error(`查询额度失败: ${response.status}`);
       }
@@ -322,21 +293,33 @@ class WeChatAuthService {
       const result = await response.json();
       logger.debug('📡 额度API返回结果:', result);
       
-      // 解析两种返回结构：1) { success, data: {...} } 2) { success, ... } 直接根级字段
-      let total = 0, used = 0, remaining = 0;
+      // 解析返回结构：{ success, total_credits, used_credits, remaining_credits, is_followed, is_member, member_expire_at }
+      let total = 0, used = 0, remaining = 0, isFollowed = false, isMember = false, memberExpireAt = null;
+      
       if (result.success) {
         const source = result.data || result;
         total = source.total_credits || source.total || 0;
         used = source.used_credits || source.used || 0;
         remaining = source.remaining_credits || source.remaining || 0;
+        isFollowed = source.is_followed === true || source.is_followed === 'true' || source.is_followed === 1;
+        isMember = source.is_member === true || source.is_member === 'true' || source.is_member === 1;
+        memberExpireAt = source.member_expire_at || null;
       }
 
       if (total > 0 || used > 0 || remaining > 0) {
-        logger.debug(`✅ 额度查询成功: 总计${total}，已用${used}，剩余${remaining}`);
-        return { total, used, remaining };
+        logger.debug(`✅ 额度查询成功: 总计${total}，已用${used}，剩余${remaining}，关注:${isFollowed}，会员:${isMember}`);
+      } else {
+        logger.debug(`✅ 额度查询成功: 总计${total}，已用${used}，剩余${remaining}，关注:${isFollowed}，会员:${isMember}`);
       }
 
-      return { total: 0, used: 0, remaining: 0 };
+      return { 
+        total, 
+        used, 
+        remaining, 
+        isFollowed, 
+        isMember, 
+        memberExpireAt 
+      };
 
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -344,7 +327,7 @@ class WeChatAuthService {
         throw new Error('查询额度超时，请检查网络连接');
       }
       logger.error('❌ 查询额度失败:', error);
-      return { total: 0, used: 0, remaining: 0 };
+      return { total: 0, used: 0, remaining: 0, isFollowed: false, isMember: false, memberExpireAt: null };
     }
   }
 

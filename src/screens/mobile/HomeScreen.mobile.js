@@ -24,6 +24,7 @@ import {
   Dimensions,
   ActivityIndicator,
   Share,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView, Platform, PermissionsAndroid, Alert, RNFS, NativeModules } from '../../adapters/WebAdapters';
 import WeChatAuthService from '../../services/WeChatAuthService';
@@ -54,6 +55,7 @@ const HomeScreen = ({ navigation }) => {
   
   // 相似组数据
   const [similarityGroups, setSimilarityGroups] = useState([]);
+  const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
   
   // 颜色分类数据
   const [colorCounts, setColorCounts] = useState({});
@@ -97,6 +99,7 @@ const HomeScreen = ({ navigation }) => {
   
   // 扫描状态
   const [isScanning, setIsScanning] = useState(false);
+  const [isSimilarityDetecting, setIsSimilarityDetecting] = useState(false); // 相似度检测状态
   
   // 消息提示
   const [globalMessage, setGlobalMessage] = useState(t('home.ready'));
@@ -814,10 +817,9 @@ const HomeScreen = ({ navigation }) => {
   const loadSimilarityGroups = async () => {
     try {
       // 使用 PC 端相同的方法获取相似组统计（与 PC 端保持一致）
+      // 加载所有相似组，而不是只加载前8个，这样才能正确显示MORE按钮
       const allGroups = await UnifiedDataService.getSimilarityGroupsStats();
-      // 只取前8组
-      const groups = allGroups.slice(0, 8);
-      setSimilarityGroups(groups);
+      setSimilarityGroups(allGroups || []);
       
       
     } catch (error) {
@@ -874,6 +876,7 @@ const HomeScreen = ({ navigation }) => {
       if (typeof window !== 'undefined') {
         window.isScanning = true;
       }
+      setIsSimilarityDetecting(true); // 设置相似度检测状态
       setGlobalMessage(t('home.similarityDetectionInProgress'));
       
       // 使用唤醒锁防止手机休眠影响检测性能
@@ -930,6 +933,7 @@ const HomeScreen = ({ navigation }) => {
       // 释放唤醒锁
       await WakeLockService.release();
       setIsScanning(false);
+      setIsSimilarityDetecting(false); // 清除相似度检测状态
       // 🔥 清除全局变量
       if (typeof window !== 'undefined') {
         window.isScanning = false;
@@ -1825,44 +1829,99 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.sectionTitle}>🔗 {t('home.similarPhotos')}</Text>
           </View>
           {similarityGroups && similarityGroups.length > 0 && (
-            <TouchableOpacity 
-              style={[
-                styles.toggleButton,
-                isScanning && styles.toggleButtonDisabled
-              ]}
-              onPress={handleStartSimilarityDetection}
-              disabled={isScanning}
-            >
-              <Text style={[
-                styles.toggleButtonText,
-                isScanning && styles.toggleButtonTextDisabled
-              ]}>{t('home.recheck')}</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtonsContainer}>
+              <TouchableOpacity 
+                style={[
+                  styles.toggleButton,
+                  (isScanning || isSimilarityDetecting) && styles.toggleButtonDisabled
+                ]}
+                onPress={handleStartSimilarityDetection}
+                disabled={isScanning || isSimilarityDetecting}
+              >
+                <Text style={[
+                  styles.toggleButtonText,
+                  (isScanning || isSimilarityDetecting) && styles.toggleButtonTextDisabled
+                ]}>{t('home.recheck')}</Text>
+              </TouchableOpacity>
+              {/* MORE按钮：当相似组数量超过默认显示数量(8)时显示 */}
+              {similarityGroups.length > 8 && !showAllSimilarityGroups && (
+                <TouchableOpacity
+                  style={styles.moreButton}
+                  onPress={() => {
+                    logger.debug('点击MORE按钮，展开所有相似组，当前数量:', similarityGroups.length);
+                    setShowAllSimilarityGroups(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.moreButtonText}>⋯</Text>
+                </TouchableOpacity>
+              )}
+              {showAllSimilarityGroups && similarityGroups.length > 8 && (
+                <TouchableOpacity
+                  style={styles.moreButton}
+                  onPress={() => {
+                    logger.debug('点击收起按钮，收起相似组');
+                    setShowAllSimilarityGroups(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.moreButtonText}>−</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
         
         {similarityGroups && similarityGroups.length > 0 ? (
-          <View style={styles.categoriesGrid}>
-            {similarityGroups.slice(0, 8).map(renderSimilarityGroupCard)}
-          </View>
+          showAllSimilarityGroups ? (
+            // 显示所有时，限制最大显示数量为100个，避免性能问题
+            (() => {
+              const MAX_DISPLAY_COUNT = 100;
+              const displayGroups = similarityGroups.slice(0, MAX_DISPLAY_COUNT);
+              const hasMore = similarityGroups.length > MAX_DISPLAY_COUNT;
+              
+              return (
+                <>
+                  <View style={styles.categoriesGrid}>
+                    {displayGroups.map(renderSimilarityGroupCard)}
+                  </View>
+                  {hasMore && (
+                    <View style={styles.moreGroupsHint}>
+                      <Text style={styles.moreGroupsHintText}>
+                        {t('home.moreSimilarityGroupsHint', { total: similarityGroups.length, displayed: MAX_DISPLAY_COUNT })}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              );
+            })()
+          ) : (
+            <View style={styles.categoriesGrid}>
+              {similarityGroups.slice(0, 8).map(renderSimilarityGroupCard)}
+            </View>
+          )
         ) : (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>🔗</Text>
-            <Text style={styles.emptyStateText}>{t('home.noSimilarityGroups')}</Text>
-            <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+            <Text style={styles.emptyStateText}>
+              {isSimilarityDetecting ? t('home.similarityDetectionInProgress') : t('home.noSimilarityGroups')}
+            </Text>
+            {!isSimilarityDetecting && (
+              <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+            )}
             <TouchableOpacity
               style={[
                 styles.startSimilarityButton,
-                isScanning && styles.startSimilarityButtonDisabled
+                (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonDisabled
               ]}
               onPress={handleStartSimilarityDetection}
-              disabled={isScanning}
+              disabled={isScanning || isSimilarityDetecting}
             >
               <Text style={[
                 styles.startSimilarityButtonText,
-                isScanning && styles.startSimilarityButtonTextDisabled
+                (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonTextDisabled
               ]}>
-                {t('home.startSimilarityDetection')}
+                {isSimilarityDetecting ? t('home.similarityDetectionInProgress') : t('home.startSimilarityDetection')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2935,6 +2994,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1, // 确保标题容器可以收缩
   },
   sectionTitle: {
     fontSize: 18,
@@ -2958,11 +3018,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16,
   },
+  headerButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0, // 防止按钮容器被压缩
+  },
   toggleButton: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     backgroundColor: '#F0F0F0',
     borderRadius: 12,
+    minHeight: 24, // 确保最小高度一致
   },
   toggleButtonDisabled: {
     backgroundColor: '#E0E0E0',
@@ -2972,6 +3039,35 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#666666',
     fontWeight: '500',
+  },
+  moreButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 12,
+    minWidth: 32,
+    minHeight: 24, // 与 toggleButton 保持一致
+    alignItems: 'center',
+    justifyContent: 'center',
+    display: 'flex', // 确保 flex 布局生效
+  },
+  moreButtonText: {
+    fontSize: 16,
+    lineHeight: 20, // 行高略大于字体大小，确保垂直居中
+    color: '#666666',
+    fontWeight: '500',
+    textAlignVertical: 'center', // Android 垂直居中
+    includeFontPadding: false, // Android 移除字体额外 padding
+  },
+  moreGroupsHint: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  moreGroupsHintText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
   toggleButtonTextDisabled: {
     opacity: 0.5,

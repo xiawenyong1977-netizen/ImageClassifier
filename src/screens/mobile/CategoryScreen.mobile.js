@@ -949,13 +949,6 @@ const CategoryScreen = ({ route, navigation }) => {
         return;
       }
 
-      // 会员状态检查
-      const { isMember } = await WeChatAuthService.getMembershipStatus();
-      if (!isMember) {
-        Alert.alert(t('common.tip'), t('category.enhanceMembersOnly'));
-        return;
-      }
-
       // 额度检查
       const credits = await WeChatAuthService.getCredits();
       if (!credits || typeof credits.remaining !== 'number') {
@@ -963,7 +956,10 @@ const CategoryScreen = ({ route, navigation }) => {
         return;
       }
       if (credits.remaining < count) {
-        Alert.alert(t('common.tip'), t('category.insufficientCreditsMessage2'));
+        Alert.alert(
+          t('common.tip'),
+          t('category.insufficientCreditsMessageFollowWeChat', { remaining: credits.remaining, count })
+        );
         return;
       }
 

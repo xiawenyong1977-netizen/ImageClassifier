@@ -89,35 +89,7 @@ const EnhanceResultScreen = ({
       try {
         logger.debug('🚀 开始提交增强任务', { preset, count: selectedImages.length });
         
-        // 检查微信授权和额度
-        try {
-          const credits = await WeChatAuthService.getCredits();
-          
-          if (credits.remaining < selectedImages.length) {
-            Alert.alert(
-              t('imagePreview.insufficientCreditsTitle'),
-              t('imagePreview.insufficientCreditsMessageSettings', { remaining: credits.remaining, count: selectedImages.length }),
-              [
-                { text: t('common.cancelButton'), style: 'cancel' },
-                { 
-                  text: t('imagePreview.goToSettingsButton'), 
-                  onPress: () => {
-                    if (typeof window !== 'undefined') {
-                      window.dispatchEvent(new CustomEvent('navigate-to-settings'));
-                    }
-                  }
-                }
-              ]
-            );
-            return;
-          }
-          
-          logger.debug(`✅ 额度充足: 剩余${credits.remaining}次，需要${selectedImages.length}次`);
-        } catch (error) {
-          logger.error('检查额度失败:', error);
-          Alert.alert(t('common.errorTitle'), t('imagePreview.cannotCheckCredits'));
-          return;
-        }
+        // 🔥 移除额度检查（入口已经检查过了，不需要重复检查）
         
         // 初始化所有图片为 processing 状态
         const initialResults = selectedImages.map((img, index) => ({

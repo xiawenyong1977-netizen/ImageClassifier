@@ -171,11 +171,11 @@ Write-Host "`n🔍 步骤3: 检查文件生成时间..." -ForegroundColor Yellow
 
 $files = @(
     @{
-        Path = "pc-version-final\dist\XinTuAlbum 1.1.1.exe"
+        Path = "pc-version-final\dist\XinTuAlbum 1.1.2.exe"
         Name = "便携版"
     },
     @{
-        Path = "pc-version-final\dist\XinTuAlbum-Setup-1.1.1.exe"
+        Path = "pc-version-final\dist\XinTuAlbum-Setup-1.1.2.exe"
         Name = "安装版"
     },
     @{
@@ -211,7 +211,7 @@ if (Test-Path $tempDir) {
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 
 # 压缩便携版
-$portableSource = "pc-version-final\dist\XinTuAlbum 1.1.1.exe"
+$portableSource = "pc-version-final\dist\XinTuAlbum 1.1.2.exe"
 $portableZipLocal = "$tempDir\xtxc$timestamp.zip"
 $portableZipRemote = "xtxc$timestamp.zip"
 if (Test-Path $portableSource) {
@@ -221,7 +221,7 @@ if (Test-Path $portableSource) {
 }
 
 # 压缩安装版
-$setupSource = "pc-version-final\dist\XinTuAlbum-Setup-1.1.1.exe"
+$setupSource = "pc-version-final\dist\XinTuAlbum-Setup-1.1.2.exe"
 $setupZipLocal = "$tempDir\xtxcsetup$timestamp.zip"
 $setupZipRemote = "xtxcsetup$timestamp.zip"
 if (Test-Path $setupSource) {

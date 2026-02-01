@@ -56,16 +56,26 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   const [showEditModal, setShowEditModal] = useState(false);
   
   // 微信授权相关状态
-  const [wechatStatus, setWechatStatus] = useState('checking'); // checking, member, not_member
+  const [wechatStatus, setWechatStatus] = useState('checking'); // checking, not_followed, followed_not_member, member
   const [qrCode, setQrCode] = useState('');
   const [credits, setCredits] = useState({ total: 0, used: 0, remaining: 0 });
   const [checkingFollow, setCheckingFollow] = useState(false);
+
+  const pollIntervalRef = useRef(null); // 保存轮询ID
 
   // ==================== 初始化 ====================
   useEffect(() => {
     loadSettings();
     detectStorageInfo();
     checkMembershipStatus();
+    
+    // 组件卸载时清理轮询
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, []);
 
   // 监听语言变化，同步更新 currentLanguage 状态
@@ -477,21 +487,38 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    */
   const checkMembershipStatus = async () => {
     try {
-      logger.debug('🔍 开始检查会员状态...');
-      const { isMember } = await WeChatAuthService.getMembershipStatus();
+      logger.debug('🔍 开始检查会员状态和关注状态...');
+      // 统一使用 getCredits 接口获取会员状态和关注状态
+      const creditsResult = await WeChatAuthService.getCredits();
+      const { isFollowed, isMember } = creditsResult;
+      
       if (isMember) {
         logger.debug('✅ 用户为会员');
         setWechatStatus('member');
-        await loadCredits();
+        setCredits({
+          total: creditsResult.total,
+          used: creditsResult.used,
+          remaining: creditsResult.remaining
+        });
+      } else if (isFollowed) {
+        logger.debug('🔍 用户已关注但未付费');
+        setWechatStatus('followed_not_member');
+        setCredits({
+          total: creditsResult.total,
+          used: creditsResult.used,
+          remaining: creditsResult.remaining
+        });
+        // 已关注但未付费时，不需要生成二维码，只启动轮询等待付费
+        // 不调用 generateQrCode()，避免显示二维码
       } else {
-        logger.debug('🔍 用户非会员（正常情况）');
-        setWechatStatus('not_member');
+        logger.debug('🔍 用户未关注公众号');
+        setWechatStatus('not_followed');
         await generateQrCode();
       }
     } catch (error) {
       // 查询会员状态失败，使用debug日志（不输出error）
       logger.debug('查询会员状态失败:', error);
-      setWechatStatus('not_member');
+      setWechatStatus('not_followed');
       await generateQrCode();
     }
   };
@@ -501,17 +528,29 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
    */
   const generateQrCode = async () => {
     try {
+      // 如果已有轮询在运行，先清理
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      
       setCheckingFollow(true);
       const { qrcode } = await WeChatAuthService.generateQrCode();
       setQrCode(qrcode);
       
-      // 轮询会员状态
-      const poll = setInterval(async () => {
+      // 轮询会员状态和关注状态
+      pollIntervalRef.current = setInterval(async () => {
         try {
-          const { isMember } = await WeChatAuthService.getMembershipStatus();
+          const creditsResult = await WeChatAuthService.getCredits();
+          const { isFollowed, isMember } = creditsResult;
+          
           if (isMember) {
             setWechatStatus('member');
-            await loadCredits();
+            setCredits({
+              total: creditsResult.total,
+              used: creditsResult.used,
+              remaining: creditsResult.remaining
+            });
             // 防止重复弹窗
             if (!activationAlertShownRef.current) {
               activationAlertShownRef.current = true;
@@ -521,8 +560,24 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               // 使用 i18n 实例的 t 函数，确保使用最新语言
               Alert.alert(i18n.t('common.success', { lng: currentLang }), i18n.t('settings.memberActivated', { lng: currentLang }));
             }
-            clearInterval(poll);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             setCheckingFollow(false);
+          } else if (isFollowed) {
+            // 已关注但未付费，更新状态和额度，继续轮询等待付费
+            setWechatStatus('followed_not_member');
+            setCredits({
+              total: creditsResult.total,
+              used: creditsResult.used,
+              remaining: creditsResult.remaining
+            });
+            // 继续轮询，不停止
+          } else {
+            // 未关注，更新状态，继续轮询等待关注
+            setWechatStatus('not_followed');
+            // 继续轮询，不停止
           }
         } catch (e) {
           logger.debug('⏳ 轮询会员状态中...');
@@ -543,7 +598,11 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
   const loadCredits = async () => {
     try {
       const creditsData = await WeChatAuthService.getCredits();
-      setCredits(creditsData);
+      setCredits({
+        total: creditsData.total,
+        used: creditsData.used,
+        remaining: creditsData.remaining
+      });
     } catch (error) {
       logger.error('加载额度失败:', error);
     }
@@ -1295,21 +1354,6 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               );
             })}
           
-          {/* 如果已关注，显示额度 */}
-          {wechatStatus === 'member' && (
-            <View style={styles.creditsContainer}>
-              <Text style={styles.creditsTitle}>💰 {t('settings.creditsUsage')}</Text>
-              <View style={styles.creditsInfo}>
-                <Text style={styles.creditsLabel}>{t('settings.remainingCredits')}：</Text>
-                <Text style={styles.creditsValue}>
-                  {credits.remaining} / {credits.total}
-                </Text>
-              </View>
-              <Text style={styles.creditsDescription}>
-                {t('settings.creditsUsed', { count: credits.used })}
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* 会员服务 */}
@@ -1320,29 +1364,6 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
             </View>
           </View>
           
-          {/* 免费会员（仅在非会员时显示） */}
-          {wechatStatus !== 'member' && (
-          <View style={styles.membershipCard}>
-            <View style={styles.membershipHeader}>
-              <Text style={styles.membershipIcon}>🆓</Text>
-              <View>
-                <Text style={styles.membershipName}>{t('settings.freeMember')}</Text>
-                <Text style={styles.membershipTag}>{t('settings.currentStatus')}</Text>
-              </View>
-            </View>
-            <View style={styles.membershipFeatures}>
-              <View style={styles.membershipFeatureItem}>
-                <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberSmartClassification')}</Text>
-              </View>
-              <View style={styles.membershipFeatureItem}>
-                <Text style={styles.membershipFeatureIcon}>✗</Text>
-                <Text style={styles.membershipFeatureText}>{t('settings.freeMemberPhotoEnhancement')}</Text>
-              </View>
-            </View>
-          </View>
-          )}
-
           {/* 付费会员 */}
           <View style={styles.membershipCardPremium}>
             <View style={styles.membershipHeader}>
@@ -1350,7 +1371,11 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               <View>
                 <Text style={styles.membershipName}>{t('settings.lifetimeMember')}</Text>
                 <Text style={styles.membershipTagPremium}>
-                  {wechatStatus === 'member' ? t('settings.activated') : t('settings.notActivated')}
+                  {wechatStatus === 'member' 
+                    ? t('settings.activated') 
+                    : wechatStatus === 'followed_not_member' 
+                    ? t('settings.followedPendingActivation')
+                    : t('settings.notActivated')}
                 </Text>
               </View>
             </View>
@@ -1365,14 +1390,20 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                 <Text style={styles.membershipFeatureIcon}>✓</Text>
                 <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberPhotoEnhancement')}</Text>
               </View>
-              <View style={styles.membershipFeatureItem}>
-                <Text style={styles.membershipFeatureIcon}>✓</Text>
-                <Text style={styles.membershipFeatureText}>{t('settings.lifetimeMemberMoreQuota')}</Text>
-              </View>
+              
+              {/* 如果已关注（包括已关注未付费和已付费），在AI修图下面显示额度信息 */}
+              {(wechatStatus === 'member' || wechatStatus === 'followed_not_member') && (
+                <View style={styles.creditsInfoInline}>
+                  <Text style={styles.creditsLabelInline}>{t('settings.remainingCredits')}: </Text>
+                  <Text style={styles.creditsValueInline} numberOfLines={1}>
+                    {credits.remaining}
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* 二维码区域（未关注时显示） */}
-            {wechatStatus !== 'member' && (
+            {/* 二维码区域（仅未关注时显示） */}
+            {wechatStatus === 'not_followed' && (
               <View style={styles.membershipQrColumn}>
                 {qrCode ? (
                   <TouchableOpacity
@@ -1794,6 +1825,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#8E8E93',
   },
+  // 内联额度显示样式（与PC端对齐）
+  creditsInfoInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+    flexWrap: 'nowrap',
+    marginLeft: 28, // 与AI修图文案对齐（对号宽度20 + 间距8）
+  },
+  creditsLabelInline: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    flexShrink: 0,
+  },
+  creditsValueInline: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '600',
+    marginLeft: 4,
+    flexShrink: 0,
+  },
   // 会员服务样式
   membershipCard: {
     margin: 16,
@@ -1876,6 +1931,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#FFFFFF',
     marginBottom: 12,
+  },
+  membershipStatusContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  membershipStatusText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  membershipStatusHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
   membershipQrHint: {
     fontSize: 13,

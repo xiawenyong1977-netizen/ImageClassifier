@@ -945,17 +945,54 @@ const ImagePreviewScreen = ({
         return;
       }
       
-      // 会员状态检查
-      const { isMember } = await WeChatAuthService.getMembershipStatus();
-      if (!isMember) {
-        Alert.alert(t('common.tip'), t('imagePreview.membersOnlyFeature'));
-        return;
-      }
+      // 🔥 在打开模态框前检查额度
+      const count = 1; // 单张图片
+      
+      try {
+        const credits = await WeChatAuthService.getCredits();
+        if (!credits || typeof credits.remaining !== 'number') {
+          Alert.alert(
+            t('common.error'),
+            t('imagePreview.cannotCheckCredits') || t('category.getCreditsFailed')
+          );
+          return; // 不打开模态框
+        }
+        
+        if (credits.remaining < count) {
+          Alert.alert(
+            t('imagePreview.insufficientCreditsTitle') || t('common.tip'),
+            t('category.insufficientCreditsMessageFollowWeChat', { remaining: credits.remaining, count })
+          );
+          return; // 不打开模态框
+        }
 
-      // 关闭二级面板，显示增强模态框
-      setEnhancePreset(presetId);
-      setExpandedAction(null);
-      setShowEnhanceModal(true);
+        // 额度充足，弹出二次确认
+        Alert.alert(
+          t('imagePreview.confirmTitle') || t('common.confirm'),
+          t('imagePreview.enhanceConfirmMessage', { count, remaining: credits.remaining }) ||
+          t('category.enhanceConfirmMessage', { count, remaining: credits.remaining }),
+          [
+            { text: t('common.cancel'), style: 'cancel' },
+            {
+              text: t('common.confirm'),
+              style: 'default',
+              onPress: () => {
+                // 确认后才打开模态框
+                setEnhancePreset(presetId);
+                setExpandedAction(null);
+                setShowEnhanceModal(true);
+              }
+            }
+          ]
+        );
+      } catch (error) {
+        logger.error('检查额度失败:', error);
+        Alert.alert(
+          t('common.error'),
+          t('imagePreview.cannotCheckCredits') || t('category.getCreditsFailed')
+        );
+        return; // 不打开模态框
+      }
     } catch (error) {
       logger.error('增强检查失败:', error);
       Alert.alert(t('common.errorTitle'), error.message || t('common.failed'));

@@ -54,6 +54,7 @@ const HomeScreen = () => {
   const [shutterRecentImages, setShutterRecentImages] = useState({});
   const [focalLengthRecentImages, setFocalLengthRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
+  const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
@@ -77,6 +78,7 @@ const HomeScreen = () => {
   const [categoryDataChanged, setCategoryDataChanged] = useState(true);
   const [totalImagesCount, setTotalImagesCount] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
+  const [isSimilarityDetecting, setIsSimilarityDetecting] = useState(false); // 相似度检测状态
   const rotationValue = useRef(new Animated.Value(0)).current;
   
   // 使用 ref 存储设置值，避免异步状态更新问题
@@ -641,6 +643,7 @@ const HomeScreen = () => {
       if (typeof window !== 'undefined') {
         window.isScanning = true;
       }
+      setIsSimilarityDetecting(true); // 设置相似度检测状态
       setGlobalMessage(t('home.similarityDetectionInProgress'));
       
       // 创建 GalleryScannerService 实例，复用其相似度检测逻辑
@@ -674,6 +677,7 @@ const HomeScreen = () => {
       setGlobalMessage(t('home.similarityDetectionFailed', { error: error.message }));
     } finally {
       setIsScanning(false);
+      setIsSimilarityDetecting(false); // 清除相似度检测状态
       // 🔥 清除全局变量
       if (typeof window !== 'undefined') {
         window.isScanning = false;
@@ -1080,6 +1084,7 @@ const HomeScreen = () => {
     return (
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={{ paddingTop: 40 }} // 为固定的消息提示区域留出空间
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -1619,52 +1624,96 @@ const HomeScreen = () => {
                 <Text style={styles.sectionTitle}>🔗 {t('category.similarityGroup')}</Text>
               </View>
               {similarityGroups && similarityGroups.length > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.refreshButton,
-                    isScanning && styles.refreshButtonDisabled
-                  ]}
-                  onPress={handleStartSimilarityDetection}
-                  disabled={isScanning}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.refreshButtonText,
-                    isScanning && styles.refreshButtonTextDisabled
-                  ]}>🔄</Text>
-                </TouchableOpacity>
+                <View style={styles.headerButtonsContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.refreshButton,
+                      isScanning && styles.refreshButtonDisabled
+                    ]}
+                    onPress={handleStartSimilarityDetection}
+                    disabled={isScanning}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.refreshButtonText,
+                      isScanning && styles.refreshButtonTextDisabled
+                    ]}>🔄</Text>
+                  </TouchableOpacity>
+                  {similarityGroups.length > 10 && !showAllSimilarityGroups && (
+                    <TouchableOpacity
+                      style={styles.moreButton}
+                      onPress={() => setShowAllSimilarityGroups(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.moreButtonText}>⋯</Text>
+                    </TouchableOpacity>
+                  )}
+                  {showAllSimilarityGroups && similarityGroups.length > 10 && (
+                    <TouchableOpacity
+                      style={styles.moreButton}
+                      onPress={() => setShowAllSimilarityGroups(false)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.moreButtonText}>−</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
             <View style={styles.categoriesContainer}>
               {similarityGroups && similarityGroups.length > 0 ? (
-                similarityGroups.slice(0, 10).map((group) => (
-                  <SimilarityCard
-                    key={group.groupId}
-                    group={group}
-                    onPress={(group) => {
-                      // 🆕 使用统一的过滤处理函数
-                      handleFilterPress('similarityGroup', group.groupId);
-                    }}
-                  />
-                ))
+                (() => {
+                  // PC端限制最多显示200个相似组，避免性能问题
+                  const MAX_DISPLAY_COUNT = 200;
+                  const displayGroups = showAllSimilarityGroups 
+                    ? similarityGroups.slice(0, MAX_DISPLAY_COUNT)
+                    : similarityGroups.slice(0, 10);
+                  const hasMore = showAllSimilarityGroups && similarityGroups.length > MAX_DISPLAY_COUNT;
+                  
+                  return (
+                    <>
+                      {displayGroups.map((group) => (
+                        <SimilarityCard
+                          key={group.groupId}
+                          group={group}
+                          onPress={(group) => {
+                            // 🆕 使用统一的过滤处理函数
+                            handleFilterPress('similarityGroup', group.groupId);
+                          }}
+                        />
+                      ))}
+                      {hasMore && (
+                        <View style={styles.moreGroupsHint}>
+                          <Text style={styles.moreGroupsHintText}>
+                            {t('home.moreSimilarityGroupsHint', { total: similarityGroups.length, displayed: MAX_DISPLAY_COUNT })}
+                          </Text>
+                        </View>
+                      )}
+                    </>
+                  );
+                })()
               ) : (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>🔗</Text>
-                  <Text style={styles.emptyStateText}>{t('home.noSimilarityGroups')}</Text>
-                  <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+                  <Text style={styles.emptyStateText}>
+                    {isSimilarityDetecting ? t('home.similarityDetectionInProgress') : t('home.noSimilarityGroups')}
+                  </Text>
+                  {!isSimilarityDetecting && (
+                    <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
+                  )}
                   <TouchableOpacity
                     style={[
                       styles.startSimilarityButton,
-                      isScanning && styles.startSimilarityButtonDisabled
+                      (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonDisabled
                     ]}
                     onPress={handleStartSimilarityDetection}
-                    disabled={isScanning}
+                    disabled={isScanning || isSimilarityDetecting}
                   >
                     <Text style={[
                       styles.startSimilarityButtonText,
-                      isScanning && styles.startSimilarityButtonTextDisabled
+                      (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonTextDisabled
                     ]}>
-                      {t('home.startSimilarityDetection')}
+                      {isSimilarityDetecting ? t('home.similarityDetectionInProgress') : t('home.startSimilarityDetection')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1893,7 +1942,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, totalImagesCount, isScanning, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -2297,10 +2346,17 @@ const styles = StyleSheet.create({
   },
   // 扫描进度提示区样式
   scanProgressBanner: {
-    backgroundColor: 'transparent',
+    position: 'fixed',
+    top: 60, // 标题栏高度
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     padding: 8,
-    margin: 8,
-    borderRadius: 4,
+    borderRadius: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    zIndex: 999,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
   },
   scanningBanner: {
     backgroundColor: 'transparent',
@@ -2415,6 +2471,39 @@ const styles = StyleSheet.create({
   },
   refreshButtonTextDisabled: {
     opacity: 0.5,
+  },
+  headerButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  moreButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+    minWidth: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  moreButtonText: {
+    fontSize: 20,
+    lineHeight: 20,
+    color: '#666',
+  },
+  moreGroupsHint: {
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreGroupsHintText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
   categoriesContainer: {
     flexDirection: 'row',

@@ -1041,20 +1041,6 @@ const CategoryScreen = ({
       return;
     }
     
-    // 开始增强的内部函数
-    const startEnhancement = () => {
-      // 捕获当前选中的图片快照（完整对象）
-      const imagesToEnhance = allImages.filter(img => selectedImages.includes(img.id));
-      logger.debug('📸 捕获图片快照:', imagesToEnhance.length, '张图片');
-      
-      // 重置状态
-      setEnhancePreset(preset);
-      setCurrentImageIndex(0);
-      
-      // 显示增强模态框（EnhanceResultScreen 会自动开始处理）
-      setShowEnhanceModal(true);
-    };
-    
     // 检查数量限制（最多9张）
     const MAX_ENHANCE_COUNT = 9;
     if (selectedCount > MAX_ENHANCE_COUNT) {
@@ -1068,30 +1054,52 @@ const CategoryScreen = ({
       return;
     }
 
-    // 查询额度并提示将消耗额度
+    // 🔥 在打开模态框前检查额度
     try {
       const credits = await WeChatAuthService.getCredits();
-      const remaining = typeof credits?.remaining === 'number' ? credits.remaining : 0;
-      // 不足则阻断并提示前往充值
-      if (remaining < selectedCount) {
+      if (!credits || typeof credits.remaining !== 'number') {
         Alert.alert(
-          t('category.insufficientCredits'),
-          t('category.insufficientCreditsMessage', { remaining, count: selectedCount }),
-          [{ text: t('common.confirm'), style: 'default' }]
+          t('common.error'),
+          t('category.getCreditsFailed') || t('imagePreview.cannotCheckCredits')
         );
-        return;
+        return; // 不打开模态框
       }
-      // 足够则二次确认
+      
+      if (credits.remaining < selectedCount) {
+        Alert.alert(
+          t('category.insufficientCredits') || t('common.tip'),
+          t('category.insufficientCreditsMessageFollowWeChat', { remaining: credits.remaining, count: selectedCount })
+        );
+        return; // 不打开模态框
+      }
+
+      // 额度充足，弹出二次确认
       Alert.alert(
         t('category.tip'),
-        t('category.enhanceConfirmMessage', { count: selectedCount, remaining }),
+        t('category.enhanceConfirmMessage', { count: selectedCount, remaining: credits.remaining }),
         [
-          { text: t('common.confirm'), onPress: () => startEnhancement() }
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('common.confirm'),
+            onPress: () => {
+              // 确认后才打开模态框
+              const imagesToEnhance = allImages.filter(img => selectedImages.includes(img.id));
+              logger.debug('📸 捕获图片快照:', imagesToEnhance.length, '张图片');
+              
+              setEnhancePreset(preset);
+              setCurrentImageIndex(0);
+              setShowEnhanceModal(true);
+            }
+          }
         ]
       );
-    } catch (e) {
-      // 查询失败不阻断，直接开始
-      startEnhancement();
+    } catch (error) {
+      logger.error('检查额度失败:', error);
+      Alert.alert(
+        t('common.error'),
+        t('category.getCreditsFailed') || t('imagePreview.cannotCheckCredits')
+      );
+      return; // 不打开模态框
     }
   };
 

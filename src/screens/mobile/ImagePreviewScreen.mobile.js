@@ -923,13 +923,6 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const handleEnhancePresetPress = async (presetId) => {
     try {
       const count = 1; // 单张图片
-      
-      // 会员状态检查
-      const { isMember } = await WeChatAuthService.getMembershipStatus();
-      if (!isMember) {
-        Alert.alert(t('common.tip') || t('common.confirm'), t('imagePreview.membersOnlyFeature') || t('category.enhanceMembersOnly'));
-        return;
-      }
 
       // 额度检查
       const credits = await WeChatAuthService.getCredits();
@@ -938,7 +931,10 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         return;
       }
       if (credits.remaining < count) {
-        Alert.alert(t('common.tip') || t('common.confirm'), t('imagePreview.insufficientCreditsMessageShort', { remaining: credits.remaining, count }));
+        Alert.alert(
+          t('common.tip') || t('common.confirm'),
+          t('category.insufficientCreditsMessageFollowWeChat', { remaining: credits.remaining, count })
+        );
         return;
       }
 
