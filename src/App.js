@@ -17,8 +17,12 @@ import { createBottomTabNavigator } from './adapters/WebAdapters';
 import { Icon } from './adapters/WebAdapters';
 import { PermissionsAndroid } from './adapters/WebAdapters';
 import { logger } from './adapters/WebAdapters';
+import { AsyncStorage } from './adapters/WebAdapters';
 
 console.log('📦 App.js: WebAdapters 导入成功');
+
+// 导入隐私政策确认组件
+import PrivacyPolicyModal, { PRIVACY_AGREED_KEY } from './components/PrivacyPolicyModal.mobile';
 
 // 导入所有屏�?
 import HomeScreen from './screens/mobile/HomeScreen.mobile';
@@ -194,13 +198,66 @@ export default function App() {
   
   const [isServiceReady, setIsServiceReady] = React.useState(false);
   const [stagingBoxCount, setStagingBoxCount] = React.useState(0);
+  const [privacyAgreed, setPrivacyAgreed] = React.useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = React.useState(false);
+  const [checkingPrivacy, setCheckingPrivacy] = React.useState(true);
+  
+  // 检查隐私政策是否已同意
+  useEffect(() => {
+    const checkPrivacyAgreement = async () => {
+      try {
+        const agreed = await AsyncStorage.getItem(PRIVACY_AGREED_KEY);
+        if (agreed === 'true') {
+          console.log('✅ 用户已同意隐私政策');
+          setPrivacyAgreed(true);
+          setShowPrivacyModal(false);
+        } else {
+          console.log('📋 用户未同意隐私政策，显示确认弹窗');
+          setShowPrivacyModal(true);
+        }
+      } catch (error) {
+        console.error('❌ 检查隐私政策同意状态失败:', error);
+        // 出错时显示隐私政策弹窗
+        setShowPrivacyModal(true);
+      } finally {
+        setCheckingPrivacy(false);
+      }
+    };
+    
+    checkPrivacyAgreement();
+  }, []);
+  
+  // 处理隐私政策同意
+  const handlePrivacyAgree = async () => {
+    try {
+      await AsyncStorage.setItem(PRIVACY_AGREED_KEY, 'true');
+      console.log('✅ 隐私政策同意状态已保存');
+      setPrivacyAgreed(true);
+      setShowPrivacyModal(false);
+    } catch (error) {
+      console.error('❌ 保存隐私政策同意状态失败:', error);
+      // 即使保存失败，也允许继续使用应用
+      setPrivacyAgreed(true);
+      setShowPrivacyModal(false);
+    }
+  };
+  
+  // 处理隐私政策不同意（不允许使用应用）
+  const handlePrivacyDisagree = () => {
+    // 华为应用市场要求必须同意才能使用，所以这里不做任何操作
+    // 用户必须同意才能继续
+    console.log('⚠️ 用户未同意隐私政策，无法继续使用应用');
+  };
   
   useEffect(() => {
-    console.log('📦 App.js: App useEffect 运行');
-    // 加载保存的语言设置
-    loadSavedLanguage();
-    initializeApp();
-  }, []);
+    // 只有在隐私政策已同意且服务未就绪时，才初始化应用
+    if (privacyAgreed && !isServiceReady) {
+      console.log('📦 App.js: App useEffect 运行');
+      // 加载保存的语言设置
+      loadSavedLanguage();
+      initializeApp();
+    }
+  }, [privacyAgreed]);
 
   // 加载暂存箱数量
   useEffect(() => {
@@ -258,6 +315,32 @@ export default function App() {
   };
 
   console.log('📦 App.js: 返回 JSX');
+  
+  // 如果正在检查隐私政策，显示加载界面
+  if (checkingPrivacy) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>🚀 {t('common.initializing')}</Text>
+        </View>
+      </View>
+    );
+  }
+  
+  // 显示隐私政策确认弹窗
+  if (showPrivacyModal) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <PrivacyPolicyModal
+          visible={showPrivacyModal}
+          onAgree={handlePrivacyAgree}
+          onDisagree={handlePrivacyDisagree}
+        />
+      </View>
+    );
+  }
   
   // 如果服务还未就绪，显示加载界面
   if (!isServiceReady) {

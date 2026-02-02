@@ -39,6 +39,17 @@
     "english": "English",
     "tip": "提示"
   },
+  "privacy": {
+    "title": "隐私政策",
+    "welcome": "欢迎使用芯图相册",
+    "description": "在使用本应用前，请仔细阅读并同意我们的隐私政策。",
+    "readPolicy": "我已阅读并同意",
+    "privacyPolicy": "《隐私政策》",
+    "agree": "同意并继续",
+    "disagree": "不同意",
+    "mustAgree": "请先阅读并同意隐私政策",
+    "openPolicy": "打开隐私政策"
+  },
   "category": {
     "imageList": "图片列表",
     "stagingBox": "暂存箱",

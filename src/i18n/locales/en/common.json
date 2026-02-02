@@ -39,6 +39,17 @@
     "english": "English",
     "tip": "Tip"
   },
+  "privacy": {
+    "title": "Privacy Policy",
+    "welcome": "Welcome to Xintu Album",
+    "description": "Please read and agree to our privacy policy before using this app.",
+    "readPolicy": "I have read and agree to the",
+    "privacyPolicy": "Privacy Policy",
+    "agree": "Agree and Continue",
+    "disagree": "Disagree",
+    "mustAgree": "Please read and agree to the privacy policy first",
+    "openPolicy": "Open Privacy Policy"
+  },
   "category": {
     "imageList": "Image List",
     "stagingBox": "Staging Box",
