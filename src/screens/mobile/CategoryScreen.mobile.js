@@ -955,6 +955,21 @@ const CategoryScreen = ({ route, navigation }) => {
         Alert.alert(t('common.error'), t('category.getCreditsFailed'));
         return;
       }
+
+      // 如果用户未关注公众号，跳过额度检查，直接执行增强
+      if (credits.isFollowed === false) {
+        try {
+          setShowEnhancePresets(false);
+          const presetName = (enhancePresets && enhancePresets[presetId] && enhancePresets[presetId].name) ? enhancePresets[presetId].name : presetId;
+          await performEnhance(presetId, presetName, selectedIds);
+        } catch (e) {
+          logger.error('提交增强失败:', e);
+          Alert.alert(t('common.error'), e.message || t('category.submitFailed'));
+        }
+        return;
+      }
+
+      // 已关注公众号，进行额度检查
       if (credits.remaining < count) {
         Alert.alert(
           t('common.tip'),

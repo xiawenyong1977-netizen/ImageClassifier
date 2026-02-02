@@ -930,6 +930,22 @@ const ImagePreviewScreen = ({ route, navigation }) => {
         Alert.alert(t('common.error'), t('imagePreview.cannotCheckCredits') || t('common.retry'));
         return;
       }
+
+      // 如果用户未关注公众号，跳过额度检查，直接执行增强
+      if (credits.isFollowed === false) {
+        try {
+          closeEnhanceModal();
+          const preset = enhancePresets?.[presetId];
+          const presetName = preset?.name || presetId;
+          await performEnhance(presetId, presetName);
+        } catch (e) {
+          logger.error('提交增强失败:', e);
+          Alert.alert(t('common.error'), e.message || t('category.submitFailed'));
+        }
+        return;
+      }
+
+      // 已关注公众号，进行额度检查
       if (credits.remaining < count) {
         Alert.alert(
           t('common.tip') || t('common.confirm'),

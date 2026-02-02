@@ -957,7 +957,16 @@ const ImagePreviewScreen = ({
           );
           return; // 不打开模态框
         }
+
+        // 如果用户未关注公众号，跳过额度检查，直接打开模态框
+        if (credits.isFollowed === false) {
+          setEnhancePreset(presetId);
+          setExpandedAction(null);
+          setShowEnhanceModal(true);
+          return;
+        }
         
+        // 已关注公众号，进行额度检查
         if (credits.remaining < count) {
           Alert.alert(
             t('imagePreview.insufficientCreditsTitle') || t('common.tip'),

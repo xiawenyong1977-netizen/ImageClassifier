@@ -1064,7 +1064,19 @@ const CategoryScreen = ({
         );
         return; // 不打开模态框
       }
+
+      // 如果用户未关注公众号，跳过额度检查，直接打开模态框
+      if (credits.isFollowed === false) {
+        const imagesToEnhance = allImages.filter(img => selectedImages.includes(img.id));
+        logger.debug('📸 捕获图片快照:', imagesToEnhance.length, '张图片');
+        
+        setEnhancePreset(preset);
+        setCurrentImageIndex(0);
+        setShowEnhanceModal(true);
+        return;
+      }
       
+      // 已关注公众号，进行额度检查
       if (credits.remaining < selectedCount) {
         Alert.alert(
           t('category.insufficientCredits') || t('common.tip'),

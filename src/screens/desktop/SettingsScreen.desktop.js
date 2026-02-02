@@ -1038,6 +1038,17 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
                     </View>
                   )}
                 </View>
+
+                {/* 免费会员权限声明 */}
+                <View style={styles.freeMemberSection}>
+                  <Text style={styles.freeMemberTitle}>{t('settings.freeMember')}</Text>
+                  <View style={styles.freeMemberFeatureItem}>
+                    <Text style={styles.freeMemberFeatureText}>{t('settings.freeMemberSmartClassification')}</Text>
+                  </View>
+                  <View style={styles.freeMemberFeatureItem}>
+                    <Text style={styles.freeMemberFeatureText}>{t('settings.freeMemberPhotoEnhancement')}</Text>
+                  </View>
+                </View>
               </View>
 
               {/* 右侧：二维码区域（仅未关注时显示） */}
@@ -1961,6 +1972,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#fff',
+  },
+  // 免费会员权限声明样式
+  freeMemberSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  freeMemberTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  freeMemberFeatureItem: {
+    marginTop: 6,
+  },
+  freeMemberFeatureText: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
   },
   languageSelector: {
     flexDirection: 'row',

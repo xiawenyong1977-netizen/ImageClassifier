@@ -1402,6 +1402,17 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               )}
             </View>
 
+            {/* 免费会员权限声明 */}
+            <View style={styles.freeMemberSection}>
+              <Text style={styles.freeMemberTitle}>{t('settings.freeMember')}</Text>
+              <View style={styles.freeMemberFeatureItem}>
+                <Text style={styles.freeMemberFeatureText}>{t('settings.freeMemberSmartClassification')}</Text>
+              </View>
+              <View style={styles.freeMemberFeatureItem}>
+                <Text style={styles.freeMemberFeatureText}>{t('settings.freeMemberPhotoEnhancement')}</Text>
+              </View>
+            </View>
+
             {/* 二维码区域（仅未关注时显示） */}
             {wechatStatus === 'not_followed' && (
               <View style={styles.membershipQrColumn}>
@@ -1966,6 +1977,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // 免费会员权限声明样式
+  freeMemberSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  freeMemberTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  freeMemberFeatureItem: {
+    marginTop: 6,
+  },
+  freeMemberFeatureText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    lineHeight: 18,
   },
   // 模态框样式
   modalOverlay: {
