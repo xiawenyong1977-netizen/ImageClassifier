@@ -89,7 +89,7 @@ if (typeof global.Intl === 'undefined') {
 // 共享适配层 - 移动端专用版本
 // 使用静态导入避免Metro的动态require问题
 import React from 'react';
-import { View, Text, Alert as RNAlert, Platform, PermissionsAndroid as RN_PermissionsAndroid, NativeModules, AppState as RNAppState } from 'react-native';
+import { View, Text, Alert as RNAlert, Platform, PermissionsAndroid as RN_PermissionsAndroid, NativeModules, AppState as RNAppState, BackHandler } from 'react-native';
 import { Buffer } from 'buffer';
 
 // React Native 专用模块 - 静态导入
@@ -242,6 +242,9 @@ export { NativeModules };
 
 // AppState（用于监听应用状态变化）
 export const AppState = RNAppState;
+
+// BackHandler（用于处理返回键和退出应用）
+export { BackHandler };
 
 // logger
 export { logger };
