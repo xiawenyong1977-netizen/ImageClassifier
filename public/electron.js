@@ -23,36 +23,155 @@ const logger = {
   }
 };
 
-  // 禁用应用菜单
-  Menu.setApplicationMenu(null);
+  // 设置应用菜单 - 为 macOS 提供标准菜单
+  if (process.platform === 'darwin') {
+    // 为 macOS 创建标准菜单
+    const template = [
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      {
+        label: 'Window',
+        submenu: [
+          { role: 'minimize' },
+          { role: 'zoom' },
+          ...(process.platform === 'darwin' ? [
+            { type: 'separator' },
+            { role: 'front' },
+            { type: 'separator' },
+            { role: 'window' }
+          ] : [
+            { role: 'close' }
+          ])
+        ]
+      }
+    ];
+
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
+  } else {
+    // 在 Windows/Linux 上，我们可以选择不显示菜单或显示简化菜单
+    // 当前保持禁用状态，也可以构建一个简化的菜单
+    const template = [
+      {
+        label: 'File',
+        submenu: [
+          { role: 'reload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      {
+        label: 'Window',
+        submenu: [
+          { role: 'minimize' },
+          { role: 'close' }
+        ]
+      }
+    ];
+    
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
+  }
 
 // 检查并安装 Visual C++ Redistributable
-function checkAndInstallVCRedist() {
+function checkAndInstallPlatformDependencies() {
   if (isDev) return; // 开发环境跳过
   
-  const redistPath = path.join(process.resourcesPath, 'redist');
-  const vcRedistPath = path.join(redistPath, 'vc_redist.x64.exe');
-  
-  if (fs.existsSync(vcRedistPath)) {
-    logger.info('检查 Visual C++ Redistributable...');
+  if (process.platform === 'win32') {
+    // Windows-specific: 检查并安装 Visual C++ Redistributable
+    const redistPath = path.join(process.resourcesPath, 'redist');
+    const vcRedistPath = path.join(redistPath, 'vc_redist.x64.exe');
     
-    // 检查是否已安装
-    exec('reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64"', (error) => {
-      if (error) {
-        logger.info('Visual C++ Redistributable 未安装，正在安装...');
-        
-        // 静默安装
-        exec(`"${vcRedistPath}" /quiet /norestart`, (installError) => {
-          if (installError) {
-            logger.warn('Visual C++ Redistributable 安装失败:', installError);
-          } else {
-            logger.info('Visual C++ Redistributable 安装成功');
-          }
-        });
-      } else {
-        logger.info('Visual C++ Redistributable 已安装');
-      }
-    });
+    if (fs.existsSync(vcRedistPath)) {
+      logger.info('检查 Visual C++ Redistributable...');
+      
+      // 检查是否已安装
+      exec('reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64"', (error) => {
+        if (error) {
+          logger.info('Visual C++ Redistributable 未安装，正在安装...');
+          
+          // 静默安装
+          exec(`"${vcRedistPath}" /quiet /norestart`, (installError) => {
+            if (installError) {
+              logger.warn('Visual C++ Redistributable 安装失败:', installError);
+            } else {
+              logger.info('Visual C++ Redistributable 安装成功');
+            }
+          });
+        } else {
+          logger.info('Visual C++ Redistributable 已安装');
+        }
+      });
+    }
+  } else if (process.platform === 'darwin') {
+    // macOS-specific: 检查必要依赖 (if any needed)
+    logger.info('macOS 系统，跳过特定依赖安装检查');
+  } else if (process.platform === 'linux') {
+    // Linux-specific: 检查必要依赖 (if any needed)
+    logger.info('Linux 系统，跳过特定依赖安装检查');
   }
 }
 
@@ -67,11 +186,16 @@ function createWindow() {
       enableRemoteModule: true,
       webSecurity: false,  // 开发环境需要禁用以加载本地文件
       // GPU 相关配置，解决 GPU 状态错误
-      hardwareAcceleration: false,  // 禁用硬件加速
+      // 在 macOS 上启用硬件加速以获得更好的性能
+      hardwareAcceleration: process.platform === 'darwin',
       offscreen: false,  // 禁用离屏渲染
       backgroundThrottling: false  // 禁用后台节流
     },
-    icon: path.join(__dirname, '../icons/imageclassify.png'),  // 使用更高分辨率的图标
+    icon: process.platform === 'darwin' 
+      ? path.join(__dirname, './icon.icns')  // macOS 使用 ICNS 格式
+      : process.platform === 'win32'
+        ? path.join(__dirname, './icon.ico')  // Windows 使用 ICO 格式
+        : path.join(__dirname, './icon.png'), // Linux 使用 PNG 格式
     title: '芯图相册-智能分类，便捷管理，仅你可见',
     autoHideMenuBar: true,  // 隐藏默认菜单栏
     // 混合模式：titleBarOverlay + 自定义内容
@@ -102,6 +226,19 @@ function createWindow() {
   
   logger.info('加载应用:', startUrl);
   mainWindow.loadURL(startUrl);
+  
+  // 在开发和生产环境中都启用对本地文件的访问权限
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    // 添加跨域头，以便能够加载本地模型文件
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Access-Control-Allow-Origin': ['*'],
+        'Access-Control-Allow-Headers': ['*'],
+        'Access-Control-Allow-Methods': ['GET, POST, OPTIONS']
+      }
+    });
+  });
 
 
   // 开发环境下打开开发者工具
@@ -121,7 +258,6 @@ function createWindow() {
 
 
   // 监听设置按钮点击事件
-  const { ipcMain } = require('electron');
   ipcMain.on('show-settings-menu', (event) => {
     // 直接导航到设置页面
     mainWindow.webContents.send('navigate-to-settings');
@@ -230,25 +366,26 @@ function createWindow() {
 
       logger.info(`📋 准备复制 ${existingFiles.length} 个文件到剪贴板`);
 
-      // 使用临时文件来存储文件路径列表，避免命令行参数长度限制
-      // Windows命令行参数长度限制通常是8191字符，3000+个文件路径很容易超过这个限制
-      const tempFilePath = path.join(os.tmpdir(), `clipboard_files_${Date.now()}.txt`);
-      
-      try {
-        // 将文件路径写入临时文件，每行一个路径
-        // 使用UTF-8编码，并在每行末尾添加换行符
-        const fileContent = existingFiles.map(filePath => {
-          // 转义路径中的特殊字符，使用Base64编码避免路径中的特殊字符问题
-          return Buffer.from(filePath, 'utf8').toString('base64');
-        }).join('\n');
+      // 根据操作系统选择适当的剪贴板处理方式
+      if (process.platform === 'win32') {
+        // Windows平台：使用原有的PowerShell方法
+        const tempFilePath = path.join(os.tmpdir(), `clipboard_files_${Date.now()}.txt`);
         
-        fs.writeFileSync(tempFilePath, fileContent, 'utf8');
-        logger.debug(`📋 已创建临时文件: ${tempFilePath}，包含 ${existingFiles.length} 个文件路径`);
-        
-        // 构建PowerShell脚本，从临时文件读取路径
-        // 将文件路径转换为PowerShell中的安全字符串（使用单引号，并转义单引号）
-        const tempFileEscaped = tempFilePath.replace(/'/g, "''");
-        const psScript = `Add-Type -AssemblyName System.Windows.Forms;
+        try {
+          // 将文件路径写入临时文件，每行一个路径
+          // 使用UTF-8编码，并在每行末尾添加换行符
+          const fileContent = existingFiles.map(filePath => {
+            // 转义路径中的特殊字符，使用Base64编码避免路径中的特殊字符问题
+            return Buffer.from(filePath, 'utf8').toString('base64');
+          }).join('\n');
+          
+          fs.writeFileSync(tempFilePath, fileContent, 'utf8');
+          logger.debug(`📋 已创建临时文件: ${tempFilePath}，包含 ${existingFiles.length} 个文件路径`);
+          
+          // 构建PowerShell脚本，从临时文件读取路径
+          // 将文件路径转换为PowerShell中的安全字符串（使用单引号，并转义单引号）
+          const tempFileEscaped = tempFilePath.replace(/'/g, "''");
+          const psScript = `Add-Type -AssemblyName System.Windows.Forms;
 $files = New-Object System.Collections.Specialized.StringCollection;
 $tempFile = '${tempFileEscaped}';
 
@@ -288,42 +425,109 @@ if (Test-Path $tempFile) {
   Write-Host "Temp file not found: $tempFile";
   exit 1;
 }`;
-        
-        // 将PowerShell脚本保存到临时文件，避免命令行参数长度限制
-        const psScriptPath = path.join(os.tmpdir(), `clipboard_script_${Date.now()}.ps1`);
-        fs.writeFileSync(psScriptPath, psScript, 'utf8');
-        logger.debug(`📋 已创建PowerShell脚本: ${psScriptPath}`);
-        
-        // 执行PowerShell脚本
-        const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"`;
-        
-        exec(psCommand, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+          
+          // 将PowerShell脚本保存到临时文件，避免命令行参数长度限制
+          const psScriptPath = path.join(os.tmpdir(), `clipboard_script_${Date.now()}.ps1`);
+          fs.writeFileSync(psScriptPath, psScript, 'utf8');
+          logger.debug(`📋 已创建PowerShell脚本: ${psScriptPath}`);
+          
+          // 执行PowerShell脚本
+          const psCommand = `powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"`;
+          
+          exec(psCommand, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+            // 清理临时文件
+            try {
+              if (fs.existsSync(psScriptPath)) {
+                fs.unlinkSync(psScriptPath);
+              }
+              if (fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath);
+              }
+            } catch (cleanupError) {
+              logger.warn(`清理临时文件失败:`, cleanupError);
+            }
+            
+            if (error) {
+              logger.error(`❌ PowerShell执行失败:`, error);
+              logger.error(`stderr:`, stderr);
+              event.reply('copy-files-result', { 
+                success: false, 
+                error: `复制失败: ${error.message}` 
+              });
+            } else {
+              logger.info(`✅ PowerShell执行成功`);
+              logger.debug(`stdout:`, stdout);
+              if (stderr) {
+                logger.warn(`stderr:`, stderr);
+              }
+              
+              event.reply('copy-files-result', { 
+                success: true, 
+                copiedCount: existingFiles.length,
+                skippedCount: missingFiles.length
+              });
+            }
+          });
+        } catch (fileError) {
+          logger.error(`❌ 创建临时文件失败:`, fileError);
           // 清理临时文件
           try {
-            if (fs.existsSync(psScriptPath)) {
-              fs.unlinkSync(psScriptPath);
-            }
             if (fs.existsSync(tempFilePath)) {
               fs.unlinkSync(tempFilePath);
             }
           } catch (cleanupError) {
+            // 忽略清理错误
+          }
+          event.reply('copy-files-result', { 
+            success: false, 
+            error: `创建临时文件失败: ${fileError.message}` 
+          });
+        }
+      } else if (process.platform === 'darwin') {
+        // macOS平台：使用osascript设置剪贴板
+        const appleScript = `
+          use AppleScript version "2.4"
+          use framework "Foundation"
+          use framework "AppKit"
+
+          property NSFileManager : a reference to current application's NSFileManager
+          property NSURL : a reference to current application's NSURL
+          property NSWorkspace : a reference to current application's NSWorkspace
+
+          set fileUrls to {}
+          repeat with aPath in {"${existingFiles.map(p => escapePathForAppleScript(p)).join('", "')}"} as list
+            set end of fileUrls to (NSURL's fileURLWithPath:aPath)
+          end repeat
+
+          set pb to the pasteboard "NSGeneralPboard"
+          pb's clearContents()
+          pb's writeObjects:fileUrls
+        `;
+
+        // 保存AppleScript到临时文件并执行
+        const scriptPath = path.join(os.tmpdir(), `clipboard_script_${Date.now()}.scpt`);
+        fs.writeFileSync(scriptPath, appleScript, 'utf8');
+        logger.debug(`📋 已创建AppleScript: ${scriptPath}`);
+
+        const osaCommand = `osascript "${scriptPath}"`;
+        exec(osaCommand, (error, stdout, stderr) => {
+          // 清理临时文件
+          try {
+            if (fs.existsSync(scriptPath)) {
+              fs.unlinkSync(scriptPath);
+            }
+          } catch (cleanupError) {
             logger.warn(`清理临时文件失败:`, cleanupError);
           }
-          
+
           if (error) {
-            logger.error(`❌ PowerShell执行失败:`, error);
-            logger.error(`stderr:`, stderr);
+            logger.error(`❌ AppleScript执行失败:`, error);
             event.reply('copy-files-result', { 
               success: false, 
               error: `复制失败: ${error.message}` 
             });
           } else {
-            logger.info(`✅ PowerShell执行成功`);
-            logger.debug(`stdout:`, stdout);
-            if (stderr) {
-              logger.warn(`stderr:`, stderr);
-            }
-            
+            logger.info(`✅ AppleScript执行成功`);
             event.reply('copy-files-result', { 
               success: true, 
               copiedCount: existingFiles.length,
@@ -331,20 +535,30 @@ if (Test-Path $tempFile) {
             });
           }
         });
-      } catch (fileError) {
-        logger.error(`❌ 创建临时文件失败:`, fileError);
-        // 清理临时文件
+      } else {
+        // Linux及其他平台：使用xclip或xsel（如果可用）
+        // 首先尝试使用系统剪贴板API
         try {
-          if (fs.existsSync(tempFilePath)) {
-            fs.unlinkSync(tempFilePath);
-          }
-        } catch (cleanupError) {
-          // 忽略清理错误
+          // 使用Electron的clipboard API来设置文件路径
+          // 注意：这可能不适用于所有Linux桌面环境
+          clipboard.write({
+            bookmark: existingFiles.join('\n'),
+            text: existingFiles.join('\n')
+          });
+          
+          logger.info(`✅ Linux剪贴板设置成功`);
+          event.reply('copy-files-result', { 
+            success: true, 
+            copiedCount: existingFiles.length,
+            skippedCount: missingFiles.length
+          });
+        } catch (error) {
+          logger.error(`❌ Linux剪贴板设置失败:`, error);
+          event.reply('copy-files-result', { 
+            success: false, 
+            error: `复制失败: ${error.message}` 
+          });
         }
-        event.reply('copy-files-result', { 
-          success: false, 
-          error: `创建临时文件失败: ${fileError.message}` 
-        });
       }
     } catch (error) {
       logger.error(`❌ 复制文件到剪贴板失败:`, error);
@@ -355,6 +569,11 @@ if (Test-Path $tempFile) {
     }
   });
 
+  // 辅助函数：为AppleScript转义路径
+  function escapePathForAppleScript(p) {
+    return p.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+  }
+
   // 页面加载完成
   mainWindow.webContents.on('did-finish-load', () => {
     logger.info('页面加载完成');
@@ -363,6 +582,9 @@ if (Test-Path $tempFile) {
 
   // 窗口关闭事件
   mainWindow.on('closed', () => {
+    // 在 macOS 上，当所有窗口关闭时并不退出应用程序
+    // 用户可以通过dock重新打开窗口
+    // 在其他平台上，关闭最后一个窗口时退出应用
     if (process.platform !== 'darwin') {
       app.quit();
     }
@@ -490,16 +712,19 @@ function setupIpcHandlers() {
 }
 
 // 在应用启动前设置 GPU 相关参数，解决 GPU 状态错误
-app.commandLine.appendSwitch('--disable-gpu');
-app.commandLine.appendSwitch('--disable-gpu-sandbox');
-app.commandLine.appendSwitch('--disable-software-rasterizer');
+// 在 macOS 上，我们可能会启用硬件加速，因为它通常有更好的图形支持
+if (process.platform !== 'darwin') {
+  app.commandLine.appendSwitch('--disable-gpu');
+  app.commandLine.appendSwitch('--disable-gpu-sandbox');
+  app.commandLine.appendSwitch('--disable-software-rasterizer');
+}
 app.commandLine.appendSwitch('--disable-background-timer-throttling');
 app.commandLine.appendSwitch('--disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('--disable-renderer-backgrounding');
 
 // 当Electron完成初始化并准备创建浏览器窗口时调用此方法
 app.whenReady().then(() => {
-  checkAndInstallVCRedist(); // 检查并安装运行库
+  checkAndInstallPlatformDependencies(); // 检查并安装平台特定依赖
   setupIpcHandlers();
   createWindow();
 });

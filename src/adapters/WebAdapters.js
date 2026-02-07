@@ -825,7 +825,29 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
-        const stats = fs.statSync(filePath);
+        const pathModule = eval('require("path")');
+        
+        // 标准化路径处理，兼容不同操作系统
+        let normalizedPath = filePath;
+        
+        // 移除 file:// 前缀（如果存在）
+        if (normalizedPath.startsWith('file://')) {
+          normalizedPath = normalizedPath.replace('file://', '');
+          // 处理 file:/// 格式（三个斜杠）
+          if (normalizedPath.startsWith('/')) {
+            normalizedPath = normalizedPath.substring(1);
+          }
+        }
+        
+        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
+        if (process.platform === 'win32' && normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
+          normalizedPath = normalizedPath.substring(1);
+        }
+        
+        // 使用 path.resolve 确保路径格式正确
+        normalizedPath = pathModule.resolve(normalizedPath);
+        
+        const stats = fs.statSync(normalizedPath);
         
         return {
           size: stats.size,
@@ -856,10 +878,27 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
-        const path = eval('require("path")');
+        const pathModule = eval('require("path")');
         
-        // 规范化路径：移除 file:// 前缀，确保使用正确的路径格式
-        let normalizedDirPath = normalizeFilePath(dirPath);
+        // 标准化路径处理，兼容不同操作系统
+        let normalizedDirPath = dirPath;
+        
+        // 移除 file:// 前缀（如果存在）
+        if (normalizedDirPath.startsWith('file://')) {
+          normalizedDirPath = normalizedDirPath.replace('file://', '');
+          // 处理 file:/// 格式（三个斜杠）
+          if (normalizedDirPath.startsWith('/')) {
+            normalizedDirPath = normalizedDirPath.substring(1);
+          }
+        }
+        
+        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
+        if (process.platform === 'win32' && normalizedDirPath.startsWith('/') && normalizedDirPath.includes(':')) {
+          normalizedDirPath = normalizedDirPath.substring(1);
+        }
+        
+        // 使用 path.resolve 确保路径格式正确
+        normalizedDirPath = pathModule.resolve(normalizedDirPath);
         
         // 使用 path.join 确保路径正确拼接（处理包含冒号的路径）
         const files = fs.readdirSync(normalizedDirPath);
@@ -867,7 +906,7 @@ export const RNFS = {
         
         for (const file of files) {
           // 使用 path.join 确保路径正确拼接，正确处理包含冒号的路径
-          const fullPath = path.join(normalizedDirPath, file);
+          const fullPath = pathModule.join(normalizedDirPath, file);
           const stats = fs.statSync(fullPath);
           
           const item = {
@@ -908,13 +947,27 @@ export const RNFS = {
       try {
         // 在 Electron 环境中，尝试使用 Node.js fs 模块
         const fs = eval('require("fs")');
+        const pathModule = eval('require("path")');
         
-        // 修复Windows路径格式问题
+        // 标准化路径处理，兼容不同操作系统
         let normalizedPath = filePath;
-        if (filePath.startsWith('/') && filePath.includes(':')) {
-          // 处理 /D:/path 格式，转换为 D:/path
-          normalizedPath = filePath.substring(1);
+        
+        // 移除 file:// 前缀（如果存在）
+        if (normalizedPath.startsWith('file://')) {
+          normalizedPath = normalizedPath.replace('file://', '');
+          // 处理 file:/// 格式（三个斜杠）
+          if (normalizedPath.startsWith('/')) {
+            normalizedPath = normalizedPath.substring(1);
+          }
         }
+        
+        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
+        if (process.platform === 'win32' && normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
+          normalizedPath = normalizedPath.substring(1);
+        }
+        
+        // 使用 path.resolve 确保路径格式正确
+        normalizedPath = pathModule.resolve(normalizedPath);
         
         const exists = fs.existsSync(normalizedPath);
         return exists;
@@ -1527,23 +1580,19 @@ export const ElectronFileAPI = {
             }
           };
           
-          // 监听文件删除结果（通过 IPCListenerService 统一管理）
+          // 监听文件删除结果 - 使用ipcRenderer.on而不是window.addEventListener
           let timeoutId;
-          const handleDeleteResult = (event) => {
-            const result = event.detail;
-            logger.debug(`[ElectronFileAPI] 收到删除结果:`, result);
+          const handleDeleteResult = (event, result) => {
+            logger.debug(`[ElectronFileAPI] 收到删除结果 (ipcRenderer):`, result);
             
-            // 由于 IPCListenerService 发送的是全局事件，我们需要通过其他方式匹配
-            // 这里我们假设每个删除请求都是独立的，直接处理第一个结果
+            // 清除超时
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+            // 移除事件监听器
+            ipcRenderer.removeListener('delete-file-result', handleDeleteResult);
+            
             if (result && typeof result.success === 'boolean') {
-              // 清除超时
-              if (timeoutId) {
-                clearTimeout(timeoutId);
-              }
-              // 移除事件监听器
-              if (typeof window !== 'undefined') {
-                window.removeEventListener('file-delete-result', handleDeleteResult);
-              }
               if (result.success) {
                 logger.debug(`[ElectronFileAPI] 文件删除成功: ${filePath}`);
                 resolve(result);
@@ -1551,13 +1600,14 @@ export const ElectronFileAPI = {
                 logger.error(`[ElectronFileAPI] 文件删除失败: ${filePath}, ${result.message}`);
                 reject(new Error(result.message));
               }
+            } else {
+              logger.error(`[ElectronFileAPI] 删除结果格式错误:`, result);
+              reject(new Error('删除结果格式错误'));
             }
           };
           
-          // 监听自定义事件
-          if (typeof window !== 'undefined') {
-            window.addEventListener('file-delete-result', handleDeleteResult);
-          }
+          // 监听IPC事件
+          ipcRenderer.on('delete-file-result', handleDeleteResult);
           
           logger.debug(`[ElectronFileAPI] 已注册结果监听器`);
           
@@ -1569,9 +1619,8 @@ export const ElectronFileAPI = {
           // 设置超时
           timeoutId = setTimeout(() => {
             logger.warn(`[ElectronFileAPI] 删除超时`);
-            if (typeof window !== 'undefined') {
-              window.removeEventListener('file-delete-result', handleDeleteResult);
-            }
+            // 移除事件监听器
+            ipcRenderer.removeListener('delete-file-result', handleDeleteResult);
             reject(new Error('文件删除超时'));
           }, 10000); // 10秒超时
           
@@ -1885,8 +1934,21 @@ export const ModelPathAdapter = {
         logger.debug('🔧 开发环境: 使用开发服务器路径');
         return 'http://localhost:3000/models';
       } else if (isElectron) {
-        // Electron生产环境：使用相对路径（相对于build目录）
-        logger.debug('💻 Electron生产环境: 使用相对路径 ./models');
+        // Electron生产环境：使用相对于 app.getAppPath() 的路径
+        logger.debug('💻 Electron生产环境: 使用相对于应用的模型路径');
+        try {
+          // 在渲染进程中通过 window.require 获取主进程模块
+          if (window.require) {
+            const electron = window.require('electron');
+            // 通过ipcRenderer请求主进程提供模型路径
+            if (electron.ipcRenderer) {
+              // 返回相对于应用根目录的路径
+              return './models';
+            }
+          }
+        } catch (e) {
+          logger.debug('⚠️ 无法获取Electron主进程引用，使用默认路径');
+        }
         return './models';
       } else {
         // Web浏览器生产环境：使用相对路径
@@ -2018,9 +2080,16 @@ export const ModelPathAdapter = {
           return await import('onnxruntime-react-native');
         
         case 'electron':
-          logger.debug('加载 onnxruntime-web (Electron环境)...');
-          const electronOrtModule = await import('onnxruntime-web');
-          return electronOrtModule.default || electronOrtModule;
+          logger.debug('加载 onnxruntime-node (Electron环境)...');
+          // For Electron apps, we typically want to use the node version for better performance
+          try {
+            return await import('onnxruntime-node');
+          } catch (error) {
+            logger.warn('onnxruntime-node 加载失败，回退到 onnxruntime-web:', error.message);
+            // If node version fails, fall back to web version
+            const electronOrtModule = await import('onnxruntime-web');
+            return electronOrtModule.default || electronOrtModule;
+          }
         
         case 'web':
           logger.debug('加载 onnxruntime-web...');
