@@ -36,8 +36,7 @@
     "react-i18next": "^16.5.4",
     "react-native": "^0.72.17",
     "react-native-web": "^0.19.13",
-    "react-refresh": "^0.17.0",
-    "sharp": "^0.34.4"
+    "react-refresh": "^0.17.0"
   },
   "devDependencies": {
     "@craco/craco": "^7.1.0",

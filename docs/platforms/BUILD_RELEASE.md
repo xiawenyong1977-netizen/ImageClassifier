@@ -7,6 +7,15 @@
 
 若你一直在根目录改 `public/electron.js` 和 `src/`，构建前需保证 **pc-version-final 用到的 `public/`、`src/` 与根目录一致**（例如通过复制、符号链接或统一源码位置）。
 
+**推荐：pc-version-final/public 用符号链接**  
+- 让 `pc-version-final/public` 指向根目录的 `../public`，只维护根目录一份，无需同步两份。
+- 构建时 `build-macos.sh` 会先把符号链接替换成实体目录再打包（避免 asar 内符号链接异常），打包完仍是同一份内容。
+- 若当前是实体目录，可恢复为符号链接（在项目根目录执行）：
+  ```bash
+  cd pc-version-final && rm -rf public && ln -s ../public public
+  ```
+  然后 `git add public` 提交（Git 会记录为符号链接）。
+
 ---
 
 ## 二、macOS 发布版（DMG）
@@ -79,7 +88,11 @@ npm run electron:build-all
 
 1. **版本号**：在 `pc-version-final/package.json` 里改 `version`（如 `1.1.2`），再构建。
 2. **图标**：  
-   - macOS：`public/icon.icns`（或 pc-version-final 内对应路径）  
+   - **.icns 的唯一源**：macOS 安装包里的图标只来自 **public/icon.png**。`create-mac-icon.sh` 只读这一份，生成 `public/icon.icns`。  
+   - **目录里其他图标**：`public/icons/` 下的 `icon_71x71.png`、`icon_150x150.png`、`icon_300x300.png`、`imageclassify.png` 是独立文件（PWA/Android 等用），不会从 .icns 自动生成。要让它们也是圆角，需要在根目录跑一遍 **`node scripts/round-icon-corners.js`**，脚本会同时处理 **public/icon.png** 和 **public/icons/** 里上述四个文件（内边距只加在 icon.png，圆角会加在所有）。  
+   - 流程：改完图标后，在根目录执行 `cp public/icon.png.bak public/icon.png`（可选）、`node scripts/round-icon-corners.js`，再构建；这样 .icns 和目录里其他图标都会是圆角。  
+   - .icns 由 **Node+sharp** 生成（`scripts/create-mac-icon.js`），全程保留透明通道，圆角不会丢。  
+   - 若安装后图标仍显示为方形：先试 **清除图标缓存**：终端执行 `killall Dock`，或 `sudo rm -rf /Library/Caches/com.apple.iconservices.store` 后重启 Finder/注销。  
    - Windows：`public/icon.ico`
 3. **代码同步**：若桌面功能是在**根目录**的 `public/`、`src/` 开发的，确保 **pc-version-final** 使用的同一份代码（复制或链接），否则打出来的包会缺少你最近的修改。
 

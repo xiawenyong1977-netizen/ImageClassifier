@@ -4,9 +4,18 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
+// 规范日志格式： [ISO8601] [LEVEL] [pid=xxx] message
+const logLevels = { INFO: 'INFO', WARN: 'WARN', ERROR: 'ERROR', DEBUG: 'DEBUG' };
+function formatLogLine(level, message, ...args) {
+  const ts = new Date().toISOString();
+  const pid = process.pid;
+  const rest = args.map(a => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))).join(' ');
+  const body = rest ? `${message} ${rest}` : message;
+  return `[${ts}] [${level}] [pid=${pid}] ${body}\n`;
+}
 // 最早写入：脚本一加载就写 /tmp，方便确认主进程是否启动（不依赖 app ready）
 try {
-  fs.appendFileSync(path.join(os.tmpdir(), 'xintualbum-bootstrap.log'), `[${new Date().toISOString()}] electron main started\n`, 'utf8');
+  fs.appendFileSync(path.join(os.tmpdir(), 'xintualbum-bootstrap.log'), formatLogLine(logLevels.INFO, 'electron main started'), 'utf8');
 } catch (_) {}
 
 const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_IS_DEV === '1' || !app.isPackaged;
@@ -77,7 +86,8 @@ const L = {
   }
 });
 
-// 简单的日志系统（安全写入，避免 EPIPE 当 stdout/stderr 被关闭时）
+// 主进程专用日志：与 src/adapters/WebAdapters.js 的 Logger 接口一致（info/warn/error/debug），
+// 但主进程不能 require 前端模块，故在此单独实现；格式与 Logger helper 对齐（[timestamp] [LEVEL]），并增加 pid 与文件输出。
 const safeLog = (fn, ...args) => {
   try {
     if (process.stdout.writable) fn(...args);
@@ -100,13 +110,16 @@ function getLogPath() {
 }
 function ensureLogFile() {
   if (logFilePath) return;
+  const logsDir = app.getPath('logs'); // 应用标准日志目录，如 ~/Library/Logs/XinTuAlbum (macOS)
   const candidates = [
-    path.join(os.homedir(), 'Desktop', 'xintualbum-main.log'),
+    path.join(logsDir, 'main.log'),
     path.join(os.tmpdir(), 'xintualbum-main.log')
   ];
   for (const p of candidates) {
     try {
-      fs.appendFileSync(p, `[${new Date().toISOString()}] Log started, path: ${p}\n`, 'utf8');
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(p, formatLogLine(logLevels.INFO, 'log started', `path=${p}`), 'utf8');
       logFilePath = p;
       return;
     } catch (_) {}
@@ -116,7 +129,7 @@ function toFile(level, message, ...args) {
   const p = getLogPath();
   if (!p) return;
   try {
-    const line = `[${new Date().toISOString()}] [${level}] ${message} ${args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')}\n`;
+    const line = formatLogLine(level, message, ...args);
     fs.appendFileSync(p, line, 'utf8');
   } catch (_) {}
 }
@@ -846,7 +859,7 @@ app.commandLine.appendSwitch('--disable-renderer-backgrounding');
 
 // 当Electron完成初始化并准备创建浏览器窗口时调用此方法
 app.whenReady().then(() => {
-  ensureLogFile(); // 打包后：立即创建日志文件（桌面或 /tmp），否则后续 logger 不会写
+  ensureLogFile(); // 打包后：立即创建日志文件（app 标准 logs 目录或 /tmp），否则后续 logger 不会写
   checkAndInstallPlatformDependencies(); // 检查并安装平台特定依赖
   setupIpcHandlers();
   createWindow();
