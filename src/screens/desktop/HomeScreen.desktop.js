@@ -1761,15 +1761,19 @@ const HomeScreen = () => {
     
     return (
       <SafeAreaView style={styles.container}>
-        {/* 自定义标题栏 */}
+        {/* 自定义标题栏；macOS 上不显示左侧图标和标题，只留设置与暂存箱 */}
         <View style={styles.customTitleBar}>
           <View style={styles.titleBarLeft}>
-            <Image 
-              source={{ uri: './icon.png' }}
-              style={styles.titleBarIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.titleBarTitle}>{t('app.name')}</Text>
+            {typeof process !== 'undefined' && process.platform !== 'darwin' && (
+              <>
+                <Image 
+                  source={{ uri: './icon.png' }}
+                  style={styles.titleBarIcon}
+                  resizeMode="contain"
+                />
+                <Text style={styles.titleBarTitle}>{t('app.name')}</Text>
+              </>
+            )}
           </View>
           <View style={styles.titleBarRight}>
             {/* 暂存箱按钮 */}
