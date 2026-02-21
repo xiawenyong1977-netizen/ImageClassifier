@@ -36,7 +36,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-modules-
 
-      - name: Install system dependencies (GTK2-Runtime for node-canvas: Cairo/Pango/libpng etc.)
+      - name: Install system dependencies (GTK2-Runtime for node-canvas)
         run: |
           choco install -y pkgconfiglite gtk-runtime libjpeg-turbo
 
