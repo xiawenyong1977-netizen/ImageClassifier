@@ -7,16 +7,15 @@ on:
         required: true
         type: string
     outputs:
-      windows_artifact_paths:
-        description: "Paths to the Windows build artifacts"
-        value: ${{ jobs.build-windows.outputs.artifact_paths }}
+      # Windows 构建现在生成多个独立的制品，不再使用单一的 artifact_paths
+      # 制品名称: windows-nsis-installer, windows-portable, windows-appx-unsigned, windows-appx-signed
 
 jobs:
   build-windows:
     name: Build Windows Application
     runs-on: windows-latest
     outputs:
-      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+      # 不再使用单一的 artifact_paths，而是生成多个独立的制品
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,7 +60,6 @@ jobs:
       - name: Find Windows artifacts
         id: build
         run: |
-          $artifactPaths = @()
           $distPath = "pc-version-final/dist"
           
           Write-Host "Searching for Windows build artifacts in: $distPath"
@@ -70,60 +68,108 @@ jobs:
           $nsisInstallers = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue
           if ($nsisInstallers) {
               Write-Host "Found NSIS installers:"
+              $nsisPaths = @()
               $nsisInstallers | ForEach-Object { 
                   Write-Host "  - $($_.FullName)"
-                  $artifactPaths += $_.FullName
+                  $nsisPaths += $_.FullName
               }
+              "nsis_paths<<EOF" >> $env:GITHUB_OUTPUT
+              $nsisPaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+              "EOF" >> $env:GITHUB_OUTPUT
           }
           
           # Portable EXE (*.Portable.exe)
           $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.Portable.exe" -ErrorAction SilentlyContinue
-          if ($portableExes) {
-              Write-Host "Found Portable EXEs:"
-              $portableExes | ForEach-Object { 
-                  Write-Host "  - $($_.FullName)"
-                  $artifactPaths += $_.FullName
-              }
-          }
-          
-          # APPX packages (上传所有版本：未签名和签名版本)
-          $appxPackages = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue
-          if ($appxPackages) {
-              Write-Host "Found APPX packages:"
-              $appxPackages | ForEach-Object { 
-                  Write-Host "  - $($_.FullName)"
-                  $artifactPaths += $_.FullName
-              }
-          }
-          
-          # Portable EXE 可能不是 *.Portable.exe 格式，查找其他可能的格式（如 *-x64.exe）
-          # 但只在没有找到 *.Portable.exe 时才查找
           if ($portableExes.Count -eq 0) {
+              # Portable EXE 可能不是 *.Portable.exe 格式，查找其他可能的格式（如 *-x64.exe）
               $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
                           Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -notlike "*.Portable.exe" -and $_.Name -like "*-x64.exe" }
               if ($exeFiles) {
                   Write-Host "Found other EXE files (likely portable):"
-                  $portableExe = $exeFiles | Select-Object -First 1
-                  Write-Host "  - $($portableExe.FullName)"
-                  $artifactPaths += $portableExe.FullName
+                  $portableExes = $exeFiles | Select-Object -First 1
               }
           }
           
-          Write-Host "Total artifacts found: $($artifactPaths.Count)"
+          if ($portableExes) {
+              Write-Host "Found Portable EXEs:"
+              $portablePaths = @()
+              $portableExes | ForEach-Object { 
+                  Write-Host "  - $($_.FullName)"
+                  $portablePaths += $_.FullName
+              }
+              "portable_paths<<EOF" >> $env:GITHUB_OUTPUT
+              $portablePaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+              "EOF" >> $env:GITHUB_OUTPUT
+          }
           
-          if ($artifactPaths.Count -eq 0) {
+          # APPX packages - 分别处理未签名和签名版本
+          $appxPackages = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue
+          if ($appxPackages) {
+              $unsignedAppx = @()
+              $signedAppx = @()
+              
+              $appxPackages | ForEach-Object {
+                  if ($_.Name -like "*-signed.appx") {
+                      Write-Host "Found signed APPX: $($_.FullName)"
+                      $signedAppx += $_.FullName
+                  } else {
+                      Write-Host "Found unsigned APPX: $($_.FullName)"
+                      $unsignedAppx += $_.FullName
+                  }
+              }
+              
+              if ($unsignedAppx.Count -gt 0) {
+                  "unsigned_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
+                  $unsignedAppx | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+                  "EOF" >> $env:GITHUB_OUTPUT
+              }
+              
+              if ($signedAppx.Count -gt 0) {
+                  "signed_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
+                  $signedAppx | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+                  "EOF" >> $env:GITHUB_OUTPUT
+              }
+          }
+          
+          # 检查是否至少找到一个类型的制品
+          $totalFound = 0
+          if ($nsisInstallers) { $totalFound += $nsisInstallers.Count }
+          if ($portableExes) { $totalFound += $portableExes.Count }
+          if ($appxPackages) { $totalFound += $appxPackages.Count }
+          
+          Write-Host "Total artifacts found: $totalFound"
+          
+          if ($totalFound -eq 0) {
               Write-Error "No Windows build artifacts found in $distPath/"
               Write-Host "Available files in dist directory:"
               Get-ChildItem -Path $distPath -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table
               exit 1
           }
-          
-          "artifact_paths<<EOF" >> $env:GITHUB_OUTPUT
-          $artifactPaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-          "EOF" >> $env:GITHUB_OUTPUT
 
-      - name: Upload Windows artifacts
+      - name: Upload NSIS Installer
+        if: steps.build.outputs.nsis_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
-          path: ${{ steps.build.outputs.artifact_paths }}
+          name: windows-nsis-installer
+          path: ${{ steps.build.outputs.nsis_paths }}
+
+      - name: Upload Portable EXE
+        if: steps.build.outputs.portable_paths != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: ${{ steps.build.outputs.portable_paths }}
+
+      - name: Upload Unsigned APPX
+        if: steps.build.outputs.unsigned_appx_paths != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-appx-unsigned
+          path: ${{ steps.build.outputs.unsigned_appx_paths }}
+
+      - name: Upload Signed APPX
+        if: steps.build.outputs.signed_appx_paths != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-appx-signed
+          path: ${{ steps.build.outputs.signed_appx_paths }}

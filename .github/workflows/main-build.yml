@@ -111,5 +111,9 @@ jobs:
           prerelease: false
           files: |
             ./artifacts/macos-build/*.*
-            ./artifacts/windows-build/*.*
-            ./artifacts/android-apk/*.*
+            ./artifacts/windows-nsis-installer/*.*
+            ./artifacts/windows-portable/*.*
+            ./artifacts/windows-appx-unsigned/*.*
+            ./artifacts/windows-appx-signed/*.*
+            ./artifacts/android-apk-unsigned/*.*
+            ./artifacts/android-apk-signed/*.*
