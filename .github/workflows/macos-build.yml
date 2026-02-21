@@ -15,6 +15,7 @@ jobs:
   build-macos:
     name: Build macOS Application
     runs-on: macos-latest
+    timeout-minutes: 60
     outputs:
       artifact_paths: ${{ steps.build.outputs.artifact_paths }}
     steps:
@@ -26,6 +27,15 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Verify Node version (required >=20 for simple-xml-to-json)
+        run: |
+          node -v
+          NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+          if [ "$NODE_MAJOR" -lt 20 ]; then
+            echo "::error::Node 20+ required, got $(node -v)"
+            exit 1
+          fi
+
       - name: Install system dependencies
         run: |
           brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
@@ -36,9 +46,9 @@ jobs:
           path: |
             node_modules
             pc-version-final/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          key: ${{ runner.os }}-node20-node-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-modules-
+            ${{ runner.os }}-node20-node-modules-
 
       - name: Build macOS application (reuse local build-macos.sh, DMG only)
         run: CI=1 ./build-macos.sh

@@ -33,6 +33,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # packages 必须用空格分隔，不能用逗号（逗号会导致 'build-tools;34.0.0,' 找不到）
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
