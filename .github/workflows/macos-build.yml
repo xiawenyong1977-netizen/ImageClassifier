@@ -76,7 +76,7 @@ jobs:
           cd pc-version-final
           npm run electron:build-mac-zip
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT }}
 
       - name: Find macOS artifacts
         id: build
