@@ -133,7 +133,7 @@ class GalleryScannerService {
    * @returns {Promise<Object>} 扫描结果
    */
   async startScan(options = {}, onProgress = null) {
-    // 检查是否已经在扫描中
+    // 检查是否已经在扫描中（JS层标志）
     if (this.isScanning) {
       const errorMsg = i18n.t('home.scanAlreadyInProgress');
       logger.warn(`⚠️ ${errorMsg}`);
@@ -146,26 +146,27 @@ class GalleryScannerService {
       throw new Error(i18n.t('home.galleryScanModuleUnavailable'));
     }
     
+    // 🔥 检查原生服务是否正在运行，如果正在运行则拒绝新扫描（保护正在进行的扫描任务）
+    try {
+      const isRunning = await ScanService.isRunning();
+      if (isRunning) {
+        const errorMsg = i18n.t('home.scanAlreadyInProgress');
+        logger.warn(`⚠️ 检测到扫描服务正在运行，拒绝新扫描请求: ${errorMsg}`);
+        throw new Error(errorMsg);
+      }
+    } catch (error) {
+      // 如果检查服务状态失败，但错误不是我们主动抛出的，记录警告但继续
+      if (error.message === i18n.t('home.scanAlreadyInProgress')) {
+        // 这是我们主动抛出的错误，直接重新抛出
+        throw error;
+      }
+      logger.warn('⚠️ 检查服务状态失败，但继续启动扫描:', error);
+    }
+    
     // 确认使用原生扫描
     logger.info('🚀 启动原生扫描服务 (Native Android Scan)');
     logger.info(`📋 扫描版本: ${this.scanVersion}`);
     logger.info(`✅ 原生模块状态: ${GalleryScanModule ? '可用' : '不可用'}`);
-
-    // 🔥 在启动新扫描前，检查并强制停止已运行的服务
-    try {
-      const isRunning = await ScanService.isRunning();
-      if (isRunning) {
-        logger.warn('⚠️ 检测到扫描服务正在运行，强制停止旧服务...');
-        ScanService.forceStop();
-        // 等待服务完全停止
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        logger.info('✅ 旧服务已停止');
-      }
-    } catch (error) {
-      logger.warn('⚠️ 检查服务状态失败，尝试强制停止:', error);
-      ScanService.forceStop();
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
 
     // 设置扫描状态和回调
     this.isScanning = true;
@@ -321,6 +322,12 @@ class GalleryScannerService {
    */
   async handleProgressEvent(event) {
     const { stage, filesProcessed, filesFound, totalImagesToBeClassified, imagesClassified, scanId } = event;
+    
+    // 🔥 检查 scanId 是否匹配当前扫描，防止处理旧扫描的事件
+    if (scanId && this.currentScanId && scanId !== this.currentScanId) {
+      logger.debug(`⚠️ 忽略旧扫描的进度事件: scanId=${scanId}, currentScanId=${this.currentScanId}, stage=${stage}`);
+      return; // 忽略旧扫描的事件
+    }
     
     // 🆕 如果是基础扫描完成事件，只完成基础扫描，不执行AI分类
     if (stage === 'basic_scan_completed') {

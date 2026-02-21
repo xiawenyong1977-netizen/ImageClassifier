@@ -170,10 +170,11 @@ const HomeScreen = ({ navigation }) => {
       // DeviceEventEmitter不可用，忽略
     }
     
-    // 监听语言变化，重新加载分类数据以更新分类名称
+    // 监听语言变化，重新加载分类数据和城市数据以更新名称
     const handleLanguageChange = () => {
-      logger.debug('🌐 语言已切换，重新加载分类数据...');
+      logger.debug('🌐 语言已切换，重新加载分类数据和城市数据...');
       loadCategories();
+      loadCities(); // 🔥 语言切换时重新加载城市名称
     };
     
     let languageSubscription = null;
@@ -1451,6 +1452,12 @@ const HomeScreen = ({ navigation }) => {
       // 加载最近扫描信息
       await loadLastScanTime();
     } catch (error) {
+      // 🔥 如果是"扫描已在进行中"的错误，静默处理，不显示错误提示
+      if (error.message && error.message.includes(t('home.scanAlreadyInProgress'))) {
+        logger.debug('ℹ️ 扫描已在进行中，跳过新扫描请求');
+        return; // 静默返回，不显示错误
+      }
+      
       logger.error('❌ 扫描失败:', error);
       setGlobalMessage(t('home.scanFailed', { error: error.message }));
       Alert.alert(t('home.scanFailed', { error: '' }), error.message);
@@ -2330,7 +2337,7 @@ const HomeScreen = ({ navigation }) => {
    */
   const renderCityCard = (city) => (
     <TouchableOpacity
-      key={city.name}
+      key={city.locationId || city.name}
       style={styles.categoryCard}
       onPress={() => {
         try {

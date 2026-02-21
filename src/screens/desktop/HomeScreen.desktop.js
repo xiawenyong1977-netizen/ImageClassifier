@@ -954,6 +954,17 @@ const HomeScreen = () => {
         window.isScanning = false;
       }
     } catch (error) {
+      // 🔥 如果是"扫描已在进行中"的错误，静默处理，不显示错误提示
+      if (error.message && error.message.includes(t('home.scanAlreadyInProgress'))) {
+        logger.debug('ℹ️ 扫描已在进行中，跳过新扫描请求');
+        setIsScanning(false); // 重置状态
+        // 🔥 清除全局变量
+        if (typeof window !== 'undefined') {
+          window.isScanning = false;
+        }
+        return; // 静默返回，不显示错误
+      }
+      
       logger.error('智能扫描失败:', error);
       setGlobalMessage(t('home.scanFailed', { error: error.message }));
       setIsScanning(false); // 扫描失败时也要重置状态
