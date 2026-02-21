@@ -101,13 +101,15 @@ jobs:
             exit 1
           fi
           
-          # Join paths with colon as separator
-          ARTIFACT_PATHS=$(IFS=':'; echo "${ARTIFACT_FILES[*]}")
-          echo "artifact_paths=$ARTIFACT_PATHS"
-          echo "artifact_paths=$ARTIFACT_PATHS" >> $GITHUB_OUTPUT
+          # Output newline-separated paths for upload-artifact
+          {
+            echo "artifact_paths<<EOF"
+            printf '%s\n' "${ARTIFACT_FILES[@]}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: ${{ join(split(steps.build.outputs.artifact_paths, ':'), '\n') }}
+          path: ${{ steps.build.outputs.artifact_paths }}

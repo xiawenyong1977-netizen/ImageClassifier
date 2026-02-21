@@ -1,0 +1,33 @@
+# Reusable workflow: run one platform build (macos / windows / android).
+# Called by main-build.yml with matrix.platform.
+name: Build Platform
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      release_tag:
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build-macos:
+    if: inputs.platform == 'macos'
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.sha }}
+
+  build-windows:
+    if: inputs.platform == 'windows'
+    uses: ./.github/workflows/windows-build.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.sha }}
+
+  build-android:
+    if: inputs.platform == 'android'
+    uses: ./.github/workflows/android-build.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.sha }}

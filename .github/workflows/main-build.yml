@@ -2,9 +2,9 @@ name: ImageClassifier Multi-Platform Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, macos-support ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, macos-support ]
   workflow_dispatch:
 
 jobs:
@@ -93,6 +93,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ./artifacts/macOS-build/*.*
+            ./artifacts/macos-build/*.*
             ./artifacts/windows-build/*.*
-            ./artifacts/android-build/*.*
+            ./artifacts/android-apk/*.*
