@@ -38,18 +38,12 @@ yarn-error.*
 # Android
 android/app/build/
 android/build/
-android/gradle/wrapper/gradle-wrapper.jar
-android/gradle/wrapper/gradle-wrapper.properties
 android/gradle/
 !android/gradle/wrapper/
-android/gradlew
-android/gradlew.bat
 android/local.properties
 android/.gradle/
 android/captures/
-android/gradlew
-android/gradlew.bat
-android/local.properties
+# Note: gradlew and gradlew.bat should be committed (removed from ignore list)
 android/.idea/workspace.xml
 android/.idea/tasks.xml
 android/.idea/gradle.xml
