@@ -68,18 +68,18 @@ jobs:
             echo "No DMG found in pc-version-final/dist/"
             exit 1
           fi
-          ARTIFACT_FILES=("$DMG_FILE")
-          echo "Found DMG: $DMG_FILE"
           
-          # Output newline-separated paths for upload-artifact
-          {
-            echo "artifact_paths<<EOF"
-            printf '%s\n' "${ARTIFACT_FILES[@]}"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          # 提取文件名（不含路径和扩展名）作为制品名称
+          DMG_BASENAME=$(basename "$DMG_FILE" .dmg)
+          echo "Found DMG: $DMG_FILE"
+          echo "Artifact name: $DMG_BASENAME"
+          
+          # 输出文件路径和制品名称
+          echo "artifact_path=$DMG_FILE" >> $GITHUB_OUTPUT
+          echo "artifact_name=$DMG_BASENAME" >> $GITHUB_OUTPUT
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-build
-          path: ${{ steps.build.outputs.artifact_paths }}
+          name: ${{ steps.build.outputs.artifact_name }}
+          path: ${{ steps.build.outputs.artifact_path }}
