@@ -26,7 +26,16 @@ jobs:
             echo "matrix={\"platform\":[\"macos\", \"windows\", \"android\"]}" >> $GITHUB_OUTPUT
           else
             # Automated trigger - only build platforms that changed
-            changed_files=$(git diff --name-only HEAD^ HEAD)
+            # For push events, use github.event.before if available, otherwise fallback to HEAD^
+            if [ "${{ github.event_name }}" == "push" ] && [ -n "${{ github.event.before }}" ]; then
+              changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+            elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              changed_files=$(git diff --name-only HEAD^ HEAD)
+            else
+              # If HEAD^ doesn't exist (shallow clone or first commit), check all files in current commit
+              changed_files=$(git diff-tree --no-commit-id --name-only -r HEAD)
+            fi
+            
             declare -a platforms=()
             
             if [[ $changed_files =~ "pc-version-final/" ]]; then
