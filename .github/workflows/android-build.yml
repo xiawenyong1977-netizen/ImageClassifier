@@ -77,10 +77,14 @@ jobs:
       - name: Check if signing secrets are configured
         id: check-secrets
         run: |
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+          # 检查 secret 是否存在（即使为空也会被传递，所以检查长度）
+          KEYSTORE_BASE64="${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
+          if [ -n "$KEYSTORE_BASE64" ] && [ ${#KEYSTORE_BASE64} -gt 0 ]; then
             echo "secrets_configured=true" >> $GITHUB_OUTPUT
+            echo "✅ Signing secrets are configured (length: ${#KEYSTORE_BASE64})"
           else
             echo "secrets_configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Signing secrets are not configured, will build unsigned APK only"
           fi
 
       - name: Build unsigned Android Release APK
@@ -104,12 +108,21 @@ jobs:
       - name: Setup signing (if secrets are configured)
         if: steps.check-secrets.outputs.secrets_configured == 'true'
         run: |
+          echo "🔐 Setting up signing keystore..."
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
           chmod 600 android/app/release.keystore
+          if [ -f "android/app/release.keystore" ]; then
+            echo "✅ Keystore file created successfully"
+            ls -lh android/app/release.keystore
+          else
+            echo "❌ Failed to create keystore file"
+            exit 1
+          fi
 
       - name: Build signed Android Release APK (if secrets configured)
         if: steps.check-secrets.outputs.secrets_configured == 'true'
         run: |
+          echo "🔐 Building signed Android Release APK..."
           cd android
           # 清理后重新构建签名版本
           ./gradlew clean
@@ -118,6 +131,7 @@ jobs:
             -PMYAPP_RELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -PMYAPP_RELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
             -PMYAPP_RELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}"
+          echo "✅ Signed APK build completed"
           
           # 保存签名版本到临时目录
           APK_DIR="app/build/outputs/apk/release"
