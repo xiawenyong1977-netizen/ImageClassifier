@@ -57,6 +57,7 @@ jobs:
   build:
     needs: build-matrix
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     uses: ./.github/workflows/build-platform.yml
     with:
