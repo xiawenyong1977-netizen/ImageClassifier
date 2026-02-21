@@ -141,6 +141,13 @@ jobs:
         run: |
           echo "🔐 Building signed Android Release APK..."
           cd android
+          
+          # 验证 keystore 文件存在
+          if [ ! -f "app/release.keystore" ]; then
+            echo "❌ Error: release.keystore not found"
+            exit 1
+          fi
+          
           # 清理后重新构建签名版本
           ./gradlew clean
           ./gradlew assembleRelease --no-daemon \
@@ -148,6 +155,12 @@ jobs:
             -PMYAPP_RELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -PMYAPP_RELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
             -PMYAPP_RELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}"
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Error: Signed APK build failed"
+            exit 1
+          fi
+          
           echo "✅ Signed APK build completed"
           
           # 保存签名版本到临时目录
@@ -157,6 +170,11 @@ jobs:
             mkdir -p ../artifacts
             cp "$SIGNED_APK" "../artifacts/app-release-signed.apk"
             echo "Signed APK saved: ../artifacts/app-release-signed.apk"
+            ls -lh "../artifacts/app-release-signed.apk"
+          else
+            echo "⚠️ Warning: Signed APK not found in $APK_DIR"
+            echo "Available files:"
+            find "$APK_DIR" -type f || echo "Directory not found"
           fi
         env:
           JAVA_OPTS: '-Xmx2048m'
@@ -164,10 +182,15 @@ jobs:
       - name: Find APKs
         id: build
         run: |
+          # 确保 artifacts 目录存在
+          mkdir -p artifacts
+          
           # 检查 artifacts 目录中的 APK 文件
           if [ -f "artifacts/app-release-unsigned.apk" ]; then
             echo "unsigned_apk=artifacts/app-release-unsigned.apk" >> $GITHUB_OUTPUT
             echo "Found unsigned APK"
+          else
+            echo "⚠️ Warning: unsigned APK not found in artifacts directory"
           fi
           
           if [ -f "artifacts/app-release-signed.apk" ]; then
@@ -176,8 +199,9 @@ jobs:
             echo "Found signed APK"
           elif [ -f "artifacts/app-release-unsigned.apk" ]; then
             echo "apk_path=artifacts/app-release-unsigned.apk" >> $GITHUB_OUTPUT
+            echo "Using unsigned APK as default"
           else
-            echo "No APK found in artifacts directory"
+            echo "❌ Error: No APK found in artifacts directory"
             exit 1
           fi
 
@@ -188,7 +212,7 @@ jobs:
           path: ${{ steps.build.outputs.unsigned_apk }}
 
       - name: Upload signed APK (if available)
-        if: ${{ steps.build.outputs.signed_apk != '' }}
+        if: steps.check-secrets.outputs.secrets_configured == 'true' && steps.build.outputs.signed_apk != ''
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed
