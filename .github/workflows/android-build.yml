@@ -74,6 +74,15 @@ jobs:
       - name: Generate build info
         run: node scripts/generate-build-info.js
 
+      - name: Check if signing secrets are configured
+        id: check-secrets
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "secrets_configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "secrets_configured=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build unsigned Android Release APK
         run: |
           cd android
@@ -93,13 +102,13 @@ jobs:
           JAVA_OPTS: '-Xmx2048m'
 
       - name: Setup signing (if secrets are configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: steps.check-secrets.outputs.secrets_configured == 'true'
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
           chmod 600 android/app/release.keystore
 
       - name: Build signed Android Release APK (if secrets configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: steps.check-secrets.outputs.secrets_configured == 'true'
         run: |
           cd android
           # 清理后重新构建签名版本
