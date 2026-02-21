@@ -79,13 +79,20 @@ jobs:
         run: |
           # 检查 secret 是否存在（即使为空也会被传递，所以检查长度）
           KEYSTORE_BASE64="${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
-          if [ -n "$KEYSTORE_BASE64" ] && [ ${#KEYSTORE_BASE64} -gt 0 ]; then
+          echo "Debug: Checking ANDROID_KEYSTORE_BASE64 secret..."
+          echo "Debug: Secret length: ${#KEYSTORE_BASE64}"
+          
+          if [ -n "$KEYSTORE_BASE64" ] && [ ${#KEYSTORE_BASE64} -gt 100 ]; then
             echo "secrets_configured=true" >> $GITHUB_OUTPUT
             echo "✅ Signing secrets are configured (length: ${#KEYSTORE_BASE64})"
           else
             echo "secrets_configured=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Signing secrets are not configured, will build unsigned APK only"
+            echo "⚠️ Signing secrets are not configured (length: ${#KEYSTORE_BASE64}), will build unsigned APK only"
           fi
+          
+          # 输出检查结果供调试
+          echo "Debug: secrets_configured output will be:"
+          cat $GITHUB_OUTPUT | grep secrets_configured || echo "secrets_configured not found in output"
 
       - name: Build unsigned Android Release APK
         run: |
@@ -104,6 +111,16 @@ jobs:
           fi
         env:
           JAVA_OPTS: '-Xmx2048m'
+
+      - name: Debug check-secrets output
+        run: |
+          echo "Debug: check-secrets.outputs.secrets_configured = '${{ steps.check-secrets.outputs.secrets_configured }}'"
+          echo "Debug: Condition check: steps.check-secrets.outputs.secrets_configured == 'true'"
+          if [ "${{ steps.check-secrets.outputs.secrets_configured }}" == "true" ]; then
+            echo "✅ Condition is TRUE - Setup signing step should run"
+          else
+            echo "❌ Condition is FALSE - Setup signing step will be skipped"
+          fi
 
       - name: Setup signing (if secrets are configured)
         if: steps.check-secrets.outputs.secrets_configured == 'true'
