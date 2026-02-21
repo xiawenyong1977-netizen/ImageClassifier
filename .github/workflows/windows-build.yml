@@ -76,24 +76,25 @@ jobs:
               "EOF" >> $env:GITHUB_OUTPUT
           }
           
-          # Portable EXE - 根据 package.json 和 BUILD_GUIDE.md 确定格式
-          # electron-builder portable target 默认格式: ${productName}-${version}-win-${arch}-portable.exe
-          # 实际文件名: XinTuAlbum-1.1.2-win-x64-portable.exe
+          # Portable EXE - 实际文件名格式: XinTuAlbum 1.1.0.exe
+          # 格式: ${productName} ${version}.exe (版本号前有空格，不是连字符)
+          # 排除 Setup 安装程序
           $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
                           Where-Object { 
                               $_.Name -notlike "*Setup*" -and 
-                              $_.Name -like "*-win-x64-portable.exe"
+                              $_.Name -like "XinTuAlbum *.exe" -and
+                              $_.Name -notlike "XinTuAlbum-Setup*"
                           }
           
           if ($portableExes.Count -eq 0) {
-              # 回退：查找其他可能的 portable 格式（兼容不同版本）
-              Write-Host "No portable EXE found with standard format (*-win-x64-portable.exe), trying alternative patterns..."
+              # 回退：查找其他可能的 portable 格式（兼容不同版本或配置）
+              Write-Host "No portable EXE found with format 'XinTuAlbum *.exe', trying alternative patterns..."
               $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
                               Where-Object { 
                                   $_.Name -notlike "*Setup*" -and 
                                   ($_.Name -like "*-portable.exe" -or 
                                    $_.Name -like "*-Portable.exe" -or
-                                   $_.Name -like "*Portable*.exe")
+                                   $_.Name -like "*-win-x64-portable.exe")
                               }
           }
           
