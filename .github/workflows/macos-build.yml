@@ -50,6 +50,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node20-node-modules-
 
+      # scripts/create-mac-icon.js 需要 sharp，从 repo 根目录 resolve
+      - name: Install sharp (for create-mac-icon.js at repo root)
+        run: npm install sharp
+
       - name: Build macOS application (reuse local build-macos.sh, DMG only)
         run: CI=1 ./build-macos.sh
         env:

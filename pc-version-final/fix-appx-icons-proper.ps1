@@ -17,8 +17,9 @@ if ([string]::IsNullOrEmpty($AppxPath)) {
     $appxFiles = Get-ChildItem -Path "$PSScriptRoot\dist" -Filter "*.appx" -ErrorAction SilentlyContinue | 
                  Sort-Object LastWriteTime -Descending
     
-    if ($appxFiles -and $appxFiles.Count -gt 0) {
-        $AppxPath = $appxFiles[0].FullName
+    $fileList = @($appxFiles)
+    if ($fileList.Count -gt 0) {
+        $AppxPath = $fileList[0].FullName
         Write-Host "找到 APPX 文件: $AppxPath" -ForegroundColor Green
     } else {
         Write-Host "错误: 未找到 APPX 文件！" -ForegroundColor Red
@@ -71,8 +72,7 @@ New-Item -ItemType Directory -Path $repackDir -Force | Out-Null
 
 try {
     Write-Host "`n[1/5] 使用 MakeAppx.exe 解压 APPX..." -ForegroundColor Yellow
-    $unpackCmd = "& `"$makeAppx`" unpack /l /p `"$AppxPath`" /d `"$unpackDir`""
-    Invoke-Expression $unpackCmd
+    & $makeAppx unpack /l /p $AppxPath /d $unpackDir
     if ($LASTEXITCODE -ne 0) {
         throw "解压失败，退出代码: $LASTEXITCODE"
     }
@@ -224,8 +224,7 @@ try {
     
     Write-Host "`n[4/5] 使用 MakeAppx.exe 重新打包..." -ForegroundColor Yellow
     $newAppxPath = Join-Path $repackDir "XinTuAlbum-1.0.0.appx"
-    $packCmd = "& `"$makeAppx`" pack /l /d `"$unpackDir`" /p `"$newAppxPath`" /o"
-    $output = Invoke-Expression $packCmd 2>&1
+    $output = & $makeAppx pack /l /d $unpackDir /p $newAppxPath /o 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ✗ 重新打包失败，退出代码: $LASTEXITCODE" -ForegroundColor Red
         Write-Host "  错误输出:" -ForegroundColor Yellow
@@ -238,8 +237,10 @@ try {
         } catch {
             Write-Host "    ✗ XML 格式错误: $($_.Exception.Message)" -ForegroundColor Red
             Write-Host "    DefaultTile 内容:" -ForegroundColor Yellow
-            if ($manifestContent -match '<uap:DefaultTile[^>]*>') {
-                Write-Host "    $([regex]::Match($manifestContent, '<uap:DefaultTile[^>]*>').Value)" -ForegroundColor Gray
+            $defaultTileRegex = '<uap:DefaultTile[^>]*>'
+            if ($manifestContent -match $defaultTileRegex) {
+                $defaultTileVal = [regex]::Match($manifestContent, $defaultTileRegex).Value
+                Write-Host "    $defaultTileVal" -ForegroundColor Gray
             }
         }
         throw "重新打包失败，退出代码: $LASTEXITCODE"

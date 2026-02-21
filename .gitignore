@@ -40,10 +40,10 @@ android/app/build/
 android/build/
 android/gradle/
 !android/gradle/wrapper/
+# gradlew / gradlew.bat 需提交，CI 依赖
 android/local.properties
 android/.gradle/
 android/captures/
-# Note: gradlew and gradlew.bat should be committed (removed from ignore list)
 android/.idea/workspace.xml
 android/.idea/tasks.xml
 android/.idea/gradle.xml

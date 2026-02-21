@@ -24,6 +24,7 @@
   "dependencies": {
     "buffer": "^6.0.3",
     "canvas": "^2.11.2",
+    "crypto-js": "^4.2.0",
     "exif-parser": "^0.1.12",
     "i18next": "^25.8.4",
     "jimp": "^1.6.0",
