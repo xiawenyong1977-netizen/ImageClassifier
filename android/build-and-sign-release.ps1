@@ -1,5 +1,10 @@
 # 一键构建并签名Release APK脚本
 # 使用方法: .\build-and-sign-release.ps1
+# CI 仅构建不签名: .\build-and-sign-release.ps1 -SkipSign
+
+param(
+    [switch]$SkipSign
+)
 
 Write-Host "🚀 开始一键构建并签名Release APK..." -ForegroundColor Green
 
@@ -18,6 +23,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "✅ Release版本构建成功" -ForegroundColor Green
+
+if ($SkipSign) {
+    Write-Host "`n⏭️ 跳过签名 (CI 模式)" -ForegroundColor Yellow
+    Write-Host "📱 未签名APK: app\build\outputs\apk\release\app-release-unsigned.apk" -ForegroundColor Cyan
+    exit 0
+}
 
 # 步骤2: 自动签名
 Write-Host "`n🔐 步骤2: 自动签名..." -ForegroundColor Yellow

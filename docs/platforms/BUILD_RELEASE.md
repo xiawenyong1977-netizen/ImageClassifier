@@ -133,3 +133,22 @@ npm run electron:build-all
 | Windows 便携版 | pc-version-final      | `npm run electron:build-portable` |
 
 输出均在 **pc-version-final/dist/** 下。
+
+---
+
+## 八、macOS DMG 安装与测试
+
+**1. 找到 DMG**  
+构建完成后：`pc-version-final/dist/XinTuAlbum-1.1.2-arm64.dmg`（Apple Silicon）或同目录下 x64 版本。
+
+**2. 安装**  
+- 双击 DMG 打开，将 **XinTuAlbum** 拖到 **应用程序（Applications）** 文件夹。  
+- 若提示“无法打开，因为无法验证开发者”：**右键** 应用 → 选 **“打开”** → 再点“打开”确认（未签名包首次需这样）。
+
+**3. 运行与测试**  
+- 在启动台或应用程序里打开 **芯图相册（XinTuAlbum）**。  
+- 建议验证：选择照片目录、扫描、分类/截图识别、设置、暂存箱等主要流程。  
+- 若异常：查看 **六、日志位置** 中的 `~/Library/Logs/XinTuAlbum/main.log` 或 `/tmp/xintualbum-bootstrap.log`。
+
+**4. 卸载**  
+删除 `/Applications/XinTuAlbum.app`；用户数据在 `~/Library/Application Support/imageclassifier-app`，按需删除。

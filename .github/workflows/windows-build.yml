@@ -1,0 +1,84 @@
+name: Windows Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    outputs:
+      windows_artifact_paths:
+        description: "Paths to the Windows build artifacts"
+        value: ${{ jobs.build-windows.outputs.artifact_paths }}
+
+jobs:
+  build-windows:
+    name: Build Windows Application
+    runs-on: windows-latest
+    outputs:
+      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            pc-version-final/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install system dependencies (GTK2-Runtime for node-canvas)
+        run: |
+          choco install -y pkgconfiglite gtk-runtime libjpeg-turbo
+
+      - name: Prepare build environment
+        run: |
+          cd pc-version-final
+          npm ci --no-optional --legacy-peer-deps
+          $gtkRoot = "C:\Program Files (x86)\Gtk2-Runtime"
+          if (-not (Test-Path $gtkRoot)) { $gtkRoot = "C:\GTK" }
+          $env:GTK_Root = $gtkRoot
+          npm install canvas@^2.11.2 --GTK_Root="$gtkRoot"
+
+      - name: Build Windows application (reuse local build.bat)
+        shell: cmd
+        run: |
+          set CI=1
+          cd pc-version-final
+          call build.bat
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+
+      - name: Find Windows artifacts
+        id: build
+        run: |
+          $artifactPaths = @()
+          $distPath = "pc-version-final/dist"
+          $nsisInstaller = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($nsisInstaller) { $artifactPaths += $nsisInstaller.FullName }
+          $portableExe = Get-ChildItem -Path $distPath -Recurse -Include "*.Portable.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($portableExe) { $artifactPaths += $portableExe.FullName }
+          $appxPackage = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($appxPackage) { $artifactPaths += $appxPackage.FullName }
+          if ($artifactPaths.Count -eq 0) {
+              Write-Error "No Windows build artifacts found in pc-version-final/dist/"
+              exit 1
+          }
+          "artifact_paths<<EOF" >> $env:GITHUB_OUTPUT
+          $artifactPaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: ${{ steps.build.outputs.artifact_paths }}

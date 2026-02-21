@@ -1,0 +1,81 @@
+name: macOS Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    outputs:
+      macos_artifact_paths:
+        description: "Paths to the macOS build artifacts"
+        value: ${{ jobs.build-macos.outputs.artifact_paths }}
+
+jobs:
+  build-macos:
+    name: Build macOS Application
+    runs-on: macos-latest
+    timeout-minutes: 60
+    outputs:
+      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Node version (required >=20 for simple-xml-to-json)
+        run: |
+          node -v
+          NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+          if [ "$NODE_MAJOR" -lt 20 ]; then
+            echo "::error::Node 20+ required, got $(node -v)"
+            exit 1
+          fi
+
+      - name: Install system dependencies
+        run: |
+          brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            pc-version-final/node_modules
+          key: ${{ runner.os }}-node20-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node20-node-modules-
+
+      - name: Build macOS application (reuse local build-macos.sh, DMG only)
+        run: CI=1 ./build-macos.sh
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+
+      - name: Find macOS artifacts
+        id: build
+        run: |
+          # macOS 只构建 DMG
+          DMG_FILE=$(find pc-version-final/dist -name "*.dmg" -type f | head -n 1)
+          if [ -z "$DMG_FILE" ]; then
+            echo "No DMG found in pc-version-final/dist/"
+            exit 1
+          fi
+          ARTIFACT_FILES=("$DMG_FILE")
+          echo "Found DMG: $DMG_FILE"
+          
+          # Output newline-separated paths for upload-artifact
+          {
+            echo "artifact_paths<<EOF"
+            printf '%s\n' "${ARTIFACT_FILES[@]}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: ${{ steps.build.outputs.artifact_paths }}

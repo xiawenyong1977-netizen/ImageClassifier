@@ -15,7 +15,12 @@ if [ -d "public" ] && [ ! -L "public" ]; then
 fi
 
 echo "📦 Installing dependencies..."
-npm install
+if [ -n "$CI" ]; then
+  npm ci --no-optional --legacy-peer-deps
+  npm install canvas@^2.11.2 || true
+else
+  npm install
+fi
 
 echo "🔨 Building the application..."
 npm run build
@@ -40,7 +45,11 @@ if [ -f "public/icon.png" ]; then
 fi
 
 echo "🍎 Creating macOS build..."
-npm run electron:build-mac
+if [ -n "$BUILD_ZIP" ]; then
+  npm run electron:build-mac-zip
+else
+  npm run electron:build-mac
+fi
 
 echo "✅ macOS build completed!"
 echo "The built application will be in the dist/ folder"

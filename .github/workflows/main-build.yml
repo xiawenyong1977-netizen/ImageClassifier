@@ -1,0 +1,101 @@
+# 注意：GitHub 仅在「默认分支」上存在本文件时，Actions 页才会显示 "Run workflow" 按钮。
+# 若只在 macos-support 等分支有改动，需合并到 main/master 后按钮才会出现。
+name: ImageClassifier Multi-Platform Build
+
+on:
+  push:
+    branches: [ main, master, macos-support ]
+  pull_request:
+    branches: [ main, master, macos-support ]
+  workflow_dispatch:
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine build matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual dispatch - build all platforms
+            echo "matrix={\"platform\":[\"macos\", \"windows\", \"android\"]}" >> $GITHUB_OUTPUT
+          else
+            # Automated trigger - only build platforms that changed
+            changed_files=$(git diff --name-only HEAD^ HEAD)
+            declare -a platforms=()
+            
+            if [[ $changed_files =~ "pc-version-final/" ]]; then
+              platforms+=("macos" "windows")
+            fi
+            
+            if [[ $changed_files =~ "android/" ]]; then
+              platforms+=("android")
+            fi
+            
+            if [ ${#platforms[@]} -eq 0 ]; then
+              platforms=("macos" "windows" "android") # Default to all if unclear
+            fi
+            
+            # Convert to JSON format
+            matrix_json="{\"platform\":["
+            for i in "${!platforms[@]}"; do
+              if [ $i -gt 0 ]; then
+                matrix_json="$matrix_json,"
+              fi
+              matrix_json="$matrix_json\"${platforms[$i]}\""
+            done
+            matrix_json="$matrix_json]}"
+            
+            echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: build-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      platform: ${{ matrix.platform }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display artifacts
+        run: |
+          echo "Available artifacts:"
+          find ./artifacts -type f -name "*.*"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ vars.CURRENT_VERSION || '1.1.2' }}
+          name: Release v${{ vars.CURRENT_VERSION || '1.1.2' }}
+          body: |
+            Automatic release for ImageClassifier v${{ vars.CURRENT_VERSION || '1.1.2' }}
+            
+            ## Changes
+            - Automated build from commit ${{ github.sha }}
+            
+            ## Platforms
+            - macOS Universal (DMG and ZIP)
+            - Windows (NSIS Installer, Portable, APPX)
+            - Android (APK)
+          draft: false
+          prerelease: false
+          files: |
+            ./artifacts/macos-build/*.*
+            ./artifacts/windows-build/*.*
+            ./artifacts/android-apk/*.*
