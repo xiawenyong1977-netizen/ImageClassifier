@@ -1,0 +1,24 @@
+# 仅用于手动触发。合并到「默认分支」(main/master) 后，在 Actions 左侧点本 workflow 名即可看到 "Run workflow"。
+name: Manual Build (Run workflow)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix (all platforms)
+        id: set-matrix
+        run: echo 'matrix={"platform":["macos", "windows", "android"]}' >> $GITHUB_OUTPUT
+
+  build:
+    needs: build-matrix
+    strategy:
+      matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      platform: ${{ matrix.platform }}
+      release_tag: ${{ github.sha }}
