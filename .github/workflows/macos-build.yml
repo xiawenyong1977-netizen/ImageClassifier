@@ -1,0 +1,113 @@
+name: macOS Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    outputs:
+      macos_artifact_paths:
+        description: "Paths to the macOS build artifacts"
+        value: ${{ jobs.build-macos.outputs.artifact_paths }}
+
+jobs:
+  build-macos:
+    name: Build macOS Application
+    runs-on: macos-latest
+    outputs:
+      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install system dependencies
+        run: |
+          brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            pc-version-final/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Prepare build environment
+        run: |
+          cd pc-version-final
+          npm ci --no-optional --legacy-peer-deps
+          npm install canvas@^2.11.2
+
+      - name: Build application
+        run: |
+          cd pc-version-final
+          npm run build
+
+      - name: Replace public symlink with real copy
+        run: |
+          cd pc-version-final
+          if [ -L "public" ]; then
+            REAL_PUBLIC=$(readlink public)
+            rm public
+            cp -R "$REAL_PUBLIC" public
+          fi
+
+      - name: Generate macOS icon
+        run: |
+          cd pc-version-final
+          if [ -f "public/icon.png" ]; then
+            if [ -f "../scripts/create-mac-icon.js" ]; then
+              node ../scripts/create-mac-icon.js .
+            fi
+          fi
+
+      - name: Build macOS application
+        run: |
+          cd pc-version-final
+          npm run electron:build-mac-zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find macOS artifacts
+        id: build
+        run: |
+          # Look for macOS build artifacts
+          DMG_FILE=$(find pc-version-final/dist -name "*.dmg" -type f | head -n 1)
+          ZIP_FILE=$(find pc-version-final/dist -name "*.zip" -type f | head -n 1)
+          
+          ARTIFACT_FILES=()
+          if [ -n "$DMG_FILE" ]; then
+            ARTIFACT_FILES+=("$DMG_FILE")
+            echo "Found DMG: $DMG_FILE"
+          fi
+          
+          if [ -n "$ZIP_FILE" ]; then
+            ARTIFACT_FILES+=("$ZIP_FILE")
+            echo "Found ZIP: $ZIP_FILE"
+          fi
+          
+          if [ ${#ARTIFACT_FILES[@]} -eq 0 ]; then
+            echo "No macOS build artifacts found in pc-version-final/dist/"
+            exit 1
+          fi
+          
+          # Join paths with colon as separator
+          ARTIFACT_PATHS=$(IFS=':'; echo "${ARTIFACT_FILES[*]}")
+          echo "artifact_paths=$ARTIFACT_PATHS"
+          echo "artifact_paths=$ARTIFACT_PATHS" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: ${{ join(split(steps.build.outputs.artifact_paths, ':'), '\n') }}

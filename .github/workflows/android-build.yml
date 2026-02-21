@@ -1,0 +1,94 @@
+name: Android Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    outputs:
+      android_artifact_path:
+        description: "Path to the Android APK"
+        value: ${{ jobs.build-android.outputs.artifact_path }}
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest  # Using Ubuntu as it has better Android SDK support
+    outputs:
+      artifact_path: ${{ steps.build.outputs.apk_path }}
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;34.0.0, platform-tools, platforms;android-33, ndk;23.1.7779620'
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install dependencies
+        run: |
+          npm ci --legacy-peer-deps
+          cd android
+          ./gradlew --version
+
+      - name: Generate build info
+        run: |
+          node scripts/generate-build-info.js
+
+      - name: Build Android Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+        env:
+          JAVA_OPTS: '-Xmx2048m'
+
+      - name: Find APK
+        id: build
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in android/app/build/outputs/apk/release"
+            exit 1
+          fi
+          echo "APK_PATH=$APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.build.outputs.apk_path }}

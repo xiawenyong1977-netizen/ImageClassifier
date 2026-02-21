@@ -1,0 +1,122 @@
+name: Windows Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    outputs:
+      windows_artifact_paths:
+        description: "Paths to the Windows build artifacts"
+        value: ${{ jobs.build-windows.outputs.artifact_paths }}
+
+jobs:
+  build-windows:
+    name: Build Windows Application
+    runs-on: windows-latest
+    outputs:
+      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Cache Node Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            pc-version-final/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install system dependencies
+        run: |
+          choco install -y pkgconfiglite cairo pango libpng libjpeg-turbo giflib librsvg pixman
+
+      - name: Prepare build environment
+        run: |
+          cd pc-version-final
+          npm ci --no-optional --legacy-peer-deps
+          npm install canvas@^2.11.2
+
+      - name: Build application
+        run: |
+          cd pc-version-final
+          npm run build
+
+      - name: Replace public symlink with real copy
+        run: |
+          cd pc-version-final
+          if (Test-Path "public" -PathType SymbolicLink) {
+              $realPublic = (Get-Item "public").Target
+              Remove-Item "public" -Force
+              Copy-Item -Recurse -Path $realPublic -Destination "public"
+          }
+
+      - name: Generate macOS icon
+        run: |
+          cd pc-version-final
+          if (Test-Path "public/icon.png") {
+              if (Test-Path "../scripts/create-mac-icon.js") {
+                  node ../scripts/create-mac-icon.js .
+              }
+          }
+
+      - name: Build Windows application
+        run: |
+          cd pc-version-final
+          npm run electron:build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find Windows artifacts
+        id: build
+        run: |
+          $artifactPaths = @()
+          
+          # Look for NSIS installer
+          $nsisInstaller = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*Setup*.exe" | Select-Object -First 1
+          if ($nsisInstaller) {
+              $artifactPaths += $nsisInstaller.FullName
+              Write-Output "Found NSIS installer: $($nsisInstaller.FullName)"
+          }
+          
+          # Look for Portable executable
+          $portableExe = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*.Portable.exe" | Select-Object -First 1
+          if ($portableExe) {
+              $artifactPaths += $portableExe.FullName
+              Write-Output "Found Portable executable: $($portableExe.FullName)"
+          }
+          
+          # Look for AppX package
+          $appxPackage = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*.appx" | Select-Object -First 1
+          if ($appxPackage) {
+              $artifactPaths += $appxPackage.FullName
+              Write-Output "Found AppX package: $($appxPackage.FullName)"
+          }
+          
+          if ($artifactPaths.Count -eq 0) {
+              Write-Error "No Windows build artifacts found in pc-version-final/dist/"
+              exit 1
+          }
+          
+          # Join paths with semicolon as separator
+          $pathsString = $artifactPaths -join ";"
+          Write-Output "artifact_paths=$pathsString"
+          echo "artifact_paths=$pathsString" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            ${{ fromJSON(format('["{0}"]', join(fromJSON(format('"{0}"', steps.build.outputs.artifact_paths)), '","'))) }}
