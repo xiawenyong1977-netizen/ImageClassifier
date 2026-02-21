@@ -66,16 +66,12 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+          fail-on-cache-miss: false
 
-      - name: Cache Android SDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.android
-            ${{ env.ANDROID_HOME }}
-          key: ${{ runner.os }}-android-sdk-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-android-sdk-
+      # 注意：移除了 Android SDK 缓存，原因：
+      # 1. Android SDK 文件非常大（包含 NDK、build-tools 等），缓存压缩会导致清理步骤超时
+      # 2. android-actions/setup-android@v3 已经内置了 SDK 缓存机制
+      # 3. SDK 下载通常比缓存压缩/上传更快
 
       - name: Install dependencies
         run: |
