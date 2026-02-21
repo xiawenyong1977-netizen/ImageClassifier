@@ -170,9 +170,10 @@ try {
         
         # 检查并修复 DefaultTile 中的图标
         # 注意：DefaultTile 不能包含 Square150x150Logo，它应该在 VisualElements 中
-        if ($manifestContent -match '<uap:DefaultTile[^>]*>') {
+        $defaultTilePattern = "<uap:DefaultTile[^>]*>"
+        if ($manifestContent -match $defaultTilePattern) {
             # 获取当前的 DefaultTile 标签
-            $defaultTileMatch = [regex]::Match($manifestContent, '<uap:DefaultTile[^>]*>')
+            $defaultTileMatch = [regex]::Match($manifestContent, $defaultTilePattern)
             $currentTile = $defaultTileMatch.Value
             
             # 构建新的 DefaultTile 属性（只包含 Wide310x150Logo 和 Square310x310Logo）
@@ -185,8 +186,8 @@ try {
             $newTileAttrs += 'Square310x310Logo="Assets\Square310x310Logo.png"'
             
             # 替换 DefaultTile 标签（移除 Square150x150Logo 如果存在）
-            $newTileTag = '<uap:DefaultTile ' + ($newTileAttrs -join ' ') + '>'
-            $manifestContent = $manifestContent -replace '<uap:DefaultTile[^>]*>', $newTileTag
+            $newTileTag = "<uap:DefaultTile " + ($newTileAttrs -join " ") + ">"
+            $manifestContent = $manifestContent -replace $defaultTilePattern, $newTileTag
             Write-Host "    ✓ 已更新 DefaultTile（Wide310x150Logo, Square310x310Logo）" -ForegroundColor Green
         }
         
@@ -237,7 +238,7 @@ try {
         } catch {
             Write-Host "    ✗ XML 格式错误: $($_.Exception.Message)" -ForegroundColor Red
             Write-Host "    DefaultTile 内容:" -ForegroundColor Yellow
-            $defaultTileRegex = '<uap:DefaultTile[^>]*>'
+            $defaultTileRegex = "<uap:DefaultTile[^>]*>"
             if ($manifestContent -match $defaultTileRegex) {
                 $defaultTileVal = [regex]::Match($manifestContent, $defaultTileRegex).Value
                 Write-Host "    $defaultTileVal" -ForegroundColor Gray
