@@ -96,9 +96,9 @@ class CityLocationService {
     // API配置
     this.apiConfig = {
       baseURL: 'https://api.aifuture.net.cn',
-      timeout: 10000, // 10秒超时（批量请求可能需要更长时间）
+      timeout: 30000, // 30秒超时（V3接口LLM查询可能需要更长时间）
       endpoints: {
-        nearestCities: '/api/v2/location/nearest-cities' // 使用v2批量接口
+        nearestCities: '/api/v3/location/nearest-cities' // 使用v3批量接口（支持最多1000个坐标，基于LLM）
       }
     };
   }
@@ -447,7 +447,7 @@ class CityLocationService {
         
         logger.info('🔍 诊断建议:');
         logger.info('   1. 打开浏览器开发者工具 -> Network 标签页');
-        logger.info('   2. 查看是否有对 /api/v2/location/nearest-cities 的请求');
+        logger.info('   2. 查看是否有对 /api/v3/location/nearest-cities 的请求');
         logger.info('   3. 如果有请求，查看状态码和响应头（特别是 CORS 相关头）');
         logger.info('   4. 如果没有请求，可能是请求被浏览器阻止（CORS preflight 失败）');
         logger.info(`   5. 手动测试: 在浏览器中访问 ${this.apiConfig.baseURL}/api/v2/health`);
