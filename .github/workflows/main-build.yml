@@ -26,28 +26,48 @@ jobs:
             echo "matrix={\"platform\":[\"macos\", \"windows\", \"android\"]}" >> $GITHUB_OUTPUT
           else
             # Automated trigger - only build platforms that changed
-            # For push events, use github.event.before if available, otherwise fallback to HEAD^
-            if [ "${{ github.event_name }}" == "push" ] && [ -n "${{ github.event.before }}" ]; then
-              changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+            changed_files=""
+            
+            # Try different methods to get changed files, with error handling
+            if [ "${{ github.event_name }}" == "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+              # Use github.event.before/after for push events (most reliable)
+              echo "Using github.event.before/after for changed files"
+              changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} 2>&1) || changed_files=""
             elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-              changed_files=$(git diff --name-only HEAD^ HEAD)
+              # Fallback to HEAD^ if it exists
+              echo "Using HEAD^ for changed files"
+              changed_files=$(git diff --name-only HEAD^ HEAD 2>&1) || changed_files=""
             else
-              # If HEAD^ doesn't exist (shallow clone or first commit), check all files in current commit
-              changed_files=$(git diff-tree --no-commit-id --name-only -r HEAD)
+              # Last resort: check all files in current commit
+              echo "Using git diff-tree for changed files (fallback)"
+              changed_files=$(git diff-tree --no-commit-id --name-only -r HEAD 2>&1) || changed_files=""
+            fi
+            
+            # If all methods failed, default to building all platforms
+            if [ -z "$changed_files" ] || [ $? -ne 0 ]; then
+              echo "Warning: Could not determine changed files, building all platforms"
+              changed_files=""
+            else
+              echo "Changed files:"
+              echo "$changed_files"
             fi
             
             declare -a platforms=()
             
-            if [[ $changed_files =~ "pc-version-final/" ]]; then
-              platforms+=("macos" "windows")
+            if [ -n "$changed_files" ]; then
+              if echo "$changed_files" | grep -q "pc-version-final/"; then
+                platforms+=("macos" "windows")
+              fi
+              
+              if echo "$changed_files" | grep -q "android/"; then
+                platforms+=("android")
+              fi
             fi
             
-            if [[ $changed_files =~ "android/" ]]; then
-              platforms+=("android")
-            fi
-            
+            # Default to all platforms if no specific changes detected or if detection failed
             if [ ${#platforms[@]} -eq 0 ]; then
-              platforms=("macos" "windows" "android") # Default to all if unclear
+              echo "No platform-specific changes detected, building all platforms"
+              platforms=("macos" "windows" "android")
             fi
             
             # Convert to JSON format
@@ -60,6 +80,7 @@ jobs:
             done
             matrix_json="$matrix_json]}"
             
+            echo "Final build matrix: $matrix_json"
             echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
           fi
 
