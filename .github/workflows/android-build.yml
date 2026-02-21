@@ -6,6 +6,15 @@ on:
       release_tag:
         required: true
         type: string
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
     outputs:
       android_artifact_path:
         description: "Path to the Android APK"
@@ -82,12 +91,6 @@ jobs:
           fi
         env:
           JAVA_OPTS: '-Xmx2048m'
-
-      - name: Setup signing (if secrets are configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
-          chmod 600 android/app/release.keystore
 
       - name: Setup signing (if secrets are configured)
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
