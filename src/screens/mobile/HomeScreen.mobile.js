@@ -868,6 +868,9 @@ const HomeScreen = ({ navigation }) => {
       return;
     }
 
+    // 🔥 在函数作用域声明，确保 finally 块中可以访问
+    let galleryScannerService = null;
+    
     try {
       logger.debug('开始相似度检测');
       
@@ -887,7 +890,7 @@ const HomeScreen = ({ navigation }) => {
       }
       
       // 创建 GalleryScannerService 实例，复用其相似度检测逻辑
-      const galleryScannerService = new GalleryScannerService();
+      galleryScannerService = new GalleryScannerService();
       await galleryScannerService.initialize();
       
       // 设置进度回调
@@ -912,6 +915,9 @@ const HomeScreen = ({ navigation }) => {
       
       // 设置扫描开始时间（用于增量检测）
       galleryScannerService.scanStartTimestamp = new Date();
+      
+      // 🔥 设置 GalleryScannerService 的扫描状态，确保状态一致性
+      galleryScannerService.isScanning = true;
       
       // 直接调用 similarityDetectionPhase，它会使用内部的 sendProgressMessage
       await galleryScannerService.similarityDetectionPhase();
@@ -938,6 +944,10 @@ const HomeScreen = ({ navigation }) => {
       // 🔥 清除全局变量
       if (typeof window !== 'undefined') {
         window.isScanning = false;
+      }
+      // 🔥 清除 GalleryScannerService 的扫描状态
+      if (galleryScannerService) {
+        galleryScannerService.isScanning = false;
       }
     }
   }, [isScanning, loadAllData, t]);
@@ -1454,7 +1464,7 @@ const HomeScreen = ({ navigation }) => {
     } catch (error) {
       // 🔥 如果是"扫描已在进行中"的错误，静默处理，不显示错误提示
       if (error.message && error.message.includes(t('home.scanAlreadyInProgress'))) {
-        logger.debug('ℹ️ 扫描已在进行中，跳过新扫描请求');
+        logger.info('ℹ️ 扫描已在进行中，跳过新扫描请求');
         return; // 静默返回，不显示错误
       }
       

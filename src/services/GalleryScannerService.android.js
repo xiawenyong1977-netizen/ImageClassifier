@@ -119,7 +119,12 @@ class GalleryScannerService {
       // 调用startScan方法
       return await this.startScan(options, onProgress);
     } catch (error) {
-      logger.error('❌ 扫描失败:', error);
+      // 如果是"扫描已在进行中"的错误，使用 info 级别而不是 error
+      if (error.message && error.message.includes(i18n.t('home.scanAlreadyInProgress'))) {
+        logger.info('ℹ️ 扫描已在进行中:', error.message);
+      } else {
+        logger.error('❌ 扫描失败:', error);
+      }
       throw error;
     }
   }
@@ -151,7 +156,7 @@ class GalleryScannerService {
       const isRunning = await ScanService.isRunning();
       if (isRunning) {
         const errorMsg = i18n.t('home.scanAlreadyInProgress');
-        logger.warn(`⚠️ 检测到扫描服务正在运行，拒绝新扫描请求: ${errorMsg}`);
+        logger.info(`ℹ️ 检测到扫描服务正在运行，拒绝新扫描请求: ${errorMsg}`);
         throw new Error(errorMsg);
       }
     } catch (error) {

@@ -791,7 +791,7 @@ class ImageClassifierService {
       
       if (imageUri.startsWith('file://')) {
         // 本地文件：使用 WebAdapters 中的安全读取函数
-        const { readImageFileAsBlob } = require('../adapters/WebAdapters.js');
+        const { readImageFileAsBlob } = require('../adapters/WebAdapters');
         blob = await readImageFileAsBlob(imageUri);
       } else {
         // 网络URL：使用 fetch

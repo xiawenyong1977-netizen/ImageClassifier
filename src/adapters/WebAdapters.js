@@ -827,24 +827,10 @@ export const RNFS = {
         const fs = eval('require("fs")');
         const pathModule = eval('require("path")');
         
-        // 标准化路径处理，兼容不同操作系统
-        let normalizedPath = filePath;
+        // 使用已有的 normalizeFilePath() 函数（已经处理了 file:// 前缀和 Windows 路径）
+        let normalizedPath = normalizeFilePath(filePath);
         
-        // 移除 file:// 前缀（如果存在）
-        if (normalizedPath.startsWith('file://')) {
-          normalizedPath = normalizedPath.replace('file://', '');
-          // 处理 file:/// 格式（三个斜杠）
-          if (normalizedPath.startsWith('/')) {
-            normalizedPath = normalizedPath.substring(1);
-          }
-        }
-        
-        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
-        if (process.platform === 'win32' && normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
-          normalizedPath = normalizedPath.substring(1);
-        }
-        
-        // 使用 path.resolve 确保路径格式正确
+        // 使用 path.resolve 确保绝对路径格式正确
         normalizedPath = pathModule.resolve(normalizedPath);
         
         const stats = fs.statSync(normalizedPath);
@@ -880,24 +866,10 @@ export const RNFS = {
         const fs = eval('require("fs")');
         const pathModule = eval('require("path")');
         
-        // 标准化路径处理，兼容不同操作系统
-        let normalizedDirPath = dirPath;
+        // 使用已有的 normalizeFilePath() 函数（已经处理了 file:// 前缀和 Windows 路径）
+        let normalizedDirPath = normalizeFilePath(dirPath);
         
-        // 移除 file:// 前缀（如果存在）
-        if (normalizedDirPath.startsWith('file://')) {
-          normalizedDirPath = normalizedDirPath.replace('file://', '');
-          // 处理 file:/// 格式（三个斜杠）
-          if (normalizedDirPath.startsWith('/')) {
-            normalizedDirPath = normalizedDirPath.substring(1);
-          }
-        }
-        
-        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
-        if (process.platform === 'win32' && normalizedDirPath.startsWith('/') && normalizedDirPath.includes(':')) {
-          normalizedDirPath = normalizedDirPath.substring(1);
-        }
-        
-        // 使用 path.resolve 确保路径格式正确
+        // 使用 path.resolve 确保绝对路径格式正确
         normalizedDirPath = pathModule.resolve(normalizedDirPath);
         
         // 使用 path.join 确保路径正确拼接（处理包含冒号的路径）
@@ -949,24 +921,10 @@ export const RNFS = {
         const fs = eval('require("fs")');
         const pathModule = eval('require("path")');
         
-        // 标准化路径处理，兼容不同操作系统
-        let normalizedPath = filePath;
+        // 使用已有的 normalizeFilePath() 函数（已经处理了 file:// 前缀和 Windows 路径）
+        let normalizedPath = normalizeFilePath(filePath);
         
-        // 移除 file:// 前缀（如果存在）
-        if (normalizedPath.startsWith('file://')) {
-          normalizedPath = normalizedPath.replace('file://', '');
-          // 处理 file:/// 格式（三个斜杠）
-          if (normalizedPath.startsWith('/')) {
-            normalizedPath = normalizedPath.substring(1);
-          }
-        }
-        
-        // 在 Windows 上处理 /D:/path 格式，转换为 D:/path
-        if (process.platform === 'win32' && normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
-          normalizedPath = normalizedPath.substring(1);
-        }
-        
-        // 使用 path.resolve 确保路径格式正确
+        // 使用 path.resolve 确保绝对路径格式正确
         normalizedPath = pathModule.resolve(normalizedPath);
         
         const exists = fs.existsSync(normalizedPath);
