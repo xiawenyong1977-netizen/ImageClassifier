@@ -63,16 +63,59 @@ jobs:
         run: |
           $artifactPaths = @()
           $distPath = "pc-version-final/dist"
-          $nsisInstaller = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($nsisInstaller) { $artifactPaths += $nsisInstaller.FullName }
-          $portableExe = Get-ChildItem -Path $distPath -Recurse -Include "*.Portable.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($portableExe) { $artifactPaths += $portableExe.FullName }
-          $appxPackage = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($appxPackage) { $artifactPaths += $appxPackage.FullName }
+          
+          Write-Host "Searching for Windows build artifacts in: $distPath"
+          
+          # NSIS Installer (*Setup*.exe)
+          $nsisInstallers = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue
+          if ($nsisInstallers) {
+              Write-Host "Found NSIS installers:"
+              $nsisInstallers | ForEach-Object { 
+                  Write-Host "  - $($_.FullName)"
+                  $artifactPaths += $_.FullName
+              }
+          }
+          
+          # Portable EXE (*.Portable.exe)
+          $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.Portable.exe" -ErrorAction SilentlyContinue
+          if ($portableExes) {
+              Write-Host "Found Portable EXEs:"
+              $portableExes | ForEach-Object { 
+                  Write-Host "  - $($_.FullName)"
+                  $artifactPaths += $_.FullName
+              }
+          }
+          
+          # APPX packages (包括未签名和签名版本)
+          $appxPackages = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue
+          if ($appxPackages) {
+              Write-Host "Found APPX packages:"
+              $appxPackages | ForEach-Object { 
+                  Write-Host "  - $($_.FullName)"
+                  $artifactPaths += $_.FullName
+              }
+          }
+          
+          # 也查找普通的 .exe 文件（非 Setup，非 Portable）
+          $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
+                      Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -notlike "*.Portable.exe" }
+          if ($exeFiles) {
+              Write-Host "Found other EXE files:"
+              $exeFiles | ForEach-Object { 
+                  Write-Host "  - $($_.FullName)"
+                  $artifactPaths += $_.FullName
+              }
+          }
+          
+          Write-Host "Total artifacts found: $($artifactPaths.Count)"
+          
           if ($artifactPaths.Count -eq 0) {
-              Write-Error "No Windows build artifacts found in pc-version-final/dist/"
+              Write-Error "No Windows build artifacts found in $distPath/"
+              Write-Host "Available files in dist directory:"
+              Get-ChildItem -Path $distPath -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table
               exit 1
           }
+          
           "artifact_paths<<EOF" >> $env:GITHUB_OUTPUT
           $artifactPaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
           "EOF" >> $env:GITHUB_OUTPUT

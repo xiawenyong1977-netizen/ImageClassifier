@@ -25,6 +25,7 @@ jobs:
     name: Build Android APK
     # 使用 Ubuntu：Windows 上 setup-android 下载常被 cancel，Linux 更稳定
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # 增加超时时间，NDK 下载可能需要较长时间
     outputs:
       artifact_path: ${{ steps.build.outputs.apk_path }}
     steps:
@@ -65,6 +66,16 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android
+            ${{ env.ANDROID_HOME }}
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-
 
       - name: Install dependencies
         run: |
