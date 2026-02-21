@@ -18,6 +18,8 @@ import { Icon } from './adapters/WebAdapters';
 import { PermissionsAndroid } from './adapters/WebAdapters';
 import { logger } from './adapters/WebAdapters';
 import { AsyncStorage } from './adapters/WebAdapters';
+import { BackHandler } from './adapters/WebAdapters';
+import { Alert } from './adapters/WebAdapters';
 
 console.log('📦 App.js: WebAdapters 导入成功');
 
@@ -207,7 +209,13 @@ export default function App() {
     const checkPrivacyAgreement = async () => {
       try {
         const agreed = await AsyncStorage.getItem(PRIVACY_AGREED_KEY);
-        if (agreed === 'true') {
+        console.log('🔍 检查隐私政策同意状态:', { key: PRIVACY_AGREED_KEY, value: agreed, type: typeof agreed });
+        
+        // 支持多种格式：'true'、true、'"true"'（JSON字符串）
+        // 注意：typeof null === 'object' 是 JavaScript 的已知 bug，所以需要显式检查 null
+        const isAgreed = agreed !== null && (agreed === 'true' || agreed === true || agreed === '"true"');
+        
+        if (isAgreed) {
           console.log('✅ 用户已同意隐私政策');
           setPrivacyAgreed(true);
           setShowPrivacyModal(false);
@@ -230,8 +238,19 @@ export default function App() {
   // 处理隐私政策同意
   const handlePrivacyAgree = async () => {
     try {
+      // 存储为字符串 'true'，确保能被正确读取
       await AsyncStorage.setItem(PRIVACY_AGREED_KEY, 'true');
-      console.log('✅ 隐私政策同意状态已保存');
+      
+      // 立即验证存储是否成功
+      const verify = await AsyncStorage.getItem(PRIVACY_AGREED_KEY);
+      console.log('✅ 隐私政策同意状态已保存，验证值:', { key: PRIVACY_AGREED_KEY, value: verify, type: typeof verify });
+      
+      // 如果验证失败，再次尝试保存
+      if (verify !== 'true' && verify !== true && verify !== '"true"') {
+        console.warn('⚠️ 验证失败，重新保存隐私政策同意状态');
+        await AsyncStorage.setItem(PRIVACY_AGREED_KEY, 'true');
+      }
+      
       setPrivacyAgreed(true);
       setShowPrivacyModal(false);
     } catch (error) {
@@ -244,9 +263,17 @@ export default function App() {
   
   // 处理隐私政策不同意（不允许使用应用）
   const handlePrivacyDisagree = () => {
-    // 华为应用市场要求必须同意才能使用，所以这里不做任何操作
-    // 用户必须同意才能继续
-    console.log('⚠️ 用户未同意隐私政策，无法继续使用应用');
+    // 华为应用市场要求必须同意才能使用
+    // 用户不同意时，直接退出应用
+    console.log('⚠️ 用户未同意隐私政策，退出应用');
+    
+    // 直接退出应用
+    if (BackHandler && BackHandler.exitApp) {
+      BackHandler.exitApp();
+    } else {
+      // 如果 BackHandler 不可用，记录错误
+      console.error('无法退出应用，BackHandler 不可用');
+    }
   };
   
   useEffect(() => {

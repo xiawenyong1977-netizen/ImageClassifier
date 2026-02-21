@@ -1386,6 +1386,23 @@ export const SQLite = {
 export const isWeb = Platform.OS === 'web';
 export const isMobile = Platform.OS === 'ios' || Platform.OS === 'android';
 
+// BackHandler 适配（Web 版本不支持退出应用）
+export const BackHandler = {
+  exitApp: () => {
+    // Web 环境无法退出应用，只能关闭窗口（如果是在 Electron 中）
+    if (typeof window !== 'undefined' && window.close) {
+      window.close();
+    } else {
+      logger.warn('Web 环境无法退出应用');
+    }
+  },
+  addEventListener: () => {
+    // Web 环境不支持返回键监听
+    return { remove: () => {} };
+  },
+  removeEventListener: () => {},
+};
+
 // 11. Alert 适配
 export const Alert = {
   alert: (title, message, buttons, options) => {
