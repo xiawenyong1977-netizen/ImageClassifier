@@ -14,16 +14,12 @@ on:
 jobs:
   build-android:
     name: Build Android APK
-    runs-on: ubuntu-latest  # Using Ubuntu as it has better Android SDK support
+    runs-on: windows-latest
     outputs:
       artifact_path: ${{ steps.build.outputs.apk_path }}
-    env:
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -34,7 +30,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '17'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -54,38 +50,42 @@ jobs:
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
-          path: ~/.gradle
+          path: ${{ runner.os == 'Windows' && 'C:\\Users\\runneradmin\\.gradle' || '~/.gradle' }}
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
       - name: Install dependencies
+        shell: pwsh
         run: |
           npm ci --legacy-peer-deps
-          cd android
-          ./gradlew --version
+          Set-Location android
+          .\gradlew.bat --version
 
       - name: Generate build info
-        run: |
-          node scripts/generate-build-info.js
+        shell: pwsh
+        run: node scripts/generate-build-info.js
 
-      - name: Build Android Release APK
+      - name: Build Android Release APK (reuse local script, skip sign in CI)
+        shell: pwsh
         run: |
-          cd android
-          ./gradlew assembleRelease --no-daemon
+          Set-Location android
+          .\build-and-sign-release.ps1 -SkipSign
         env:
           JAVA_OPTS: '-Xmx2048m'
 
       - name: Find APK
         id: build
+        shell: pwsh
         run: |
-          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK found in android/app/build/outputs/apk/release"
+          $apk = Get-ChildItem -Path android/app/build/outputs/apk/release -Filter *.apk -Recurse | Select-Object -First 1
+          if (-not $apk) {
+            Write-Error "No APK found in android/app/build/outputs/apk/release"
             exit 1
-          fi
-          echo "APK_PATH=$APK_PATH"
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          }
+          $fullPath = $apk.FullName
+          Write-Output "APK_PATH=$fullPath"
+          "apk_path=$fullPath" >> $env:GITHUB_OUTPUT
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
