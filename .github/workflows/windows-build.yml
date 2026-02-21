@@ -1,19 +1,19 @@
 name: Windows Build
 
+# Windows 构建现在生成多个独立的制品，不再使用单一的 artifact_paths
+# 制品名称: windows-nsis-installer, windows-portable, windows-appx-unsigned, windows-appx-signed
 on:
   workflow_call:
     inputs:
       release_tag:
         required: true
         type: string
-    # Windows 构建现在生成多个独立的制品，不再使用单一的 artifact_paths
-    # 制品名称: windows-nsis-installer, windows-portable, windows-appx-unsigned, windows-appx-signed
 
 jobs:
+  # 不再使用单一的 artifact_paths，而是生成多个独立的制品
   build-windows:
     name: Build Windows Application
     runs-on: windows-latest
-    # 不再使用单一的 artifact_paths，而是生成多个独立的制品
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

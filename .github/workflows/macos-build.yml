@@ -1,13 +1,13 @@
 name: macOS Build
 
+# macOS 构建现在使用原始文件名作为制品名称
+# 制品名称格式: XinTuAlbum-${version} 或 XinTuAlbum-${version}-${arch}
 on:
   workflow_call:
     inputs:
       release_tag:
         required: true
         type: string
-    # macOS 构建现在使用原始文件名作为制品名称
-    # 制品名称格式: XinTuAlbum-${version} 或 XinTuAlbum-${version}-${arch}
 
 jobs:
   build-macos:
