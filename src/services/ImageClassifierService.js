@@ -386,16 +386,17 @@ class ImageClassifierService {
         isMobileResolution = aspectRatio <= 0.5;
       }
       
-      // 特征2：文件名判定 - 包含截图关键词
+      // 特征2：文件名判定 - 包含截图/截屏关键词（含中文）
       const fileNameLower = (fileName || '').toLowerCase();
-      const isScreenshotFile = fileNameLower.includes('screenshot') || 
-                              fileNameLower.includes('截图') || 
+      const isScreenshotFile = fileNameLower.includes('screenshot') ||
+                              fileNameLower.includes('截图') ||
+                              fileNameLower.includes('截屏') ||
                               fileNameLower.includes('screen');
-      
-      // 特征3：路径判定 - 检查是否在截图目录中
+
+      // 特征3：路径判定 - 检查是否在截图/截屏目录中
       // path可能是相对路径（Android 10+）或绝对路径（Android 9及以下），PC和移动端都兼容
       let isScreenshotPath = false;
-      const screenshotKeywords = ['screenshots', '截图', 'screen'];
+      const screenshotKeywords = ['screenshots', '截图', '截屏', 'screen'];
       
       if (path) {
         const pathLower = path.toLowerCase();
