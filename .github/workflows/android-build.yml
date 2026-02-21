@@ -153,16 +153,20 @@ jobs:
           echo "🔐 Building signed Android Release APK..."
           cd android
           
-          # 验证 keystore 文件存在
+          # 验证 keystore 文件存在（相对于 android/ 目录）
           if [ ! -f "app/release.keystore" ]; then
-            echo "❌ Error: release.keystore not found"
+            echo "❌ Error: release.keystore not found at app/release.keystore"
+            echo "Current directory: $(pwd)"
+            echo "Files in app directory:"
+            ls -la app/ || echo "app directory not found"
             exit 1
           fi
+          echo "✅ Keystore file found at app/release.keystore"
           
           # 清理后重新构建签名版本
           ./gradlew clean
           ./gradlew assembleRelease --no-daemon \
-            -PMYAPP_RELEASE_STORE_FILE=app/release.keystore \
+            -PMYAPP_RELEASE_STORE_FILE=release.keystore \
             -PMYAPP_RELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -PMYAPP_RELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
             -PMYAPP_RELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}"
