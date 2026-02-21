@@ -86,7 +86,7 @@ jobs:
               }
           }
           
-          # APPX packages (包括未签名和签名版本)
+          # APPX packages (上传所有版本：未签名和签名版本)
           $appxPackages = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue
           if ($appxPackages) {
               Write-Host "Found APPX packages:"
@@ -96,14 +96,16 @@ jobs:
               }
           }
           
-          # 也查找普通的 .exe 文件（非 Setup，非 Portable）
-          $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
-                      Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -notlike "*.Portable.exe" }
-          if ($exeFiles) {
-              Write-Host "Found other EXE files:"
-              $exeFiles | ForEach-Object { 
-                  Write-Host "  - $($_.FullName)"
-                  $artifactPaths += $_.FullName
+          # Portable EXE 可能不是 *.Portable.exe 格式，查找其他可能的格式（如 *-x64.exe）
+          # 但只在没有找到 *.Portable.exe 时才查找
+          if ($artifactPaths.Count -lt 2) {
+              $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
+                          Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -notlike "*.Portable.exe" -and $_.Name -like "*-x64.exe" }
+              if ($exeFiles) {
+                  Write-Host "Found other EXE files (likely portable):"
+                  $portableExe = $exeFiles | Select-Object -First 1
+                  Write-Host "  - $($portableExe.FullName)"
+                  $artifactPaths += $portableExe.FullName
               }
           }
           
