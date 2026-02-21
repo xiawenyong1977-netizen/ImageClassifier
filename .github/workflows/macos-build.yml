@@ -7,9 +7,8 @@ on:
         required: true
         type: string
     outputs:
-      macos_artifact_paths:
-        description: "Paths to the macOS build artifacts"
-        value: ${{ jobs.build-macos.outputs.artifact_paths }}
+      # macOS 构建现在使用原始文件名作为制品名称
+      # 制品名称格式: XinTuAlbum-${version} 或 XinTuAlbum-${version}-${arch}
 
 jobs:
   build-macos:
@@ -17,7 +16,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     outputs:
-      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+      # 不再使用 artifact_paths，而是使用 artifact_name 和 artifact_path
+      artifact_name: ${{ steps.build.outputs.artifact_name }}
+      artifact_path: ${{ steps.build.outputs.artifact_path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
