@@ -46,15 +46,38 @@ if (-not (Test-Path $CertPath)) {
 
 Write-Host "Certificate: $CertPath" -ForegroundColor Gray
 
+# Find SignTool (same locations as MakeAppx in Windows SDK)
 Write-Host "`nChecking SignTool..." -ForegroundColor Yellow
-try {
-    $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
-    Write-Host "[OK] SignTool: $signTool" -ForegroundColor Green
-} catch {
+$signTool = $null
+$signToolPaths = @(
+    "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe",
+    "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe",
+    "${env:ProgramFiles}\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+)
+foreach ($p in $signToolPaths) {
+    if (Test-Path $p) {
+        $signTool = $p
+        break
+    }
+}
+if (-not $signTool) {
+    try {
+        $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
+    } catch {
+        # try any Windows Kits 10 bin\x64
+        $kitsRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+        if (Test-Path $kitsRoot) {
+            $found = Get-ChildItem -Path $kitsRoot -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $signTool = $found.FullName }
+        }
+    }
+}
+if (-not $signTool) {
     Write-Host "[X] SignTool.exe not found" -ForegroundColor Red
-    Write-Host "Add to PATH or install Windows SDK: https://developer.microsoft.com/windows/downloads/windows-sdk/" -ForegroundColor Yellow
+    Write-Host "Install Windows SDK or add SignTool to PATH" -ForegroundColor Yellow
     exit 1
 }
+Write-Host "[OK] SignTool: $signTool" -ForegroundColor Green
 
 Write-Host "`nChecking certificate in trusted root..." -ForegroundColor Yellow
 
