@@ -110,7 +110,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ./artifacts/macos-build/*.*
+            ./artifacts/XinTuAlbum-*/*
             ./artifacts/windows-nsis-installer/*.*
             ./artifacts/windows-portable/*.*
             ./artifacts/windows-appx-unsigned/*.*
