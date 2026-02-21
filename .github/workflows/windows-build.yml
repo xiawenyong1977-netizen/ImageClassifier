@@ -98,7 +98,7 @@ jobs:
           
           # Portable EXE 可能不是 *.Portable.exe 格式，查找其他可能的格式（如 *-x64.exe）
           # 但只在没有找到 *.Portable.exe 时才查找
-          if ($artifactPaths.Count -lt 2) {
+          if ($portableExes.Count -eq 0) {
               $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
                           Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -notlike "*.Portable.exe" -and $_.Name -like "*-x64.exe" }
               if ($exeFiles) {
