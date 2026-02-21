@@ -14,7 +14,8 @@ on:
 jobs:
   build-android:
     name: Build Android APK
-    runs-on: windows-latest
+    # 使用 Ubuntu：Windows 上 setup-android 下载常被 cancel，Linux 更稳定
+    runs-on: ubuntu-latest
     outputs:
       artifact_path: ${{ steps.build.outputs.apk_path }}
     steps:
@@ -50,42 +51,36 @@ jobs:
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
-          path: ${{ runner.os == 'Windows' && 'C:\\Users\\runneradmin\\.gradle' || '~/.gradle' }}
+          path: ~/.gradle
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
       - name: Install dependencies
-        shell: pwsh
         run: |
           npm ci --legacy-peer-deps
-          Set-Location android
-          .\gradlew.bat --version
+          cd android && ./gradlew --version
 
       - name: Generate build info
-        shell: pwsh
         run: node scripts/generate-build-info.js
 
-      - name: Build Android Release APK (reuse local script, skip sign in CI)
-        shell: pwsh
+      - name: Build Android Release APK (same steps as build-and-sign-release.ps1 -SkipSign)
         run: |
-          Set-Location android
-          .\build-and-sign-release.ps1 -SkipSign
+          cd android
+          ./gradlew clean
+          ./gradlew assembleRelease --no-daemon
         env:
           JAVA_OPTS: '-Xmx2048m'
 
       - name: Find APK
         id: build
-        shell: pwsh
         run: |
-          $apk = Get-ChildItem -Path android/app/build/outputs/apk/release -Filter *.apk -Recurse | Select-Object -First 1
-          if (-not $apk) {
-            Write-Error "No APK found in android/app/build/outputs/apk/release"
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" -type f | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in android/app/build/outputs/apk/release"
             exit 1
-          }
-          $fullPath = $apk.FullName
-          Write-Output "APK_PATH=$fullPath"
-          "apk_path=$fullPath" >> $env:GITHUB_OUTPUT
+          fi
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
