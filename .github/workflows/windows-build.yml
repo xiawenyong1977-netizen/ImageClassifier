@@ -76,32 +76,25 @@ jobs:
               "EOF" >> $env:GITHUB_OUTPUT
           }
           
-          # Portable EXE - 查找多种可能的格式
-          # 格式1: *.Portable.exe (大写 P)
-          # 格式2: *-portable.exe (小写 p，electron-builder 默认格式)
-          # 格式3: *-win-x64-portable.exe
+          # Portable EXE - 根据 package.json 和 BUILD_GUIDE.md 确定格式
+          # electron-builder portable target 默认格式: ${productName}-${version}-win-${arch}-portable.exe
+          # 实际文件名: XinTuAlbum-1.1.2-win-x64-portable.exe
           $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
                           Where-Object { 
                               $_.Name -notlike "*Setup*" -and 
-                              ($_.Name -like "*-portable.exe" -or 
-                               $_.Name -like "*-Portable.exe" -or
-                               $_.Name -like "*Portable*.exe")
+                              $_.Name -like "*-win-x64-portable.exe"
                           }
           
           if ($portableExes.Count -eq 0) {
-              # 如果没找到 portable 格式，查找其他可能的便携版格式（如 *-x64.exe，但不是 Setup）
-              Write-Host "No portable EXE found with standard patterns, trying alternative formats..."
-              $exeFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
-                          Where-Object { 
-                              $_.Name -notlike "*Setup*" -and 
-                              $_.Name -notlike "*-portable.exe" -and 
-                              $_.Name -notlike "*-Portable.exe" -and
-                              $_.Name -like "*-x64.exe" 
-                          }
-              if ($exeFiles) {
-                  Write-Host "Found other EXE files (likely portable):"
-                  $portableExes = $exeFiles | Select-Object -First 1
-              }
+              # 回退：查找其他可能的 portable 格式（兼容不同版本）
+              Write-Host "No portable EXE found with standard format (*-win-x64-portable.exe), trying alternative patterns..."
+              $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
+                              Where-Object { 
+                                  $_.Name -notlike "*Setup*" -and 
+                                  ($_.Name -like "*-portable.exe" -or 
+                                   $_.Name -like "*-Portable.exe" -or
+                                   $_.Name -like "*Portable*.exe")
+                              }
           }
           
           if ($portableExes) {
