@@ -10,7 +10,7 @@
  * 6. FAB扫描按钮
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   View,
@@ -40,6 +40,50 @@ import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettin
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// 与后端 model_client.BACKGROUND_COLORS 一致，10 种固定颜色
+const BACKGROUND_COLORS = [
+  '橙色', '蓝色', '红色', '绿色', '紫色',
+  '粉色', '黄色', '灰色', '黑色', '白色'
+];
+const COLOR_NAME_TO_HEX = {
+  '橙色': '#FF9800', '蓝色': '#2196F3', '红色': '#F44336', '绿色': '#4CAF50',
+  '紫色': '#9C27B0', '粉色': '#E91E63', '黄色': '#FFEB3B', '灰色': '#9E9E9E',
+  '黑色': '#212121', '白色': '#FFFFFF',
+  'Orange': '#FF9800', 'Blue': '#2196F3', 'Red': '#F44336', 'Green': '#4CAF50',
+  'Purple': '#9C27B0', 'Pink': '#E91E63', 'Yellow': '#FFEB3B', 'Gray': '#9E9E9E',
+  'Black': '#212121', 'White': '#FFFFFF',
+};
+
+/** 城市卡片（与 PC 端一致：根据 locationId + i18n.language 自行获取显示名称） */
+const CityCard = ({ locationId, count, latestImageUri, onPress }) => {
+  const { i18n } = useTranslation('common');
+  const [cityName, setCityName] = useState(locationId);
+  const currentLanguage = useMemo(() => i18n.language || 'zh', [i18n.language]);
+
+  useEffect(() => {
+    if (!locationId || typeof locationId !== 'string') return;
+    cityLocationService.getLocationName(locationId, currentLanguage).then((name) => {
+      setCityName(name || locationId);
+    }).catch(() => setCityName(locationId));
+  }, [locationId, currentLanguage]);
+
+  return (
+    <TouchableOpacity style={styles.categoryCard} onPress={onPress}>
+      {latestImageUri ? (
+        <Image source={{ uri: latestImageUri }} style={styles.thumbnail} resizeMode="cover" />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#FF9800' }]}>
+          <Text style={styles.emptyThumbnailText}>📍</Text>
+        </View>
+      )}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{cityName}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 const HomeScreen = ({ navigation }) => {
   const { t, i18n } = useTranslation('common');
   
@@ -56,42 +100,22 @@ const HomeScreen = ({ navigation }) => {
   // 相似组数据
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
+  const [showAllCities, setShowAllCities] = useState(false);
   
-  // 颜色分类数据
+  // 颜色分类数据（按颜色区不再加载缩略图，仅用色块+数量展示）
   const [colorCounts, setColorCounts] = useState({});
-  const [colorRecentImages, setColorRecentImages] = useState({});
   
-  // 目录分类数据
+  // 目录/格式/分辨率/方向（合并为按属性区，无缩略图）
   const [directoryCounts, setDirectoryCounts] = useState({});
-  const [directoryRecentImages, setDirectoryRecentImages] = useState({});
-  
-  // 格式分类数据
   const [formatCounts, setFormatCounts] = useState({});
-  const [formatRecentImages, setFormatRecentImages] = useState({});
-  
-  // 分辨率分类数据
   const [resolutionCounts, setResolutionCounts] = useState({});
-  const [resolutionRecentImages, setResolutionRecentImages] = useState({});
-  
-  // 方向分类数据
   const [orientationCounts, setOrientationCounts] = useState({});
-  const [orientationRecentImages, setOrientationRecentImages] = useState({});
   
-  // ISO分类数据
+  // ISO/光圈/快门/焦距（合并为按拍摄参数区，无缩略图）
   const [isoCounts, setISOCounts] = useState({});
-  const [isoRecentImages, setISORecentImages] = useState({});
-  
-  // 光圈分类数据
   const [apertureCounts, setApertureCounts] = useState({});
-  const [apertureRecentImages, setApertureRecentImages] = useState({});
-  
-  // 快门分类数据
   const [shutterCounts, setShutterCounts] = useState({});
-  const [shutterRecentImages, setShutterRecentImages] = useState({});
-  
-  // 焦距分类数据
   const [focalLengthCounts, setFocalLengthCounts] = useState({});
-  const [focalLengthRecentImages, setFocalLengthRecentImages] = useState({});
   
   // 最近照片
   const [recentImages, setRecentImages] = useState([]);
@@ -170,11 +194,10 @@ const HomeScreen = ({ navigation }) => {
       // DeviceEventEmitter不可用，忽略
     }
     
-    // 监听语言变化，重新加载分类数据和城市数据以更新名称
+    // 监听语言变化，重新加载分类数据（城市名称由 CityCard 根据 i18n.language 自行获取）
     const handleLanguageChange = () => {
-      logger.debug('🌐 语言已切换，重新加载分类数据和城市数据...');
+      logger.debug('🌐 语言已切换，重新加载分类数据...');
       loadCategories();
-      loadCities(); // 🔥 语言切换时重新加载城市名称
     };
     
     let languageSubscription = null;
@@ -314,14 +337,6 @@ const HomeScreen = ({ navigation }) => {
    * 因为过滤逻辑在渲染时进行，只需要触发重新渲染即可
    */
 
-  /**
-   * 监听语言变化，重新加载城市列表（城市名称需要根据语言设置显示）
-   */
-  useEffect(() => {
-    if (!loading) {
-      loadCities();
-    }
-  }, [i18n.language]);
 
   /**
    * 初始化数据加载
@@ -467,8 +482,8 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 加载城市列表（包含最近一张照片）
-   * 根据语言设置获取位置ID的显示名称
+   * 加载城市列表（仅 locationId、count、latestImageUri）
+   * 城市显示名称由 CityCard 组件根据 i18n.language 自行获取（与 PC 端一致）
    */
   const loadCities = async () => {
     try {
@@ -476,33 +491,18 @@ const HomeScreen = ({ navigation }) => {
       const cityCounts = cache.cityCounts || {};
       const allImages = cache.allImages || [];
       
-      // 获取当前语言设置
-      const currentLanguage = i18n.language || 'zh';
-      
-      // 构建城市列表并按数量降序排序
-      const cityListPromises = Object.keys(cityCounts).map(async (locationId) => {
-        // 找到这个城市最近的一张照片（按时间戳降序）
-        // 暂存箱图片不通过 category 标记，所以不需要过滤
+      const cityList = Object.keys(cityCounts).map((locationId) => {
         const cityImages = allImages
           .filter(img => img.city === locationId)
           .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        
         const latestImage = cityImages.length > 0 ? cityImages[0] : null;
-        
-        // 根据语言设置获取位置ID的显示名称
-        const displayName = await cityLocationService.getLocationName(locationId, currentLanguage) || locationId;
-        
         return {
-          locationId: locationId, // 保存 location_id 用于导航
-          name: displayName, // 显示名称（根据语言设置）
+          locationId,
           count: cityCounts[locationId],
           latestImageUri: latestImage ? getUri(latestImage) : null,
         };
       });
-      
-      const cityList = await Promise.all(cityListPromises);
       cityList.sort((a, b) => b.count - a.count);
-      
       setCities(cityList);
       
     } catch (error) {
@@ -515,298 +515,104 @@ const HomeScreen = ({ navigation }) => {
    */
   const loadColors = async () => {
     try {
-      // 加载颜色统计
       const colorCountsData = await UnifiedDataService.readColorCounts();
       setColorCounts(colorCountsData);
-      
-      // 加载各颜色的最近图片（按数量排序取前10个）
-      const sortedColors = Object.entries(colorCountsData).sort(([,a], [,b]) => b - a);
-      const colorIds = sortedColors.slice(0, 10).map(([colorName]) => colorName);
-      const colorImagesPromises = colorIds.map(async (colorName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByColor(colorName, 1);
-          return { colorName, images };
-        } catch (error) {
-          logger.error(`加载颜色 ${colorName} 最近图片失败:`, error);
-          return { colorName, images: [] };
-        }
-      });
-      
-      const colorImagesResults = await Promise.all(colorImagesPromises);
-      const colorImagesMap = {};
-      colorImagesResults.forEach(({ colorName, images }) => {
-        colorImagesMap[colorName] = images;
-      });
-      
-      setColorRecentImages(colorImagesMap);
-      
     } catch (error) {
       logger.error('❌ 加载颜色分类失败:', error);
     }
   };
 
   /**
-   * 加载目录分类数据
+   * 加载目录分类数据（按属性区无缩略图，仅加载数量）
    */
   const loadDirectories = async () => {
     try {
-      // 加载目录统计
-      const directoryCountsData = await UnifiedDataService.readDirectoryCounts();
-      setDirectoryCounts(directoryCountsData);
-      
-      // 加载所有目录的最近图片（每个目录只加载1张用于缩略图）
-      const allDirectoryIds = Object.keys(directoryCountsData);
-      
-      const directoryImagesPromises = allDirectoryIds.map(async (dirName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
-          return { dirName, images };
-        } catch (error) {
-          logger.error(`加载目录 ${dirName} 的图片失败:`, error);
-          return { dirName, images: [] };
-        }
-      });
-      
-      const directoryImagesResults = await Promise.all(directoryImagesPromises);
-      const directoryImagesMap = {};
-      directoryImagesResults.forEach(({ dirName, images }) => {
-        directoryImagesMap[dirName] = images;
-      });
-      setDirectoryRecentImages(directoryImagesMap);
+      const data = await UnifiedDataService.readDirectoryCounts();
+      setDirectoryCounts(data);
     } catch (error) {
       logger.error('❌ 加载目录分类失败:', error);
     }
   };
 
   /**
-   * 加载格式分类数据
+   * 加载格式分类数据（按属性区无缩略图，仅加载数量）
    */
   const loadFormats = async () => {
     try {
-      // 加载格式统计
-      const formatCountsData = await UnifiedDataService.readFormatCounts();
-      setFormatCounts(formatCountsData);
-      
-      // 加载各格式的最近图片（按数量排序取前10个）
-      const sortedFormats = Object.entries(formatCountsData).sort(([,a], [,b]) => b - a);
-      const formatIds = sortedFormats.slice(0, 10).map(([formatName]) => formatName);
-      const formatImagesPromises = formatIds.map(async (formatName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByFormat(formatName, 1);
-          return { formatName, images };
-        } catch (error) {
-          logger.error(`加载格式 ${formatName} 最近图片失败:`, error);
-          return { formatName, images: [] };
-        }
-      });
-      
-      const formatImagesResults = await Promise.all(formatImagesPromises);
-      const formatImagesMap = {};
-      formatImagesResults.forEach(({ formatName, images }) => {
-        formatImagesMap[formatName] = images;
-      });
-      setFormatRecentImages(formatImagesMap);
+      const data = await UnifiedDataService.readFormatCounts();
+      setFormatCounts(data);
     } catch (error) {
       logger.error('❌ 加载格式分类失败:', error);
     }
   };
 
   /**
-   * 加载分辨率分类数据
+   * 加载分辨率分类数据（按属性区无缩略图，仅加载数量）
    */
   const loadResolutions = async () => {
     try {
-      // 加载分辨率统计
-      const resolutionCountsData = await UnifiedDataService.readResolutionCounts();
-      setResolutionCounts(resolutionCountsData);
-      
-      // 加载各分辨率的最近图片（按数量排序取前10个）
-      const sortedResolutions = Object.entries(resolutionCountsData).sort(([,a], [,b]) => b - a);
-      const resolutionIds = sortedResolutions.slice(0, 10).map(([resolutionName]) => resolutionName);
-      const resolutionImagesPromises = resolutionIds.map(async (resolutionName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByResolution(resolutionName, 1);
-          return { resolutionName, images };
-        } catch (error) {
-          logger.error(`加载分辨率 ${resolutionName} 最近图片失败:`, error);
-          return { resolutionName, images: [] };
-        }
-      });
-      
-      const resolutionImagesResults = await Promise.all(resolutionImagesPromises);
-      const resolutionImagesMap = {};
-      resolutionImagesResults.forEach(({ resolutionName, images }) => {
-        resolutionImagesMap[resolutionName] = images;
-      });
-      setResolutionRecentImages(resolutionImagesMap);
+      const data = await UnifiedDataService.readResolutionCounts();
+      setResolutionCounts(data);
     } catch (error) {
       logger.error('❌ 加载分辨率分类失败:', error);
     }
   };
 
   /**
-   * 加载方向分类数据
+   * 加载方向分类数据（按属性区无缩略图，仅加载数量）
    */
   const loadOrientations = async () => {
     try {
-      // 加载方向统计
-      const orientationCountsData = await UnifiedDataService.readOrientationCounts();
-      setOrientationCounts(orientationCountsData);
-      
-      // 加载各方向的最近图片（所有方向）
-      const allOrientations = Object.keys(orientationCountsData);
-      const orientationImagesPromises = allOrientations.map(async (orientationName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByOrientation(orientationName, 1);
-          return { orientationName, images };
-        } catch (error) {
-          logger.error(`加载方向 ${orientationName} 最近图片失败:`, error);
-          return { orientationName, images: [] };
-        }
-      });
-      
-      const orientationImagesResults = await Promise.all(orientationImagesPromises);
-      const orientationImagesMap = {};
-      orientationImagesResults.forEach(({ orientationName, images }) => {
-        orientationImagesMap[orientationName] = images;
-      });
-      setOrientationRecentImages(orientationImagesMap);
+      const data = await UnifiedDataService.readOrientationCounts();
+      setOrientationCounts(data);
     } catch (error) {
       logger.error('❌ 加载方向分类失败:', error);
     }
   };
 
   /**
-   * 加载ISO分类数据
+   * 加载ISO分类数据（按拍摄参数区无缩略图，仅加载数量）
    */
   const loadISO = async () => {
     try {
-      // 加载ISO统计
-      const isoCountsData = await UnifiedDataService.readISOCounts();
-      setISOCounts(isoCountsData);
-      
-      // 加载各ISO的最近图片（按数量排序取前10个）
-      const sortedISO = Object.entries(isoCountsData).sort(([,a], [,b]) => b - a);
-      const isoIds = sortedISO.slice(0, 10).map(([isoName]) => isoName);
-      const isoImagesPromises = isoIds.map(async (isoName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByISO(isoName, 1);
-          return { isoName, images };
-        } catch (error) {
-          logger.error(`加载ISO ${isoName} 最近图片失败:`, error);
-          return { isoName, images: [] };
-        }
-      });
-      
-      const isoImagesResults = await Promise.all(isoImagesPromises);
-      const isoImagesMap = {};
-      isoImagesResults.forEach(({ isoName, images }) => {
-        isoImagesMap[isoName] = images;
-      });
-      
-      setISORecentImages(isoImagesMap);
+      const data = await UnifiedDataService.readISOCounts();
+      setISOCounts(data);
     } catch (error) {
       logger.error('❌ 加载ISO分类失败:', error);
     }
   };
 
   /**
-   * 加载光圈分类数据
+   * 加载光圈分类数据（按拍摄参数区无缩略图，仅加载数量）
    */
   const loadAperture = async () => {
     try {
-      // 加载光圈统计
-      const apertureCountsData = await UnifiedDataService.readApertureCounts();
-      setApertureCounts(apertureCountsData);
-      
-      // 加载各光圈的最近图片（按数量排序取前10个）
-      const sortedAperture = Object.entries(apertureCountsData).sort(([,a], [,b]) => b - a);
-      const apertureIds = sortedAperture.slice(0, 10).map(([apertureName]) => apertureName);
-      const apertureImagesPromises = apertureIds.map(async (apertureName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByAperture(apertureName, 1);
-          return { apertureName, images };
-        } catch (error) {
-          logger.error(`加载光圈 ${apertureName} 最近图片失败:`, error);
-          return { apertureName, images: [] };
-        }
-      });
-      
-      const apertureImagesResults = await Promise.all(apertureImagesPromises);
-      const apertureImagesMap = {};
-      apertureImagesResults.forEach(({ apertureName, images }) => {
-        apertureImagesMap[apertureName] = images;
-      });
-      
-      setApertureRecentImages(apertureImagesMap);
+      const data = await UnifiedDataService.readApertureCounts();
+      setApertureCounts(data);
     } catch (error) {
       logger.error('❌ 加载光圈分类失败:', error);
     }
   };
 
   /**
-   * 加载快门分类数据
+   * 加载快门分类数据（按拍摄参数区无缩略图，仅加载数量）
    */
   const loadShutter = async () => {
     try {
-      // 加载快门统计
-      const shutterCountsData = await UnifiedDataService.readShutterCounts();
-      setShutterCounts(shutterCountsData);
-      
-      // 加载各快门的最近图片（按数量排序取前10个）
-      const sortedShutter = Object.entries(shutterCountsData).sort(([,a], [,b]) => b - a);
-      const shutterIds = sortedShutter.slice(0, 10).map(([shutterName]) => shutterName);
-      const shutterImagesPromises = shutterIds.map(async (shutterName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByShutter(shutterName, 1);
-          return { shutterName, images };
-        } catch (error) {
-          logger.error(`加载快门 ${shutterName} 最近图片失败:`, error);
-          return { shutterName, images: [] };
-        }
-      });
-      
-      const shutterImagesResults = await Promise.all(shutterImagesPromises);
-      const shutterImagesMap = {};
-      shutterImagesResults.forEach(({ shutterName, images }) => {
-        shutterImagesMap[shutterName] = images;
-      });
-      
-      setShutterRecentImages(shutterImagesMap);
+      const data = await UnifiedDataService.readShutterCounts();
+      setShutterCounts(data);
     } catch (error) {
       logger.error('❌ 加载快门分类失败:', error);
     }
   };
 
   /**
-   * 加载焦距分类数据
+   * 加载焦距分类数据（按拍摄参数区无缩略图，仅加载数量）
    */
   const loadFocalLength = async () => {
     try {
-      // 加载焦距统计
-      const focalLengthCountsData = await UnifiedDataService.readFocalLengthCounts();
-      setFocalLengthCounts(focalLengthCountsData);
-      
-      // 加载各焦距的最近图片（按数量排序取前10个）
-      const sortedFocalLength = Object.entries(focalLengthCountsData).sort(([,a], [,b]) => b - a);
-      const focalLengthIds = sortedFocalLength.slice(0, 10).map(([focalLengthName]) => focalLengthName);
-      const focalLengthImagesPromises = focalLengthIds.map(async (focalLengthName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByFocalLength(focalLengthName, 1);
-          return { focalLengthName, images };
-        } catch (error) {
-          logger.error(`加载焦距 ${focalLengthName} 最近图片失败:`, error);
-          return { focalLengthName, images: [] };
-        }
-      });
-      
-      const focalLengthImagesResults = await Promise.all(focalLengthImagesPromises);
-      const focalLengthImagesMap = {};
-      focalLengthImagesResults.forEach(({ focalLengthName, images }) => {
-        focalLengthImagesMap[focalLengthName] = images;
-      });
-      
-      setFocalLengthRecentImages(focalLengthImagesMap);
+      const data = await UnifiedDataService.readFocalLengthCounts();
+      setFocalLengthCounts(data);
     } catch (error) {
       logger.error('❌ 加载焦距分类失败:', error);
     }
@@ -1741,7 +1547,7 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 渲染按内容分类区（4列网格）
+   * 渲染按内容分类区（4列网格，含按颜色芯片合并展示）
    */
   const renderCategoriesSection = () => {
     // 在渲染时根据 hideEmptyCategories 状态过滤分类（只用一个变量）
@@ -1749,34 +1555,81 @@ const HomeScreen = ({ navigation }) => {
       ? categories.filter(cat => cat.count > 0)
       : categories;
     
+    const hasUnclassifiedPhotos = categories.some(cat => cat.id === 'NA' && cat.count > 0);
+    const filteredColors = showColorCategories
+      ? BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
+          .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0))
+      : [];
+    const hasContent = filteredCategories.length > 0 || filteredColors.length > 0;
+
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏷️ {t('home.byContent')}</Text>
+          <View style={styles.sectionTitleColumn}>
+            <Text style={styles.sectionTitle}>🏷️ {t('home.byContent')}</Text>
+            {hasUnclassifiedPhotos && (
+              <Text style={styles.sectionHint}>{t('home.longPressUnclassifiedHint')}</Text>
+            )}
+          </View>
           <TouchableOpacity 
-            style={styles.toggleButton}
+            style={[styles.toggleButton, styles.toggleButtonNoShrink]}
             onPress={toggleHideEmptyCategories}
           >
             <Text style={styles.toggleButtonText}>
               {hideEmptyCategories ? t('home.showEmptyCategories') : t('home.hideEmptyCategories')}
             </Text>
             </TouchableOpacity>
-          </View>
+        </View>
         
-        {filteredCategories.length === 0 ? (
+        {!hasContent ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>📷</Text>
             <Text style={styles.emptyStateText}>{t('home.noCategoryImages')}</Text>
             <Text style={styles.emptyStateSubtext}>{t('home.scanOrAdjustSettings')}</Text>
           </View>
         ) : (
-          <View style={styles.categoriesGrid}>
-            {filteredCategories.map(renderCategoryCard)}
-          </View>
+          <>
+            {filteredCategories.length > 0 && (
+              <View style={styles.categoriesGrid}>
+                {filteredCategories.map(renderCategoryCard)}
+              </View>
+            )}
+            {filteredColors.length > 0 && (
+              <View style={[styles.colorChipsContainer, { marginTop: filteredCategories.length > 0 ? 12 : 0 }]}>
+                {filteredColors.map((color) => renderColorChip(color))}
+              </View>
+            )}
+          </>
         )}
-        </View>
+      </View>
     );
   };
+
+  /**
+   * 渲染相似组芯片（展开更多时使用，无缩略图，格式：相似组 · 12）
+   */
+  const renderSimilarityGroupChip = (group) => (
+    <TouchableOpacity
+      key={group.groupId}
+      style={styles.attributeChip}
+      onPress={() => {
+        try {
+          if (!group?.groupId || !navigation) return;
+          navigation.navigate('Category', {
+            filterType: 'similarityGroup',
+            filterValue: group.groupId,
+            fromScreen: 'SimilarityGroup',
+          });
+        } catch (error) {
+          logger.error('❌ 相似组芯片点击失败:', error);
+        }
+      }}
+    >
+      <Text style={styles.attributeChipName} numberOfLines={1}>
+        {t('home.similarityGroupChip', { count: group.imageCount || 0 })}
+      </Text>
+    </TouchableOpacity>
+  );
 
   /**
    * 渲染相似组卡片（与 PC 端保持一致：显示 1 张代表图片）
@@ -1860,29 +1713,28 @@ const HomeScreen = ({ navigation }) => {
                   (isScanning || isSimilarityDetecting) && styles.toggleButtonTextDisabled
                 ]}>{t('home.recheck')}</Text>
               </TouchableOpacity>
-              {/* MORE按钮：当相似组数量超过默认显示数量(8)时显示 */}
               {similarityGroups.length > 8 && !showAllSimilarityGroups && (
                 <TouchableOpacity
-                  style={styles.moreButton}
+                  style={styles.toggleButton}
                   onPress={() => {
-                    logger.debug('点击MORE按钮，展开所有相似组，当前数量:', similarityGroups.length);
+                    logger.debug('点击更多按钮，展开所有相似组，当前数量:', similarityGroups.length);
                     setShowAllSimilarityGroups(true);
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.moreButtonText}>⋯</Text>
+                  <Text style={styles.toggleButtonText}>{t('home.showMore')}</Text>
                 </TouchableOpacity>
               )}
               {showAllSimilarityGroups && similarityGroups.length > 8 && (
                 <TouchableOpacity
-                  style={styles.moreButton}
+                  style={styles.toggleButton}
                   onPress={() => {
                     logger.debug('点击收起按钮，收起相似组');
                     setShowAllSimilarityGroups(false);
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.moreButtonText}>−</Text>
+                  <Text style={styles.toggleButtonText}>{t('home.showLess')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1891,27 +1743,12 @@ const HomeScreen = ({ navigation }) => {
         
         {similarityGroups && similarityGroups.length > 0 ? (
           showAllSimilarityGroups ? (
-            // 显示所有时，限制最大显示数量为100个，避免性能问题
-            (() => {
-              const MAX_DISPLAY_COUNT = 100;
-              const displayGroups = similarityGroups.slice(0, MAX_DISPLAY_COUNT);
-              const hasMore = similarityGroups.length > MAX_DISPLAY_COUNT;
-              
-              return (
-                <>
-                  <View style={styles.categoriesGrid}>
-                    {displayGroups.map(renderSimilarityGroupCard)}
-                  </View>
-                  {hasMore && (
-                    <View style={styles.moreGroupsHint}>
-                      <Text style={styles.moreGroupsHintText}>
-                        {t('home.moreSimilarityGroupsHint', { total: similarityGroups.length, displayed: MAX_DISPLAY_COUNT })}
-                      </Text>
-                    </View>
-                  )}
-                </>
-              );
-            })()
+            // 展开更多时使用芯片流式布局，无缩略图，可显示全部相似组
+            <View style={[styles.attributesContainer, { paddingTop: 0 }]}>
+              <View style={styles.attributeRow}>
+                {similarityGroups.map(renderSimilarityGroupChip)}
+              </View>
+            </View>
           ) : (
             <View style={styles.categoriesGrid}>
               {similarityGroups.slice(0, 8).map(renderSimilarityGroupCard)}
@@ -1948,766 +1785,215 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 渲染颜色卡片（与PC端保持一致）
+   * 渲染颜色芯片（色块+名称+数量，无缩略图，提升性能）
    */
-  const renderColorCard = (color) => {
+  const renderColorChip = (color) => {
     const count = colorCounts[color] || 0;
-    const recentImages = colorRecentImages[color] || [];
+    const hex = COLOR_NAME_TO_HEX[color] || '#9E9E9E';
     
     return (
       <TouchableOpacity
         key={color}
-        style={styles.categoryCard}
+        style={styles.colorChip}
         onPress={() => {
           try {
             if (!color || !navigation) {
               logger.warn('❌ 颜色数据无效或导航对象为空:', { color, navigation: !!navigation });
               return;
             }
-            
-            logger.debug('🎨 点击颜色卡片:', color);
+            logger.debug('🎨 点击颜色芯片:', color);
             navigation.navigate('Category', {
               filterType: 'color',
               filterValue: color,
               fromScreen: 'Home',
             });
           } catch (error) {
-            logger.error('❌ 颜色卡片点击失败:', error);
+            logger.error('❌ 颜色芯片点击失败:', error);
           }
         }}
       >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: color || '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>🎨</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示颜色信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{getColorNameTranslation(color, i18n.language)}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
+        <View style={[styles.colorChipSwatch, { backgroundColor: hex }]} />
+        <Text style={styles.colorChipName} numberOfLines={1}>{getColorNameTranslation(color, i18n.language)}</Text>
+        <Text style={styles.colorChipCount}>{count}</Text>
       </TouchableOpacity>
     );
   };
 
   /**
-   * 渲染颜色分类区（与"按内容"保持一致：4列网格布局）
+   * 渲染属性芯片（通用：名称+数量，无缩略图）
    */
-  const renderColorsSection = () => {
-    // 过滤掉 null、undefined 和空字符串
-    const filteredColorCounts = Object.entries(colorCounts).filter(([color]) => {
-      return color && 
-             typeof color === 'string' && 
-             color.trim() !== '' && 
-             color !== 'null' && 
-             color !== 'undefined';
-    });
-    
-    if (filteredColorCounts.length === 0) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🎨 {t('home.byColor')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredColorCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([color]) => renderColorCard(color))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染目录卡片
-   */
-  const renderDirectoryCard = (directory) => {
-    const count = directoryCounts[directory] || 0;
-    const recentImages = directoryRecentImages[directory] || [];
-    // 提取目录名（最后一个路径段）
-    const directoryName = directory.split('/').pop() || directory;
-    
-    return (
-      <TouchableOpacity
-        key={directory}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!directory || !navigation) {
-              logger.warn('❌ 目录数据无效或导航对象为空:', { directory, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📁 点击目录卡片:', directory);
-            navigation.navigate('Category', {
-              filterType: 'directory',
-              filterValue: directory,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 目录卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📁</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示目录信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName} numberOfLines={1}>{directoryName}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染目录分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderDirectoriesSection = () => {
-    // 过滤掉无效目录
-    const filteredDirectoryCounts = Object.entries(directoryCounts).filter(([directory]) => {
-      return directory && 
-             typeof directory === 'string' && 
-             directory.trim() !== '' && 
-             directory !== 'null' && 
-             directory !== 'undefined';
-    });
-    
-    if (filteredDirectoryCounts.length === 0) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📁 {t('home.byStorage')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredDirectoryCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([directory]) => renderDirectoryCard(directory))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染格式卡片
-   */
-  const renderFormatCard = (format) => {
-    const count = formatCounts[format] || 0;
-    const recentImages = formatRecentImages[format] || [];
-    
-    return (
-      <TouchableOpacity
-        key={format}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!format || !navigation) {
-              logger.warn('❌ 格式数据无效或导航对象为空:', { format, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📄 点击格式卡片:', format);
-            navigation.navigate('Category', {
-              filterType: 'format',
-              filterValue: format,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 格式卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📄</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示格式信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{format}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染格式分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderFormatsSection = () => {
-    // 过滤掉无效格式
-    const filteredFormatCounts = Object.entries(formatCounts).filter(([format]) => {
-      return format && 
-             typeof format === 'string' && 
-             format.trim() !== '' && 
-             format !== 'null' && 
-             format !== 'UNKNOWN';
-    });
-    
-    if (filteredFormatCounts.length === 0) return null;
-    if (!showFormatCategories) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📄 {t('home.byFormat')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredFormatCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([format]) => renderFormatCard(format))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染分辨率卡片
-   */
-  const renderResolutionCard = (resolution) => {
-    const count = resolutionCounts[resolution] || 0;
-    const recentImages = resolutionRecentImages[resolution] || [];
-    
-    return (
-      <TouchableOpacity
-        key={resolution}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!resolution || !navigation) {
-              logger.warn('❌ 分辨率数据无效或导航对象为空:', { resolution, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📐 点击分辨率卡片:', resolution);
-            navigation.navigate('Category', {
-              filterType: 'resolution',
-              filterValue: resolution,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 分辨率卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📏</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示分辨率信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{resolution}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染分辨率分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderResolutionsSection = () => {
-    // 过滤掉无效分辨率
-    const filteredResolutionCounts = Object.entries(resolutionCounts).filter(([resolution]) => {
-      return resolution && 
-             typeof resolution === 'string' && 
-             resolution.trim() !== '' && 
-             resolution !== 'null' && 
-             resolution !== 'UNKNOWN';
-    });
-    
-    if (filteredResolutionCounts.length === 0) return null;
-    if (!showResolutionCategories) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📏 {t('home.byResolution')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredResolutionCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([resolution]) => renderResolutionCard(resolution))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染方向卡片
-   */
-  const renderOrientationCard = (orientation) => {
-    const count = orientationCounts[orientation] || 0;
-    const recentImages = orientationRecentImages[orientation] || [];
-    
-    return (
-      <TouchableOpacity
-        key={orientation}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!orientation || !navigation) {
-              logger.warn('❌ 方向数据无效或导航对象为空:', { orientation, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('🔄 点击方向卡片:', orientation);
-            navigation.navigate('Category', {
-              filterType: 'orientation',
-              filterValue: orientation,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 方向卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>🧭</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示方向信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{getOrientationNameTranslation(orientation, i18n.language)}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染方向分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderOrientationsSection = () => {
-    // 过滤掉无效方向
-    const filteredOrientationCounts = Object.entries(orientationCounts).filter(([orientation]) => {
-      return orientation && 
-             typeof orientation === 'string' && 
-             orientation.trim() !== '' && 
-             orientation !== 'null' && 
-             orientation !== 'UNKNOWN';
-    });
-    
-    if (filteredOrientationCounts.length === 0) return null;
-    if (!showOrientationCategories) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>🧭 {t('home.byOrientation')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredOrientationCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([orientation]) => renderOrientationCard(orientation))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染城市卡片（与"按内容"保持一致：4列网格布局）
-   */
-  const renderCityCard = (city) => (
+  const renderAttributeChip = (filterType, filterValue, displayName, count) => (
     <TouchableOpacity
-      key={city.locationId || city.name}
-      style={styles.categoryCard}
+      key={`${filterType}-${filterValue}`}
+      style={styles.attributeChip}
       onPress={() => {
         try {
-          // 🆕 添加空值检查
-          if (!city || !city.name || !navigation) {
-            logger.warn('❌ 城市数据无效或导航对象为空:', { city, navigation: !!navigation });
-            return;
-          }
-          
-          logger.debug('🏙️ 点击城市卡片:', city.name, 'locationId:', city.locationId);
+          if (!filterValue || !navigation) return;
           navigation.navigate('Category', {
-            filterType: 'city',
-            filterValue: city.locationId || city.name, // 使用 locationId 进行过滤
+            filterType,
+            filterValue,
             fromScreen: 'Home',
           });
         } catch (error) {
-          logger.error('❌ 城市卡片点击失败:', error);
+          logger.error(`❌ 属性芯片点击失败:`, error);
         }
       }}
     >
-      {/* 显示缩略图或城市背景色 */}
-      {city.latestImageUri ? (
-        <Image
-          source={{ uri: city.latestImageUri }}
-          style={styles.thumbnail}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={[styles.thumbnail, { backgroundColor: '#FF9800' }]}>
-          <Text style={styles.emptyThumbnailText}>📍</Text>
-        </View>
-      )}
-      
-      {/* 覆盖层显示城市信息 */}
-      <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName}>{city.name}</Text>
-        <Text style={styles.categoryCount}>{city.count}</Text>
-      </View>
+      <Text style={styles.attributeChipName} numberOfLines={1}>{displayName}</Text>
+      <Text style={styles.attributeChipCount}>{count}</Text>
     </TouchableOpacity>
   );
 
   /**
-   * 渲染ISO卡片
+   * 渲染按属性区（合并存储/格式/分辨率/方向，四行芯片，无缩略图无子标题）
    */
-  const renderISOCard = (iso) => {
-    const count = isoCounts[iso] || 0;
-    const recentImages = isoRecentImages[iso] || [];
-    const currentLang = i18n.language || 'zh';
-    const displayName = getCameraSettingsCategoryTranslation('iso', iso, currentLang) || iso;
-    
-    return (
-      <TouchableOpacity
-        key={iso}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!iso || !navigation) {
-              logger.warn('❌ ISO数据无效或导航对象为空:', { iso, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📸 点击ISO卡片:', iso);
-            navigation.navigate('Category', {
-              filterType: 'iso',
-              filterValue: iso,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ ISO卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📸</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示ISO信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{displayName}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const renderAttributesSection = () => {
+    const dirItems = Object.entries(directoryCounts)
+      .filter(([d]) => d && typeof d === 'string' && d.trim() && d !== 'null' && d !== 'undefined')
+      .sort(([,a], [,b]) => b - a);
+    const formatItems = Object.entries(formatCounts)
+      .filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+    const resolutionItems = Object.entries(resolutionCounts)
+      .filter(([r]) => r && typeof r === 'string' && r.trim() && r !== 'null' && r !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+    const orientationItems = Object.entries(orientationCounts)
+      .filter(([o]) => o && typeof o === 'string' && o.trim() && o !== 'null' && o !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
 
-  /**
-   * 渲染ISO分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderISOSection = () => {
-    // 过滤掉无效ISO
-    const filteredISOCounts = Object.entries(isoCounts).filter(([iso]) => {
-      return iso && 
-             typeof iso === 'string' && 
-             iso.trim() !== '' && 
-             iso !== 'null' && 
-             iso !== 'UNKNOWN';
-    });
-    
-    if (filteredISOCounts.length === 0) return null;
-    if (!showISOCategories) return null;
-    
+    const hasDir = showDirectoryCategories && dirItems.length > 0;
+    const hasFormat = showFormatCategories && formatItems.length > 0;
+    const hasResolution = showResolutionCategories && resolutionItems.length > 0;
+    const hasOrientation = showOrientationCategories && orientationItems.length > 0;
+
+    if (!hasDir && !hasFormat && !hasResolution && !hasOrientation) return null;
+
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byISO')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredISOCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([iso]) => renderISOCard(iso))}
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📋 {t('home.byAttributes')}</Text>
+        <View style={styles.attributesContainer}>
+          {hasDir && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byStorage')}</Text>
+              <View style={styles.attributeRow}>
+                {dirItems.map(([directory]) => {
+                  const count = directoryCounts[directory] || 0;
+                  const displayName = directory.split('/').pop() || directory;
+                  return renderAttributeChip('directory', directory, displayName, count);
+                })}
+              </View>
+            </View>
+          )}
+          {hasFormat && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byFormat')}</Text>
+              <View style={styles.attributeRow}>
+                {formatItems.map(([format]) => renderAttributeChip('format', format, format, formatCounts[format] || 0))}
+              </View>
+            </View>
+          )}
+          {hasResolution && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byResolution')}</Text>
+              <View style={styles.attributeRow}>
+                {resolutionItems.map(([resolution]) => renderAttributeChip('resolution', resolution, resolution, resolutionCounts[resolution] || 0))}
+              </View>
+            </View>
+          )}
+          {hasOrientation && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byOrientation')}</Text>
+              <View style={styles.attributeRow}>
+                {orientationItems.map(([orientation]) => renderAttributeChip('orientation', orientation, getOrientationNameTranslation(orientation, i18n.language), orientationCounts[orientation] || 0))}
+              </View>
+            </View>
+          )}
         </View>
       </View>
     );
   };
 
   /**
-   * 渲染光圈卡片
+   * 渲染城市卡片（与 PC 端一致：CityCard 根据 locationId + 语言自行获取显示名）
    */
-  const renderApertureCard = (aperture) => {
-    const count = apertureCounts[aperture] || 0;
-    const recentImages = apertureRecentImages[aperture] || [];
-    const currentLang = i18n.language || 'zh';
-    const displayName = getCameraSettingsCategoryTranslation('aperture', aperture, currentLang) || aperture;
-    
-    return (
-      <TouchableOpacity
-        key={aperture}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!aperture || !navigation) {
-              logger.warn('❌ 光圈数据无效或导航对象为空:', { aperture, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📸 点击光圈卡片:', aperture);
-            navigation.navigate('Category', {
-              filterType: 'aperture',
-              filterValue: aperture,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 光圈卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📸</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示光圈信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{displayName}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const renderCityCard = (city) => (
+    <CityCard
+      key={city.locationId}
+      locationId={city.locationId}
+      count={city.count}
+      latestImageUri={city.latestImageUri}
+      onPress={() => {
+        if (!city?.locationId || !navigation) return;
+        navigation.navigate('Category', {
+          filterType: 'city',
+          filterValue: city.locationId,
+          fromScreen: 'Home',
+        });
+      }}
+    />
+  );
 
   /**
-   * 渲染光圈分类区（与"按内容"保持一致：4列网格布局）
+   * 渲染按拍摄参数区（合并 ISO/光圈/快门/焦距，四行芯片，样式与按属性一致）
    */
-  const renderApertureSection = () => {
-    // 过滤掉无效光圈
-    const filteredApertureCounts = Object.entries(apertureCounts).filter(([aperture]) => {
-      return aperture && 
-             typeof aperture === 'string' && 
-             aperture.trim() !== '' && 
-             aperture !== 'null' && 
-             aperture !== 'UNKNOWN';
-    });
-    
-    if (filteredApertureCounts.length === 0) return null;
-    if (!showApertureCategories) return null;
-    
+  const renderShootingParamsSection = () => {
+    const currentLang = i18n.language || 'zh';
+    const isoItems = Object.entries(isoCounts)
+      .filter(([i]) => i && typeof i === 'string' && i.trim() && i !== 'null' && i !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+    const apertureItems = Object.entries(apertureCounts)
+      .filter(([a]) => a && typeof a === 'string' && a.trim() && a !== 'null' && a !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+    const shutterItems = Object.entries(shutterCounts)
+      .filter(([s]) => s && typeof s === 'string' && s.trim() && s !== 'null' && s !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+    const focalLengthItems = Object.entries(focalLengthCounts)
+      .filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN')
+      .sort(([,a], [,b]) => b - a);
+
+    const hasISO = showISOCategories && isoItems.length > 0;
+    const hasAperture = showApertureCategories && apertureItems.length > 0;
+    const hasShutter = showShutterCategories && shutterItems.length > 0;
+    const hasFocalLength = showFocalLengthCategories && focalLengthItems.length > 0;
+
+    if (!hasISO && !hasAperture && !hasShutter && !hasFocalLength) return null;
+
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byAperture')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredApertureCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([aperture]) => renderApertureCard(aperture))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染快门卡片
-   */
-  const renderShutterCard = (shutter) => {
-    const count = shutterCounts[shutter] || 0;
-    const recentImages = shutterRecentImages[shutter] || [];
-    const currentLang = i18n.language || 'zh';
-    const displayName = getCameraSettingsCategoryTranslation('shutter', shutter, currentLang) || shutter;
-    
-    return (
-      <TouchableOpacity
-        key={shutter}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!shutter || !navigation) {
-              logger.warn('❌ 快门数据无效或导航对象为空:', { shutter, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📸 点击快门卡片:', shutter);
-            navigation.navigate('Category', {
-              filterType: 'shutter',
-              filterValue: shutter,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 快门卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📸</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示快门信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{displayName}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染快门分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderShutterSection = () => {
-    // 过滤掉无效快门
-    const filteredShutterCounts = Object.entries(shutterCounts).filter(([shutter]) => {
-      return shutter && 
-             typeof shutter === 'string' && 
-             shutter.trim() !== '' && 
-             shutter !== 'null' && 
-             shutter !== 'UNKNOWN';
-    });
-    
-    if (filteredShutterCounts.length === 0) return null;
-    if (!showShutterCategories) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byShutter')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredShutterCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([shutter]) => renderShutterCard(shutter))}
-        </View>
-      </View>
-    );
-  };
-
-  /**
-   * 渲染焦距卡片
-   */
-  const renderFocalLengthCard = (focalLength) => {
-    const count = focalLengthCounts[focalLength] || 0;
-    const recentImages = focalLengthRecentImages[focalLength] || [];
-    const currentLang = i18n.language || 'zh';
-    const displayName = getCameraSettingsCategoryTranslation('focalLength', focalLength, currentLang) || focalLength;
-    
-    return (
-      <TouchableOpacity
-        key={focalLength}
-        style={styles.categoryCard}
-        onPress={() => {
-          try {
-            if (!focalLength || !navigation) {
-              logger.warn('❌ 焦距数据无效或导航对象为空:', { focalLength, navigation: !!navigation });
-              return;
-            }
-            
-            logger.debug('📸 点击焦距卡片:', focalLength);
-            navigation.navigate('Category', {
-              filterType: 'focalLength',
-              filterValue: focalLength,
-              fromScreen: 'Home',
-            });
-          } catch (error) {
-            logger.error('❌ 焦距卡片点击失败:', error);
-          }
-        }}
-      >
-        {/* 缩略图占满整个卡片 */}
-        {recentImages.length > 0 ? (
-          <Image
-            source={{ uri: getUri(recentImages[0]) || recentImages[0]?.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.thumbnail, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.emptyThumbnailText}>📸</Text>
-          </View>
-        )}
-        
-        {/* 覆盖层显示焦距信息 */}
-        <View style={styles.categoryOverlay}>
-          <Text style={styles.categoryName}>{displayName}</Text>
-          <Text style={styles.categoryCount}>{count}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  /**
-   * 渲染焦距分类区（与"按内容"保持一致：4列网格布局）
-   */
-  const renderFocalLengthSection = () => {
-    // 过滤掉无效焦距
-    const filteredFocalLengthCounts = Object.entries(focalLengthCounts).filter(([focalLength]) => {
-      return focalLength && 
-             typeof focalLength === 'string' && 
-             focalLength.trim() !== '' && 
-             focalLength !== 'null' && 
-             focalLength !== 'UNKNOWN';
-    });
-    
-    if (filteredFocalLengthCounts.length === 0) return null;
-    if (!showFocalLengthCategories) return null;
-    
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byFocalLength')}</Text>
-        <View style={styles.categoriesGrid}>
-          {filteredFocalLengthCounts
-            .sort(([,a], [,b]) => b - a)
-            .map(([focalLength]) => renderFocalLengthCard(focalLength))}
+        <Text style={[styles.sectionTitle, { marginBottom: 12, paddingHorizontal: 16 }]}>📸 {t('home.byShootingParams')}</Text>
+        <View style={styles.attributesContainer}>
+          {hasISO && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byISO')}</Text>
+              <View style={styles.attributeRow}>
+                {isoItems.map(([iso]) => renderAttributeChip('iso', iso, getCameraSettingsCategoryTranslation('iso', iso, currentLang) || iso, isoCounts[iso] || 0))}
+              </View>
+            </View>
+          )}
+          {hasAperture && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byAperture')}</Text>
+              <View style={styles.attributeRow}>
+                {apertureItems.map(([aperture]) => renderAttributeChip('aperture', aperture, getCameraSettingsCategoryTranslation('aperture', aperture, currentLang) || aperture, apertureCounts[aperture] || 0))}
+              </View>
+            </View>
+          )}
+          {hasShutter && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byShutter')}</Text>
+              <View style={styles.attributeRow}>
+                {shutterItems.map(([shutter]) => renderAttributeChip('shutter', shutter, getCameraSettingsCategoryTranslation('shutter', shutter, currentLang) || shutter, shutterCounts[shutter] || 0))}
+              </View>
+            </View>
+          )}
+          {hasFocalLength && (
+            <View style={styles.attributeSubBlock}>
+              <Text style={styles.attributeSubLabel}>{t('home.byFocalLength')}</Text>
+              <View style={styles.attributeRow}>
+                {focalLengthItems.map(([focalLength]) => renderAttributeChip('focalLength', focalLength, getCameraSettingsCategoryTranslation('focalLength', focalLength, currentLang) || focalLength, focalLengthCounts[focalLength] || 0))}
+              </View>
+            </View>
+          )}
         </View>
       </View>
     );
@@ -2719,6 +2005,12 @@ const HomeScreen = ({ navigation }) => {
   const renderCitiesSection = () => {
     // 如果设置中关闭了城市显示，不渲染
     if (!showCityCategories) return null;
+
+    // 按照片数量降序排列，显示最多的城市在前
+    const sortedCities = cities && cities.length > 0
+      ? [...cities].sort((a, b) => (b.count || 0) - (a.count || 0))
+      : [];
+    const displayCities = showAllCities ? sortedCities : sortedCities.slice(0, 8);
     
     return (
       <View style={styles.section}>
@@ -2727,25 +2019,45 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
           </View>
           {cities && cities.length > 0 && (
-            <TouchableOpacity 
-              style={[
-                styles.toggleButton,
-                isScanning && styles.toggleButtonDisabled
-              ]}
-              onPress={handleStartLocationEnrichment}
-              disabled={isScanning}
-            >
-              <Text style={[
-                styles.toggleButtonText,
-                isScanning && styles.toggleButtonTextDisabled
-              ]}>{t('home.recheck')}</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtonsContainer}>
+              <TouchableOpacity 
+                style={[
+                  styles.toggleButton,
+                  isScanning && styles.toggleButtonDisabled
+                ]}
+                onPress={handleStartLocationEnrichment}
+                disabled={isScanning}
+              >
+                <Text style={[
+                  styles.toggleButtonText,
+                  isScanning && styles.toggleButtonTextDisabled
+                ]}>{t('home.recheck')}</Text>
+              </TouchableOpacity>
+              {sortedCities.length > 8 && !showAllCities && (
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowAllCities(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.toggleButtonText}>{t('home.showMore')}</Text>
+                </TouchableOpacity>
+              )}
+              {showAllCities && sortedCities.length > 8 && (
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowAllCities(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.toggleButtonText}>{t('home.showLess')}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
         
         {cities && cities.length > 0 ? (
           <View style={styles.categoriesGrid}>
-            {cities.map(renderCityCard)}
+            {displayCities.map(renderCityCard)}
           </View>
         ) : (
           <View style={styles.emptyState}>
@@ -2924,16 +2236,9 @@ const HomeScreen = ({ navigation }) => {
       >
         {renderCategoriesSection()}
         {showCityCategories && renderCitiesSection()}
-        {showColorCategories && renderColorsSection()}
-        {showDirectoryCategories && renderDirectoriesSection()}
-        {renderFormatsSection()}
-        {renderResolutionsSection()}
-        {renderOrientationsSection()}
-        {renderISOSection()}
-        {renderApertureSection()}
-        {renderShutterSection()}
-        {renderFocalLengthSection()}
         {showSimilarityGroups && renderSimilarityGroupsSection()}
+        {renderAttributesSection()}
+        {renderShootingParamsSection()}
         {showRecentPhotos && renderRecentPhotos()}
       </ScrollView>
 
@@ -3002,6 +2307,7 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -3011,7 +2317,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    flex: 1, // 确保标题容器可以收缩
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0, // 允许 flex 子项收缩到小于内容宽度
   },
   sectionTitle: {
     fontSize: 18,
@@ -3019,6 +2327,24 @@ const styles = StyleSheet.create({
     color: '#000000',
     // 注意：当 sectionTitle 在 sectionHeader 内部时，不需要额外的 padding
     // 当单独使用时，需要通过内联样式添加 paddingHorizontal: 16
+  },
+  sectionTitleColumn: {
+    flexDirection: 'column',
+    gap: 2,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0, // 允许收缩，避免英文长文本时按钮溢出屏幕
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  sectionHint: {
+    fontSize: 12,
+    color: '#666666',
+    fontWeight: '400',
   },
   countBadge: {
     backgroundColor: '#007AFF',
@@ -3047,6 +2373,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
     borderRadius: 12,
     minHeight: 24, // 确保最小高度一致
+  },
+  toggleButtonNoShrink: {
+    flexShrink: 0, // 防止按钮被压缩，空间不足时换行
   },
   toggleButtonDisabled: {
     backgroundColor: '#E0E0E0',
@@ -3152,6 +2481,88 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     borderRadius: 4,
     marginLeft: 2,
+  },
+  
+  // 颜色芯片（无缩略图，色块+名称+数量）
+  colorChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  colorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    gap: 6,
+    width: (SCREEN_WIDTH - 16 * 2 - 8 * 4) / 5,
+  },
+  colorChipSwatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  colorChipName: {
+    flex: 1,
+    fontSize: 11,
+    color: '#333',
+    fontWeight: '500',
+  },
+  colorChipCount: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  
+  // 按属性区（存储/格式/分辨率/方向）
+  attributesContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  attributeSubBlock: {
+    gap: 6,
+  },
+  attributeSubLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+    paddingHorizontal: 4,
+  },
+  attributeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 8,
+    backgroundColor: '#FAFAFA',
+  },
+  attributeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    gap: 6,
+  },
+  attributeChipName: {
+    fontSize: 11,
+    color: '#333',
+    fontWeight: '500',
+    maxWidth: 100,
+  },
+  attributeChipCount: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#666',
   },
   
   // 相似组卡片
