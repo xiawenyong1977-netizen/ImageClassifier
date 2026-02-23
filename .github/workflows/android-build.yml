@@ -108,13 +108,21 @@ jobs:
           # 先构建未签名版本
           ./gradlew assembleRelease --no-daemon
           
-          # 保存未签名版本到临时目录
+          # 保存未签名版本到临时目录并重命名为统一格式
           APK_DIR="app/build/outputs/apk/release"
           UNSIGNED_APK=$(find "$APK_DIR" -name "*.apk" -type f | head -n 1)
           if [ -n "$UNSIGNED_APK" ]; then
             mkdir -p ../artifacts
-            cp "$UNSIGNED_APK" "../artifacts/app-release-unsigned.apk"
-            echo "Unsigned APK saved: ../artifacts/app-release-unsigned.apk"
+            # 从 build.gradle 读取版本号（versionName）
+            VERSION=$(grep -oP 'versionName\s+"\K[^"]+' app/build.gradle | head -n 1)
+            if [ -z "$VERSION" ]; then
+              # 回退：从 package.json 读取
+              VERSION=$(node -p "require('../package.json').version")
+            fi
+            echo "Android version: $VERSION"
+            NEW_NAME="XinTuAlbum-android-arm-$VERSION.apk"
+            cp "$UNSIGNED_APK" "../artifacts/$NEW_NAME"
+            echo "Unsigned APK saved: ../artifacts/$NEW_NAME"
           fi
         env:
           JAVA_OPTS: '-Xmx2048m'
@@ -174,14 +182,22 @@ jobs:
           
           echo "✅ Signed APK build completed"
           
-          # 保存签名版本到临时目录
+          # 保存签名版本到临时目录并重命名为统一格式
           APK_DIR="app/build/outputs/apk/release"
           SIGNED_APK=$(find "$APK_DIR" -name "*.apk" -type f | head -n 1)
           if [ -n "$SIGNED_APK" ]; then
             mkdir -p ../artifacts
-            cp "$SIGNED_APK" "../artifacts/app-release-signed.apk"
-            echo "Signed APK saved: ../artifacts/app-release-signed.apk"
-            ls -lh "../artifacts/app-release-signed.apk"
+            # 从 build.gradle 读取版本号（versionName）
+            VERSION=$(grep -oP 'versionName\s+"\K[^"]+' app/build.gradle | head -n 1)
+            if [ -z "$VERSION" ]; then
+              # 回退：从 package.json 读取
+              VERSION=$(node -p "require('../package.json').version")
+            fi
+            echo "Android version: $VERSION"
+            NEW_NAME="XinTuAlbum-android-arm-signed-$VERSION.apk"
+            cp "$SIGNED_APK" "../artifacts/$NEW_NAME"
+            echo "Signed APK saved: ../artifacts/$NEW_NAME"
+            ls -lh "../artifacts/$NEW_NAME"
           else
             echo "⚠️ Warning: Signed APK not found in $APK_DIR"
             echo "Available files:"
@@ -196,35 +212,48 @@ jobs:
           # 确保 artifacts 目录存在
           mkdir -p artifacts
           
-          # 检查 artifacts 目录中的 APK 文件
-          if [ -f "artifacts/app-release-unsigned.apk" ]; then
-            echo "unsigned_apk=artifacts/app-release-unsigned.apk" >> $GITHUB_OUTPUT
-            echo "Found unsigned APK"
+          # 从 build.gradle 读取版本号（versionName）
+          VERSION=$(grep -oP 'versionName\s+"\K[^"]+' android/app/build.gradle | head -n 1)
+          if [ -z "$VERSION" ]; then
+            # 回退：从 package.json 读取
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "Android version: $VERSION"
+          
+          # 检查 artifacts 目录中的 APK 文件（统一格式）
+          UNSIGNED_APK="artifacts/XinTuAlbum-android-arm-$VERSION.apk"
+          SIGNED_APK="artifacts/XinTuAlbum-android-arm-signed-$VERSION.apk"
+          
+          if [ -f "$UNSIGNED_APK" ]; then
+            echo "unsigned_apk=$UNSIGNED_APK" >> $GITHUB_OUTPUT
+            echo "Found unsigned APK: $UNSIGNED_APK"
           else
-            echo "⚠️ Warning: unsigned APK not found in artifacts directory"
+            echo "⚠️ Warning: unsigned APK not found: $UNSIGNED_APK"
           fi
           
-          if [ -f "artifacts/app-release-signed.apk" ]; then
-            echo "signed_apk=artifacts/app-release-signed.apk" >> $GITHUB_OUTPUT
-            echo "apk_path=artifacts/app-release-signed.apk" >> $GITHUB_OUTPUT
-            echo "Found signed APK"
-          elif [ -f "artifacts/app-release-unsigned.apk" ]; then
-            echo "apk_path=artifacts/app-release-unsigned.apk" >> $GITHUB_OUTPUT
+          if [ -f "$SIGNED_APK" ]; then
+            echo "signed_apk=$SIGNED_APK" >> $GITHUB_OUTPUT
+            echo "apk_path=$SIGNED_APK" >> $GITHUB_OUTPUT
+            echo "Found signed APK: $SIGNED_APK"
+          elif [ -f "$UNSIGNED_APK" ]; then
+            echo "apk_path=$UNSIGNED_APK" >> $GITHUB_OUTPUT
             echo "Using unsigned APK as default"
           else
             echo "❌ Error: No APK found in artifacts directory"
+            echo "Looking for: $UNSIGNED_APK or $SIGNED_APK"
+            ls -la artifacts/ || echo "artifacts directory not found"
             exit 1
           fi
 
       - name: Upload unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-unsigned
+          name: XinTuAlbum-android-arm
           path: ${{ steps.build.outputs.unsigned_apk }}
 
       - name: Upload signed APK (if available)
         if: steps.check-secrets.outputs.secrets_configured == 'true' && steps.build.outputs.signed_apk != ''
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-signed
+          name: XinTuAlbum-android-arm-signed
           path: ${{ steps.build.outputs.signed_apk }}

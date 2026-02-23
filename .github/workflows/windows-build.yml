@@ -55,15 +55,73 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT }}
 
+      - name: Rename Windows artifacts to unified format
+        run: |
+          $distPath = "pc-version-final/dist"
+          # 从 package.json 读取版本号
+          $packageJson = Get-Content "pc-version-final/package.json" | ConvertFrom-Json
+          $version = $packageJson.version
+          Write-Host "Version from package.json: $version"
+          
+          Write-Host "Renaming Windows artifacts to unified format..."
+          
+          # 重命名 NSIS 安装程序: XinTuAlbum-win-amd-setup-${version}.exe
+          $nsisFiles = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue
+          foreach ($file in $nsisFiles) {
+              $newName = "XinTuAlbum-win-amd-setup-$version.exe"
+              $newPath = Join-Path $file.DirectoryName $newName
+              if ($file.Name -ne $newName) {
+                  Write-Host "Renaming: $($file.Name) -> $newName"
+                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
+              }
+          }
+          
+          # 重命名 Portable EXE: XinTuAlbum-win-amd-portable-${version}.exe
+          $portableFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
+                          Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -like "XinTuAlbum*.exe" }
+          foreach ($file in $portableFiles) {
+              $newName = "XinTuAlbum-win-amd-portable-$version.exe"
+              $newPath = Join-Path $file.DirectoryName $newName
+              if ($file.Name -ne $newName) {
+                  Write-Host "Renaming: $($file.Name) -> $newName"
+                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
+              }
+          }
+          
+          # 重命名 APPX (未签名): XinTuAlbum-win-amd-${version}.appx
+          $unsignedAppx = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue | 
+                         Where-Object { $_.Name -notlike "*-signed.appx" }
+          foreach ($file in $unsignedAppx) {
+              $newName = "XinTuAlbum-win-amd-$version.appx"
+              if ($file.Name -ne $newName) {
+                  Write-Host "Renaming: $($file.Name) -> $newName"
+                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
+              }
+          }
+          
+          # 重命名 APPX (签名): XinTuAlbum-win-amd-signed-${version}.appx
+          $signedAppx = Get-ChildItem -Path $distPath -Recurse -Include "*-signed.appx" -ErrorAction SilentlyContinue
+          foreach ($file in $signedAppx) {
+              $newName = "XinTuAlbum-win-amd-signed-$version.appx"
+              if ($file.Name -ne $newName) {
+                  Write-Host "Renaming: $($file.Name) -> $newName"
+                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
+              }
+          }
+
       - name: Find Windows artifacts
         id: build
         run: |
           $distPath = "pc-version-final/dist"
           
+          # 从 package.json 读取版本号
+          $packageJson = Get-Content "pc-version-final/package.json" | ConvertFrom-Json
+          $version = $packageJson.version
+          Write-Host "Version from package.json: $version"
           Write-Host "Searching for Windows build artifacts in: $distPath"
           
-          # NSIS Installer (*Setup*.exe)
-          $nsisInstallers = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue
+          # NSIS Installer: XinTuAlbum-win-amd-setup-${version}.exe
+          $nsisInstallers = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-setup-*.exe" -ErrorAction SilentlyContinue
           if ($nsisInstallers) {
               Write-Host "Found NSIS installers:"
               $nsisPaths = @()
@@ -76,27 +134,8 @@ jobs:
               "EOF" >> $env:GITHUB_OUTPUT
           }
           
-          # Portable EXE - 实际文件名格式: XinTuAlbum 1.1.0.exe
-          # 格式: ${productName} ${version}.exe (版本号前有空格，不是连字符)
-          # 排除 Setup 安装程序
-          $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
-                          Where-Object { 
-                              $_.Name -notlike "*Setup*" -and 
-                              $_.Name -like "XinTuAlbum *.exe" -and
-                              $_.Name -notlike "XinTuAlbum-Setup*"
-                          }
-          
-          if ($portableExes.Count -eq 0) {
-              # 回退：查找其他可能的 portable 格式（兼容不同版本或配置）
-              Write-Host "No portable EXE found with format 'XinTuAlbum *.exe', trying alternative patterns..."
-              $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
-                              Where-Object { 
-                                  $_.Name -notlike "*Setup*" -and 
-                                  ($_.Name -like "*-portable.exe" -or 
-                                   $_.Name -like "*-Portable.exe" -or
-                                   $_.Name -like "*-win-x64-portable.exe")
-                              }
-          }
+          # Portable EXE: XinTuAlbum-win-amd-portable-${version}.exe
+          $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-portable-*.exe" -ErrorAction SilentlyContinue
           
           if ($portableExes) {
               Write-Host "Found Portable EXEs:"
@@ -111,32 +150,34 @@ jobs:
           }
           
           # APPX packages - 分别处理未签名和签名版本
-          $appxPackages = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue
-          if ($appxPackages) {
-              $unsignedAppx = @()
-              $signedAppx = @()
-              
-              $appxPackages | ForEach-Object {
-                  if ($_.Name -like "*-signed.appx") {
-                      Write-Host "Found signed APPX: $($_.FullName)"
-                      $signedAppx += $_.FullName
-                  } else {
-                      Write-Host "Found unsigned APPX: $($_.FullName)"
-                      $unsignedAppx += $_.FullName
-                  }
+          # 未签名: XinTuAlbum-win-amd-${version}.appx
+          # 签名: XinTuAlbum-win-amd-signed-${version}.appx
+          $unsignedAppx = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-*.appx" -ErrorAction SilentlyContinue | 
+                          Where-Object { $_.Name -notlike "*-signed.appx" }
+          $signedAppx = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-signed-*.appx" -ErrorAction SilentlyContinue
+          
+          if ($unsignedAppx) {
+              Write-Host "Found unsigned APPX:"
+              $unsignedAppxList = @()
+              $unsignedAppx | ForEach-Object {
+                  Write-Host "  - $($_.FullName)"
+                  $unsignedAppxList += $_.FullName
               }
-              
-              if ($unsignedAppx.Count -gt 0) {
-                  "unsigned_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
-                  $unsignedAppx | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-                  "EOF" >> $env:GITHUB_OUTPUT
+              "unsigned_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
+              $unsignedAppxList | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+              "EOF" >> $env:GITHUB_OUTPUT
+          }
+          
+          if ($signedAppx) {
+              Write-Host "Found signed APPX:"
+              $signedAppxList = @()
+              $signedAppx | ForEach-Object {
+                  Write-Host "  - $($_.FullName)"
+                  $signedAppxList += $_.FullName
               }
-              
-              if ($signedAppx.Count -gt 0) {
-                  "signed_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
-                  $signedAppx | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-                  "EOF" >> $env:GITHUB_OUTPUT
-              }
+              "signed_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
+              $signedAppxList | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
+              "EOF" >> $env:GITHUB_OUTPUT
           }
           
           # 检查是否至少找到一个类型的制品
@@ -158,26 +199,26 @@ jobs:
         if: steps.build.outputs.nsis_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: windows-nsis-installer
+          name: XinTuAlbum-win-amd-setup
           path: ${{ steps.build.outputs.nsis_paths }}
 
       - name: Upload Portable EXE
         if: steps.build.outputs.portable_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: windows-portable
+          name: XinTuAlbum-win-amd-portable
           path: ${{ steps.build.outputs.portable_paths }}
 
       - name: Upload Unsigned APPX
         if: steps.build.outputs.unsigned_appx_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: windows-appx-unsigned
+          name: XinTuAlbum-win-amd
           path: ${{ steps.build.outputs.unsigned_appx_paths }}
 
       - name: Upload Signed APPX
         if: steps.build.outputs.signed_appx_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: windows-appx-signed
+          name: XinTuAlbum-win-amd-signed
           path: ${{ steps.build.outputs.signed_appx_paths }}

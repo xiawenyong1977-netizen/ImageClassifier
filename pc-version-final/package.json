@@ -85,19 +85,22 @@
           "target": "nsis",
           "arch": [
             "x64"
-          ]
+          ],
+          "artifactName": "${productName}-win-amd-setup-${version}.${ext}"
         },
         {
           "target": "portable",
           "arch": [
             "x64"
-          ]
+          ],
+          "artifactName": "${productName}-win-amd-portable-${version}.${ext}"
         },
         {
           "target": "appx",
           "arch": [
             "x64"
-          ]
+          ],
+          "artifactName": "${productName}-win-amd-${version}.${ext}"
         }
       ],
       "requestedExecutionLevel": "asInvoker"
@@ -110,7 +113,7 @@
       "applicationId": "XinTuAlbum",
       "backgroundColor": "transparent",
       "showNameOnTiles": true,
-      "artifactName": "${productName}-${version}.${ext}",
+      "artifactName": "${productName}-win-amd-${version}.${ext}",
       "languages": [
         "zh-CN"
       ]
@@ -143,7 +146,7 @@
         }
       ],
       "category": "public.app-category.photography",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-mac-${arch}-${version}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -184,9 +187,12 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "include": "installer/installer.nsh",
-      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "artifactName": "${productName}-win-amd-setup-${version}.${ext}",
       "language": "2052",
       "warningsAsErrors": false
+    },
+    "portable": {
+      "artifactName": "${productName}-win-amd-portable-${version}.${ext}"
     }
   }
 }

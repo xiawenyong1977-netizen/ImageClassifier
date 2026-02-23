@@ -59,13 +59,67 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT }}
 
+      - name: Rename macOS artifacts to unified format
+        id: rename
+        run: |
+          # 从 package.json 读取版本号
+          VERSION=$(node -p "require('./pc-version-final/package.json').version")
+          echo "macOS version: $VERSION"
+          
+          # 查找所有 DMG 文件并重命名
+          DMG_FILES=$(find pc-version-final/dist -name "*.dmg" -type f)
+          if [ -z "$DMG_FILES" ]; then
+            echo "No DMG found in pc-version-final/dist/"
+            exit 1
+          fi
+          
+          # 使用数组存储重命名后的文件路径（避免子 shell 问题）
+          RENAMED_FILES=()
+          
+          for DMG_FILE in $DMG_FILES; do
+            BASENAME=$(basename "$DMG_FILE" .dmg)
+            DIRNAME=$(dirname "$DMG_FILE")
+            
+            # 检测架构：x64 -> intel, arm64 -> arm
+            if echo "$BASENAME" | grep -q "x64"; then
+              ARCH="intel"
+            elif echo "$BASENAME" | grep -q "arm64"; then
+              ARCH="arm"
+            else
+              # 默认尝试从文件名推断，或使用通用名称
+              ARCH="intel"
+            fi
+            
+            NEW_NAME="XinTuAlbum-mac-$ARCH-$VERSION.dmg"
+            NEW_PATH="$DIRNAME/$NEW_NAME"
+            
+            if [ "$(basename "$DMG_FILE")" != "$NEW_NAME" ]; then
+              echo "Renaming: $(basename "$DMG_FILE") -> $NEW_NAME"
+              mv "$DMG_FILE" "$NEW_PATH"
+            else
+              NEW_PATH="$DMG_FILE"
+            fi
+            
+            RENAMED_FILES+=("$NEW_PATH")
+            echo "Renamed DMG: $NEW_PATH (arch: $ARCH)"
+          done
+          
+          # 输出第一个文件作为主要制品（如果有多个，Find 步骤会处理）
+          if [ ${#RENAMED_FILES[@]} -gt 0 ]; then
+            echo "artifact_path=${RENAMED_FILES[0]}" >> $GITHUB_OUTPUT
+            BASENAME=$(basename "${RENAMED_FILES[0]}" .dmg)
+            echo "artifact_name=$BASENAME" >> $GITHUB_OUTPUT
+          fi
+
       - name: Find macOS artifacts
         id: build
         run: |
-          # macOS 只构建 DMG
-          DMG_FILE=$(find pc-version-final/dist -name "*.dmg" -type f | head -n 1)
+          # macOS 只构建 DMG（已重命名为统一格式: XinTuAlbum-mac-{arch}-{version}.dmg）
+          DMG_FILE=$(find pc-version-final/dist -name "XinTuAlbum-mac-*.dmg" -type f | head -n 1)
           if [ -z "$DMG_FILE" ]; then
             echo "No DMG found in pc-version-final/dist/"
+            echo "Looking for: XinTuAlbum-mac-*.dmg"
+            find pc-version-final/dist -name "*.dmg" -type f || echo "No DMG files found"
             exit 1
           fi
           
