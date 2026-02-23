@@ -1,27 +1,32 @@
 name: Windows Build
 
-# Windows 构建现在生成多个独立的制品，不再使用单一的 artifact_paths
-# 制品名称: windows-nsis-installer, windows-portable, windows-appx-unsigned, windows-appx-signed
 on:
   workflow_call:
     inputs:
       release_tag:
         required: true
         type: string
+    outputs:
+      windows_artifact_paths:
+        description: "Paths to the Windows build artifacts"
+        value: ${{ jobs.build-windows.outputs.artifact_paths }}
 
 jobs:
-  # 不再使用单一的 artifact_paths，而是生成多个独立的制品
   build-windows:
     name: Build Windows Application
     runs-on: windows-latest
+    outputs:
+      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '18'
 
       - name: Cache Node Modules
         uses: actions/cache@v4
@@ -33,196 +38,85 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-modules-
 
-      - name: Install system dependencies (GTK2-Runtime for node-canvas)
+      - name: Install system dependencies
         run: |
-          choco install -y pkgconfiglite gtk-runtime libjpeg-turbo
+          choco install -y pkgconfiglite cairo pango libpng libjpeg-turbo giflib librsvg pixman
 
       - name: Prepare build environment
         run: |
           cd pc-version-final
           npm ci --no-optional --legacy-peer-deps
-          $gtkRoot = "C:\Program Files (x86)\Gtk2-Runtime"
-          if (-not (Test-Path $gtkRoot)) { $gtkRoot = "C:\GTK" }
-          $env:GTK_Root = $gtkRoot
-          npm install canvas@^2.11.2 --GTK_Root="$gtkRoot"
+          npm install canvas@^2.11.2
 
-      - name: Build Windows application (reuse local build.bat)
-        shell: cmd
+      - name: Build application
         run: |
-          set CI=1
           cd pc-version-final
-          call build.bat
+          npm run build
+
+      - name: Replace public symlink with real copy
+        run: |
+          cd pc-version-final
+          if (Test-Path "public" -PathType SymbolicLink) {
+              $realPublic = (Get-Item "public").Target
+              Remove-Item "public" -Force
+              Copy-Item -Recurse -Path $realPublic -Destination "public"
+          }
+
+      - name: Generate macOS icon
+        run: |
+          cd pc-version-final
+          if (Test-Path "public/icon.png") {
+              if (Test-Path "../scripts/create-mac-icon.js") {
+                  node ../scripts/create-mac-icon.js .
+              }
+          }
+
+      - name: Build Windows application
+        run: |
+          cd pc-version-final
+          npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.PAT }}
-
-      - name: Rename Windows artifacts to unified format
-        run: |
-          $distPath = "pc-version-final/dist"
-          # 从 package.json 读取版本号
-          $packageJson = Get-Content "pc-version-final/package.json" | ConvertFrom-Json
-          $version = $packageJson.version
-          Write-Host "Version from package.json: $version"
-          
-          Write-Host "Renaming Windows artifacts to unified format..."
-          
-          # 重命名 NSIS 安装程序: XinTuAlbum-win-amd-setup-${version}.exe
-          $nsisFiles = Get-ChildItem -Path $distPath -Recurse -Include "*Setup*.exe" -ErrorAction SilentlyContinue
-          foreach ($file in $nsisFiles) {
-              $newName = "XinTuAlbum-win-amd-setup-$version.exe"
-              $newPath = Join-Path $file.DirectoryName $newName
-              if ($file.Name -ne $newName) {
-                  Write-Host "Renaming: $($file.Name) -> $newName"
-                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
-              }
-          }
-          
-          # 重命名 Portable EXE: XinTuAlbum-win-amd-portable-${version}.exe
-          $portableFiles = Get-ChildItem -Path $distPath -Recurse -Include "*.exe" -ErrorAction SilentlyContinue | 
-                          Where-Object { $_.Name -notlike "*Setup*" -and $_.Name -like "XinTuAlbum*.exe" }
-          foreach ($file in $portableFiles) {
-              $newName = "XinTuAlbum-win-amd-portable-$version.exe"
-              $newPath = Join-Path $file.DirectoryName $newName
-              if ($file.Name -ne $newName) {
-                  Write-Host "Renaming: $($file.Name) -> $newName"
-                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
-              }
-          }
-          
-          # 重命名 APPX (未签名): XinTuAlbum-win-amd-${version}.appx
-          $unsignedAppx = Get-ChildItem -Path $distPath -Recurse -Include "*.appx" -ErrorAction SilentlyContinue | 
-                         Where-Object { $_.Name -notlike "*-signed.appx" }
-          foreach ($file in $unsignedAppx) {
-              $newName = "XinTuAlbum-win-amd-$version.appx"
-              if ($file.Name -ne $newName) {
-                  Write-Host "Renaming: $($file.Name) -> $newName"
-                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
-              }
-          }
-          
-          # 重命名 APPX (签名): XinTuAlbum-win-amd-signed-${version}.appx
-          $signedAppx = Get-ChildItem -Path $distPath -Recurse -Include "*-signed.appx" -ErrorAction SilentlyContinue
-          foreach ($file in $signedAppx) {
-              $newName = "XinTuAlbum-win-amd-signed-$version.appx"
-              if ($file.Name -ne $newName) {
-                  Write-Host "Renaming: $($file.Name) -> $newName"
-                  Rename-Item -Path $file.FullName -NewName $newName -ErrorAction SilentlyContinue
-              }
-          }
 
       - name: Find Windows artifacts
         id: build
         run: |
-          $distPath = "pc-version-final/dist"
+          $artifactPaths = @()
           
-          # 从 package.json 读取版本号
-          $packageJson = Get-Content "pc-version-final/package.json" | ConvertFrom-Json
-          $version = $packageJson.version
-          Write-Host "Version from package.json: $version"
-          Write-Host "Searching for Windows build artifacts in: $distPath"
-          
-          # NSIS Installer: XinTuAlbum-win-amd-setup-${version}.exe
-          $nsisInstallers = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-setup-*.exe" -ErrorAction SilentlyContinue
-          if ($nsisInstallers) {
-              Write-Host "Found NSIS installers:"
-              $nsisPaths = @()
-              $nsisInstallers | ForEach-Object { 
-                  Write-Host "  - $($_.FullName)"
-                  $nsisPaths += $_.FullName
-              }
-              "nsis_paths<<EOF" >> $env:GITHUB_OUTPUT
-              $nsisPaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-              "EOF" >> $env:GITHUB_OUTPUT
+          # Look for NSIS installer
+          $nsisInstaller = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*Setup*.exe" | Select-Object -First 1
+          if ($nsisInstaller) {
+              $artifactPaths += $nsisInstaller.FullName
+              Write-Output "Found NSIS installer: $($nsisInstaller.FullName)"
           }
           
-          # Portable EXE: XinTuAlbum-win-amd-portable-${version}.exe
-          $portableExes = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-portable-*.exe" -ErrorAction SilentlyContinue
-          
-          if ($portableExes) {
-              Write-Host "Found Portable EXEs:"
-              $portablePaths = @()
-              $portableExes | ForEach-Object { 
-                  Write-Host "  - $($_.FullName)"
-                  $portablePaths += $_.FullName
-              }
-              "portable_paths<<EOF" >> $env:GITHUB_OUTPUT
-              $portablePaths | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-              "EOF" >> $env:GITHUB_OUTPUT
+          # Look for Portable executable
+          $portableExe = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*.Portable.exe" | Select-Object -First 1
+          if ($portableExe) {
+              $artifactPaths += $portableExe.FullName
+              Write-Output "Found Portable executable: $($portableExe.FullName)"
           }
           
-          # APPX packages - 分别处理未签名和签名版本
-          # 未签名: XinTuAlbum-win-amd-${version}.appx
-          # 签名: XinTuAlbum-win-amd-signed-${version}.appx
-          $unsignedAppx = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-*.appx" -ErrorAction SilentlyContinue | 
-                          Where-Object { $_.Name -notlike "*-signed.appx" }
-          $signedAppx = Get-ChildItem -Path $distPath -Recurse -Include "XinTuAlbum-win-amd-signed-*.appx" -ErrorAction SilentlyContinue
-          
-          if ($unsignedAppx) {
-              Write-Host "Found unsigned APPX:"
-              $unsignedAppxList = @()
-              $unsignedAppx | ForEach-Object {
-                  Write-Host "  - $($_.FullName)"
-                  $unsignedAppxList += $_.FullName
-              }
-              "unsigned_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
-              $unsignedAppxList | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-              "EOF" >> $env:GITHUB_OUTPUT
+          # Look for AppX package
+          $appxPackage = Get-ChildItem -Path "pc-version-final/dist/" -Recurse -Include "*.appx" | Select-Object -First 1
+          if ($appxPackage) {
+              $artifactPaths += $appxPackage.FullName
+              Write-Output "Found AppX package: $($appxPackage.FullName)"
           }
           
-          if ($signedAppx) {
-              Write-Host "Found signed APPX:"
-              $signedAppxList = @()
-              $signedAppx | ForEach-Object {
-                  Write-Host "  - $($_.FullName)"
-                  $signedAppxList += $_.FullName
-              }
-              "signed_appx_paths<<EOF" >> $env:GITHUB_OUTPUT
-              $signedAppxList | ForEach-Object { $_ } >> $env:GITHUB_OUTPUT
-              "EOF" >> $env:GITHUB_OUTPUT
-          }
-          
-          # 输出版本号供 artifact 名称使用
-          "version=$version" >> $env:GITHUB_OUTPUT
-          
-          # 检查是否至少找到一个类型的制品
-          $totalFound = 0
-          if ($nsisInstallers) { $totalFound += $nsisInstallers.Count }
-          if ($portableExes) { $totalFound += $portableExes.Count }
-          if ($unsignedAppx) { $totalFound += $unsignedAppx.Count }
-          if ($signedAppx) { $totalFound += $signedAppx.Count }
-          
-          Write-Host "Total artifacts found: $totalFound"
-          
-          if ($totalFound -eq 0) {
-              Write-Error "No Windows build artifacts found in $distPath/"
-              Write-Host "Available files in dist directory:"
-              Get-ChildItem -Path $distPath -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table
+          if ($artifactPaths.Count -eq 0) {
+              Write-Error "No Windows build artifacts found in pc-version-final/dist/"
               exit 1
           }
+          
+          # Join paths with semicolon as separator
+          $pathsString = $artifactPaths -join ";"
+          Write-Output "artifact_paths=$pathsString"
+          echo "artifact_paths=$pathsString" >> $env:GITHUB_OUTPUT
 
-      - name: Upload NSIS Installer
-        if: steps.build.outputs.nsis_paths != ''
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-win-amd-setup-${{ steps.build.outputs.version }}
-          path: ${{ steps.build.outputs.nsis_paths }}
-
-      - name: Upload Portable EXE
-        if: steps.build.outputs.portable_paths != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: XinTuAlbum-win-amd-portable-${{ steps.build.outputs.version }}
-          path: ${{ steps.build.outputs.portable_paths }}
-
-      - name: Upload Unsigned APPX
-        if: steps.build.outputs.unsigned_appx_paths != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: XinTuAlbum-win-amd-${{ steps.build.outputs.version }}
-          path: ${{ steps.build.outputs.unsigned_appx_paths }}
-
-      - name: Upload Signed APPX
-        if: steps.build.outputs.signed_appx_paths != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: XinTuAlbum-win-amd-signed-${{ steps.build.outputs.version }}
-          path: ${{ steps.build.outputs.signed_appx_paths }}
+          name: windows-build
+          path: |
+            ${{ fromJSON(format('["{0}"]', join(fromJSON(format('"{0}"', steps.build.outputs.artifact_paths)), '","'))) }}

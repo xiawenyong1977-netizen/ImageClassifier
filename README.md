@@ -469,3 +469,4 @@ cd android
 
 *让照片管理更智能，让隐私更安全*
 
+# Test build trigger
