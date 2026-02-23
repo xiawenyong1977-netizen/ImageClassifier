@@ -28,19 +28,48 @@ jobs:
             echo "matrix={\"platform\":[\"macos\", \"windows\", \"android\"]}" >> $GITHUB_OUTPUT
           else
             # Automated trigger - only build platforms that changed
-            changed_files=$(git diff --name-only HEAD^ HEAD)
+            changed_files=""
+            
+            # Try different methods to get changed files, with error handling
+            if [ "${{ github.event_name }}" == "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+              # Use github.event.before/after for push events (most reliable)
+              echo "Using github.event.before/after for changed files"
+              changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} 2>&1) || changed_files=""
+            elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              # Fallback to HEAD^ if it exists
+              echo "Using HEAD^ for changed files"
+              changed_files=$(git diff --name-only HEAD^ HEAD 2>&1) || changed_files=""
+            else
+              # Last resort: check all files in current commit
+              echo "Using git diff-tree for changed files (fallback)"
+              changed_files=$(git diff-tree --no-commit-id --name-only -r HEAD 2>&1) || changed_files=""
+            fi
+            
+            # If all methods failed, default to building all platforms
+            if [ -z "$changed_files" ] || [ $? -ne 0 ]; then
+              echo "Warning: Could not determine changed files, building all platforms"
+              changed_files=""
+            else
+              echo "Changed files:"
+              echo "$changed_files"
+            fi
+            
             declare -a platforms=()
             
-            if [[ $changed_files =~ "pc-version-final/" ]]; then
-              platforms+=("macos" "windows")
+            if [ -n "$changed_files" ]; then
+              if echo "$changed_files" | grep -q "pc-version-final/"; then
+                platforms+=("macos" "windows")
+              fi
+              
+              if echo "$changed_files" | grep -q "android/"; then
+                platforms+=("android")
+              fi
             fi
             
-            if [[ $changed_files =~ "android/" ]]; then
-              platforms+=("android")
-            fi
-            
+            # Default to all platforms if no specific changes detected or if detection failed
             if [ ${#platforms[@]} -eq 0 ]; then
-              platforms=("macos" "windows" "android") # Default to all if unclear
+              echo "No platform-specific changes detected, building all platforms"
+              platforms=("macos" "windows" "android")
             fi
             
             # Convert to JSON format
@@ -53,16 +82,23 @@ jobs:
             done
             matrix_json="$matrix_json]}"
             
+            echo "Final build matrix: $matrix_json"
             echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
           fi
 
   build:
     needs: build-matrix
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     uses: ./.github/workflows/build-platform.yml
     with:
       platform: ${{ matrix.platform }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
   release:
     needs: build
@@ -82,10 +118,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ vars.CURRENT_VERSION || '1.1.2' }}
-          name: Release v${{ vars.CURRENT_VERSION || '1.1.2' }}
+          tag_name: v${{ vars.CURRENT_VERSION || '1.1.3' }}
+          name: Release v${{ vars.CURRENT_VERSION || '1.1.3' }}
           body: |
-            Automatic release for ImageClassifier v${{ vars.CURRENT_VERSION || '1.1.2' }}
+            Automatic release for ImageClassifier v${{ vars.CURRENT_VERSION || '1.1.3' }}
             
             ## Changes
             - Automated build from commit ${{ github.sha }}
@@ -97,6 +133,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ./artifacts/macos-build/*.*
-            ./artifacts/windows-build/*.*
-            ./artifacts/android-apk/*.*
+            ./artifacts/XinTuAlbum-mac-*/*
+            ./artifacts/XinTuAlbum-win-*/*
+            ./artifacts/XinTuAlbum-android-*/*
