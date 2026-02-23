@@ -1,32 +1,40 @@
 name: macOS Build
 
+# macOS 构建现在使用原始文件名作为制品名称
+# 制品名称格式: XinTuAlbum-${version} 或 XinTuAlbum-${version}-${arch}
 on:
   workflow_call:
     inputs:
       release_tag:
         required: true
         type: string
-    outputs:
-      macos_artifact_paths:
-        description: "Paths to the macOS build artifacts"
-        value: ${{ jobs.build-macos.outputs.artifact_paths }}
 
 jobs:
   build-macos:
     name: Build macOS Application
     runs-on: macos-latest
+    timeout-minutes: 60
     outputs:
-      artifact_paths: ${{ steps.build.outputs.artifact_paths }}
+      # 不再使用 artifact_paths，而是使用 artifact_name 和 artifact_path
+      artifact_name: ${{ steps.build.outputs.artifact_name }}
+      artifact_path: ${{ steps.build.outputs.artifact_path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
+
+      - name: Verify Node version (required >=20 for simple-xml-to-json)
+        run: |
+          node -v
+          NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+          if [ "$NODE_MAJOR" -lt 20 ]; then
+            echo "::error::Node 20+ required, got $(node -v)"
+            exit 1
+          fi
 
       - name: Install system dependencies
         run: |
@@ -38,81 +46,100 @@ jobs:
           path: |
             node_modules
             pc-version-final/node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          key: ${{ runner.os }}-node20-node-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-modules-
+            ${{ runner.os }}-node20-node-modules-
 
-      - name: Prepare build environment
-        run: |
-          cd pc-version-final
-          npm ci --no-optional --legacy-peer-deps
-          npm install canvas@^2.11.2
-
-      - name: Build application
-        run: |
-          cd pc-version-final
-          npm run build
-
-      - name: Replace public symlink with real copy
-        run: |
-          cd pc-version-final
-          if [ -L "public" ]; then
-            REAL_PUBLIC=$(readlink public)
-            rm public
-            cp -R "$REAL_PUBLIC" public
-          fi
-
-      - name: Install sharp (for create-mac-icon.js)
+      # scripts/create-mac-icon.js 需要 sharp，从 repo 根目录 resolve
+      - name: Install sharp (for create-mac-icon.js at repo root)
         run: npm install sharp
 
-      - name: Generate macOS icon
-        run: |
-          cd pc-version-final
-          if [ -f "public/icon.png" ]; then
-            if [ -f "../scripts/create-mac-icon.js" ]; then
-              node ../scripts/create-mac-icon.js .
-            fi
-          fi
-
-      - name: Build macOS application
-        run: |
-          cd pc-version-final
-          npm run electron:build-mac-zip
+      - name: Build macOS application (reuse local build-macos.sh, DMG only)
+        run: CI=1 ./build-macos.sh
         env:
           GH_TOKEN: ${{ secrets.PAT }}
+
+      - name: Rename macOS artifacts to unified format
+        id: rename
+        run: |
+          # 从 package.json 读取版本号
+          VERSION=$(node -p "require('./pc-version-final/package.json').version")
+          echo "macOS version: $VERSION"
+          
+          # 检查 dist 是否存在（build-macos.sh 失败时可能未生成）
+          if [ ! -d "pc-version-final/dist" ]; then
+            echo "::error::pc-version-final/dist 不存在，构建可能失败。请检查上方 build-macos.sh 的日志。"
+            exit 1
+          fi
+          
+          # 查找所有 DMG 文件并重命名
+          DMG_FILES=$(find pc-version-final/dist -name "*.dmg" -type f)
+          if [ -z "$DMG_FILES" ]; then
+            echo "No DMG found in pc-version-final/dist/"
+            exit 1
+          fi
+          
+          # 使用数组存储重命名后的文件路径（避免子 shell 问题）
+          RENAMED_FILES=()
+          
+          for DMG_FILE in $DMG_FILES; do
+            BASENAME=$(basename "$DMG_FILE" .dmg)
+            DIRNAME=$(dirname "$DMG_FILE")
+            
+            # 检测架构：x64 -> intel, arm64 -> arm
+            if echo "$BASENAME" | grep -q "x64"; then
+              ARCH="intel"
+            elif echo "$BASENAME" | grep -q "arm64"; then
+              ARCH="arm"
+            else
+              # 默认尝试从文件名推断，或使用通用名称
+              ARCH="intel"
+            fi
+            
+            NEW_NAME="XinTuAlbum-mac-$ARCH-$VERSION.dmg"
+            NEW_PATH="$DIRNAME/$NEW_NAME"
+            
+            if [ "$(basename "$DMG_FILE")" != "$NEW_NAME" ]; then
+              echo "Renaming: $(basename "$DMG_FILE") -> $NEW_NAME"
+              mv "$DMG_FILE" "$NEW_PATH"
+            else
+              NEW_PATH="$DMG_FILE"
+            fi
+            
+            RENAMED_FILES+=("$NEW_PATH")
+            echo "Renamed DMG: $NEW_PATH (arch: $ARCH)"
+          done
+          
+          # 输出第一个文件作为主要制品（如果有多个，Find 步骤会处理）
+          if [ ${#RENAMED_FILES[@]} -gt 0 ]; then
+            echo "artifact_path=${RENAMED_FILES[0]}" >> $GITHUB_OUTPUT
+            BASENAME=$(basename "${RENAMED_FILES[0]}" .dmg)
+            echo "artifact_name=$BASENAME" >> $GITHUB_OUTPUT
+          fi
 
       - name: Find macOS artifacts
         id: build
         run: |
-          # Look for macOS build artifacts
-          DMG_FILE=$(find pc-version-final/dist -name "*.dmg" -type f | head -n 1)
-          ZIP_FILE=$(find pc-version-final/dist -name "*.zip" -type f | head -n 1)
-          
-          ARTIFACT_FILES=()
-          if [ -n "$DMG_FILE" ]; then
-            ARTIFACT_FILES+=("$DMG_FILE")
-            echo "Found DMG: $DMG_FILE"
-          fi
-          
-          if [ -n "$ZIP_FILE" ]; then
-            ARTIFACT_FILES+=("$ZIP_FILE")
-            echo "Found ZIP: $ZIP_FILE"
-          fi
-          
-          if [ ${#ARTIFACT_FILES[@]} -eq 0 ]; then
-            echo "No macOS build artifacts found in pc-version-final/dist/"
+          # macOS 只构建 DMG（已重命名为统一格式: XinTuAlbum-mac-{arch}-{version}.dmg）
+          DMG_FILE=$(find pc-version-final/dist -name "XinTuAlbum-mac-*.dmg" -type f | head -n 1)
+          if [ -z "$DMG_FILE" ]; then
+            echo "No DMG found in pc-version-final/dist/"
+            echo "Looking for: XinTuAlbum-mac-*.dmg"
+            find pc-version-final/dist -name "*.dmg" -type f || echo "No DMG files found"
             exit 1
           fi
           
-          # Output newline-separated paths for upload-artifact
-          {
-            echo "artifact_paths<<EOF"
-            printf '%s\n' "${ARTIFACT_FILES[@]}"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          # 提取文件名（不含路径和扩展名）作为制品名称
+          DMG_BASENAME=$(basename "$DMG_FILE" .dmg)
+          echo "Found DMG: $DMG_FILE"
+          echo "Artifact name: $DMG_BASENAME"
+          
+          # 输出文件路径和制品名称
+          echo "artifact_path=$DMG_FILE" >> $GITHUB_OUTPUT
+          echo "artifact_name=$DMG_BASENAME" >> $GITHUB_OUTPUT
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-build
-          path: ${{ steps.build.outputs.artifact_paths }}
+          name: ${{ steps.build.outputs.artifact_name }}
+          path: ${{ steps.build.outputs.artifact_path }}
