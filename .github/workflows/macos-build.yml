@@ -62,6 +62,9 @@ jobs:
             cp -R "$REAL_PUBLIC" public
           fi
 
+      - name: Install sharp (for create-mac-icon.js)
+        run: npm install sharp
+
       - name: Generate macOS icon
         run: |
           cd pc-version-final
