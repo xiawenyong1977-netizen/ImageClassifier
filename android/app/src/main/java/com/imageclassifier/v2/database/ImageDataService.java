@@ -1196,51 +1196,50 @@ public class ImageDataService {
         return 0.0;
     }
     
-    // ==================== 拍摄参数分类计算 ====================
+    // ==================== 拍摄参数档位化分类（折中方案：标准档位，非高中低） ====================
     
-    /**
-     * ISO分类：low(<400), medium(400-1600), high(>1600)
-     */
+    private static final double[] ISO_BUCKETS = {50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600};
+    private static final double[] APERTURE_BUCKETS = {1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22};
+    private static final double[] SHUTTER_BUCKETS_SEC = {1.0/8000, 1.0/4000, 1.0/2000, 1.0/1000, 1.0/500, 1.0/250, 1.0/125, 1.0/60, 1.0/30, 1.0/15, 1.0/8, 1.0/4, 1.0/2, 1, 2, 4, 8};
+    private static final double[] FOCAL_BUCKETS = {14, 24, 35, 50, 85, 135, 200, 300, 400};
+    
+    private double bucketToNearest(double value, double[] buckets) {
+        if (value <= buckets[0]) return buckets[0];
+        for (int i = 0; i < buckets.length - 1; i++) {
+            double mid = (buckets[i] + buckets[i + 1]) / 2;
+            if (value <= mid) return buckets[i];
+        }
+        return buckets[buckets.length - 1];
+    }
+    
+    /** ISO档位：50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600 */
     private String categorizeISO(Integer iso) {
         if (iso == null || iso <= 0) return null;
-        if (iso < 400) return "low";
-        if (iso <= 1600) return "medium";
-        return "high";
+        double bucketed = bucketToNearest(iso.doubleValue(), ISO_BUCKETS);
+        return String.valueOf((int) bucketed);
     }
     
-    /**
-     * 光圈分类：wide(<f/2.8), medium(f/2.8-f/5.6), narrow(>f/5.6)
-     */
+    /** 光圈档位：1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22 */
     private String categorizeAperture(Double fNumber) {
         if (fNumber == null || fNumber <= 0) return null;
-        if (fNumber < 2.8) return "wide";
-        if (fNumber <= 5.6) return "medium";
-        return "narrow";
+        double bucketed = bucketToNearest(fNumber, APERTURE_BUCKETS);
+        return (bucketed == Math.floor(bucketed)) ? String.valueOf((int) bucketed) : String.valueOf(bucketed);
     }
     
-    /**
-     * 快门分类：fast(>1/250s), medium(1/30-1/250s), slow(<1/30s)
-     */
+    /** 快门档位：1/8000, 1/4000, ..., 1/8, 1/4, 1/2, 1", 2", 4", 8" */
     private String categorizeShutterSpeed(Double exposureTime) {
         if (exposureTime == null || exposureTime <= 0) return null;
-        if (exposureTime > 1.0/250.0) return "fast";
-        if (exposureTime >= 1.0/30.0) return "medium";
-        return "slow";
+        double bucketed = bucketToNearest(exposureTime, SHUTTER_BUCKETS_SEC);
+        if (bucketed >= 1) return (int) bucketed + "\"";
+        int denom = (int) Math.round(1.0 / bucketed);
+        return "1/" + denom;
     }
     
-    /**
-     * 焦距分类：
-     * - ultrawide(<3mm): 超广角/微距（手机贴得比较近的时候）
-     * - wide(3-35mm): 广角（正常拍摄）
-     * - standard(35-85mm): 标准
-     * - telephoto(>85mm): 长焦
-     */
+    /** 焦距档位：14, 24, 35, 50, 85, 135, 200, 300, 400 mm */
     private String categorizeFocalLength(Double focalLength) {
         if (focalLength == null || focalLength <= 0) return null;
-        if (focalLength < 3) return "ultrawide";  // 手机微距/超广角模式
-        if (focalLength < 35) return "wide";       // 正常广角
-        if (focalLength <= 85) return "standard";  // 标准
-        return "telephoto";                        // 长焦
+        double bucketed = bucketToNearest(focalLength, FOCAL_BUCKETS);
+        return String.valueOf((int) bucketed);
     }
     
     /**

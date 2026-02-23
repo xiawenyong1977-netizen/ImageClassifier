@@ -1204,17 +1204,13 @@ const ImagePreviewScreen = ({ route, navigation }) => {
                   <Text style={styles.infoValue}>
                     {(() => {
                       const parts = [];
-                      // 城市名称
-                      if (locationDetail.name) {
-                        parts.push(locationDetail.name);
+                      const admin2 = locationDetail.admin2_zh || locationDetail.admin2_en;
+                      const admin1 = locationDetail.admin1_zh || locationDetail.admin1_en;
+                      if (admin2 && admin2.trim() !== '') {
+                        parts.push(admin2);
                       }
-                      // 区/县
-                      if (locationDetail.district && locationDetail.district.trim() !== '') {
-                        parts.push(locationDetail.district);
-                      }
-                      // 省份
-                      if (locationDetail.province && locationDetail.province.trim() !== '' && locationDetail.province !== 'unknown') {
-                        parts.push(locationDetail.province);
+                      if (admin1 && admin1.trim() !== '' && admin1 !== 'unknown' && admin1 !== admin2) {
+                        parts.push(admin1);
                       }
                       // 国家名称（根据语言设置）
                       if (locationDetail.country_code && locationDetail.country_code.trim() !== '') {
