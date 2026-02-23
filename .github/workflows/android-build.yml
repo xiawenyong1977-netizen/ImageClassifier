@@ -17,8 +17,6 @@ jobs:
     runs-on: ubuntu-latest  # Using Ubuntu as it has better Android SDK support
     outputs:
       artifact_path: ${{ steps.build.outputs.apk_path }}
-    env:
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,7 +32,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '17'  # sdkmanager 需要 JDK 17+
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
