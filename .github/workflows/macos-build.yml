@@ -66,6 +66,12 @@ jobs:
           VERSION=$(node -p "require('./pc-version-final/package.json').version")
           echo "macOS version: $VERSION"
           
+          # 检查 dist 是否存在（build-macos.sh 失败时可能未生成）
+          if [ ! -d "pc-version-final/dist" ]; then
+            echo "::error::pc-version-final/dist 不存在，构建可能失败。请检查上方 build-macos.sh 的日志。"
+            exit 1
+          fi
+          
           # 查找所有 DMG 文件并重命名
           DMG_FILES=$(find pc-version-final/dist -name "*.dmg" -type f)
           if [ -z "$DMG_FILES" ]; then

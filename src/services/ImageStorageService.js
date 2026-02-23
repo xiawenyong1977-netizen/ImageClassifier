@@ -4351,7 +4351,7 @@ class ImageStorageService {
         images,
         stats,
         exportDate: new Date().toISOString(),
-        version: '1.1.2',
+        version: '1.1.3',
       };
       
       logger.debug(`Exported ${images.length} images and statistics`);

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e  # 任一命令失败时立即退出，避免 dist 未生成时后续步骤误报
 
 # macOS Build Script for ImageClassifier
 
@@ -49,6 +50,12 @@ if [ -n "$BUILD_ZIP" ]; then
   npm run electron:build-mac-zip
 else
   npm run electron:build-mac
+fi
+
+# 验证 dist 已生成
+if [ ! -d "dist" ] || [ -z "$(find dist -name '*.dmg' -type f 2>/dev/null)" ]; then
+  echo "::error::构建完成但未找到 dist/*.dmg，electron-builder 可能失败"
+  exit 1
 fi
 
 echo "✅ macOS build completed!"
