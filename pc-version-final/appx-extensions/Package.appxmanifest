@@ -4,7 +4,7 @@
          xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
          IgnorableNamespaces="uap uap3">
   <Identity Name="E8546D00.75903E98454E"
-            Version="1.1.2.0"
+            Version="1.1.3.0"
             Publisher="CN=03F46D22-3B0F-4788-A8BF-351A4DF78D3D"/>
   <Properties>
     <DisplayName>芯图相册</DisplayName>

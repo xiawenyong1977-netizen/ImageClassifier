@@ -306,11 +306,16 @@ class CityLocationService {
       for (const result of data.results) {
         if (result.success && result.city) {
           try {
-            // 验证必填字段
-            if (!result.city.name_en) {
-              throw new Error(`API返回的城市数据缺少name_en字段：${JSON.stringify(result.city)}`);
+            // 验证必填字段：需有二级行政区信息（admin2_en）
+            const c = result.city;
+            const hasAdmin2 = c.admin2_en && typeof c.admin2_en === 'string' && c.admin2_en.trim() !== '';
+            if (!hasAdmin2) {
+              throw new Error(`API返回的城市数据缺少二级行政区信息：${JSON.stringify(result.city)}`);
             }
-            
+            if (!c.country_code || !c.country_code.trim()) {
+              throw new Error(`API返回的城市数据缺少country_code：${JSON.stringify(result.city)}`);
+            }
+
             const index = locationsToSave.length;
             locationsToSave.push(result.city);
             
@@ -491,15 +496,11 @@ class CityLocationService {
         };
       }
 
-      // 根据语言选择城市名称
-      const cityName = language === 'en' && location.name_en 
-        ? location.name_en 
-        : (location.name_zh || location.name_en);
-
-      // 标准化城市名称（仅中文）
-      const normalizedCityName = language === 'zh' 
-        ? this.normalizeCityName(cityName)
-        : cityName;
+      // 根据语言选择显示名称（二级行政区 admin2 最具体）
+      const displayName = language === 'en'
+        ? (location.admin2_en || location.admin1_en || '')
+        : (location.admin2_zh || location.admin1_zh || location.admin2_en || location.admin1_en || '');
+      const normalizedCityName = language === 'zh' ? this.normalizeCityName(displayName) : displayName;
 
       // 计算距离（如果查询坐标与城市坐标不同）
       const distance = this.calculateDistance(
@@ -514,21 +515,21 @@ class CityLocationService {
         latitude: coord.latitude,
         longitude: coord.longitude,
         success: true,
-        location_id: location.location_id, // 添加 location_id 到返回结果
+        location_id: location.location_id,
         city: {
           name: normalizedCityName,
-          name_zh: location.name_zh,
-          name_en: location.name_en,
-          province: location.province,
-          city: location.city,
-          district: location.district,
+          admin1_zh: location.admin1_zh,
+          admin1_en: location.admin1_en,
+          admin2_zh: location.admin2_zh,
+          admin2_en: location.admin2_en,
           lat: location.latitude,
           lng: location.longitude,
           country_code: location.country_code,
+          country: getCountryName(location.country_code, language),
           data_source: location.data_source,
           distance: Math.round(distance * 100) / 100,
           source: 'local',
-          location_id: location.location_id // 也添加到 city 对象中以便兼容
+          location_id: location.location_id
         },
         fromCache: true
       };
@@ -567,12 +568,11 @@ class CityLocationService {
         return null;
       }
 
-      // 根据语言设置返回对应的名称
-      if (language === 'en') {
-        return locationDetail.name_en || locationDetail.name_zh || null;
-      } else {
-        return locationDetail.name_zh || locationDetail.name_en || null;
-      }
+      // 根据语言返回二级行政区名称（admin2 最具体），展示时去除省/市/区等后缀
+      const nameEn = locationDetail.admin2_en || locationDetail.admin1_en;
+      const nameZh = locationDetail.admin2_zh || locationDetail.admin1_zh;
+      const raw = language === 'en' ? (nameEn || nameZh) : (nameZh || nameEn);
+      return raw ? this.normalizeCityName(raw) : null;
     } catch (error) {
       logger.error('getLocationName: 获取位置名称失败', { locationId, language, error });
       return null;
@@ -587,25 +587,12 @@ class CityLocationService {
    * 
    * 返回对象包含以下字段：
    * - location_id: 位置ID
-   * - name: 根据语言设置返回的名称（name_zh 或 name_en）
-   * - name_zh: 中文名称
-   * - name_en: 英文名称
-   * - country_code: 国家代码（如 'CN', 'US'）
-   * - province: 省份/州
-   * - city: 城市
-   * - district: 区/县
-   * - latitude: 纬度
-   * - longitude: 经度
-   * - admin1_code: 一级行政区划代码
-   * - admin2_code: 二级行政区划代码
-   * - geoname_id: GeoNames ID
-   * - population: 人口数量
-   * - data_source: 数据来源（如 'gaode', 'nominatim'）
-   * - api_city_id: API城市ID
-   * - api_adcode: API行政区划代码
-   * - api_id: API ID
-   * - created_at: 创建时间
-   * - updated_at: 更新时间
+   * - name: 根据语言设置返回的显示名称（admin2 或 admin1）
+   * - admin1_zh/en: 一级行政区中英文
+   * - admin2_zh/en: 二级行政区中英文
+   * - country_code: 国家代码
+   * - latitude, longitude: 坐标
+   * - data_source: 数据来源
    */
   async getLocationDetail(locationId, language = 'zh') {
     if (!locationId || typeof locationId !== 'string') {
@@ -633,31 +620,21 @@ class CityLocationService {
         return null;
       }
 
-      // 根据语言设置选择主要显示名称
-      const displayName = language === 'en' 
-        ? (locationDetail.name_en || locationDetail.name_zh || '')
-        : (locationDetail.name_zh || locationDetail.name_en || '');
+      const nameZh = locationDetail.admin2_zh || locationDetail.admin1_zh;
+      const nameEn = locationDetail.admin2_en || locationDetail.admin1_en;
+      const displayName = language === 'en' ? (nameEn || nameZh || '') : (nameZh || nameEn || '');
 
-      // 返回格式化的位置详情对象
       return {
         location_id: locationDetail.location_id,
         name: displayName,
-        name_zh: locationDetail.name_zh || null,
-        name_en: locationDetail.name_en || null,
+        admin1_zh: locationDetail.admin1_zh || null,
+        admin1_en: locationDetail.admin1_en || null,
+        admin2_zh: locationDetail.admin2_zh || null,
+        admin2_en: locationDetail.admin2_en || null,
         country_code: locationDetail.country_code || null,
-        province: locationDetail.province || null,
-        city: locationDetail.city || null,
-        district: locationDetail.district || null,
         latitude: locationDetail.latitude || null,
         longitude: locationDetail.longitude || null,
-        admin1_code: locationDetail.admin1_code || null,
-        admin2_code: locationDetail.admin2_code || null,
-        geoname_id: locationDetail.geoname_id || null,
-        population: locationDetail.population || null,
         data_source: locationDetail.data_source || null,
-        api_city_id: locationDetail.api_city_id || null,
-        api_adcode: locationDetail.api_adcode || null,
-        api_id: locationDetail.api_id || null,
         created_at: locationDetail.created_at || null,
         updated_at: locationDetail.updated_at || null
       };
@@ -694,22 +671,16 @@ class CityLocationService {
     }
 
     const parts = [];
-    
-    // 城市名称
-    if (detail.name) {
-      parts.push(detail.name);
+    const admin2 = detail.admin2_zh || detail.admin2_en;
+    const admin1 = detail.admin1_zh || detail.admin1_en;
+
+    if (admin2 && admin2.trim() !== '') {
+      parts.push(admin2);
     }
-    
-    // 区/县
-    if (detail.district && detail.district.trim() !== '') {
-      parts.push(detail.district);
+    if (admin1 && admin1.trim() !== '' && admin1 !== 'unknown' && admin1 !== admin2) {
+      parts.push(admin1);
     }
-    
-    // 省份
-    if (detail.province && detail.province.trim() !== '' && detail.province !== 'unknown') {
-      parts.push(detail.province);
-    }
-    
+
     // 国家名称（翻译后的）
     if (detail.country_code && detail.country_code.trim() !== '') {
       const countryName = getCountryName(detail.country_code, language);
@@ -742,19 +713,34 @@ class CityLocationService {
   }
 
   /**
-   * 标准化城市名称
+   * 标准化城市名称（去除行政区划后缀，用于展示）
+   * 与后端 _normalize_place_name 一致
    * @param {string} cityName - 原始城市名称
    * @returns {string} 标准化后的城市名称
    */
   normalizeCityName(cityName) {
-    if (!cityName) return cityName;
-    
-    let normalized = cityName.trim();
-    if (normalized.endsWith('市')) {
-      normalized = normalized.slice(0, -1);
+    if (!cityName || typeof cityName !== 'string') return cityName;
+    let s = cityName.trim();
+    if (!s) return cityName;
+    // 中文 ≤2 字不处理（如 北区、东区）
+    const hasChinese = /[\u4e00-\u9fff]/.test(s);
+    if (hasChinese && s.length <= 2) return s;
+    const suffixesZh = ['特别行政区', '自治区', '直辖市', '地区', '市', '省', '县', '区', '州', '盟'];
+    const suffixesEn = [' Special Administrative Region', ' Autonomous Region', ' Province', ' City', ' District', ' County', ' Prefecture', ' Region'];
+    if (hasChinese) {
+      for (const suffix of suffixesZh) {
+        if (s.endsWith(suffix) && s.length > suffix.length) {
+          return s.slice(0, -suffix.length).trim();
+        }
+      }
+    } else {
+      for (const suffix of suffixesEn) {
+        if (s.length > suffix.length && s.toLowerCase().endsWith(suffix.toLowerCase())) {
+          return s.slice(0, -suffix.length).trim();
+        }
+      }
     }
-    
-    return normalized;
+    return s;
   }
 
   /**

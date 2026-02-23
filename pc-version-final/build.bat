@@ -3,7 +3,12 @@ echo 开始构建芯图相册PC版本...
 
 echo.
 echo 步骤1: 安装依赖
+if defined CI goto skip_install
 call npm install
+goto after_install
+:skip_install
+echo (CI 模式，跳过 npm install，使用 workflow 已安装依赖)
+:after_install
 
 echo.
 echo 步骤2: 构建React应用
@@ -34,4 +39,6 @@ echo 构建完成！输出文件位于 dist 目录中
 echo   - EXE版本: XinTuAlbum 1.0.0.exe, XinTuAlbum-Setup-1.0.0.exe
 echo   - APPX无签名版本（已修复图标，用于提交微软）: XinTuAlbum-1.0.0.appx
 echo   - APPX测试签名版本: XinTuAlbum-1.0.0-signed.appx
+if defined CI goto no_pause
 pause
+:no_pause

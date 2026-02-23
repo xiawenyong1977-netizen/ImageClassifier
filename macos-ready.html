@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ImageClassifier - macOS Support Verification</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 600px;
+            margin: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            background: #f0f8ff;
+            border-left: 4px solid #007AFF;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .features {
+            text-align: left;
+            margin: 20px 0;
+        }
+        .feature {
+            margin: 10px 0;
+            padding-left: 20px;
+            border-left: 2px solid #4CAF50;
+        }
+        .btn {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 ImageClassifier macOS Support</h1>
+        
+        <div class="status">
+            <strong>✅ 准备就绪</strong><br>
+            macOS 支持已成功实施并准备运行
+        </div>
+        
+        <div class="features">
+            <h3>核心功能:</h3>
+            <div class="feature">✅ Electron 应用架构 (macOS 兼容)</div>
+            <div class="feature">✅ 跨平台文件操作</div>
+            <div class="feature">✅ macOS 图标支持 (.icns)</div>
+            <div class="feature">✅ 标准 macOS 菜单系统</div>
+            <div class="feature">✅ 路径规范化 (POSIX 兼容)</div>
+            <div class="feature">✅ IPC 通信修复</div>
+            <div class="feature">✅ 剪贴板功能 (AppleScript 支持)</div>
+        </div>
+        
+        <p>此应用程序现已准备好在您的 Mac 上运行!</p>
+        
+        <button class="btn" onclick="startApp()">启动应用程序</button>
+        <button class="btn" onclick="showInstructions()">查看运行说明</button>
+        
+        <div style="margin-top: 30px; font-size: 14px; color: #666;">
+            <p>ImageClassifier (芯图相册)<br>
+            智能照片分类管理工具 - macOS 版</p>
+        </div>
+    </div>
+
+    <script>
+        function startApp() {
+            alert('要启动应用程序，请在终端中运行以下命令:\n\n' +
+                  'cd /Users/xwyftjk/.openclaw/workspace/ImageClassifier/pc-version-final\n' +
+                  'npm start  # 终端1: 启动React应用\n\n' +
+                  '然后在另一个终端运行:\n' +
+                  'npx electron .  # 终端2: 启动Electron应用');
+        }
+        
+        function showInstructions() {
+            window.open('RUN_INSTRUCTIONS.md', '_blank');
+        }
+    </script>
+</body>
+</html>

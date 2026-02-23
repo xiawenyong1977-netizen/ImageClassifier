@@ -1,0 +1,7238 @@
+{
+  "version": "1.1.3",
+  "description": "ImageClassifierApp 初始配置文件",
+  "lastUpdated": "2025-01-20T00:00:00.000Z",
+  "models": {
+    "mobilenetv3": {
+      "name": "MobileNetV3图像分类模型",
+      "path": "./models/mobilenetv3_rw_Opset17.onnx",
+      "confidenceThreshold": 0.3
+    }
+  },
+  "categoryNameMap": {
+    "social_activities": {
+      "chinese": "社交活动",
+      "english": "Social Activities"
+    },
+    "pets": {
+      "chinese": "宠物萌照",
+      "english": "Pet Photos"
+    },
+    "single_person": {
+      "chinese": "单人照片",
+      "english": "Single Person"
+    },
+    "foods": {
+      "chinese": "美食记录",
+      "english": "Food Records"
+    },
+   
+    "travel_scenery": {
+      "chinese": "旅行风景",
+      "english": "Travel Scenery"
+    },
+   
+    "screenshot": {
+      "chinese": "手机截图",
+      "english": "Mobile Screenshots"
+    },
+   
+    "other": {
+      "chinese": "其它",
+      "english": "Other Images"
+    },
+    "idcard": {
+      "chinese": "证件照",
+      "english": "ID Card"
+    },
+    "NA": {
+      "chinese": "待分类",
+      "english": "to be classified"
+    },
+    "qrcode": {
+      "chinese": "二维码",
+      "english": "QR Code"
+    }
+   
+  },
+  "categoryDisplayOrder": [
+    "single_person",
+    "social_activities",
+    "travel_scenery",
+    "pets",
+    "foods",
+    "idcard",
+    "screenshot",
+    "qrcode",
+    "other",
+    "NA"
+  ],
+  "objectMappings": {
+    "animals": "pets", 
+    "food": "foods",
+    "transportation": "travel_scenery",
+    "infrastructure": "travel_scenery",
+    "nature": "travel_scenery",
+    "daily_items": "other"
+  },
+  "objectCategories": {
+    "person": {
+      "name": "人物",
+      "subcategories": [
+        "person"
+      ]
+    },
+    "animals": {
+      "name": "动物",
+      "subcategories": [
+        "all_animals"
+      ]
+    },
+    "transportation": {
+      "name": "交通工具",
+      "subcategories": [
+        "land_vehicles",
+        "aircraft",
+        "watercraft"
+      ]
+    },
+    "sports": {
+      "name": "运动器材",
+      "subcategories": [
+        "ball_sports",
+        "winter_sports",
+        "water_sports",
+        "outdoor_activities"
+      ]
+    },
+    "foods": {
+      "name": "食物",
+      "subcategories": [
+        "fruits",
+        "vegetables",
+        "meat",
+        "beverages",
+        "desserts"
+      ]
+    },
+    "daily_items": {
+      "name": "生活用品",
+      "subcategories": [
+        "furniture",
+        "electronics",
+        "clothing",
+        "bags",
+        "tools"
+      ]
+    },
+    "infrastructure": {
+      "name": "基础设施",
+      "subcategories": [
+        "traffic_signs",
+        "street_furniture",
+        "buildings"
+      ]
+    },
+    "nature": {
+      "name": "自然景观",
+      "subcategories": [
+        "plants",
+        "landscapes",
+        "weather"
+      ]
+    }
+  },
+  "yoloObjectNameMap": {
+    "person": {
+      "id": 0,
+      "chinese": "人",
+      "english": "Person",
+      "category": "person",
+      "subcategory": "person"
+    },
+    "bicycle": {
+      "id": 1,
+      "chinese": "自行车",
+      "english": "Bicycle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "car": {
+      "id": 2,
+      "chinese": "汽车",
+      "english": "Car",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "motorcycle": {
+      "id": 3,
+      "chinese": "摩托车",
+      "english": "Motorcycle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "airplane": {
+      "id": 4,
+      "chinese": "飞机",
+      "english": "Airplane",
+      "category": "transportation",
+      "subcategory": "aircraft"
+    },
+    "bus": {
+      "id": 5,
+      "chinese": "公交车",
+      "english": "Bus",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "train": {
+      "id": 6,
+      "chinese": "火车",
+      "english": "Train",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "truck": {
+      "id": 7,
+      "chinese": "卡车",
+      "english": "Truck",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "boat": {
+      "id": 8,
+      "chinese": "船",
+      "english": "Boat",
+      "category": "transportation",
+      "subcategory": "watercraft"
+    },
+    "traffic light": {
+      "id": 9,
+      "chinese": "交通灯",
+      "english": "Traffic Light",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "fire hydrant": {
+      "id": 10,
+      "chinese": "消防栓",
+      "english": "Fire Hydrant",
+      "category": "infrastructure",
+      "subcategory": "buildings"
+    },
+    "stop sign": {
+      "id": 11,
+      "chinese": "停车标志",
+      "english": "Stop Sign",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "parking meter": {
+      "id": 12,
+      "chinese": "停车收费表",
+      "english": "Parking Meter",
+      "category": "infrastructure",
+      "subcategory": "street_furniture"
+    },
+    "bench": {
+      "id": 13,
+      "chinese": "长椅",
+      "english": "Bench",
+      "category": "infrastructure",
+      "subcategory": "street_furniture"
+    },
+    "bird": {
+      "id": 14,
+      "chinese": "鸟",
+      "english": "Bird",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cat": {
+      "id": 15,
+      "chinese": "猫",
+      "english": "Cat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dog": {
+      "id": 16,
+      "chinese": "狗",
+      "english": "Dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "horse": {
+      "id": 17,
+      "chinese": "马",
+      "english": "Horse",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sheep": {
+      "id": 18,
+      "chinese": "羊",
+      "english": "Sheep",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cow": {
+      "id": 19,
+      "chinese": "牛",
+      "english": "Cow",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "elephant": {
+      "id": 20,
+      "chinese": "大象",
+      "english": "Elephant",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bear": {
+      "id": 21,
+      "chinese": "熊",
+      "english": "Bear",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "zebra": {
+      "id": 22,
+      "chinese": "斑马",
+      "english": "Zebra",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "giraffe": {
+      "id": 23,
+      "chinese": "长颈鹿",
+      "english": "Giraffe",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "backpack": {
+      "id": 24,
+      "chinese": "背包",
+      "english": "Backpack",
+      "category": "daily_items",
+      "subcategory": "bags"
+    },
+    "umbrella": {
+      "id": 25,
+      "chinese": "雨伞",
+      "english": "Umbrella",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "handbag": {
+      "id": 26,
+      "chinese": "手提包",
+      "english": "Handbag",
+      "category": "daily_items",
+      "subcategory": "bags"
+    },
+    "tie": {
+      "id": 27,
+      "chinese": "领带",
+      "english": "Tie",
+      "category": "daily_items",
+      "subcategory": "clothing"
+    },
+    "suitcase": {
+      "id": 28,
+      "chinese": "手提箱",
+      "english": "Suitcase",
+      "category": "daily_items",
+      "subcategory": "bags"
+    },
+    "frisbee": {
+      "id": 29,
+      "chinese": "飞盘",
+      "english": "Frisbee",
+      "category": "sports",
+      "subcategory": "outdoor_activities"
+    },
+    "skis": {
+      "id": 30,
+      "chinese": "滑雪板",
+      "english": "Skis",
+      "category": "sports",
+      "subcategory": "winter_sports"
+    },
+    "snowboard": {
+      "id": 31,
+      "chinese": "滑雪板",
+      "english": "Snowboard",
+      "category": "sports",
+      "subcategory": "winter_sports"
+    },
+    "sports ball": {
+      "id": 32,
+      "chinese": "运动球",
+      "english": "Sports Ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "kite": {
+      "id": 33,
+      "chinese": "风筝",
+      "english": "Kite",
+      "category": "sports",
+      "subcategory": "outdoor_activities"
+    },
+    "baseball bat": {
+      "id": 34,
+      "chinese": "棒球棒",
+      "english": "Baseball Bat",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "baseball glove": {
+      "id": 35,
+      "chinese": "棒球手套",
+      "english": "Baseball Glove",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "skateboard": {
+      "id": 36,
+      "chinese": "滑板",
+      "english": "Skateboard",
+      "category": "sports",
+      "subcategory": "outdoor_activities"
+    },
+    "surfboard": {
+      "id": 37,
+      "chinese": "冲浪板",
+      "english": "Surfboard",
+      "category": "sports",
+      "subcategory": "water_sports"
+    },
+    "tennis racket": {
+      "id": 38,
+      "chinese": "网球拍",
+      "english": "Tennis Racket",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "bottle": {
+      "id": 39,
+      "chinese": "瓶子",
+      "english": "Bottle",
+      "category": "food",
+      "subcategory": "beverages"
+    },
+    "wine glass": {
+      "id": 40,
+      "chinese": "酒杯",
+      "english": "Wine Glass",
+      "category": "food",
+      "subcategory": "beverages"
+    },
+    "cup": {
+      "id": 41,
+      "chinese": "杯子",
+      "english": "Cup",
+      "category": "food",
+      "subcategory": "beverages"
+    },
+    "fork": {
+      "id": 42,
+      "chinese": "叉子",
+      "english": "Fork",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "knife": {
+      "id": 43,
+      "chinese": "刀",
+      "english": "Knife",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "spoon": {
+      "id": 44,
+      "chinese": "勺子",
+      "english": "Spoon",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "bowl": {
+      "id": 45,
+      "chinese": "碗",
+      "english": "Bowl",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "banana": {
+      "id": 46,
+      "chinese": "香蕉",
+      "english": "Banana",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "apple": {
+      "id": 47,
+      "chinese": "苹果",
+      "english": "Apple",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "sandwich": {
+      "id": 48,
+      "chinese": "三明治",
+      "english": "Sandwich",
+      "category": "food",
+      "subcategory": "meat"
+    },
+    "orange": {
+      "id": 49,
+      "chinese": "橙子",
+      "english": "Orange",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "broccoli": {
+      "id": 50,
+      "chinese": "西兰花",
+      "english": "Broccoli",
+      "category": "food",
+      "subcategory": "vegetables"
+    },
+    "carrot": {
+      "id": 51,
+      "chinese": "胡萝卜",
+      "english": "Carrot",
+      "category": "food",
+      "subcategory": "vegetables"
+    },
+    "hot dog": {
+      "id": 52,
+      "chinese": "热狗",
+      "english": "Hot Dog",
+      "category": "food",
+      "subcategory": "meat"
+    },
+    "pizza": {
+      "id": 53,
+      "chinese": "披萨",
+      "english": "Pizza",
+      "category": "food",
+      "subcategory": "meat"
+    },
+    "donut": {
+      "id": 54,
+      "chinese": "甜甜圈",
+      "english": "Donut",
+      "category": "food",
+      "subcategory": "desserts"
+    },
+    "cake": {
+      "id": 55,
+      "chinese": "蛋糕",
+      "english": "Cake",
+      "category": "food",
+      "subcategory": "desserts"
+    },
+    "chair": {
+      "id": 56,
+      "chinese": "椅子",
+      "english": "Chair",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "couch": {
+      "id": 57,
+      "chinese": "沙发",
+      "english": "Couch",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "potted plant": {
+      "id": 58,
+      "chinese": "盆栽植物",
+      "english": "Potted Plant",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "bed": {
+      "id": 59,
+      "chinese": "床",
+      "english": "Bed",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "dining table": {
+      "id": 60,
+      "chinese": "餐桌",
+      "english": "Dining Table",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "toilet": {
+      "id": 61,
+      "chinese": "马桶",
+      "english": "Toilet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "tv": {
+      "id": 62,
+      "chinese": "电视",
+      "english": "TV",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "laptop": {
+      "id": 63,
+      "chinese": "笔记本电脑",
+      "english": "Laptop",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "mouse": {
+      "id": 64,
+      "chinese": "鼠标",
+      "english": "Mouse",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "remote": {
+      "id": 65,
+      "chinese": "遥控器",
+      "english": "Remote",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "keyboard": {
+      "id": 66,
+      "chinese": "键盘",
+      "english": "Keyboard",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "cell phone": {
+      "id": 67,
+      "chinese": "手机",
+      "english": "Cell Phone",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "microwave": {
+      "id": 68,
+      "chinese": "微波炉",
+      "english": "Microwave",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "oven": {
+      "id": 69,
+      "chinese": "烤箱",
+      "english": "Oven",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "toaster": {
+      "id": 70,
+      "chinese": "烤面包机",
+      "english": "Toaster",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "sink": {
+      "id": 71,
+      "chinese": "水槽",
+      "english": "Sink",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "refrigerator": {
+      "id": 72,
+      "chinese": "冰箱",
+      "english": "Refrigerator",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "book": {
+      "id": 73,
+      "chinese": "书",
+      "english": "Book",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "clock": {
+      "id": 74,
+      "chinese": "时钟",
+      "english": "Clock",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "vase": {
+      "id": 75,
+      "chinese": "花瓶",
+      "english": "Vase",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "scissors": {
+      "id": 76,
+      "chinese": "剪刀",
+      "english": "Scissors",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "teddy bear": {
+      "id": 77,
+      "chinese": "泰迪熊",
+      "english": "Teddy Bear",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "hair drier": {
+      "id": 78,
+      "chinese": "吹风机",
+      "english": "Hair Drier",
+      "category": "daily_items",
+      "subcategory": "electronics"
+    },
+    "toothbrush": {
+      "id": 79,
+      "chinese": "牙刷",
+      "english": "Toothbrush",
+      "category": "daily_items",
+      "subcategory": "tools"
+    }
+  },
+  "mobilenetv3Classes": {
+    "tench, Tinca tinca": {
+      "id": 0,
+      "chinese": "鱼",
+      "english": "tench, Tinca tinca",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "goldfish, Carassius auratus": {
+      "id": 1,
+      "chinese": "鱼",
+      "english": "goldfish, Carassius auratus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "great white shark, white shark, man-eater, man-eating shark, Carcharodon carcharias": {
+      "id": 2,
+      "chinese": "鱼",
+      "english": "great white shark, white shark, man-eater, man-eating shark, Carcharodon carcharias",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tiger shark, Galeocerdo cuvieri": {
+      "id": 3,
+      "chinese": "鱼",
+      "english": "tiger shark, Galeocerdo cuvieri",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hammerhead, hammerhead shark": {
+      "id": 4,
+      "chinese": "鱼",
+      "english": "hammerhead, hammerhead shark",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "electric ray, crampfish, numbfish, torpedo": {
+      "id": 5,
+      "chinese": "鱼",
+      "english": "electric ray, crampfish, numbfish, torpedo",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "stingray": {
+      "id": 6,
+      "chinese": "鱼",
+      "english": "stingray",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cock": {
+      "id": 7,
+      "chinese": "鸡",
+      "english": "cock",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hen": {
+      "id": 8,
+      "chinese": "鸡",
+      "english": "hen",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ostrich, Struthio camelus": {
+      "id": 9,
+      "chinese": "鸵鸟",
+      "english": "ostrich, Struthio camelus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "brambling, Fringilla montifringilla": {
+      "id": 10,
+      "chinese": "鸟",
+      "english": "brambling, Fringilla montifringilla",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "goldfinch, Carduelis carduelis": {
+      "id": 11,
+      "chinese": "鸟",
+      "english": "goldfinch, Carduelis carduelis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "house finch, linnet, Carpodacus mexicanus": {
+      "id": 12,
+      "chinese": "鸟",
+      "english": "house finch, linnet, Carpodacus mexicanus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "junco, snowbird": {
+      "id": 13,
+      "chinese": "鸟",
+      "english": "junco, snowbird",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "indigo bunting, indigo finch, indigo bird, Passerina cyanea": {
+      "id": 14,
+      "chinese": "鸟",
+      "english": "indigo bunting, indigo finch, indigo bird, Passerina cyanea",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "robin, American robin, Turdus migratorius": {
+      "id": 15,
+      "chinese": "鸟",
+      "english": "robin, American robin, Turdus migratorius",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bulbul": {
+      "id": 16,
+      "chinese": "鸟",
+      "english": "bulbul",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "jay": {
+      "id": 17,
+      "chinese": "鸟",
+      "english": "jay",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "magpie": {
+      "id": 18,
+      "chinese": "鸟",
+      "english": "magpie",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "chickadee": {
+      "id": 19,
+      "chinese": "鸟",
+      "english": "chickadee",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "water ouzel, dipper": {
+      "id": 20,
+      "chinese": "鸟",
+      "english": "water ouzel, dipper",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "kite": {
+      "id": 21,
+      "chinese": "鸟",
+      "english": "kite",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bald eagle, American eagle, Haliaeetus leucocephalus": {
+      "id": 22,
+      "chinese": "鹰",
+      "english": "bald eagle, American eagle, Haliaeetus leucocephalus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "vulture": {
+      "id": 23,
+      "chinese": "鹰",
+      "english": "vulture",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "great grey owl, great gray owl, Strix nebulosa": {
+      "id": 24,
+      "chinese": "猫头鹰",
+      "english": "great grey owl, great gray owl, Strix nebulosa",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "European fire salamander, Salamandra salamandra": {
+      "id": 25,
+      "chinese": "壁虎",
+      "english": "European fire salamander, Salamandra salamandra",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "common newt, Triturus vulgaris": {
+      "id": 26,
+      "chinese": "壁虎",
+      "english": "common newt, Triturus vulgaris",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "eft": {
+      "id": 27,
+      "chinese": "壁虎",
+      "english": "eft",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "spotted salamander, Ambystoma maculatum": {
+      "id": 28,
+      "chinese": "壁虎",
+      "english": "spotted salamander, Ambystoma maculatum",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "axolotl, mud puppy, Ambystoma mexicanum": {
+      "id": 29,
+      "chinese": "壁虎",
+      "english": "axolotl, mud puppy, Ambystoma mexicanum",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bullfrog, Rana catesbeiana": {
+      "id": 30,
+      "chinese": "蛤蟆",
+      "english": "bullfrog, Rana catesbeiana",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tree frog, tree-frog": {
+      "id": 31,
+      "chinese": "青蛙",
+      "english": "tree frog, tree-frog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tailed frog, bell toad, ribbed toad, tailed toad, Ascaphus trui": {
+      "id": 32,
+      "chinese": "青蛙",
+      "english": "tailed frog, bell toad, ribbed toad, tailed toad, Ascaphus trui",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "loggerhead, loggerhead turtle, Caretta caretta": {
+      "id": 33,
+      "chinese": "龟",
+      "english": "loggerhead, loggerhead turtle, Caretta caretta",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "leatherback turtle, leatherback, leathery turtle, Dermochelys coriacea": {
+      "id": 34,
+      "chinese": "龟",
+      "english": "leatherback turtle, leatherback, leathery turtle, Dermochelys coriacea",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "mud turtle": {
+      "id": 35,
+      "chinese": "龟",
+      "english": "mud turtle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "terrapin": {
+      "id": 36,
+      "chinese": "龟",
+      "english": "terrapin",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "box turtle, box tortoise": {
+      "id": 37,
+      "chinese": "龟",
+      "english": "box turtle, box tortoise",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "banded gecko": {
+      "id": 38,
+      "chinese": "蜥蜴",
+      "english": "banded gecko",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "common iguana, iguana, Iguana iguana": {
+      "id": 39,
+      "chinese": "蜥蜴",
+      "english": "common iguana, iguana, Iguana iguana",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American chameleon, anole, Anolis carolinensis": {
+      "id": 40,
+      "chinese": "蜥蜴",
+      "english": "American chameleon, anole, Anolis carolinensis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "whiptail, whiptail lizard": {
+      "id": 41,
+      "chinese": "蜥蜴",
+      "english": "whiptail, whiptail lizard",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "agama": {
+      "id": 42,
+      "chinese": "蜥蜴",
+      "english": "agama",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "frilled lizard, Chlamydosaurus kingi": {
+      "id": 43,
+      "chinese": "蜥蜴",
+      "english": "frilled lizard, Chlamydosaurus kingi",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "alligator lizard": {
+      "id": 44,
+      "chinese": "蜥蜴",
+      "english": "alligator lizard",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Gila monster, Heloderma suspectum": {
+      "id": 45,
+      "chinese": "蜥蜴",
+      "english": "Gila monster, Heloderma suspectum",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "green lizard, Lacerta viridis": {
+      "id": 46,
+      "chinese": "蜥蜴",
+      "english": "green lizard, Lacerta viridis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "African chameleon, Chamaeleo chamaeleon": {
+      "id": 47,
+      "chinese": "蜥蜴",
+      "english": "African chameleon, Chamaeleo chamaeleon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Komodo dragon, Komodo lizard, dragon lizard, giant lizard, Varanus komodoensis": {
+      "id": 48,
+      "chinese": "蜥蜴",
+      "english": "Komodo dragon, Komodo lizard, dragon lizard, giant lizard, Varanus komodoensis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "African crocodile, Nile crocodile, Crocodylus niloticus": {
+      "id": 49,
+      "chinese": "鳄鱼",
+      "english": "African crocodile, Nile crocodile, Crocodylus niloticus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American alligator, Alligator mississipiensis": {
+      "id": 50,
+      "chinese": "鳄鱼",
+      "english": "American alligator, Alligator mississipiensis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "triceratops": {
+      "id": 51,
+      "chinese": "恐龙",
+      "english": "triceratops",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "thunder snake, worm snake, Carphophis amoenus": {
+      "id": 52,
+      "chinese": "蛇",
+      "english": "thunder snake, worm snake, Carphophis amoenus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ringneck snake, ring-necked snake, ring snake": {
+      "id": 53,
+      "chinese": "蛇",
+      "english": "ringneck snake, ring-necked snake, ring snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hognose snake, puff adder, sand viper": {
+      "id": 54,
+      "chinese": "蛇",
+      "english": "hognose snake, puff adder, sand viper",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "green snake, grass snake": {
+      "id": 55,
+      "chinese": "蛇",
+      "english": "green snake, grass snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "king snake, kingsnake": {
+      "id": 56,
+      "chinese": "蛇",
+      "english": "king snake, kingsnake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "garter snake, grass snake": {
+      "id": 57,
+      "chinese": "蛇",
+      "english": "garter snake, grass snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "water snake": {
+      "id": 58,
+      "chinese": "蛇",
+      "english": "water snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "vine snake": {
+      "id": 59,
+      "chinese": "蛇",
+      "english": "vine snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "night snake, Hypsiglena torquata": {
+      "id": 60,
+      "chinese": "蛇",
+      "english": "night snake, Hypsiglena torquata",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "boa constrictor, Constrictor constrictor": {
+      "id": 61,
+      "chinese": "蛇",
+      "english": "boa constrictor, Constrictor constrictor",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "rock python, rock snake, Python sebae": {
+      "id": 62,
+      "chinese": "蛇",
+      "english": "rock python, rock snake, Python sebae",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Indian cobra, Naja naja": {
+      "id": 63,
+      "chinese": "蛇",
+      "english": "Indian cobra, Naja naja",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "green mamba": {
+      "id": 64,
+      "chinese": "蛇",
+      "english": "green mamba",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sea snake": {
+      "id": 65,
+      "chinese": "蛇",
+      "english": "sea snake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "horned viper, cerastes, sand viper, horned asp, Cerastes cornutus": {
+      "id": 66,
+      "chinese": "蛇",
+      "english": "horned viper, cerastes, sand viper, horned asp, Cerastes cornutus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "diamondback, diamondback rattlesnake, Crotalus adamanteus": {
+      "id": 67,
+      "chinese": "蛇",
+      "english": "diamondback, diamondback rattlesnake, Crotalus adamanteus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sidewinder, horned rattlesnake, Crotalus cerastes": {
+      "id": 68,
+      "chinese": "蛇",
+      "english": "sidewinder, horned rattlesnake, Crotalus cerastes",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "trilobite": {
+      "id": 69,
+      "chinese": "化石",
+      "english": "trilobite",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "harvestman, daddy longlegs, Phalangium opilio": {
+      "id": 70,
+      "chinese": "蜘蛛",
+      "english": "harvestman, daddy longlegs, Phalangium opilio",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "scorpion": {
+      "id": 71,
+      "chinese": "蝎子",
+      "english": "scorpion",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black and gold garden spider, Argiope aurantia": {
+      "id": 72,
+      "chinese": "蜘蛛",
+      "english": "black and gold garden spider, Argiope aurantia",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "barn spider, Araneus cavaticus": {
+      "id": 73,
+      "chinese": "蜘蛛",
+      "english": "barn spider, Araneus cavaticus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "garden spider, Aranea diademata": {
+      "id": 74,
+      "chinese": "蜘蛛",
+      "english": "garden spider, Aranea diademata",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black widow, Latrodectus mactans": {
+      "id": 75,
+      "chinese": "蜘蛛",
+      "english": "black widow, Latrodectus mactans",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tarantula": {
+      "id": 76,
+      "chinese": "蜘蛛",
+      "english": "tarantula",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "wolf spider, hunting spider": {
+      "id": 77,
+      "chinese": "蜘蛛",
+      "english": "wolf spider, hunting spider",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tick": {
+      "id": 78,
+      "chinese": "蜘蛛",
+      "english": "tick",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "centipede": {
+      "id": 79,
+      "chinese": "蜈蚣",
+      "english": "centipede",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black grouse": {
+      "id": 80,
+      "chinese": "鸟",
+      "english": "black grouse",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ptarmigan": {
+      "id": 81,
+      "chinese": "鸟",
+      "english": "ptarmigan",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ruffed grouse, partridge, Bonasa umbellus": {
+      "id": 82,
+      "chinese": "鸟",
+      "english": "ruffed grouse, partridge, Bonasa umbellus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "prairie chicken, prairie grouse, prairie fowl": {
+      "id": 83,
+      "chinese": "鸟",
+      "english": "prairie chicken, prairie grouse, prairie fowl",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "peacock": {
+      "id": 84,
+      "chinese": "孔雀",
+      "english": "peacock",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "quail": {
+      "id": 85,
+      "chinese": "鸟",
+      "english": "quail",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "partridge": {
+      "id": 86,
+      "chinese": "鸟",
+      "english": "partridge",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "African grey, African gray, Psittacus erithacus": {
+      "id": 87,
+      "chinese": "鸟",
+      "english": "African grey, African gray, Psittacus erithacus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "macaw": {
+      "id": 88,
+      "chinese": "鸟",
+      "english": "macaw",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sulphur-crested cockatoo, Kakatoe galerita, Cacatua galerita": {
+      "id": 89,
+      "chinese": "鸟",
+      "english": "sulphur-crested cockatoo, Kakatoe galerita, Cacatua galerita",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lorikeet": {
+      "id": 90,
+      "chinese": "鸟",
+      "english": "lorikeet",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "coucal": {
+      "id": 91,
+      "chinese": "鸟",
+      "english": "coucal",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bee eater": {
+      "id": 92,
+      "chinese": "鸟",
+      "english": "bee eater",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hornbill": {
+      "id": 93,
+      "chinese": "鸟",
+      "english": "hornbill",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hummingbird": {
+      "id": 94,
+      "chinese": "鸟",
+      "english": "hummingbird",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "jacamar": {
+      "id": 95,
+      "chinese": "鸟",
+      "english": "jacamar",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "toucan": {
+      "id": 96,
+      "chinese": "鸟",
+      "english": "toucan",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "drake": {
+      "id": 97,
+      "chinese": "鸭子",
+      "english": "drake",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "red-breasted merganser, Mergus serrator": {
+      "id": 98,
+      "chinese": "鹅",
+      "english": "red-breasted merganser, Mergus serrator",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "goose": {
+      "id": 99,
+      "chinese": "鹅",
+      "english": "goose",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black swan, Cygnus atratus": {
+      "id": 100,
+      "chinese": "鹅",
+      "english": "black swan, Cygnus atratus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tusker": {
+      "id": 101,
+      "chinese": "大象",
+      "english": "tusker",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "echidna, spiny anteater, anteater": {
+      "id": 102,
+      "chinese": "刺猬",
+      "english": "echidna, spiny anteater, anteater",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "platypus, duckbill, duckbilled platypus, duck-billed platypus, Ornithorhynchus anatinus": {
+      "id": 103,
+      "chinese": "鸭嘴兽",
+      "english": "platypus, duckbill, duckbilled platypus, duck-billed platypus, Ornithorhynchus anatinus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "wallaby, brush kangaroo": {
+      "id": 104,
+      "chinese": "袋鼠",
+      "english": "wallaby, brush kangaroo",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "koala, koala bear, kangaroo bear, native bear, Phascolarctos cinereus": {
+      "id": 105,
+      "chinese": "考拉",
+      "english": "koala, koala bear, kangaroo bear, native bear, Phascolarctos cinereus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "wombat": {
+      "id": 106,
+      "chinese": "土拨鼠",
+      "english": "wombat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "jellyfish": {
+      "id": 107,
+      "chinese": "水母",
+      "english": "jellyfish",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sea anemone, anemone": {
+      "id": 108,
+      "chinese": "珊瑚",
+      "english": "sea anemone, anemone",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "brain coral": {
+      "id": 109,
+      "chinese": "珊瑚",
+      "english": "brain coral",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "flatworm, platyhelminth": {
+      "id": 110,
+      "chinese": "海洋生物",
+      "english": "flatworm, platyhelminth",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "nematode, nematode worm, roundworm": {
+      "id": 111,
+      "chinese": "海蛇",
+      "english": "nematode, nematode worm, roundworm",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "conch": {
+      "id": 112,
+      "chinese": "海螺",
+      "english": "conch",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "snail": {
+      "id": 113,
+      "chinese": "蜗牛",
+      "english": "snail",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "slug": {
+      "id": 114,
+      "chinese": "蜗牛",
+      "english": "slug",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "sea slug, nudibranch": {
+      "id": 115,
+      "chinese": "海洋生物",
+      "english": "sea slug, nudibranch",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "chiton, coat-of-mail shell, sea cradle, polyplacophore": {
+      "id": 116,
+      "chinese": "海洋生物",
+      "english": "chiton, coat-of-mail shell, sea cradle, polyplacophore",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "chambered nautilus, pearly nautilus, nautilus": {
+      "id": 117,
+      "chinese": "海螺",
+      "english": "chambered nautilus, pearly nautilus, nautilus",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "Dungeness crab, Cancer magister": {
+      "id": 118,
+      "chinese": "螃蟹",
+      "english": "Dungeness crab, Cancer magister",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "rock crab, Cancer irroratus": {
+      "id": 119,
+      "chinese": "螃蟹",
+      "english": "rock crab, Cancer irroratus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "fiddler crab": {
+      "id": 120,
+      "chinese": "螃蟹",
+      "english": "fiddler crab",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "king crab, Alaska crab, Alaskan king crab, Alaska king crab, Paralithodes camtschatica": {
+      "id": 121,
+      "chinese": "螃蟹",
+      "english": "king crab, Alaska crab, Alaskan king crab, Alaska king crab, Paralithodes camtschatica",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American lobster, Northern lobster, Maine lobster, Homarus americanus": {
+      "id": 122,
+      "chinese": "龙虾",
+      "english": "American lobster, Northern lobster, Maine lobster, Homarus americanus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "spiny lobster, langouste, rock lobster, crawfish, crayfish, sea crawfish": {
+      "id": 123,
+      "chinese": "龙虾",
+      "english": "spiny lobster, langouste, rock lobster, crawfish, crayfish, sea crawfish",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "crayfish, crawfish, crawdad, crawdaddy": {
+      "id": 124,
+      "chinese": "龙虾",
+      "english": "crayfish, crawfish, crawdad, crawdaddy",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hermit crab": {
+      "id": 125,
+      "chinese": "寄居蟹",
+      "english": "hermit crab",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "isopod": {
+      "id": 126,
+      "chinese": "海洋生物",
+      "english": "isopod",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "white stork, Ciconia ciconia": {
+      "id": 127,
+      "chinese": "鸟",
+      "english": "white stork, Ciconia ciconia",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black stork, Ciconia nigra": {
+      "id": 128,
+      "chinese": "鸟",
+      "english": "black stork, Ciconia nigra",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "spoonbill": {
+      "id": 129,
+      "chinese": "鸟",
+      "english": "spoonbill",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "flamingo": {
+      "id": 130,
+      "chinese": "鸟",
+      "english": "flamingo",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "little blue heron, Egretta caerulea": {
+      "id": 131,
+      "chinese": "鸟",
+      "english": "little blue heron, Egretta caerulea",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American egret, great white heron, Egretta albus": {
+      "id": 132,
+      "chinese": "鸟",
+      "english": "American egret, great white heron, Egretta albus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bittern": {
+      "id": 133,
+      "chinese": "鸟",
+      "english": "bittern",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "crane": {
+      "id": 517,
+      "chinese": "起重机",
+      "english": "crane",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "limpkin, Aramus pictus": {
+      "id": 135,
+      "chinese": "鸟",
+      "english": "limpkin, Aramus pictus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "European gallinule, Porphyrio porphyrio": {
+      "id": 136,
+      "chinese": "鸟",
+      "english": "European gallinule, Porphyrio porphyrio",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American coot, marsh hen, mud hen, water hen, Fulica americana": {
+      "id": 137,
+      "chinese": "鸟",
+      "english": "American coot, marsh hen, mud hen, water hen, Fulica americana",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bustard": {
+      "id": 138,
+      "chinese": "鸟",
+      "english": "bustard",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ruddy turnstone, Arenaria interpres": {
+      "id": 139,
+      "chinese": "鸟",
+      "english": "ruddy turnstone, Arenaria interpres",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "red-backed sandpiper, dunlin, Erolia alpina": {
+      "id": 140,
+      "chinese": "鸟",
+      "english": "red-backed sandpiper, dunlin, Erolia alpina",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "redshank, Tringa totanus": {
+      "id": 141,
+      "chinese": "鸟",
+      "english": "redshank, Tringa totanus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dowitcher": {
+      "id": 142,
+      "chinese": "鸟",
+      "english": "dowitcher",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "oystercatcher, oyster catcher": {
+      "id": 143,
+      "chinese": "鸟",
+      "english": "oystercatcher, oyster catcher",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "pelican": {
+      "id": 144,
+      "chinese": "鸟",
+      "english": "pelican",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "king penguin, Aptenodytes patagonica": {
+      "id": 145,
+      "chinese": "企鹅",
+      "english": "king penguin, Aptenodytes patagonica",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "albatross, mollymawk": {
+      "id": 146,
+      "chinese": "鸟",
+      "english": "albatross, mollymawk",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "grey whale, gray whale, devilfish, Eschrichtius gibbosus, Eschrichtius robustus": {
+      "id": 147,
+      "chinese": "鲸鱼",
+      "english": "grey whale, gray whale, devilfish, Eschrichtius gibbosus, Eschrichtius robustus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "killer whale, killer, orca, grampus, sea wolf, Orcinus orca": {
+      "id": 148,
+      "chinese": "鲸鱼",
+      "english": "killer whale, killer, orca, grampus, sea wolf, Orcinus orca",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dugong, Dugong dugon": {
+      "id": 149,
+      "chinese": "海象",
+      "english": "dugong, Dugong dugon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sea lion": {
+      "id": 150,
+      "chinese": "海狮",
+      "english": "sea lion",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Chihuahua": {
+      "id": 151,
+      "chinese": "狗",
+      "english": "Chihuahua",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Japanese spaniel": {
+      "id": 152,
+      "chinese": "狗",
+      "english": "Japanese spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Maltese dog, Maltese terrier, Maltese": {
+      "id": 153,
+      "chinese": "狗",
+      "english": "Maltese dog, Maltese terrier, Maltese",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Pekinese, Pekingese, Peke": {
+      "id": 154,
+      "chinese": "狗",
+      "english": "Pekinese, Pekingese, Peke",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Shih-Tzu": {
+      "id": 155,
+      "chinese": "狗",
+      "english": "Shih-Tzu",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Blenheim spaniel": {
+      "id": 156,
+      "chinese": "狗",
+      "english": "Blenheim spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "papillon": {
+      "id": 157,
+      "chinese": "狗",
+      "english": "papillon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "toy terrier": {
+      "id": 158,
+      "chinese": "狗",
+      "english": "toy terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Rhodesian ridgeback": {
+      "id": 159,
+      "chinese": "狗",
+      "english": "Rhodesian ridgeback",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Afghan hound, Afghan": {
+      "id": 160,
+      "chinese": "狗",
+      "english": "Afghan hound, Afghan",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "basset, basset hound": {
+      "id": 161,
+      "chinese": "狗",
+      "english": "basset, basset hound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "beagle": {
+      "id": 162,
+      "chinese": "狗",
+      "english": "beagle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bloodhound, sleuthhound": {
+      "id": 163,
+      "chinese": "狗",
+      "english": "bloodhound, sleuthhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bluetick": {
+      "id": 164,
+      "chinese": "狗",
+      "english": "bluetick",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "black-and-tan coonhound": {
+      "id": 165,
+      "chinese": "狗",
+      "english": "black-and-tan coonhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Walker hound, Walker foxhound": {
+      "id": 166,
+      "chinese": "狗",
+      "english": "Walker hound, Walker foxhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "English foxhound": {
+      "id": 167,
+      "chinese": "狗",
+      "english": "English foxhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "redbone": {
+      "id": 168,
+      "chinese": "狗",
+      "english": "redbone",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "borzoi, Russian wolfhound": {
+      "id": 169,
+      "chinese": "狗",
+      "english": "borzoi, Russian wolfhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Irish wolfhound": {
+      "id": 170,
+      "chinese": "狗",
+      "english": "Irish wolfhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Italian greyhound": {
+      "id": 171,
+      "chinese": "狗",
+      "english": "Italian greyhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "whippet": {
+      "id": 172,
+      "chinese": "狗",
+      "english": "whippet",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Ibizan hound, Ibizan Podenco": {
+      "id": 173,
+      "chinese": "狗",
+      "english": "Ibizan hound, Ibizan Podenco",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Norwegian elkhound, elkhound": {
+      "id": 174,
+      "chinese": "狗",
+      "english": "Norwegian elkhound, elkhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "otterhound, otter hound": {
+      "id": 175,
+      "chinese": "狗",
+      "english": "otterhound, otter hound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Saluki, gazelle hound": {
+      "id": 176,
+      "chinese": "狗",
+      "english": "Saluki, gazelle hound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Scottish deerhound, deerhound": {
+      "id": 177,
+      "chinese": "狗",
+      "english": "Scottish deerhound, deerhound",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Weimaraner": {
+      "id": 178,
+      "chinese": "狗",
+      "english": "Weimaraner",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Staffordshire bullterrier, Staffordshire bull terrier": {
+      "id": 179,
+      "chinese": "狗",
+      "english": "Staffordshire bullterrier, Staffordshire bull terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American Staffordshire terrier, Staffordshire terrier, American pit bull terrier, pit bull terrier": {
+      "id": 180,
+      "chinese": "狗",
+      "english": "American Staffordshire terrier, Staffordshire terrier, American pit bull terrier, pit bull terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Bedlington terrier": {
+      "id": 181,
+      "chinese": "狗",
+      "english": "Bedlington terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Border terrier": {
+      "id": 182,
+      "chinese": "狗",
+      "english": "Border terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Kerry blue terrier": {
+      "id": 183,
+      "chinese": "狗",
+      "english": "Kerry blue terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Irish terrier": {
+      "id": 184,
+      "chinese": "狗",
+      "english": "Irish terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Norfolk terrier": {
+      "id": 185,
+      "chinese": "狗",
+      "english": "Norfolk terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Norwich terrier": {
+      "id": 186,
+      "chinese": "狗",
+      "english": "Norwich terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Yorkshire terrier": {
+      "id": 187,
+      "chinese": "狗",
+      "english": "Yorkshire terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "wire-haired fox terrier": {
+      "id": 188,
+      "chinese": "狗",
+      "english": "wire-haired fox terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Lakeland terrier": {
+      "id": 189,
+      "chinese": "狗",
+      "english": "Lakeland terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Sealyham terrier, Sealyham": {
+      "id": 190,
+      "chinese": "狗",
+      "english": "Sealyham terrier, Sealyham",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Airedale, Airedale terrier": {
+      "id": 191,
+      "chinese": "狗",
+      "english": "Airedale, Airedale terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cairn, cairn terrier": {
+      "id": 192,
+      "chinese": "狗",
+      "english": "cairn, cairn terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Australian terrier": {
+      "id": 193,
+      "chinese": "狗",
+      "english": "Australian terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Dandie Dinmont, Dandie Dinmont terrier": {
+      "id": 194,
+      "chinese": "狗",
+      "english": "Dandie Dinmont, Dandie Dinmont terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Boston bull, Boston terrier": {
+      "id": 195,
+      "chinese": "狗",
+      "english": "Boston bull, Boston terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "miniature schnauzer": {
+      "id": 196,
+      "chinese": "狗",
+      "english": "miniature schnauzer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "giant schnauzer": {
+      "id": 197,
+      "chinese": "狗",
+      "english": "giant schnauzer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "standard schnauzer": {
+      "id": 198,
+      "chinese": "狗",
+      "english": "standard schnauzer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Scotch terrier, Scottish terrier, Scottie": {
+      "id": 199,
+      "chinese": "狗",
+      "english": "Scotch terrier, Scottish terrier, Scottie",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Tibetan terrier, chrysanthemum dog": {
+      "id": 200,
+      "chinese": "狗",
+      "english": "Tibetan terrier, chrysanthemum dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "silky terrier, Sydney silky": {
+      "id": 201,
+      "chinese": "狗",
+      "english": "silky terrier, Sydney silky",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "soft-coated wheaten terrier": {
+      "id": 202,
+      "chinese": "狗",
+      "english": "soft-coated wheaten terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "West Highland white terrier": {
+      "id": 203,
+      "chinese": "狗",
+      "english": "West Highland white terrier",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Lhasa, Lhasa apso": {
+      "id": 204,
+      "chinese": "狗",
+      "english": "Lhasa, Lhasa apso",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "flat-coated retriever": {
+      "id": 205,
+      "chinese": "狗",
+      "english": "flat-coated retriever",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "curly-coated retriever": {
+      "id": 206,
+      "chinese": "狗",
+      "english": "curly-coated retriever",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "golden retriever": {
+      "id": 207,
+      "chinese": "狗",
+      "english": "golden retriever",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Labrador retriever": {
+      "id": 208,
+      "chinese": "狗",
+      "english": "Labrador retriever",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Chesapeake Bay retriever": {
+      "id": 209,
+      "chinese": "狗",
+      "english": "Chesapeake Bay retriever",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "German short-haired pointer": {
+      "id": 210,
+      "chinese": "狗",
+      "english": "German short-haired pointer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "vizsla, Hungarian pointer": {
+      "id": 211,
+      "chinese": "狗",
+      "english": "vizsla, Hungarian pointer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "English setter": {
+      "id": 212,
+      "chinese": "狗",
+      "english": "English setter",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Irish setter, red setter": {
+      "id": 213,
+      "chinese": "狗",
+      "english": "Irish setter, red setter",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Gordon setter": {
+      "id": 214,
+      "chinese": "狗",
+      "english": "Gordon setter",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Brittany spaniel": {
+      "id": 215,
+      "chinese": "狗",
+      "english": "Brittany spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "clumber, clumber spaniel": {
+      "id": 216,
+      "chinese": "狗",
+      "english": "clumber, clumber spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "English springer, English springer spaniel": {
+      "id": 217,
+      "chinese": "狗",
+      "english": "English springer, English springer spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Welsh springer spaniel": {
+      "id": 218,
+      "chinese": "狗",
+      "english": "Welsh springer spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cocker spaniel, English cocker spaniel, cocker": {
+      "id": 219,
+      "chinese": "狗",
+      "english": "cocker spaniel, English cocker spaniel, cocker",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Sussex spaniel": {
+      "id": 220,
+      "chinese": "狗",
+      "english": "Sussex spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Irish water spaniel": {
+      "id": 221,
+      "chinese": "狗",
+      "english": "Irish water spaniel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "kuvasz": {
+      "id": 222,
+      "chinese": "狗",
+      "english": "kuvasz",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "schipperke": {
+      "id": 223,
+      "chinese": "狗",
+      "english": "schipperke",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "groenendael": {
+      "id": 224,
+      "chinese": "狗",
+      "english": "groenendael",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "malinois": {
+      "id": 225,
+      "chinese": "狗",
+      "english": "malinois",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "briard": {
+      "id": 226,
+      "chinese": "狗",
+      "english": "briard",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "kelpie": {
+      "id": 227,
+      "chinese": "狗",
+      "english": "kelpie",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "komondor": {
+      "id": 228,
+      "chinese": "狗",
+      "english": "komondor",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Old English sheepdog, bobtail": {
+      "id": 229,
+      "chinese": "狗",
+      "english": "Old English sheepdog, bobtail",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Shetland sheepdog, Shetland sheep dog, Shetland": {
+      "id": 230,
+      "chinese": "狗",
+      "english": "Shetland sheepdog, Shetland sheep dog, Shetland",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "collie": {
+      "id": 231,
+      "chinese": "狗",
+      "english": "collie",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Border collie": {
+      "id": 232,
+      "chinese": "狗",
+      "english": "Border collie",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Bouvier des Flandres, Bouviers des Flandres": {
+      "id": 233,
+      "chinese": "狗",
+      "english": "Bouvier des Flandres, Bouviers des Flandres",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Rottweiler": {
+      "id": 234,
+      "chinese": "狗",
+      "english": "Rottweiler",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "German shepherd, German shepherd dog, German police dog, alsatian": {
+      "id": 235,
+      "chinese": "狗",
+      "english": "German shepherd, German shepherd dog, German police dog, alsatian",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Doberman, Doberman pinscher": {
+      "id": 236,
+      "chinese": "狗",
+      "english": "Doberman, Doberman pinscher",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "miniature pinscher": {
+      "id": 237,
+      "chinese": "狗",
+      "english": "miniature pinscher",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Greater Swiss Mountain dog": {
+      "id": 238,
+      "chinese": "狗",
+      "english": "Greater Swiss Mountain dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Bernese mountain dog": {
+      "id": 239,
+      "chinese": "狗",
+      "english": "Bernese mountain dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Appenzeller": {
+      "id": 240,
+      "chinese": "狗",
+      "english": "Appenzeller",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "EntleBucher": {
+      "id": 241,
+      "chinese": "狗",
+      "english": "EntleBucher",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "boxer": {
+      "id": 242,
+      "chinese": "狗",
+      "english": "boxer",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bull mastiff": {
+      "id": 243,
+      "chinese": "狗",
+      "english": "bull mastiff",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Tibetan mastiff": {
+      "id": 244,
+      "chinese": "狗",
+      "english": "Tibetan mastiff",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "French bulldog": {
+      "id": 245,
+      "chinese": "狗",
+      "english": "French bulldog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Great Dane": {
+      "id": 246,
+      "chinese": "狗",
+      "english": "Great Dane",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Saint Bernard, St Bernard": {
+      "id": 247,
+      "chinese": "狗",
+      "english": "Saint Bernard, St Bernard",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Eskimo dog, husky": {
+      "id": 248,
+      "chinese": "狗",
+      "english": "Eskimo dog, husky",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "malamute, malemute, Alaskan malamute": {
+      "id": 249,
+      "chinese": "狗",
+      "english": "malamute, malemute, Alaskan malamute",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Siberian husky": {
+      "id": 250,
+      "chinese": "狗",
+      "english": "Siberian husky",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dalmatian, coach dog, carriage dog": {
+      "id": 251,
+      "chinese": "狗",
+      "english": "dalmatian, coach dog, carriage dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "affenpinscher, monkey pinscher, monkey dog": {
+      "id": 252,
+      "chinese": "狗",
+      "english": "affenpinscher, monkey pinscher, monkey dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "basenji": {
+      "id": 253,
+      "chinese": "狗",
+      "english": "basenji",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "pug, pug-dog": {
+      "id": 254,
+      "chinese": "狗",
+      "english": "pug, pug-dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Leonberg": {
+      "id": 255,
+      "chinese": "狗",
+      "english": "Leonberg",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Newfoundland, Newfoundland dog": {
+      "id": 256,
+      "chinese": "狗",
+      "english": "Newfoundland, Newfoundland dog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Great Pyrenees": {
+      "id": 257,
+      "chinese": "狗",
+      "english": "Great Pyrenees",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Samoyed, Samoyede": {
+      "id": 258,
+      "chinese": "狗",
+      "english": "Samoyed, Samoyede",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Pomeranian": {
+      "id": 259,
+      "chinese": "狗",
+      "english": "Pomeranian",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "chow, chow chow": {
+      "id": 260,
+      "chinese": "狗",
+      "english": "chow, chow chow",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "keeshond": {
+      "id": 261,
+      "chinese": "狗",
+      "english": "keeshond",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Brabancon griffon": {
+      "id": 262,
+      "chinese": "狗",
+      "english": "Brabancon griffon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Pembroke, Pembroke Welsh corgi": {
+      "id": 263,
+      "chinese": "狗",
+      "english": "Pembroke, Pembroke Welsh corgi",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Cardigan, Cardigan Welsh corgi": {
+      "id": 264,
+      "chinese": "狗",
+      "english": "Cardigan, Cardigan Welsh corgi",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "toy poodle": {
+      "id": 265,
+      "chinese": "狗",
+      "english": "toy poodle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "miniature poodle": {
+      "id": 266,
+      "chinese": "狗",
+      "english": "miniature poodle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "standard poodle": {
+      "id": 267,
+      "chinese": "狗",
+      "english": "standard poodle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Mexican hairless": {
+      "id": 268,
+      "chinese": "狗",
+      "english": "Mexican hairless",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "timber wolf, grey wolf, gray wolf, Canis lupus": {
+      "id": 269,
+      "chinese": "狼",
+      "english": "timber wolf, grey wolf, gray wolf, Canis lupus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "white wolf, Arctic wolf, Canis lupus tundrarum": {
+      "id": 270,
+      "chinese": "狼",
+      "english": "white wolf, Arctic wolf, Canis lupus tundrarum",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "red wolf, maned wolf, Canis rufus, Canis niger": {
+      "id": 271,
+      "chinese": "狼",
+      "english": "red wolf, maned wolf, Canis rufus, Canis niger",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "coyote, prairie wolf, brush wolf, Canis latrans": {
+      "id": 272,
+      "chinese": "狼",
+      "english": "coyote, prairie wolf, brush wolf, Canis latrans",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dingo, warrigal, warragal, Canis dingo": {
+      "id": 273,
+      "chinese": "狼",
+      "english": "dingo, warrigal, warragal, Canis dingo",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dhole, Cuon alpinus": {
+      "id": 274,
+      "chinese": "狼",
+      "english": "dhole, Cuon alpinus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "African hunting dog, hyena dog, Cape hunting dog, Lycaon pictus": {
+      "id": 275,
+      "chinese": "狼",
+      "english": "African hunting dog, hyena dog, Cape hunting dog, Lycaon pictus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hyena, hyaena": {
+      "id": 276,
+      "chinese": "狼",
+      "english": "hyena, hyaena",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "red fox, Vulpes vulpes": {
+      "id": 277,
+      "chinese": "狐狸",
+      "english": "red fox, Vulpes vulpes",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "kit fox, Vulpes macrotis": {
+      "id": 278,
+      "chinese": "狐狸",
+      "english": "kit fox, Vulpes macrotis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Arctic fox, white fox, Alopex lagopus": {
+      "id": 279,
+      "chinese": "狐狸",
+      "english": "Arctic fox, white fox, Alopex lagopus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "grey fox, gray fox, Urocyon cinereoargenteus": {
+      "id": 280,
+      "chinese": "狐狸",
+      "english": "grey fox, gray fox, Urocyon cinereoargenteus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tabby, tabby cat": {
+      "id": 281,
+      "chinese": "猫",
+      "english": "tabby, tabby cat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tiger cat": {
+      "id": 282,
+      "chinese": "猫",
+      "english": "tiger cat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Persian cat": {
+      "id": 283,
+      "chinese": "猫",
+      "english": "Persian cat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Siamese cat, Siamese": {
+      "id": 284,
+      "chinese": "猫",
+      "english": "Siamese cat, Siamese",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Egyptian cat": {
+      "id": 285,
+      "chinese": "猫",
+      "english": "Egyptian cat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cougar, puma, catamount, mountain lion, painter, panther, Felis concolor": {
+      "id": 286,
+      "chinese": "猫",
+      "english": "cougar, puma, catamount, mountain lion, painter, panther, Felis concolor",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lynx, catamount": {
+      "id": 287,
+      "chinese": "猫",
+      "english": "lynx, catamount",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "leopard, Panthera pardus": {
+      "id": 288,
+      "chinese": "豹",
+      "english": "leopard, Panthera pardus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "snow leopard, ounce, Panthera uncia": {
+      "id": 289,
+      "chinese": "豹",
+      "english": "snow leopard, ounce, Panthera uncia",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "jaguar, panther, Panthera onca, Felis onca": {
+      "id": 290,
+      "chinese": "豹",
+      "english": "jaguar, panther, Panthera onca, Felis onca",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lion, king of beasts, Panthera leo": {
+      "id": 291,
+      "chinese": "狮子",
+      "english": "lion, king of beasts, Panthera leo",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tiger, Panthera tigris": {
+      "id": 292,
+      "chinese": "老虎",
+      "english": "tiger, Panthera tigris",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cheetah, chetah, Acinonyx jubatus": {
+      "id": 293,
+      "chinese": "豹",
+      "english": "cheetah, chetah, Acinonyx jubatus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "brown bear, bruin, Ursus arctos": {
+      "id": 294,
+      "chinese": "熊",
+      "english": "brown bear, bruin, Ursus arctos",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "American black bear, black bear, Ursus americanus, Euarctos americanus": {
+      "id": 295,
+      "chinese": "熊",
+      "english": "American black bear, black bear, Ursus americanus, Euarctos americanus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ice bear, polar bear, Ursus Maritimus, Thalarctos maritimus": {
+      "id": 296,
+      "chinese": "熊",
+      "english": "ice bear, polar bear, Ursus Maritimus, Thalarctos maritimus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sloth bear, Melursus ursinus, Ursus ursinus": {
+      "id": 297,
+      "chinese": "熊",
+      "english": "sloth bear, Melursus ursinus, Ursus ursinus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "mongoose": {
+      "id": 298,
+      "chinese": "猫鼬",
+      "english": "mongoose",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "meerkat, mierkat": {
+      "id": 299,
+      "chinese": "猫鼬",
+      "english": "meerkat, mierkat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "tiger beetle": {
+      "id": 300,
+      "chinese": "昆虫",
+      "english": "tiger beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ladybug, ladybeetle, lady beetle, ladybird, ladybird beetle": {
+      "id": 301,
+      "chinese": "昆虫",
+      "english": "ladybug, ladybeetle, lady beetle, ladybird, ladybird beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ground beetle, carabid beetle": {
+      "id": 302,
+      "chinese": "昆虫",
+      "english": "ground beetle, carabid beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "long-horned beetle, longicorn, longicorn beetle": {
+      "id": 303,
+      "chinese": "昆虫",
+      "english": "long-horned beetle, longicorn, longicorn beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "leaf beetle, chrysomelid": {
+      "id": 304,
+      "chinese": "昆虫",
+      "english": "leaf beetle, chrysomelid",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dung beetle": {
+      "id": 305,
+      "chinese": "昆虫",
+      "english": "dung beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "rhinoceros beetle": {
+      "id": 306,
+      "chinese": "昆虫",
+      "english": "rhinoceros beetle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "weevil": {
+      "id": 307,
+      "chinese": "昆虫",
+      "english": "weevil",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "fly": {
+      "id": 308,
+      "chinese": "昆虫",
+      "english": "fly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bee": {
+      "id": 309,
+      "chinese": "昆虫",
+      "english": "bee",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ant, emmet, pismire": {
+      "id": 310,
+      "chinese": "昆虫",
+      "english": "ant, emmet, pismire",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "grasshopper, hopper": {
+      "id": 311,
+      "chinese": "昆虫",
+      "english": "grasshopper, hopper",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cricket": {
+      "id": 312,
+      "chinese": "昆虫",
+      "english": "cricket",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "walking stick, walkingstick, stick insect": {
+      "id": 313,
+      "chinese": "昆虫",
+      "english": "walking stick, walkingstick, stick insect",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cockroach, roach": {
+      "id": 314,
+      "chinese": "昆虫",
+      "english": "cockroach, roach",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "mantis, mantid": {
+      "id": 315,
+      "chinese": "昆虫",
+      "english": "mantis, mantid",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cicada, cicala": {
+      "id": 316,
+      "chinese": "昆虫",
+      "english": "cicada, cicala",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "leafhopper": {
+      "id": 317,
+      "chinese": "昆虫",
+      "english": "leafhopper",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lacewing, lacewing fly": {
+      "id": 318,
+      "chinese": "昆虫",
+      "english": "lacewing, lacewing fly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "dragonfly, darning needle, devil’s darning needle, sewing needle, snake feeder, snake doctor, mosquito hawk, skeeter hawk": {
+      "id": 319,
+      "chinese": "蜻蜓",
+      "english": "dragonfly, darning needle, devil’s darning needle, sewing needle, snake feeder, snake doctor, mosquito hawk, skeeter hawk",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "damselfly": {
+      "id": 320,
+      "chinese": "蜻蜓",
+      "english": "damselfly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "admiral": {
+      "id": 321,
+      "chinese": "蝴蝶",
+      "english": "admiral",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ringlet, ringlet butterfly": {
+      "id": 322,
+      "chinese": "蝴蝶",
+      "english": "ringlet, ringlet butterfly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "monarch, monarch butterfly, milkweed butterfly, Danaus plexippus": {
+      "id": 323,
+      "chinese": "蝴蝶",
+      "english": "monarch, monarch butterfly, milkweed butterfly, Danaus plexippus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "cabbage butterfly": {
+      "id": 324,
+      "chinese": "蝴蝶",
+      "english": "cabbage butterfly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sulphur butterfly, sulfur butterfly": {
+      "id": 325,
+      "chinese": "蝴蝶",
+      "english": "sulphur butterfly, sulfur butterfly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lycaenid, lycaenid butterfly": {
+      "id": 326,
+      "chinese": "蝴蝶",
+      "english": "lycaenid, lycaenid butterfly",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "starfish, sea star": {
+      "id": 327,
+      "chinese": "海星",
+      "english": "starfish, sea star",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sea urchin": {
+      "id": 328,
+      "chinese": "海胆",
+      "english": "sea urchin",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sea cucumber, holothurian": {
+      "id": 329,
+      "chinese": "海洋生物",
+      "english": "sea cucumber, holothurian",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "wood rabbit, cottontail, cottontail rabbit": {
+      "id": 330,
+      "chinese": "兔子",
+      "english": "wood rabbit, cottontail, cottontail rabbit",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hare": {
+      "id": 331,
+      "chinese": "兔子",
+      "english": "hare",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Angora, Angora rabbit": {
+      "id": 332,
+      "chinese": "兔子",
+      "english": "Angora, Angora rabbit",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hamster": {
+      "id": 333,
+      "chinese": "鼠",
+      "english": "hamster",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "porcupine, hedgehog": {
+      "id": 334,
+      "chinese": "鼠",
+      "english": "porcupine, hedgehog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "fox squirrel, eastern fox squirrel, Sciurus niger": {
+      "id": 335,
+      "chinese": "松鼠",
+      "english": "fox squirrel, eastern fox squirrel, Sciurus niger",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "marmot": {
+      "id": 336,
+      "chinese": "鼠",
+      "english": "marmot",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "beaver": {
+      "id": 337,
+      "chinese": "鼠",
+      "english": "beaver",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "guinea pig, Cavia cobaya": {
+      "id": 338,
+      "chinese": "鼠",
+      "english": "guinea pig, Cavia cobaya",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sorrel": {
+      "id": 339,
+      "chinese": "马",
+      "english": "sorrel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "zebra": {
+      "id": 340,
+      "chinese": "斑马",
+      "english": "zebra",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hog, pig, grunter, squealer, Sus scrofa": {
+      "id": 341,
+      "chinese": "猪",
+      "english": "hog, pig, grunter, squealer, Sus scrofa",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "wild boar, boar, Sus scrofa": {
+      "id": 342,
+      "chinese": "猪",
+      "english": "wild boar, boar, Sus scrofa",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "warthog": {
+      "id": 343,
+      "chinese": "猪",
+      "english": "warthog",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hippopotamus, hippo, river horse, Hippopotamus amphibius": {
+      "id": 344,
+      "chinese": "河马",
+      "english": "hippopotamus, hippo, river horse, Hippopotamus amphibius",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ox": {
+      "id": 345,
+      "chinese": "牛",
+      "english": "ox",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "water buffalo, water ox, Asiatic buffalo, Bubalus bubalis": {
+      "id": 346,
+      "chinese": "牛",
+      "english": "water buffalo, water ox, Asiatic buffalo, Bubalus bubalis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bison": {
+      "id": 347,
+      "chinese": "牛",
+      "english": "bison",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ram, tup": {
+      "id": 348,
+      "chinese": "羊",
+      "english": "ram, tup",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "bighorn, bighorn sheep, cimarron, Rocky Mountain bighorn, Rocky Mountain sheep, Ovis canadensis": {
+      "id": 349,
+      "chinese": "羊",
+      "english": "bighorn, bighorn sheep, cimarron, Rocky Mountain bighorn, Rocky Mountain sheep, Ovis canadensis",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "ibex, Capra ibex": {
+      "id": 350,
+      "chinese": "羊",
+      "english": "ibex, Capra ibex",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hartebeest": {
+      "id": 351,
+      "chinese": "羊",
+      "english": "hartebeest",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "impala, Aepyceros melampus": {
+      "id": 352,
+      "chinese": "羊",
+      "english": "impala, Aepyceros melampus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "gazelle": {
+      "id": 353,
+      "chinese": "羊",
+      "english": "gazelle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Arabian camel, dromedary, Camelus dromedarius": {
+      "id": 354,
+      "chinese": "骆驼",
+      "english": "Arabian camel, dromedary, Camelus dromedarius"
+    },
+    "llama": {
+      "id": 355,
+      "chinese": "羊驼",
+      "english": "llama",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "weasel": {
+      "id": 356,
+      "chinese": "狸",
+      "english": "weasel"
+    },
+    "mink": {
+      "id": 357,
+      "chinese": "狸",
+      "english": "mink"
+    },
+    "polecat, fitch, foulmart, foumart, Mustela putorius": {
+      "id": 358,
+      "chinese": "狸",
+      "english": "polecat, fitch, foulmart, foumart, Mustela putorius"
+    },
+    "black-footed ferret, ferret, Mustela nigripes": {
+      "id": 359,
+      "chinese": "狸",
+      "english": "black-footed ferret, ferret, Mustela nigripes"
+    },
+    "otter": {
+      "id": 360,
+      "chinese": "狸",
+      "english": "otter"
+    },
+    "skunk, polecat, wood pussy": {
+      "id": 361,
+      "chinese": "狸",
+      "english": "skunk, polecat, wood pussy"
+    },
+    "badger": {
+      "id": 362,
+      "chinese": "狸",
+      "english": "badger"
+    },
+    "armadillo": {
+      "id": 363,
+      "chinese": "穿山甲",
+      "english": "armadillo",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "three-toed sloth, ai, Bradypus tridactylus": {
+      "id": 364,
+      "chinese": "树懒",
+      "english": "three-toed sloth, ai, Bradypus tridactylus",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "orangutan, orang, orangutang, Pongo pygmaeus": {
+      "id": 365,
+      "chinese": "狒狒",
+      "english": "orangutan, orang, orangutang, Pongo pygmaeus"
+    },
+    "gorilla, Gorilla gorilla": {
+      "id": 366,
+      "chinese": "猩猩",
+      "english": "gorilla, Gorilla gorilla",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "chimpanzee, chimp, Pan troglodytes": {
+      "id": 367,
+      "chinese": "猴子",
+      "english": "chimpanzee, chimp, Pan troglodytes",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "gibbon, Hylobates lar": {
+      "id": 368,
+      "chinese": "猴子",
+      "english": "gibbon, Hylobates lar",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "siamang, Hylobates syndactylus, Symphalangus syndactylus": {
+      "id": 369,
+      "chinese": "猴子",
+      "english": "siamang, Hylobates syndactylus, Symphalangus syndactylus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "guenon, guenon monkey": {
+      "id": 370,
+      "chinese": "猴子",
+      "english": "guenon, guenon monkey",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "patas, hussar monkey, Erythrocebus patas": {
+      "id": 371,
+      "chinese": "猴子",
+      "english": "patas, hussar monkey, Erythrocebus patas",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "baboon": {
+      "id": 372,
+      "chinese": "猴子",
+      "english": "baboon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "macaque": {
+      "id": 373,
+      "chinese": "猴子",
+      "english": "macaque",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "langur": {
+      "id": 374,
+      "chinese": "猴子",
+      "english": "langur",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "colobus, colobus monkey": {
+      "id": 375,
+      "chinese": "猴子",
+      "english": "colobus, colobus monkey",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "proboscis monkey, Nasalis larvatus": {
+      "id": 376,
+      "chinese": "猴子",
+      "english": "proboscis monkey, Nasalis larvatus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "marmoset": {
+      "id": 377,
+      "chinese": "猴子",
+      "english": "marmoset",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "capuchin, ringtail, Cebus capucinus": {
+      "id": 378,
+      "chinese": "猴子",
+      "english": "capuchin, ringtail, Cebus capucinus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "howler monkey, howler": {
+      "id": 379,
+      "chinese": "猴子",
+      "english": "howler monkey, howler",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "titi, titi monkey": {
+      "id": 380,
+      "chinese": "猴子",
+      "english": "titi, titi monkey",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "spider monkey, Ateles geoffroyi": {
+      "id": 381,
+      "chinese": "猴子",
+      "english": "spider monkey, Ateles geoffroyi",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "squirrel monkey, Saimiri sciureus": {
+      "id": 382,
+      "chinese": "猴子",
+      "english": "squirrel monkey, Saimiri sciureus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Madagascar cat, ring-tailed lemur, Lemur catta": {
+      "id": 383,
+      "chinese": "猴子",
+      "english": "Madagascar cat, ring-tailed lemur, Lemur catta",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "indri, indris, Indri indri, Indri brevicaudatus": {
+      "id": 384,
+      "chinese": "猴子",
+      "english": "indri, indris, Indri indri, Indri brevicaudatus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "Indian elephant, Elephas maximus": {
+      "id": 385,
+      "chinese": "大象",
+      "english": "Indian elephant, Elephas maximus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "African elephant, Loxodonta africana": {
+      "id": 386,
+      "chinese": "大象",
+      "english": "African elephant, Loxodonta africana",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lesser panda, red panda, panda, bear cat, cat bear, Ailurus fulgens": {
+      "id": 387,
+      "chinese": "浣熊",
+      "english": "lesser panda, red panda, panda, bear cat, cat bear, Ailurus fulgens",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "giant panda, panda, panda bear, coon bear, Ailuropoda melanoleuca": {
+      "id": 388,
+      "chinese": "熊猫",
+      "english": "giant panda, panda, panda bear, coon bear, Ailuropoda melanoleuca",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "barracouta, snoek": {
+      "id": 389,
+      "chinese": "鱼",
+      "english": "barracouta, snoek",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "eel": {
+      "id": 390,
+      "chinese": "鱼",
+      "english": "eel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "coho, cohoe, coho salmon, blue jack, silver salmon, Oncorhynchus kisutch": {
+      "id": 391,
+      "chinese": "鱼",
+      "english": "coho, cohoe, coho salmon, blue jack, silver salmon, Oncorhynchus kisutch",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "rock beauty, Holocanthus tricolor": {
+      "id": 392,
+      "chinese": "鱼",
+      "english": "rock beauty, Holocanthus tricolor",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "anemone fish": {
+      "id": 393,
+      "chinese": "鱼",
+      "english": "anemone fish",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "sturgeon": {
+      "id": 394,
+      "chinese": "鱼",
+      "english": "sturgeon",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "gar, garfish, garpike, billfish, Lepisosteus osseus": {
+      "id": 395,
+      "chinese": "鱼",
+      "english": "gar, garfish, garpike, billfish, Lepisosteus osseus",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "lionfish": {
+      "id": 396,
+      "chinese": "鱼",
+      "english": "lionfish",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "puffer, pufferfish, blowfish, globefish": {
+      "id": 397,
+      "chinese": "鱼",
+      "english": "puffer, pufferfish, blowfish, globefish",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "abacus": {
+      "id": 398,
+      "chinese": "算盘",
+      "english": "abacus",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "abaya": {
+      "id": 399,
+      "chinese": "穆斯林",
+      "english": "abaya"
+    },
+    "academic gown, academic robe, judge’s robe": {
+      "id": 400,
+      "chinese": "学士服",
+      "english": "academic gown, academic robe, judge’s robe"
+    },
+    "accordion, piano accordion, squeeze box": {
+      "id": 401,
+      "chinese": "手风琴",
+      "english": "accordion, piano accordion, squeeze box",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "acoustic guitar": {
+      "id": 402,
+      "chinese": "吉他",
+      "english": "acoustic guitar",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "aircraft carrier, carrier, flattop, attack aircraft carrier": {
+      "id": 403,
+      "chinese": "航空母舰",
+      "english": "aircraft carrier, carrier, flattop, attack aircraft carrier",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "airliner": {
+      "id": 404,
+      "chinese": "飞机",
+      "english": "airliner",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "airship, dirigible": {
+      "id": 405,
+      "chinese": "飞艇",
+      "english": "airship, dirigible"
+    },
+    "altar": {
+      "id": 406,
+      "chinese": "教堂",
+      "english": "altar",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "heck, ambulance": {
+      "id": 407,
+      "chinese": "救护车",
+      "english": "heck, ambulance",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "heck, amphibian, amphibious vehicle": {
+      "id": 408,
+      "chinese": "水陆两用车",
+      "english": "heck, amphibian, amphibious vehicle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "analog clock": {
+      "id": 409,
+      "chinese": "钟",
+      "english": "analog clock"
+    },
+    "apiary, bee house": {
+      "id": 410,
+      "chinese": "箱子",
+      "english": "apiary, bee house"
+    },
+    "apron": {
+      "id": 411,
+      "chinese": "围裙",
+      "english": "apron"
+    },
+    "ashcan, trash can, garbage can, wastebin, ash bin, ash-bin, ashbin, dustbin, trash barrel, trash bin": {
+      "id": 412,
+      "chinese": "垃圾箱",
+      "english": "ashcan, trash can, garbage can, wastebin, ash bin, ash-bin, ashbin, dustbin, trash barrel, trash bin"
+    },
+    "assault rifle, assault gun": {
+      "id": 413,
+      "chinese": "枪",
+      "english": "assault rifle, assault gun"
+    },
+    "backpack, back pack, knapsack, packsack, rucksack, haversack": {
+      "id": 414,
+      "chinese": "背包",
+      "english": "backpack, back pack, knapsack, packsack, rucksack, haversack",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bakery, bakeshop, bakehouse": {
+      "id": 415,
+      "chinese": "面包柜",
+      "english": "bakery, bakeshop, bakehouse",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "balance beam, beam": {
+      "id": 416,
+      "chinese": "体操",
+      "english": "balance beam, beam"
+    },
+    "balloon": {
+      "id": 417,
+      "chinese": "热气球",
+      "english": "balloon",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "ballpoint, ballpoint pen, ballpen, Biro": {
+      "id": 418,
+      "chinese": "钢笔",
+      "english": "ballpoint, ballpoint pen, ballpen, Biro",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "Band Aid": {
+      "id": 419,
+      "chinese": "邦迪",
+      "english": "Band Aid"
+    },
+    "banjo": {
+      "id": 420,
+      "chinese": "乐器",
+      "english": "banjo"
+    },
+    "bannister, banister, balustrade, balusters, handrail": {
+      "id": 421,
+      "chinese": "楼梯",
+      "english": "bannister, banister, balustrade, balusters, handrail"
+    },
+    "barbell": {
+      "id": 422,
+      "chinese": "杠铃",
+      "english": "barbell",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "barber chair": {
+      "id": 423,
+      "chinese": "座椅",
+      "english": "barber chair"
+    },
+    "barbershop": {
+      "id": 424,
+      "chinese": "理发",
+      "english": "barbershop"
+    },
+    "barn": {
+      "id": 425,
+      "chinese": "木屋",
+      "english": "barn"
+    },
+    "barometer": {
+      "id": 426,
+      "chinese": "表",
+      "english": "barometer"
+    },
+    "barrel, cask": {
+      "id": 427,
+      "chinese": "酒桶",
+      "english": "barrel, cask",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "barrow, garden cart, lawn cart, wheelbarrow": {
+      "id": 428,
+      "chinese": "手推车",
+      "english": "barrow, garden cart, lawn cart, wheelbarrow",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "baseball": {
+      "id": 429,
+      "chinese": "棒球",
+      "english": "baseball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "basketball": {
+      "id": 430,
+      "chinese": "篮球",
+      "english": "basketball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "bassinet": {
+      "id": 431,
+      "chinese": "婴儿",
+      "english": "bassinet"
+    },
+    "bassoon": {
+      "id": 432,
+      "chinese": "乐器",
+      "english": "bassoon"
+    },
+    "bathing cap, swimming cap": {
+      "id": 433,
+      "chinese": "游泳",
+      "english": "bathing cap, swimming cap",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "bath towel": {
+      "id": 434,
+      "chinese": "婴儿毛巾",
+      "english": "bath towel",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bathtub, bathing tub, bath, tub": {
+      "id": 435,
+      "chinese": "浴缸",
+      "english": "bathtub, bathing tub, bath, tub"
+    },
+    "heck, beach wagon, station wagon, wagon, estate car, beach waggon, station waggon, waggon": {
+      "id": 436,
+      "chinese": "轿车",
+      "english": "heck, beach wagon, station wagon, wagon, estate car, beach waggon, station waggon, waggon",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "beacon, lighthouse, beacon light, pharos": {
+      "id": 437,
+      "chinese": "灯塔",
+      "english": "beacon, lighthouse, beacon light, pharos",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "beaker": {
+      "id": 438,
+      "chinese": "烧杯",
+      "english": "beaker"
+    },
+    "bearskin, busby, shako": {
+      "id": 439,
+      "chinese": "守卫",
+      "english": "bearskin, busby, shako"
+    },
+    "beer bottle": {
+      "id": 440,
+      "chinese": "啤酒",
+      "english": "beer bottle",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "beer glass": {
+      "id": 441,
+      "chinese": "啤酒",
+      "english": "beer glass",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "bell cote, bell cot": {
+      "id": 442,
+      "chinese": "建筑",
+      "english": "bell cote, bell cot",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "bib": {
+      "id": 443,
+      "chinese": "围兜",
+      "english": "bib"
+    },
+    "bicycle-built-for-two, tandem bicycle, tandem": {
+      "id": 444,
+      "chinese": "双人自行车",
+      "english": "bicycle-built-for-two, tandem bicycle, tandem",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "bikini, two-piece": {
+      "id": 445,
+      "chinese": "比基尼",
+      "english": "bikini, two-piece"
+    },
+    "binder, ring-binder": {
+      "id": 446,
+      "chinese": "笔记本",
+      "english": "binder, ring-binder",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "binoculars, field glasses, opera glasses": {
+      "id": 447,
+      "chinese": "望远镜",
+      "english": "binoculars, field glasses, opera glasses"
+    },
+    "birdhouse": {
+      "id": 448,
+      "chinese": "信箱",
+      "english": "birdhouse"
+    },
+    "boathouse": {
+      "id": 449,
+      "chinese": "小屋",
+      "english": "boathouse"
+    },
+    "bobsled, bobsleigh, bob": {
+      "id": 450,
+      "chinese": "雪橇",
+      "english": "bobsled, bobsleigh, bob",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "bolo tie, bolo, bola tie, bola": {
+      "id": 451,
+      "chinese": "项链",
+      "english": "bolo tie, bolo, bola tie, bola",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bonnet, poke bonnet": {
+      "id": 452,
+      "chinese": "帽子",
+      "english": "bonnet, poke bonnet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bookcase": {
+      "id": 453,
+      "chinese": "书柜",
+      "english": "bookcase",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "bookshop, bookstore, bookstall": {
+      "id": 454,
+      "chinese": "书店",
+      "english": "bookshop, bookstore, bookstall",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "bottlecap": {
+      "id": 455,
+      "chinese": "瓶盖",
+      "english": "bottlecap"
+    },
+    "bow": {
+      "id": 456,
+      "chinese": "弓箭",
+      "english": "bow",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bow tie, bow-tie, bowtie": {
+      "id": 457,
+      "chinese": "领结",
+      "english": "bow tie, bow-tie, bowtie"
+    },
+    "brass, memorial tablet, plaque": {
+      "id": 458,
+      "chinese": "墓碑",
+      "english": "brass, memorial tablet, plaque"
+    },
+    "brassiere, bra, bandeau": {
+      "id": 459,
+      "chinese": "胸罩",
+      "english": "brassiere, bra, bandeau"
+    },
+    "breakwater, groin, groyne, mole, bulwark, seawall, jetty": {
+      "id": 460,
+      "chinese": "海岸",
+      "english": "breakwater, groin, groyne, mole, bulwark, seawall, jetty",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "breastplate, aegis, egis": {
+      "id": 461,
+      "chinese": "盔甲",
+      "english": "breastplate, aegis, egis",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "broom": {
+      "id": 462,
+      "chinese": "扫帚",
+      "english": "broom",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "bucket, pail": {
+      "id": 463,
+      "chinese": "水桶",
+      "english": "bucket, pail"
+    },
+    "buckle": {
+      "id": 464,
+      "chinese": "皮带",
+      "english": "buckle"
+    },
+    "bulletproof vest": {
+      "id": 465,
+      "chinese": "防弹背心",
+      "english": "bulletproof vest"
+    },
+    "bullet train, bullet": {
+      "id": 466,
+      "chinese": "火车",
+      "english": "bullet train, bullet",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "butcher shop, meat market": {
+      "id": 467,
+      "chinese": "肉铺",
+      "english": "butcher shop, meat market",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "heck, cab, hack, taxi, taxicab": {
+      "id": 468,
+      "chinese": "出租车",
+      "english": "heck, cab, hack, taxi, taxicab",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "caldron, cauldron": {
+      "id": 469,
+      "chinese": "锅",
+      "english": "caldron, cauldron"
+    },
+    "candle, taper, wax light": {
+      "id": 470,
+      "chinese": "蜡烛",
+      "english": "candle, taper, wax light",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cannon": {
+      "id": 471,
+      "chinese": "炮",
+      "english": "cannon"
+    },
+    "canoe": {
+      "id": 472,
+      "chinese": "艇",
+      "english": "canoe"
+    },
+    "can opener, tin opener": {
+      "id": 473,
+      "chinese": "订书机",
+      "english": "can opener, tin opener",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "cardigan": {
+      "id": 474,
+      "chinese": "毛衣",
+      "english": "cardigan",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "car mirror": {
+      "id": 475,
+      "chinese": "反光镜",
+      "english": "car mirror"
+    },
+    "carousel, carrousel, merry-go-round, roundabout, whirligig": {
+      "id": 476,
+      "chinese": "旋转木马",
+      "english": "carousel, carrousel, merry-go-round, roundabout, whirligig",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "carpenter’s kit, tool kit": {
+      "id": 477,
+      "chinese": "工具箱",
+      "english": "carpenter’s kit, tool kit",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "carton": {
+      "id": 478,
+      "chinese": "盒子",
+      "english": "carton"
+    },
+    "car wheel": {
+      "id": 479,
+      "chinese": "轮胎",
+      "english": "car wheel"
+    },
+    "cash machine, cash dispenser, automated teller machine, automatic teller machine, automated teller, automatic teller, ATM": {
+      "id": 480,
+      "chinese": "取款机",
+      "english": "cash machine, cash dispenser, automated teller machine, automatic teller machine, automated teller, automatic teller, ATM"
+    },
+    "cassette": {
+      "id": 481,
+      "chinese": "磁带",
+      "english": "cassette"
+    },
+    "cassette player": {
+      "id": 482,
+      "chinese": "磁带",
+      "english": "cassette player"
+    },
+    "castle": {
+      "id": 483,
+      "chinese": "城堡",
+      "english": "castle"
+    },
+    "catamaran": {
+      "id": 484,
+      "chinese": "帆船",
+      "english": "catamaran",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "CD player": {
+      "id": 485,
+      "chinese": "cd播放器",
+      "english": "CD player"
+    },
+    "cello, violoncello": {
+      "id": 486,
+      "chinese": "大提琴",
+      "english": "cello, violoncello",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cellular telephone, cellular phone, cellphone, cell, mobile phone": {
+      "id": 487,
+      "chinese": "手机",
+      "english": "cellular telephone, cellular phone, cellphone, cell, mobile phone",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "chain": {
+      "id": 488,
+      "chinese": "铁链",
+      "english": "chain"
+    },
+    "chainlink fence": {
+      "id": 489,
+      "chinese": "铁丝网",
+      "english": "chainlink fence"
+    },
+    "chain mail, ring mail, mail, chain armor, chain armour, ring armor, ring armour": {
+      "id": 490,
+      "chinese": "铁丝网",
+      "english": "chain mail, ring mail, mail, chain armor, chain armour, ring armor, ring armour"
+    },
+    "chain saw, chainsaw": {
+      "id": 491,
+      "chinese": "电锯",
+      "english": "chain saw, chainsaw"
+    },
+    "chest": {
+      "id": 492,
+      "chinese": "木箱",
+      "english": "chest"
+    },
+    "chiffonier, commode": {
+      "id": 493,
+      "chinese": "木柜",
+      "english": "chiffonier, commode"
+    },
+    "chime, bell, gong": {
+      "id": 494,
+      "chinese": "锣鼓",
+      "english": "chime, bell, gong",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "china cabinet, china closet": {
+      "id": 495,
+      "chinese": "柜子",
+      "english": "china cabinet, china closet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "Christmas stocking": {
+      "id": 496,
+      "chinese": "袜子",
+      "english": "Christmas stocking",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "church, church building": {
+      "id": 497,
+      "chinese": "教堂",
+      "english": "church, church building",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "cinema, movie theater, movie theatre, movie house, picture palace": {
+      "id": 498,
+      "chinese": "剧院",
+      "english": "cinema, movie theater, movie theatre, movie house, picture palace",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "cleaver, meat cleaver, chopper": {
+      "id": 499,
+      "chinese": "刀",
+      "english": "cleaver, meat cleaver, chopper"
+    },
+    "cliff dwelling": {
+      "id": 500,
+      "chinese": "堡垒",
+      "english": "cliff dwelling"
+    },
+    "cloak": {
+      "id": 501,
+      "chinese": "斗篷",
+      "english": "cloak"
+    },
+    "clog, geta, patten, sabot": {
+      "id": 502,
+      "chinese": "鞋子",
+      "english": "clog, geta, patten, sabot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cocktail shaker": {
+      "id": 503,
+      "chinese": "瓶子",
+      "english": "cocktail shaker",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "coffee mug": {
+      "id": 504,
+      "chinese": "杯子",
+      "english": "coffee mug",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "coffeepot": {
+      "id": 505,
+      "chinese": "壶",
+      "english": "coffeepot"
+    },
+    "coil, spiral, volute, whorl, helix": {
+      "id": 506,
+      "chinese": "螺旋",
+      "english": "coil, spiral, volute, whorl, helix"
+    },
+    "combination lock": {
+      "id": 507,
+      "chinese": "锁",
+      "english": "combination lock",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "computer keyboard, keypad": {
+      "id": 508,
+      "chinese": "键盘",
+      "english": "computer keyboard, keypad",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "confectionery, confectionary, candy store": {
+      "id": 509,
+      "chinese": "糖果",
+      "english": "confectionery, confectionary, candy store",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "container ship, containership, container vessel": {
+      "id": 510,
+      "chinese": "船",
+      "english": "container ship, containership, container vessel",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "heck, convertible": {
+      "id": 511,
+      "chinese": "轿车",
+      "english": "heck, convertible",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "corkscrew, bottle screw": {
+      "id": 512,
+      "chinese": "开瓶器",
+      "english": "corkscrew, bottle screw"
+    },
+    "cornet, horn, trumpet, trump": {
+      "id": 513,
+      "chinese": "号（乐器）",
+      "english": "cornet, horn, trumpet, trump"
+    },
+    "cowboy boot": {
+      "id": 514,
+      "chinese": "靴子",
+      "english": "cowboy boot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cowboy hat, ten-gallon hat": {
+      "id": 515,
+      "chinese": "帽子",
+      "english": "cowboy hat, ten-gallon hat",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cradle": {
+      "id": 516,
+      "chinese": "婴儿床",
+      "english": "cradle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "crash helmet": {
+      "id": 518,
+      "chinese": "头盔",
+      "english": "crash helmet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "crate": {
+      "id": 519,
+      "chinese": "木箱",
+      "english": "crate"
+    },
+    "crib, cot": {
+      "id": 520,
+      "chinese": "婴儿床",
+      "english": "crib, cot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "Crock Pot": {
+      "id": 521,
+      "chinese": "电饭锅",
+      "english": "Crock Pot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "croquet ball": {
+      "id": 522,
+      "chinese": "推球",
+      "english": "croquet ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "crutch": {
+      "id": 523,
+      "chinese": "拐杖",
+      "english": "crutch",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "cuirass": {
+      "id": 524,
+      "chinese": "盔甲",
+      "english": "cuirass",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "dam, dike, dyke": {
+      "id": 525,
+      "chinese": "水库",
+      "english": "dam, dike, dyke"
+    },
+    "desk": {
+      "id": 526,
+      "chinese": "办公桌",
+      "english": "desk"
+    },
+    "desktop computer": {
+      "id": 527,
+      "chinese": "电脑",
+      "english": "desktop computer",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "dial telephone, dial phone": {
+      "id": 528,
+      "chinese": "电话机",
+      "english": "dial telephone, dial phone",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "diaper, nappy, napkin": {
+      "id": 529,
+      "chinese": "尿布",
+      "english": "diaper, nappy, napkin"
+    },
+    "digital clock": {
+      "id": 530,
+      "chinese": "闹钟",
+      "english": "digital clock",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "digital watch": {
+      "id": 531,
+      "chinese": "手表",
+      "english": "digital watch",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "dining table, board": {
+      "id": 532,
+      "chinese": "餐桌",
+      "english": "dining table, board"
+    },
+    "dishrag, dishcloth": {
+      "id": 533,
+      "chinese": "垫子",
+      "english": "dishrag, dishcloth"
+    },
+    "dishwasher, dish washer, dishwashing machine": {
+      "id": 534,
+      "chinese": "洗碗柜",
+      "english": "dishwasher, dish washer, dishwashing machine",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "disk brake, disc brake": {
+      "id": 535,
+      "chinese": "车轮",
+      "english": "disk brake, disc brake",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "dock, dockage, docking facility": {
+      "id": 536,
+      "chinese": "港口",
+      "english": "dock, dockage, docking facility",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "dogsled, dog sled, dog sleigh": {
+      "id": 537,
+      "chinese": "雪橇",
+      "english": "dogsled, dog sled, dog sleigh",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "dome": {
+      "id": 538,
+      "chinese": "穹顶",
+      "english": "dome"
+    },
+    "doormat, welcome mat": {
+      "id": 539,
+      "chinese": "地毯",
+      "english": "doormat, welcome mat",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "drilling platform, offshore rig": {
+      "id": 540,
+      "chinese": "油田",
+      "english": "drilling platform, offshore rig"
+    },
+    "drum, membranophone, tympan": {
+      "id": 541,
+      "chinese": "鼓",
+      "english": "drum, membranophone, tympan",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "drumstick": {
+      "id": 542,
+      "chinese": "鼓棒",
+      "english": "drumstick",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "dumbbell": {
+      "id": 543,
+      "chinese": "哑铃",
+      "english": "dumbbell",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "Dutch oven": {
+      "id": 544,
+      "chinese": "锅",
+      "english": "Dutch oven"
+    },
+    "electric fan, blower": {
+      "id": 545,
+      "chinese": "风扇",
+      "english": "electric fan, blower",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "electric guitar": {
+      "id": 546,
+      "chinese": "电吉他",
+      "english": "electric guitar",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "heck, electric locomotive": {
+      "id": 547,
+      "chinese": "火车",
+      "english": "heck, electric locomotive",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "entertainment center": {
+      "id": 548,
+      "chinese": "电视机",
+      "english": "entertainment center",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "envelope": {
+      "id": 549,
+      "chinese": "信",
+      "english": "envelope"
+    },
+    "espresso maker": {
+      "id": 550,
+      "chinese": "咖啡机",
+      "english": "espresso maker",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "face powder": {
+      "id": 551,
+      "chinese": "化妆品",
+      "english": "face powder",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "feather boa, boa": {
+      "id": 552,
+      "chinese": "绒毛",
+      "english": "feather boa, boa"
+    },
+    "file, file cabinet, filing cabinet": {
+      "id": 553,
+      "chinese": "柜子",
+      "english": "file, file cabinet, filing cabinet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "fireboat": {
+      "id": 554,
+      "chinese": "喷泉",
+      "english": "fireboat",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "heck, fire engine, fire truck": {
+      "id": 555,
+      "chinese": "消防车",
+      "english": "heck, fire engine, fire truck",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "fire screen, fireguard": {
+      "id": 556,
+      "chinese": "壁炉",
+      "english": "fire screen, fireguard"
+    },
+    "flagpole, flagstaff": {
+      "id": 557,
+      "chinese": "旗杆",
+      "english": "flagpole, flagstaff"
+    },
+    "flute, transverse flute": {
+      "id": 558,
+      "chinese": "笛子",
+      "english": "flute, transverse flute"
+    },
+    "folding chair": {
+      "id": 559,
+      "chinese": "座椅",
+      "english": "folding chair"
+    },
+    "football helmet": {
+      "id": 560,
+      "chinese": "橄榄球",
+      "english": "football helmet",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "forklift": {
+      "id": 561,
+      "chinese": "叉车",
+      "english": "forklift",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "fountain": {
+      "id": 562,
+      "chinese": "喷泉",
+      "english": "fountain",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "fountain pen": {
+      "id": 563,
+      "chinese": "钢笔",
+      "english": "fountain pen",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "four-poster": {
+      "id": 564,
+      "chinese": "床",
+      "english": "four-poster",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "freight car": {
+      "id": 565,
+      "chinese": "火车",
+      "english": "freight car",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "French horn, horn": {
+      "id": 566,
+      "chinese": "圆号",
+      "english": "French horn, horn"
+    },
+    "frying pan, frypan, skillet": {
+      "id": 567,
+      "chinese": "平底锅",
+      "english": "frying pan, frypan, skillet"
+    },
+    "fur coat": {
+      "id": 568,
+      "chinese": "裘皮",
+      "english": "fur coat"
+    },
+    "heck, garbage truck, dustcart": {
+      "id": 569,
+      "chinese": "卡车",
+      "english": "heck, garbage truck, dustcart",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "gasmask, respirator, gas helmet": {
+      "id": 570,
+      "chinese": "面具",
+      "english": "gasmask, respirator, gas helmet"
+    },
+    "gas pump, gasoline pump, petrol pump, island dispenser": {
+      "id": 571,
+      "chinese": "加油",
+      "english": "gas pump, gasoline pump, petrol pump, island dispenser"
+    },
+    "goblet": {
+      "id": 572,
+      "chinese": "酒杯",
+      "english": "goblet",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "go-kart": {
+      "id": 573,
+      "chinese": "卡丁车",
+      "english": "go-kart",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "golf ball": {
+      "id": 574,
+      "chinese": "高尔夫",
+      "english": "golf ball"
+    },
+    "golfcart, golf cart": {
+      "id": 575,
+      "chinese": "高尔夫车",
+      "english": "golfcart, golf cart",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "gondola": {
+      "id": 576,
+      "chinese": "小船",
+      "english": "gondola",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "gong, tam-tam": {
+      "id": 577,
+      "chinese": "锣鼓",
+      "english": "gong, tam-tam",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "gown": {
+      "id": 578,
+      "chinese": "婚纱",
+      "english": "gown"
+    },
+    "grand piano, grand": {
+      "id": 579,
+      "chinese": "钢琴",
+      "english": "grand piano, grand",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "greenhouse, nursery, glasshouse": {
+      "id": 580,
+      "chinese": "大棚",
+      "english": "greenhouse, nursery, glasshouse"
+    },
+    "标 check, grille, radiator grille": {
+      "id": 581,
+      "chinese": "轿车",
+      "english": "标 check, grille, radiator grille",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "grocery store, grocery, food market, market": {
+      "id": 582,
+      "chinese": "菜场",
+      "english": "grocery store, grocery, food market, market"
+    },
+    "guillotine": {
+      "id": 583,
+      "chinese": "断头台",
+      "english": "guillotine"
+    },
+    "hair slide": {
+      "id": 584,
+      "chinese": "发饰",
+      "english": "hair slide"
+    },
+    "hair spray": {
+      "id": 585,
+      "chinese": "发蜡",
+      "english": "hair spray"
+    },
+    "half track": {
+      "id": 586,
+      "chinese": "坦克",
+      "english": "half track",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "hammer": {
+      "id": 587,
+      "chinese": "榔头",
+      "english": "hammer"
+    },
+    "hamper": {
+      "id": 588,
+      "chinese": "竹筒",
+      "english": "hamper"
+    },
+    "hand blower, blow dryer, blow drier, hair dryer, hair drier": {
+      "id": 589,
+      "chinese": "吹风机",
+      "english": "hand blower, blow dryer, blow drier, hair dryer, hair drier",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "hand-held computer, hand-held microcomputer": {
+      "id": 590,
+      "chinese": "pos机",
+      "english": "hand-held computer, hand-held microcomputer"
+    },
+    "handkerchief, hankie, hanky, hankey": {
+      "id": 591,
+      "chinese": "手帕",
+      "english": "handkerchief, hankie, hanky, hankey"
+    },
+    "hard disc, hard disk, fixed disk": {
+      "id": 592,
+      "chinese": "硬盘",
+      "english": "hard disc, hard disk, fixed disk"
+    },
+    "harmonica, mouth organ, harp, mouth harp": {
+      "id": 593,
+      "chinese": "口风琴",
+      "english": "harmonica, mouth organ, harp, mouth harp",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "harp": {
+      "id": 594,
+      "chinese": "竖琴",
+      "english": "harp",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "harvester, reaper": {
+      "id": 595,
+      "chinese": "起重机",
+      "english": "harvester, reaper",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "hatchet": {
+      "id": 596,
+      "chinese": "斧头",
+      "english": "hatchet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "holster": {
+      "id": 597,
+      "chinese": "手枪",
+      "english": "holster",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "home theater, home theatre": {
+      "id": 598,
+      "chinese": "电视机",
+      "english": "home theater, home theatre",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "honeycomb": {
+      "id": 599,
+      "chinese": "蜂巢",
+      "english": "honeycomb"
+    },
+    "hook, claw": {
+      "id": 600,
+      "chinese": "钩子",
+      "english": "hook, claw"
+    },
+    "hoopskirt, crinoline": {
+      "id": 601,
+      "chinese": "裙子",
+      "english": "hoopskirt, crinoline",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "horizontal bar, high bar": {
+      "id": 602,
+      "chinese": "体操",
+      "english": "horizontal bar, high bar"
+    },
+    "horse cart, horse-cart": {
+      "id": 603,
+      "chinese": "马车",
+      "english": "horse cart, horse-cart",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "hourglass": {
+      "id": 604,
+      "chinese": "沙漏",
+      "english": "hourglass",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "iPod": {
+      "id": 605,
+      "chinese": "音乐播放器",
+      "english": "iPod"
+    },
+    "iron, smoothing iron": {
+      "id": 606,
+      "chinese": "电熨斗",
+      "english": "iron, smoothing iron",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "jack-o’-lantern": {
+      "id": 607,
+      "chinese": "南瓜灯",
+      "english": "jack-o’-lantern"
+    },
+    "jean, blue jean, denim": {
+      "id": 608,
+      "chinese": "牛仔裤",
+      "english": "jean, blue jean, denim",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "heck, jeep, landrover": {
+      "id": 609,
+      "chinese": "吉普车",
+      "english": "heck, jeep, landrover",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "jersey, T-shirt, tee shirt": {
+      "id": 610,
+      "chinese": "T恤",
+      "english": "jersey, T-shirt, tee shirt",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "jigsaw puzzle": {
+      "id": 611,
+      "chinese": "拼图",
+      "english": "jigsaw puzzle"
+    },
+    "jinrikisha, ricksha, rickshaw": {
+      "id": 612,
+      "chinese": "黄包车",
+      "english": "jinrikisha, ricksha, rickshaw",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "joystick": {
+      "id": 613,
+      "chinese": "操纵杆",
+      "english": "joystick"
+    },
+    "kimono": {
+      "id": 614,
+      "chinese": "和服",
+      "english": "kimono"
+    },
+    "knee pad": {
+      "id": 615,
+      "chinese": "护具",
+      "english": "knee pad"
+    },
+    "knot": {
+      "id": 616,
+      "chinese": "绳结",
+      "english": "knot"
+    },
+    "lab coat, laboratory coat": {
+      "id": 617,
+      "chinese": "医生",
+      "english": "lab coat, laboratory coat"
+    },
+    "ladle": {
+      "id": 618,
+      "chinese": "勺子",
+      "english": "ladle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "lampshade, lamp shade": {
+      "id": 619,
+      "chinese": "灯",
+      "english": "lampshade, lamp shade"
+    },
+    "laptop, laptop computer": {
+      "id": 620,
+      "chinese": "笔记本电脑",
+      "english": "laptop, laptop computer",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "lawn mower, mower": {
+      "id": 621,
+      "chinese": "割草机",
+      "english": "lawn mower, mower",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "lens cap, lens cover": {
+      "id": 622,
+      "chinese": "镜头盖",
+      "english": "lens cap, lens cover",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "letter opener, paper knife, paperknife": {
+      "id": 623,
+      "chinese": "小刀",
+      "english": "letter opener, paper knife, paperknife"
+    },
+    "library": {
+      "id": 624,
+      "chinese": "图书馆",
+      "english": "library",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "lifeboat": {
+      "id": 625,
+      "chinese": "救生船",
+      "english": "lifeboat",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "lighter, light, igniter, ignitor": {
+      "id": 626,
+      "chinese": "打火机",
+      "english": "lighter, light, igniter, ignitor",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "heck, limousine, limo": {
+      "id": 627,
+      "chinese": "加长车",
+      "english": "heck, limousine, limo",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "liner, ocean liner": {
+      "id": 628,
+      "chinese": "轮船",
+      "english": "liner, ocean liner",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "lipstick, lip rouge": {
+      "id": 629,
+      "chinese": "口红",
+      "english": "lipstick, lip rouge",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "Loafer": {
+      "id": 630,
+      "chinese": "鞋子",
+      "english": "Loafer",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "lotion": {
+      "id": 631,
+      "chinese": "护肤品",
+      "english": "lotion",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "loudspeaker, speaker, speaker unit, loudspeaker system, speaker system": {
+      "id": 632,
+      "chinese": "音响",
+      "english": "loudspeaker, speaker, speaker unit, loudspeaker system, speaker system",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "loupe, jeweler’s loupe": {
+      "id": 633,
+      "chinese": "放大镜",
+      "english": "loupe, jeweler’s loupe"
+    },
+    "lumbermill, sawmill": {
+      "id": 634,
+      "chinese": "原木",
+      "english": "lumbermill, sawmill"
+    },
+    "magnetic compass": {
+      "id": 635,
+      "chinese": "指南针",
+      "english": "magnetic compass"
+    },
+    "mailbag, postbag": {
+      "id": 636,
+      "chinese": "包",
+      "english": "mailbag, postbag",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "mailbox, letter box": {
+      "id": 637,
+      "chinese": "邮箱",
+      "english": "mailbox, letter box"
+    },
+    "maillot": {
+      "id": 638,
+      "chinese": "泳衣",
+      "english": "maillot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "maillot, tank suit": {
+      "id": 639,
+      "chinese": "泳衣",
+      "english": "maillot, tank suit",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "manhole cover": {
+      "id": 640,
+      "chinese": "窨井盖",
+      "english": "manhole cover"
+    },
+    "maraca": {
+      "id": 641,
+      "chinese": "手摇铃",
+      "english": "maraca"
+    },
+    "marimba, xylophone": {
+      "id": 642,
+      "chinese": "木琴",
+      "english": "marimba, xylophone"
+    },
+    "mask": {
+      "id": 643,
+      "chinese": "面具",
+      "english": "mask"
+    },
+    "matchstick": {
+      "id": 644,
+      "chinese": "火柴",
+      "english": "matchstick",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "maypole": {
+      "id": 645,
+      "chinese": "绳子",
+      "english": "maypole"
+    },
+    "maze, labyrinth": {
+      "id": 646,
+      "chinese": "迷宫",
+      "english": "maze, labyrinth"
+    },
+    "measuring cup": {
+      "id": 647,
+      "chinese": "烧杯",
+      "english": "measuring cup"
+    },
+    "medicine chest, medicine cabinet": {
+      "id": 648,
+      "chinese": "冰箱",
+      "english": "medicine chest, medicine cabinet",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "megalith, megalithic structure": {
+      "id": 649,
+      "chinese": "石柱",
+      "english": "megalith, megalithic structure",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "microphone, mike": {
+      "id": 650,
+      "chinese": "话筒",
+      "english": "microphone, mike"
+    },
+    "microwave, microwave oven": {
+      "id": 651,
+      "chinese": "微波炉",
+      "english": "microwave, microwave oven",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "military uniform": {
+      "id": 652,
+      "chinese": "军人",
+      "english": "military uniform"
+    },
+    "milk can": {
+      "id": 653,
+      "chinese": "水壶",
+      "english": "milk can"
+    },
+    "heck, minibus": {
+      "id": 654,
+      "chinese": "小客车",
+      "english": "heck, minibus",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "miniskirt, mini": {
+      "id": 655,
+      "chinese": "短裙",
+      "english": "miniskirt, mini"
+    },
+    "heck, minivan": {
+      "id": 656,
+      "chinese": "面包车",
+      "english": "heck, minivan",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "missile": {
+      "id": 657,
+      "chinese": "导弹",
+      "english": "missile",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "mitten": {
+      "id": 658,
+      "chinese": "手套",
+      "english": "mitten",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "mixing bowl": {
+      "id": 659,
+      "chinese": "碗",
+      "english": "mixing bowl",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "mobile home, manufactured home": {
+      "id": 660,
+      "chinese": "房车",
+      "english": "mobile home, manufactured home",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "Model T": {
+      "id": 661,
+      "chinese": "老爷车",
+      "english": "Model T",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "modem": {
+      "id": 662,
+      "chinese": "路由器",
+      "english": "modem",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "monastery": {
+      "id": 663,
+      "chinese": "建筑",
+      "english": "monastery",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "monitor": {
+      "id": 664,
+      "chinese": "显示器",
+      "english": "monitor",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "heck, moped": {
+      "id": 665,
+      "chinese": "摩托车",
+      "english": "heck, moped",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "mortar": {
+      "id": 666,
+      "chinese": "砚",
+      "english": "mortar"
+    },
+    "mortarboard": {
+      "id": 667,
+      "chinese": "学士帽",
+      "english": "mortarboard"
+    },
+    "mosque": {
+      "id": 668,
+      "chinese": "建筑",
+      "english": "mosque",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "mosquito net": {
+      "id": 669,
+      "chinese": "蚊帐",
+      "english": "mosquito net",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "heck, motor scooter, scooter": {
+      "id": 670,
+      "chinese": "助动车",
+      "english": "heck, motor scooter, scooter",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "heck, mountain bike, all-terrain bike, off-roader": {
+      "id": 671,
+      "chinese": "自行车",
+      "english": "heck, mountain bike, all-terrain bike, off-roader",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "mountain tent": {
+      "id": 672,
+      "chinese": "帐篷",
+      "english": "mountain tent",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "mouse, computer mouse": {
+      "id": 673,
+      "chinese": "键盘鼠标",
+      "english": "mouse, computer mouse",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "mousetrap": {
+      "id": 674,
+      "chinese": "捕鼠夹",
+      "english": "mousetrap",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "车 check, moving van": {
+      "id": 675,
+      "chinese": "货车",
+      "english": "车 check, moving van",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "muzzle": {
+      "id": 676,
+      "chinese": "狗嘴套",
+      "english": "muzzle",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "nail": {
+      "id": 677,
+      "chinese": "钉子",
+      "english": "nail",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "neck brace": {
+      "id": 678,
+      "chinese": "颈托",
+      "english": "neck brace",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "necklace": {
+      "id": 679,
+      "chinese": "项链",
+      "english": "necklace",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "nipple": {
+      "id": 680,
+      "chinese": "奶瓶",
+      "english": "nipple",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "notebook, notebook computer": {
+      "id": 681,
+      "chinese": "笔记本电脑",
+      "english": "notebook, notebook computer",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "obelisk": {
+      "id": 682,
+      "chinese": "建筑",
+      "english": "obelisk",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "oboe, hautboy, hautbois": {
+      "id": 683,
+      "chinese": "黑管",
+      "english": "oboe, hautboy, hautbois",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "ocarina, sweet potato": {
+      "id": 684,
+      "chinese": "埙",
+      "english": "ocarina, sweet potato",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "odometer, hodometer, mileometer, milometer": {
+      "id": 685,
+      "chinese": "仪表盘",
+      "english": "odometer, hodometer, mileometer, milometer"
+    },
+    "oil filter": {
+      "id": 686,
+      "chinese": "机油滤清器",
+      "english": "oil filter"
+    },
+    "organ, pipe organ": {
+      "id": 687,
+      "chinese": "管风琴",
+      "english": "organ, pipe organ",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "oscilloscope, scope, cathode-ray oscilloscope, CRO": {
+      "id": 688,
+      "chinese": "示波器",
+      "english": "oscilloscope, scope, cathode-ray oscilloscope, CRO"
+    },
+    "overskirt": {
+      "id": 689,
+      "chinese": "礼服",
+      "english": "overskirt"
+    },
+    "oxcart": {
+      "id": 690,
+      "chinese": "牛车",
+      "english": "oxcart",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "oxygen mask": {
+      "id": 691,
+      "chinese": "呼吸器",
+      "english": "oxygen mask"
+    },
+    "packet": {
+      "id": 692,
+      "chinese": "零食",
+      "english": "packet"
+    },
+    "paddle, boat paddle": {
+      "id": 693,
+      "chinese": "划桨",
+      "english": "paddle, boat paddle"
+    },
+    "paddlewheel, paddle wheel": {
+      "id": 694,
+      "chinese": "水轮",
+      "english": "paddlewheel, paddle wheel"
+    },
+    "padlock": {
+      "id": 695,
+      "chinese": "锁",
+      "english": "padlock",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "paintbrush": {
+      "id": 696,
+      "chinese": "刷子",
+      "english": "paintbrush",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pajama, pyjama, pj’s, jammies": {
+      "id": 697,
+      "chinese": "睡衣",
+      "english": "pajama, pyjama, pj’s, jammies",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "palace": {
+      "id": 698,
+      "chinese": "建筑",
+      "english": "palace",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "panpipe, pandean pipe, syrinx": {
+      "id": 699,
+      "chinese": "乐器",
+      "english": "panpipe, pandean pipe, syrinx"
+    },
+    "paper towel": {
+      "id": 700,
+      "chinese": "纸巾",
+      "english": "paper towel"
+    },
+    "parachute, chute": {
+      "id": 701,
+      "chinese": "降落伞",
+      "english": "parachute, chute"
+    },
+    "parallel bars, bars": {
+      "id": 702,
+      "chinese": "体操",
+      "english": "parallel bars, bars"
+    },
+    "park bench": {
+      "id": 703,
+      "chinese": "长椅",
+      "english": "park bench",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "parking meter": {
+      "id": 704,
+      "chinese": "停车缴费器",
+      "english": "parking meter",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "heck, passenger car, coach, carriage": {
+      "id": 705,
+      "chinese": "火车",
+      "english": "heck, passenger car, coach, carriage",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "patio, terrace": {
+      "id": 706,
+      "chinese": "院子",
+      "english": "patio, terrace"
+    },
+    "pay-phone, pay-station": {
+      "id": 707,
+      "chinese": "公用电话",
+      "english": "pay-phone, pay-station",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pedestal, plinth, footstall": {
+      "id": 708,
+      "chinese": "柱子",
+      "english": "pedestal, plinth, footstall"
+    },
+    "pencil box, pencil case": {
+      "id": 709,
+      "chinese": "文具袋",
+      "english": "pencil box, pencil case"
+    },
+    "pencil sharpener": {
+      "id": 710,
+      "chinese": "卷笔刀",
+      "english": "pencil sharpener",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "perfume, essence": {
+      "id": 711,
+      "chinese": "香水",
+      "english": "perfume, essence",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "Petri dish": {
+      "id": 712,
+      "chinese": "培养皿",
+      "english": "Petri dish"
+    },
+    "photocopier": {
+      "id": 713,
+      "chinese": "打印机",
+      "english": "photocopier",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pick, plectrum, plectron": {
+      "id": 714,
+      "chinese": "吉他拨片",
+      "english": "pick, plectrum, plectron",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pickelhaube": {
+      "id": 715,
+      "chinese": "头盔",
+      "english": "pickelhaube",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "picket fence, paling": {
+      "id": 716,
+      "chinese": "栅栏",
+      "english": "picket fence, paling",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "heck, pickup, pickup truck": {
+      "id": 717,
+      "chinese": "轿车",
+      "english": "heck, pickup, pickup truck",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "pier": {
+      "id": 718,
+      "chinese": "桥",
+      "english": "pier",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "piggy bank, penny bank": {
+      "id": 719,
+      "chinese": "储蓄罐",
+      "english": "piggy bank, penny bank"
+    },
+    "pill bottle": {
+      "id": 720,
+      "chinese": "药丸",
+      "english": "pill bottle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pillow": {
+      "id": 721,
+      "chinese": "枕头",
+      "english": "pillow",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "ping-pong ball": {
+      "id": 722,
+      "chinese": "乒乓球",
+      "english": "ping-pong ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "pinwheel": {
+      "id": 723,
+      "chinese": "风车",
+      "english": "pinwheel",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "pirate, pirate ship": {
+      "id": 724,
+      "chinese": "帆船",
+      "english": "pirate, pirate ship",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "pitcher, ewer": {
+      "id": 725,
+      "chinese": "茶壶",
+      "english": "pitcher, ewer",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "plane, carpenter’s plane, woodworking plane": {
+      "id": 726,
+      "chinese": "刨子",
+      "english": "plane, carpenter’s plane, woodworking plane"
+    },
+    "planetarium": {
+      "id": 727,
+      "chinese": "建筑",
+      "english": "planetarium",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "plastic bag": {
+      "id": 728,
+      "chinese": "塑料袋",
+      "english": "plastic bag",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "plate rack": {
+      "id": 729,
+      "chinese": "碗架",
+      "english": "plate rack",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "plow, plough": {
+      "id": 730,
+      "chinese": "推土机",
+      "english": "plow, plough"
+    },
+    "plunger, plumber’s helper": {
+      "id": 731,
+      "chinese": "搋子",
+      "english": "plunger, plumber’s helper"
+    },
+    "Polaroid camera, Polaroid Land camera": {
+      "id": 732,
+      "chinese": "相机",
+      "english": "Polaroid camera, Polaroid Land camera",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pole": {
+      "id": 733,
+      "chinese": "杆子",
+      "english": "pole"
+    },
+    "heck, police van, police wagon, paddy wagon, patrol wagon, wagon, black Maria": {
+      "id": 734,
+      "chinese": "警车",
+      "english": "heck, police van, police wagon, paddy wagon, patrol wagon, wagon, black Maria",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "poncho": {
+      "id": 735,
+      "chinese": "披风",
+      "english": "poncho",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "pool table, billiard table, snooker table": {
+      "id": 736,
+      "chinese": "桌球",
+      "english": "pool table, billiard table, snooker table",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "pop bottle, soda bottle": {
+      "id": 737,
+      "chinese": "瓶子",
+      "english": "pop bottle, soda bottle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "pot, flowerpot": {
+      "id": 738,
+      "chinese": "盆栽",
+      "english": "pot, flowerpot",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "potter’s wheel": {
+      "id": 739,
+      "chinese": "陶艺",
+      "english": "potter’s wheel"
+    },
+    "power drill": {
+      "id": 740,
+      "chinese": "钻机",
+      "english": "power drill"
+    },
+    "prayer rug, prayer mat": {
+      "id": 741,
+      "chinese": "毯子",
+      "english": "prayer rug, prayer mat",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "printer": {
+      "id": 742,
+      "chinese": "打印机",
+      "english": "printer",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "prison, prison house": {
+      "id": 743,
+      "chinese": "监狱",
+      "english": "prison, prison house"
+    },
+    "projectile, missile": {
+      "id": 744,
+      "chinese": "导弹",
+      "english": "projectile, missile",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "projector": {
+      "id": 745,
+      "chinese": "投影仪",
+      "english": "projector",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "puck, hockey puck": {
+      "id": 746,
+      "chinese": "冰球",
+      "english": "puck, hockey puck",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "punching bag, punch bag, punching ball, punchball": {
+      "id": 747,
+      "chinese": "拳击",
+      "english": "punching bag, punch bag, punching ball, punchball"
+    },
+    "purse": {
+      "id": 748,
+      "chinese": "手提袋",
+      "english": "purse"
+    },
+    "quill, quill pen": {
+      "id": 749,
+      "chinese": "羽毛笔",
+      "english": "quill, quill pen",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "子, quilt, comforter, comfort, puff": {
+      "id": 750,
+      "chinese": "床",
+      "english": "子, quilt, comforter, comfort, puff",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "racer, race car, racing car": {
+      "id": 751,
+      "chinese": "赛车",
+      "english": "racer, race car, racing car",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "racket, racquet": {
+      "id": 752,
+      "chinese": "网球",
+      "english": "racket, racquet",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "radiator": {
+      "id": 753,
+      "chinese": "加热器",
+      "english": "radiator"
+    },
+    "radio, wireless": {
+      "id": 754,
+      "chinese": "收音机",
+      "english": "radio, wireless",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "radio telescope, radio reflector": {
+      "id": 755,
+      "chinese": "卫星接收器",
+      "english": "radio telescope, radio reflector",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "rain barrel": {
+      "id": 756,
+      "chinese": "酒桶",
+      "english": "rain barrel",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "recreational vehicle, RV, R.V.": {
+      "id": 757,
+      "chinese": "房车",
+      "english": "recreational vehicle, RV, R.V.",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "reel": {
+      "id": 758,
+      "chinese": "鱼竿",
+      "english": "reel",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "reflex camera": {
+      "id": 759,
+      "chinese": "相机",
+      "english": "reflex camera",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "refrigerator, icebox": {
+      "id": 760,
+      "chinese": "冰箱",
+      "english": "refrigerator, icebox",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "remote control, remote": {
+      "id": 761,
+      "chinese": "遥控器",
+      "english": "remote control, remote",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "restaurant, eating house, eating place, eatery": {
+      "id": 762,
+      "chinese": "餐厅",
+      "english": "restaurant, eating house, eating place, eatery",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "revolver, six-gun, six-shooter": {
+      "id": 763,
+      "chinese": "手枪",
+      "english": "revolver, six-gun, six-shooter",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "rifle": {
+      "id": 764,
+      "chinese": "狙击枪",
+      "english": "rifle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "rocking chair, rocker": {
+      "id": 765,
+      "chinese": "摇椅",
+      "english": "rocking chair, rocker",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "rotisserie": {
+      "id": 766,
+      "chinese": "烤箱",
+      "english": "rotisserie",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "rubber eraser, rubber, pencil eraser": {
+      "id": 767,
+      "chinese": "橡皮",
+      "english": "rubber eraser, rubber, pencil eraser",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "rugby ball": {
+      "id": 768,
+      "chinese": "橄榄球",
+      "english": "rugby ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "rule, ruler": {
+      "id": 769,
+      "chinese": "尺",
+      "english": "rule, ruler",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "running shoe": {
+      "id": 770,
+      "chinese": "运动鞋",
+      "english": "running shoe",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "safe": {
+      "id": 771,
+      "chinese": "保险箱",
+      "english": "safe",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "safety pin": {
+      "id": 772,
+      "chinese": "回形针",
+      "english": "safety pin",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "saltshaker, salt shaker": {
+      "id": 773,
+      "chinese": "调料瓶",
+      "english": "saltshaker, salt shaker"
+    },
+    "sandal": {
+      "id": 774,
+      "chinese": "拖鞋",
+      "english": "sandal",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sarong": {
+      "id": 775,
+      "chinese": "长裙",
+      "english": "sarong"
+    },
+    "sax, saxophone": {
+      "id": 776,
+      "chinese": "萨克斯",
+      "english": "sax, saxophone",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "scabbard": {
+      "id": 777,
+      "chinese": "剑",
+      "english": "scabbard",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "scale, weighing machine": {
+      "id": 778,
+      "chinese": "秤",
+      "english": "scale, weighing machine"
+    },
+    "school bus": {
+      "id": 779,
+      "chinese": "校车",
+      "english": "school bus",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "schooner": {
+      "id": 780,
+      "chinese": "帆船",
+      "english": "schooner",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "scoreboard": {
+      "id": 781,
+      "chinese": "计分板",
+      "english": "scoreboard",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "screen, CRT screen": {
+      "id": 782,
+      "chinese": "显示器",
+      "english": "screen, CRT screen",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "screw": {
+      "id": 783,
+      "chinese": "螺丝",
+      "english": "screw"
+    },
+    "screwdriver": {
+      "id": 784,
+      "chinese": "螺丝刀",
+      "english": "screwdriver",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "seat belt, seatbelt": {
+      "id": 785,
+      "chinese": "安全带",
+      "english": "seat belt, seatbelt"
+    },
+    "sewing machine": {
+      "id": 786,
+      "chinese": "缝纫机",
+      "english": "sewing machine",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "shield, buckler": {
+      "id": 787,
+      "chinese": "盾牌",
+      "english": "shield, buckler",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "shoe shop, shoe-shop, shoe store": {
+      "id": 788,
+      "chinese": "鞋店",
+      "english": "shoe shop, shoe-shop, shoe store"
+    },
+    "shoji": {
+      "id": 789,
+      "chinese": "榻榻米",
+      "english": "shoji"
+    },
+    "shopping basket": {
+      "id": 790,
+      "chinese": "购物篮",
+      "english": "shopping basket"
+    },
+    "shopping cart": {
+      "id": 791,
+      "chinese": "购物车",
+      "english": "shopping cart",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "shovel": {
+      "id": 792,
+      "chinese": "铲子",
+      "english": "shovel"
+    },
+    "shower cap": {
+      "id": 793,
+      "chinese": "浴帽",
+      "english": "shower cap"
+    },
+    "shower curtain": {
+      "id": 794,
+      "chinese": "浴帘",
+      "english": "shower curtain"
+    },
+    "ski": {
+      "id": 795,
+      "chinese": "滑雪",
+      "english": "ski",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "ski mask": {
+      "id": 796,
+      "chinese": "面罩",
+      "english": "ski mask"
+    },
+    "sleeping bag": {
+      "id": 797,
+      "chinese": "睡袋",
+      "english": "sleeping bag",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "slide rule, slipstick": {
+      "id": 798,
+      "chinese": "游标卡尺",
+      "english": "slide rule, slipstick",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sliding door": {
+      "id": 799,
+      "chinese": "移门",
+      "english": "sliding door",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "slot, one-armed bandit": {
+      "id": 800,
+      "chinese": "老虎机",
+      "english": "slot, one-armed bandit",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "snorkel": {
+      "id": 801,
+      "chinese": "游泳眼镜",
+      "english": "snorkel",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "snowmobile": {
+      "id": 802,
+      "chinese": "滑雪车",
+      "english": "snowmobile",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "snowplow, snowplough": {
+      "id": 803,
+      "chinese": "铲雪车",
+      "english": "snowplow, snowplough",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "soap dispenser": {
+      "id": 804,
+      "chinese": "洗手液",
+      "english": "soap dispenser"
+    },
+    "soccer ball": {
+      "id": 805,
+      "chinese": "足球",
+      "english": "soccer ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "sock": {
+      "id": 806,
+      "chinese": "袜子",
+      "english": "sock",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "solar dish, solar collector, solar furnace": {
+      "id": 807,
+      "chinese": "太阳能板",
+      "english": "solar dish, solar collector, solar furnace",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "sombrero": {
+      "id": 808,
+      "chinese": "帽子",
+      "english": "sombrero",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "soup bowl": {
+      "id": 809,
+      "chinese": "碗",
+      "english": "soup bowl",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "space bar": {
+      "id": 810,
+      "chinese": "键盘",
+      "english": "space bar",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "space heater": {
+      "id": 811,
+      "chinese": "电热器",
+      "english": "space heater"
+    },
+    "space shuttle": {
+      "id": 812,
+      "chinese": "航天飞船",
+      "english": "space shuttle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "spatula": {
+      "id": 813,
+      "chinese": "锅铲",
+      "english": "spatula"
+    },
+    "speedboat": {
+      "id": 814,
+      "chinese": "快艇",
+      "english": "speedboat",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "spider web, spider’s web": {
+      "id": 815,
+      "chinese": "蜘蛛网",
+      "english": "spider web, spider’s web",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "spindle": {
+      "id": 816,
+      "chinese": "毛线",
+      "english": "spindle"
+    },
+    "heck, sports car, sport car": {
+      "id": 817,
+      "chinese": "运动型轿车",
+      "english": "heck, sports car, sport car",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "spotlight, spot": {
+      "id": 818,
+      "chinese": "探照灯",
+      "english": "spotlight, spot"
+    },
+    "stage": {
+      "id": 819,
+      "chinese": "乐队",
+      "english": "stage"
+    },
+    "steam locomotive": {
+      "id": 820,
+      "chinese": "蒸汽机车",
+      "english": "steam locomotive",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "steel arch bridge": {
+      "id": 821,
+      "chinese": "桥",
+      "english": "steel arch bridge",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "steel drum": {
+      "id": 822,
+      "chinese": "鼓",
+      "english": "steel drum",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "stethoscope": {
+      "id": 823,
+      "chinese": "听诊器",
+      "english": "stethoscope",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "stole": {
+      "id": 824,
+      "chinese": "担架",
+      "english": "stole",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "stone wall": {
+      "id": 825,
+      "chinese": "石堆",
+      "english": "stone wall",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "stopwatch, stop watch": {
+      "id": 826,
+      "chinese": "秒表",
+      "english": "stopwatch, stop watch",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "stove": {
+      "id": 827,
+      "chinese": "火炉",
+      "english": "stove"
+    },
+    "strainer": {
+      "id": 828,
+      "chinese": "滤网",
+      "english": "strainer"
+    },
+    "heck, streetcar, tram, tramcar, trolley, trolley car": {
+      "id": 829,
+      "chinese": "公交车",
+      "english": "heck, streetcar, tram, tramcar, trolley, trolley car",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "stretcher": {
+      "id": 830,
+      "chinese": "担架",
+      "english": "stretcher",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "studio couch, day bed": {
+      "id": 831,
+      "chinese": "沙发",
+      "english": "studio couch, day bed",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "stupa, tope": {
+      "id": 832,
+      "chinese": "皇宫",
+      "english": "stupa, tope"
+    },
+    "submarine, pigboat, sub, U-boat": {
+      "id": 833,
+      "chinese": "轮船",
+      "english": "submarine, pigboat, sub, U-boat",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "suit, suit of clothes": {
+      "id": 834,
+      "chinese": "西装",
+      "english": "suit, suit of clothes",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sundial": {
+      "id": 835,
+      "chinese": "日晷",
+      "english": "sundial",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sunglass": {
+      "id": 836,
+      "chinese": "墨镜",
+      "english": "sunglass",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sunglasses, dark glasses, shades": {
+      "id": 837,
+      "chinese": "墨镜",
+      "english": "sunglasses, dark glasses, shades",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sunscreen, sunblock, sun blocker": {
+      "id": 838,
+      "chinese": "防晒霜",
+      "english": "sunscreen, sunblock, sun blocker",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "suspension bridge": {
+      "id": 839,
+      "chinese": "桥",
+      "english": "suspension bridge",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "swab, swob, mop": {
+      "id": 840,
+      "chinese": "拖把",
+      "english": "swab, swob, mop",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "sweatshirt": {
+      "id": 841,
+      "chinese": "连帽衫",
+      "english": "sweatshirt",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "swimming trunks, bathing trunks": {
+      "id": 842,
+      "chinese": "沙滩裤",
+      "english": "swimming trunks, bathing trunks",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "swing": {
+      "id": 843,
+      "chinese": "秋千",
+      "english": "swing",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "switch, electric switch, electrical switch": {
+      "id": 844,
+      "chinese": "开关",
+      "english": "switch, electric switch, electrical switch",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "syringe": {
+      "id": 845,
+      "chinese": "针筒",
+      "english": "syringe",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "table lamp": {
+      "id": 846,
+      "chinese": "台灯",
+      "english": "table lamp",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "tank, army tank, armored combat vehicle, armoured combat vehicle": {
+      "id": 847,
+      "chinese": "坦克",
+      "english": "tank, army tank, armored combat vehicle, armoured combat vehicle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "tape player": {
+      "id": 848,
+      "chinese": "磁带播放器",
+      "english": "tape player",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "teapot": {
+      "id": 849,
+      "chinese": "茶壶",
+      "english": "teapot",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "teddy, teddy bear": {
+      "id": 850,
+      "chinese": "毛绒玩具",
+      "english": "teddy, teddy bear",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "television, television system": {
+      "id": 851,
+      "chinese": "电视机",
+      "english": "television, television system",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "tennis ball": {
+      "id": 852,
+      "chinese": "网球",
+      "english": "tennis ball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "thatch, thatched roof": {
+      "id": 853,
+      "chinese": "草屋",
+      "english": "thatch, thatched roof",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "theater curtain, theatre curtain": {
+      "id": 854,
+      "chinese": "幕布",
+      "english": "theater curtain, theatre curtain",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "thimble": {
+      "id": 855,
+      "chinese": "指套",
+      "english": "thimble"
+    },
+    "thresher, thrasher, threshing machine": {
+      "id": 856,
+      "chinese": "装甲车",
+      "english": "thresher, thrasher, threshing machine",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "throne": {
+      "id": 857,
+      "chinese": "皇位",
+      "english": "throne"
+    },
+    "tile roof": {
+      "id": 858,
+      "chinese": "瓦片",
+      "english": "tile roof"
+    },
+    "toaster": {
+      "id": 859,
+      "chinese": "面包机",
+      "english": "toaster",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "tobacco shop, tobacconist shop, tobacconist": {
+      "id": 860,
+      "chinese": "烟酒店",
+      "english": "tobacco shop, tobacconist shop, tobacconist",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "toilet seat": {
+      "id": 861,
+      "chinese": "马桶",
+      "english": "toilet seat",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "torch": {
+      "id": 862,
+      "chinese": "火炬",
+      "english": "torch"
+    },
+    "totem pole": {
+      "id": 863,
+      "chinese": "图腾",
+      "english": "totem pole"
+    },
+    "heck, tow truck, tow car, wrecker": {
+      "id": 864,
+      "chinese": "大卡车",
+      "english": "heck, tow truck, tow car, wrecker",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "toyshop": {
+      "id": 865,
+      "chinese": "玩具店",
+      "english": "toyshop"
+    },
+    "tractor": {
+      "id": 866,
+      "chinese": "拖拉机",
+      "english": "tractor"
+    },
+    "heck, trailer truck, tractor trailer, trucking rig, rig, articulated lorry, semi": {
+      "id": 867,
+      "chinese": "大货车",
+      "english": "heck, trailer truck, tractor trailer, trucking rig, rig, articulated lorry, semi",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "子, tray": {
+      "id": 868,
+      "chinese": "碟子",
+      "english": "子, tray"
+    },
+    "trench coat": {
+      "id": 869,
+      "chinese": "风衣",
+      "english": "trench coat",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "tricycle, trike, velocipede": {
+      "id": 870,
+      "chinese": "儿童自行车",
+      "english": "tricycle, trike, velocipede",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "trimaran": {
+      "id": 871,
+      "chinese": "船",
+      "english": "trimaran",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "tripod": {
+      "id": 872,
+      "chinese": "三脚架",
+      "english": "tripod"
+    },
+    "triumphal arch": {
+      "id": 873,
+      "chinese": "拱门",
+      "english": "triumphal arch",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "heck, trolleybus, trolley coach, trackless trolley": {
+      "id": 874,
+      "chinese": "巴士",
+      "english": "heck, trolleybus, trolley coach, trackless trolley"
+    },
+    "trombone": {
+      "id": 875,
+      "chinese": "长号",
+      "english": "trombone",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "tub, vat": {
+      "id": 876,
+      "chinese": "浴缸",
+      "english": "tub, vat"
+    },
+    "turnstile": {
+      "id": 877,
+      "chinese": "闸机",
+      "english": "turnstile"
+    },
+    "typewriter keyboard": {
+      "id": 878,
+      "chinese": "打字机",
+      "english": "typewriter keyboard"
+    },
+    "umbrella": {
+      "id": 879,
+      "chinese": "伞",
+      "english": "umbrella"
+    },
+    "unicycle, monocycle": {
+      "id": 880,
+      "chinese": "独轮车",
+      "english": "unicycle, monocycle",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "upright, upright piano": {
+      "id": 881,
+      "chinese": "钢琴",
+      "english": "upright, upright piano",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "vacuum, vacuum cleaner": {
+      "id": 882,
+      "chinese": "吸尘器",
+      "english": "vacuum, vacuum cleaner"
+    },
+    "vase": {
+      "id": 883,
+      "chinese": "花瓶",
+      "english": "vase",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "vault": {
+      "id": 884,
+      "chinese": "拱廊",
+      "english": "vault"
+    },
+    "velvet": {
+      "id": 885,
+      "chinese": "珊瑚绒",
+      "english": "velvet",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "vending machine": {
+      "id": 886,
+      "chinese": "自动贩卖机",
+      "english": "vending machine"
+    },
+    "vestment": {
+      "id": 887,
+      "chinese": "教皇袍",
+      "english": "vestment"
+    },
+    "viaduct": {
+      "id": 888,
+      "chinese": "桥",
+      "english": "viaduct",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "violin, fiddle": {
+      "id": 889,
+      "chinese": "小提琴",
+      "english": "violin, fiddle",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "volleyball": {
+      "id": 890,
+      "chinese": "排球",
+      "english": "volleyball",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "waffle iron": {
+      "id": 891,
+      "chinese": "煎饼锅",
+      "english": "waffle iron",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "wall clock": {
+      "id": 892,
+      "chinese": "挂钟",
+      "english": "wall clock"
+    },
+    "wallet, billfold, notecase, pocketbook": {
+      "id": 893,
+      "chinese": "钱夹",
+      "english": "wallet, billfold, notecase, pocketbook"
+    },
+    "wardrobe, closet, press": {
+      "id": 894,
+      "chinese": "柜子",
+      "english": "wardrobe, closet, press",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "warplane, military plane": {
+      "id": 895,
+      "chinese": "飞机",
+      "english": "warplane, military plane",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "washbasin, handbasin, washbowl, lavabo, wash-hand basin": {
+      "id": 896,
+      "chinese": "台盆",
+      "english": "washbasin, handbasin, washbowl, lavabo, wash-hand basin"
+    },
+    "washer, automatic washer, washing machine": {
+      "id": 897,
+      "chinese": "洗衣机",
+      "english": "washer, automatic washer, washing machine",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "water bottle": {
+      "id": 898,
+      "chinese": "水瓶",
+      "english": "water bottle"
+    },
+    "water jug": {
+      "id": 899,
+      "chinese": "水壶",
+      "english": "water jug"
+    },
+    "water tower": {
+      "id": 900,
+      "chinese": "煤气包",
+      "english": "water tower",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "whiskey jug": {
+      "id": 901,
+      "chinese": "水壶",
+      "english": "whiskey jug"
+    },
+    "whistle": {
+      "id": 902,
+      "chinese": "哨子",
+      "english": "whistle"
+    },
+    "wig": {
+      "id": 903,
+      "chinese": "头发",
+      "english": "wig"
+    },
+    "window screen": {
+      "id": 904,
+      "chinese": "窗户",
+      "english": "window screen",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "window shade": {
+      "id": 905,
+      "chinese": "百叶窗",
+      "english": "window shade",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "Windsor tie": {
+      "id": 906,
+      "chinese": "领带",
+      "english": "Windsor tie"
+    },
+    "wine bottle": {
+      "id": 907,
+      "chinese": "葡萄酒",
+      "english": "wine bottle",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "wing": {
+      "id": 908,
+      "chinese": "飞机",
+      "english": "wing",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "wok": {
+      "id": 909,
+      "chinese": "炒锅",
+      "english": "wok"
+    },
+    "wooden spoon": {
+      "id": 910,
+      "chinese": "勺子",
+      "english": "wooden spoon",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "wool, woolen, woollen": {
+      "id": 911,
+      "chinese": "围巾",
+      "english": "wool, woolen, woollen",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "worm fence, snake fence, snake-rail fence, Virginia fence": {
+      "id": 912,
+      "chinese": "栅栏",
+      "english": "worm fence, snake fence, snake-rail fence, Virginia fence",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "wreck": {
+      "id": 913,
+      "chinese": "沉船",
+      "english": "wreck",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "yawl": {
+      "id": 914,
+      "chinese": "帆船",
+      "english": "yawl",
+      "category": "transportation",
+      "subcategory": "land_vehicles"
+    },
+    "yurt": {
+      "id": 915,
+      "chinese": "蒙古包",
+      "english": "yurt",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "web site, website, internet site, site": {
+      "id": 916,
+      "chinese": "网页",
+      "english": "web site, website, internet site, site"
+    },
+    "comic book": {
+      "id": 917,
+      "chinese": "海报",
+      "english": "comic book",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "crossword puzzle, crossword": {
+      "id": 918,
+      "chinese": "填字游戏",
+      "english": "crossword puzzle, crossword"
+    },
+    "street sign": {
+      "id": 919,
+      "chinese": "交通标志",
+      "english": "street sign",
+      "category": "infrastructure",
+      "subcategory": "traffic_signs"
+    },
+    "traffic light, traffic signal, stoplight": {
+      "id": 920,
+      "chinese": "交通灯",
+      "english": "traffic light, traffic signal, stoplight"
+    },
+    "book jacket, dust cover, dust jacket, dust wrapper": {
+      "id": 921,
+      "chinese": "书",
+      "english": "book jacket, dust cover, dust jacket, dust wrapper",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "menu": {
+      "id": 922,
+      "chinese": "菜单",
+      "english": "menu",
+      "category": "daily_items", 
+      "subcategory": "tools"
+    },
+    "plate": {
+      "id": 923,
+      "chinese": "盘子",
+      "english": "plate",
+      "category": "daily_items",
+      "subcategory": "tools"
+    },
+    "guacamole": {
+      "id": 924,
+      "chinese": "墨西哥鳄梨酱",
+      "english": "guacamole",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "consomme": {
+      "id": 925,
+      "chinese": "清炖肉汤",
+      "english": "consomme",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "hot pot, hotpot": {
+      "id": 926,
+      "chinese": "焖罐",
+      "english": "hot pot, hotpot",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "trifle": {
+      "id": 927,
+      "chinese": "蛋糕",
+      "english": "trifle",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "ice cream, icecream": {
+      "id": 928,
+      "chinese": "冰激凌",
+      "english": "ice cream, icecream",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "ice lolly, lolly, lollipop, popsicle": {
+      "id": 929,
+      "chinese": "棒冰",
+      "english": "ice lolly, lolly, lollipop, popsicle",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "French loaf": {
+      "id": 930,
+      "chinese": "面包",
+      "english": "French loaf",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "bagel, beigel": {
+      "id": 931,
+      "chinese": "甜甜圈",
+      "english": "bagel, beigel"
+    },
+    "pretzel": {
+      "id": 932,
+      "chinese": "面包",
+      "english": "pretzel",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "cheeseburger": {
+      "id": 933,
+      "chinese": "汉堡",
+      "english": "cheeseburger",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "hotdog, hot dog, red hot": {
+      "id": 934,
+      "chinese": "热狗",
+      "english": "hotdog, hot dog, red hot",
+      "category": "animals",
+      "subcategory": "all_animals"
+    },
+    "mashed potato": {
+      "id": 935,
+      "chinese": "焗饭",
+      "english": "mashed potato"
+    },
+    "head cabbage": {
+      "id": 936,
+      "chinese": "蔬菜",
+      "english": "head cabbage",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "broccoli": {
+      "id": 937,
+      "chinese": "西蓝花",
+      "english": "broccoli",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "cauliflower": {
+      "id": 938,
+      "chinese": "花椰菜",
+      "english": "cauliflower",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "zucchini, courgette": {
+      "id": 939,
+      "chinese": "蔬菜",
+      "english": "zucchini, courgette",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "spaghetti squash": {
+      "id": 940,
+      "chinese": "金瓜",
+      "english": "spaghetti squash"
+    },
+    "acorn squash": {
+      "id": 941,
+      "chinese": "南瓜",
+      "english": "acorn squash"
+    },
+    "butternut squash": {
+      "id": 942,
+      "chinese": "南瓜",
+      "english": "butternut squash"
+    },
+    "cucumber, cuke": {
+      "id": 943,
+      "chinese": "黄瓜",
+      "english": "cucumber, cuke",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "artichoke, globe artichoke": {
+      "id": 944,
+      "chinese": "蔬菜",
+      "english": "artichoke, globe artichoke",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "椒 红椒, bell pepper": {
+      "id": 945,
+      "chinese": "青椒",
+      "english": "椒 红椒, bell pepper"
+    },
+    "cardoon": {
+      "id": 946,
+      "chinese": "花",
+      "english": "cardoon",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "mushroom": {
+      "id": 947,
+      "chinese": "蘑菇",
+      "english": "mushroom"
+    },
+    "Granny Smith": {
+      "id": 948,
+      "chinese": "苹果",
+      "english": "Granny Smith",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "strawberry": {
+      "id": 949,
+      "chinese": "草莓",
+      "english": "strawberry",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "orange": {
+      "id": 950,
+      "chinese": "橙子",
+      "english": "orange",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "lemon": {
+      "id": 951,
+      "chinese": "柠檬",
+      "english": "lemon",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "fig": {
+      "id": 952,
+      "chinese": "水果",
+      "english": "fig",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "pineapple, ananas": {
+      "id": 953,
+      "chinese": "菠萝",
+      "english": "pineapple, ananas",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "banana": {
+      "id": 954,
+      "chinese": "香蕉",
+      "english": "banana",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "jackfruit, jak, jack": {
+      "id": 955,
+      "chinese": "榴莲",
+      "english": "jackfruit, jak, jack"
+    },
+    "custard apple": {
+      "id": 956,
+      "chinese": "水果",
+      "english": "custard apple",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "pomegranate": {
+      "id": 957,
+      "chinese": "石榴",
+      "english": "pomegranate",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "hay": {
+      "id": 958,
+      "chinese": "草垛",
+      "english": "hay",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "carbonara": {
+      "id": 959,
+      "chinese": "意大利面",
+      "english": "carbonara"
+    },
+    "chocolate sauce, chocolate syrup": {
+      "id": 960,
+      "chinese": "甜品",
+      "english": "chocolate sauce, chocolate syrup"
+    },
+    "dough": {
+      "id": 961,
+      "chinese": "面团",
+      "english": "dough"
+    },
+    "meat loaf, meatloaf": {
+      "id": 962,
+      "chinese": "肉酱",
+      "english": "meat loaf, meatloaf",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "pizza, pizza pie": {
+      "id": 963,
+      "chinese": "披萨",
+      "english": "pizza, pizza pie",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "potpie": {
+      "id": 964,
+      "chinese": "派",
+      "english": "potpie"
+    },
+    "burrito": {
+      "id": 965,
+      "chinese": "肉卷",
+      "english": "burrito",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "red wine": {
+      "id": 966,
+      "chinese": "红酒",
+      "english": "red wine",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "espresso": {
+      "id": 967,
+      "chinese": "咖啡",
+      "english": "espresso",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "cup": {
+      "id": 968,
+      "chinese": "茶",
+      "english": "cup",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "eggnog": {
+      "id": 969,
+      "chinese": "饮料杯",
+      "english": "eggnog"
+    },
+    "alp": {
+      "id": 970,
+      "chinese": "雪山",
+      "english": "alp",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "bubble": {
+      "id": 971,
+      "chinese": "泡泡",
+      "english": "bubble"
+    },
+    "cliff, drop, drop-off": {
+      "id": 972,
+      "chinese": "悬崖",
+      "english": "cliff, drop, drop-off",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "coral reef": {
+      "id": 973,
+      "chinese": "珊瑚",
+      "english": "coral reef",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "geyser": {
+      "id": 974,
+      "chinese": "温泉",
+      "english": "geyser",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "lakeside, lakeshore": {
+      "id": 975,
+      "chinese": "风景",
+      "english": "lakeside, lakeshore",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "promontory, headland, head, foreland": {
+      "id": 976,
+      "chinese": "小岛",
+      "english": "promontory, headland, head, foreland",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "sandbar, sand bar": {
+      "id": 977,
+      "chinese": "沙滩",
+      "english": "sandbar, sand bar",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "seashore, coast, seacoast, sea-coast": {
+      "id": 978,
+      "chinese": "海滩",
+      "english": "seashore, coast, seacoast, sea-coast",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "流, valley, vale": {
+      "id": 979,
+      "chinese": "瀑布",
+      "english": "流, valley, vale",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "volcano": {
+      "id": 980,
+      "chinese": "火山",
+      "english": "volcano",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "ballplayer, baseball player": {
+      "id": 981,
+      "chinese": "棒球",
+      "english": "ballplayer, baseball player",
+      "category": "sports",
+      "subcategory": "ball_sports"
+    },
+    "groom, bridegroom": {
+      "id": 982,
+      "chinese": "婚礼",
+      "english": "groom, bridegroom"
+    },
+    "scuba diver": {
+      "id": 983,
+      "chinese": "潜水",
+      "english": "scuba diver"
+    },
+    "rapeseed": {
+      "id": 984,
+      "chinese": "油菜花",
+      "english": "rapeseed",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "daisy": {
+      "id": 985,
+      "chinese": "菊花",
+      "english": "daisy",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "yellow lady’s slipper, yellow lady-slipper, Cypripedium calceolus, Cypripedium parviflorum": {
+      "id": 986,
+      "chinese": "植物",
+      "english": "yellow lady’s slipper, yellow lady-slipper, Cypripedium calceolus, Cypripedium parviflorum",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "corn": {
+      "id": 987,
+      "chinese": "玉米",
+      "english": "corn",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "acorn": {
+      "id": 988,
+      "chinese": "松果",
+      "english": "acorn",
+      "category": "nature",
+      "subcategory": "plants"
+    },
+    "hip, rose hip, rosehip": {
+      "id": 989,
+      "chinese": "植物",
+      "english": "hip, rose hip, rosehip",
+      "category": "daily_items",
+      "subcategory": "furniture"
+    },
+    "buckeye, horse chestnut, conker": {
+      "id": 990,
+      "chinese": "栗子",
+      "english": "buckeye, horse chestnut, conker"
+    },
+    "coral fungus": {
+      "id": 991,
+      "chinese": "菌菇",
+      "english": "coral fungus"
+    },
+    "agaric": {
+      "id": 992,
+      "chinese": "菌菇",
+      "english": "agaric"
+    },
+    "gyromitra": {
+      "id": 993,
+      "chinese": "菌菇",
+      "english": "gyromitra"
+    },
+    "stinkhorn, carrion fungus": {
+      "id": 994,
+      "chinese": "菌菇",
+      "english": "stinkhorn, carrion fungus"
+    },
+    "earthstar": {
+      "id": 995,
+      "chinese": "菌菇",
+      "english": "earthstar"
+    },
+    "hen-of-the-woods, hen of the woods, Polyporus frondosus, Grifola frondosa": {
+      "id": 996,
+      "chinese": "菌菇",
+      "english": "hen-of-the-woods, hen of the woods, Polyporus frondosus, Grifola frondosa"
+    },
+    "bolete": {
+      "id": 997,
+      "chinese": "菌菇",
+      "english": "bolete"
+    },
+    "ear, spike, capitulum": {
+      "id": 998,
+      "chinese": "玉米",
+      "english": "ear, spike, capitulum",
+      "category": "food",
+      "subcategory": "fruits"
+    },
+    "toilet tissue, toilet paper, bathroom tissue": {
+      "id": 999,
+      "chinese": "卷筒纸",
+      "english": "toilet tissue, toilet paper, bathroom tissue"
+    }
+  }
+}

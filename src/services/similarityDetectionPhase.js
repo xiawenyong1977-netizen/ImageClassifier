@@ -41,7 +41,7 @@ function getExcludedCategoryStats(images) {
 }
 
 /**
- * 相似度检测阶段（增量检测：基于相似组中最新照片的时间）
+ * 相似度检测阶段（全量重新检测）
  * 共享函数，供 GalleryScannerService 和 GalleryScannerService.android 使用
  * 
  * @param {Object} context - 上下文对象，包含服务实例的属性和方法
@@ -53,59 +53,14 @@ function getExcludedCategoryStats(images) {
 export async function similarityDetectionPhase(context) {
   const { sendProgressMessage, similarityService, totalImagesToBeClassified } = context;
   
-  logger.info('🔍 阶段6: 开始相似度检测');
+  logger.info('🔍 阶段6: 开始相似度检测（全量重新检测）');
   
   try {
-    // 🔥 优化：只查询相似组中最新照片之后更新的图片，而不是所有图片
-    // 复用 getSimilarityGroupsStats() 接口获取相似组统计，找到最新照片的时间作为增量扫描起点
-    let latestImageTime = null;
-    let hasSimilarityGroups = false;
-    try {
-      const similarityGroupsStats = await UnifiedDataService.getSimilarityGroupsStats();
-      
-      if (similarityGroupsStats && similarityGroupsStats.length > 0) {
-        hasSimilarityGroups = true;
-        // 找到所有相似组中最新照片的时间
-        let maxTime = 0;
-        similarityGroupsStats.forEach(group => {
-          if (group.latestTime && group.latestTime instanceof Date) {
-            const time = group.latestTime.getTime();
-            if (time > maxTime) {
-              maxTime = time;
-            }
-          }
-        });
-        
-        if (maxTime > 0) {
-          latestImageTime = new Date(maxTime);
-          logger.info(`📊 阶段6: 找到相似组中最新照片时间: ${latestImageTime.toISOString()} (来自 ${similarityGroupsStats.length} 个相似组)`);
-        }
-      } else {
-        logger.info('📊 阶段6: 没有现有相似组，将进行全量扫描');
-      }
-    } catch (error) {
-      logger.warn(`⚠️ 获取相似组最新照片时间失败，将进行全量扫描: ${error.message}`);
-    }
-    
-    // 确定增量扫描的起点时间
-    let scanStartTime = null;
-    if (hasSimilarityGroups && latestImageTime) {
-      // 有相似组：使用相似组中最新照片的时间（增量扫描）
-      scanStartTime = latestImageTime;
-    } else {
-      // 没有相似组：使用一个很早的时间，扫描所有图片（全量扫描）
-      scanStartTime = new Date(0); // 1970-01-01，确保能查询到所有图片
-      logger.info('📊 阶段6: 没有相似组，使用全量扫描模式（查询所有图片）');
-    }
-    
-    const sinceTimeStr = scanStartTime.toISOString();
-    
-    logger.info(`📊 阶段6: 查询 ${sinceTimeStr} 之后文件时间更新的图片（${hasSimilarityGroups && latestImageTime ? '增量扫描' : '全量扫描'}）`);
-    // 🔥 使用文件时间（timestamp）而不是更新时间（updatedAt），因为新复制过来的照片文件时间会变化
-    let imagesForSimilarity = await UnifiedDataService.readImagesByTimestampAfter(sinceTimeStr);
+    // 全量：读取所有图片
+    let imagesForSimilarity = await UnifiedDataService.readAllImages();
     
     if (!imagesForSimilarity || imagesForSimilarity.length === 0) {
-      logger.info('📊 阶段6: 没有最近更新的图片，跳过相似度检测');
+      logger.info('📊 阶段6: 没有图片，跳过相似度检测');
       return;
     }
     
@@ -128,7 +83,7 @@ export async function similarityDetectionPhase(context) {
     }
     
     const totalFoundThisPhase = imagesForSimilarity.length;
-    logger.info(`🔍 阶段6: 开始相似度检测，处理 ${totalFoundThisPhase} 张最近更新的图片`);
+    logger.info(`🔍 阶段6: 开始相似度检测，处理 ${totalFoundThisPhase} 张图片（全量）`);
     
     // 发送开始处理消息
     // 第三个参数是相似组数量（初始为0），第四个参数是总分类目标（可选，Android版本使用）
@@ -138,14 +93,18 @@ export async function similarityDetectionPhase(context) {
       logger.warn(`⚠️ 发送相似度检测开始消息失败: ${error.message}`);
     }
     
-    // 批量进行相似度检测
-    logger.info(`🔍 开始调用相似度检测服务，参数: timeWindow=300, similarityThreshold=0.8, useSimplifiedAlgorithm=false`);
+    // 批量进行相似度检测（相似度阈值从 settings 传入，默认 0.8 即 80%，最低 80%）
+    let similarityThreshold = (context.similarityThreshold != null && context.similarityThreshold >= 0 && context.similarityThreshold <= 1)
+      ? context.similarityThreshold
+      : 0.8;
+    if (similarityThreshold < 0.8) similarityThreshold = 0.8;
+    logger.info(`🔍 开始调用相似度检测服务，参数: timeWindow=300, similarityThreshold=${similarityThreshold}, useSimplifiedAlgorithm=false`);
     const result = await similarityService.detectSimilarImages({
       timeWindow: 300, // 5分钟时间窗口
-      similarityThreshold: 0.8,
+      similarityThreshold,
       groupType: 'similar',
       images: imagesForSimilarity,
-      clearExisting: false, // 🔥 改为 false，不清除现有相似组，只检测新分类的图片
+      clearExisting: true, // 全量重新检测：先清除现有相似组，再对所有图片重新检测
       useSimplifiedAlgorithm: false, // 🔥 强制使用直方图模式，因为AI分类不一定执行了
       onProgress: async (processed, total, groups) => {
         // 更新相似组数量（使用传递的groups参数）

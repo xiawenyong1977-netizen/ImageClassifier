@@ -1,4 +1,4 @@
-﻿// 导入WebAdapters统一适配器
+// 导入WebAdapters统一适配器
 import { 
   logger, 
   readImageFileAsBlob, 
@@ -87,8 +87,9 @@ const enrichLocationInfoWithCity = async (latitude, longitude, altitude = null, 
     );
 
     if (nearestCity) {
-      locationInfo.city = nearestCity.name;
-      locationInfo.province = nearestCity.province;
+      locationInfo.city = nearestCity.location_id || nearestCity.name; // city 列存 location_id
+      locationInfo.province = nearestCity.admin1_zh || nearestCity.admin1_en || null;
+      locationInfo.district = nearestCity.admin2_zh || nearestCity.admin2_en || null;
       locationInfo.country = nearestCity.country || '中国';
       locationInfo.cityDistance = nearestCity.distance || null;
     }
@@ -2632,10 +2633,15 @@ class GalleryScannerService {
    * 对所有已分类的图片进行相似度检测
    */
   async similarityDetectionPhase(scanStartTime, candidateImages = []) {
-    // 使用共享的相似度检测函数（全量检测）
+    const settings = await UnifiedDataService.readSettings();
+    let similarityThreshold = (settings.similarityThreshold != null && settings.similarityThreshold >= 0 && settings.similarityThreshold <= 1)
+      ? settings.similarityThreshold
+      : 0.8;
+    if (similarityThreshold < 0.8) similarityThreshold = 0.8;
     await sharedSimilarityDetection({
       sendProgressMessage: this.sendProgressMessage.bind(this),
       similarityService: this.similarityService,
+      similarityThreshold,
       // PC 版本不传递 totalImagesToBeClassified
     });
   }

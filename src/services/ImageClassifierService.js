@@ -386,16 +386,17 @@ class ImageClassifierService {
         isMobileResolution = aspectRatio <= 0.5;
       }
       
-      // 特征2：文件名判定 - 包含截图关键词
+      // 特征2：文件名判定 - 包含截图/截屏关键词（含中文）
       const fileNameLower = (fileName || '').toLowerCase();
-      const isScreenshotFile = fileNameLower.includes('screenshot') || 
-                              fileNameLower.includes('截图') || 
+      const isScreenshotFile = fileNameLower.includes('screenshot') ||
+                              fileNameLower.includes('截图') ||
+                              fileNameLower.includes('截屏') ||
                               fileNameLower.includes('screen');
-      
-      // 特征3：路径判定 - 检查是否在截图目录中
+
+      // 特征3：路径判定 - 检查是否在截图/截屏目录中
       // path可能是相对路径（Android 10+）或绝对路径（Android 9及以下），PC和移动端都兼容
       let isScreenshotPath = false;
-      const screenshotKeywords = ['screenshots', '截图', 'screen'];
+      const screenshotKeywords = ['screenshots', '截图', '截屏', 'screen'];
       
       if (path) {
         const pathLower = path.toLowerCase();
@@ -790,7 +791,7 @@ class ImageClassifierService {
       
       if (imageUri.startsWith('file://')) {
         // 本地文件：使用 WebAdapters 中的安全读取函数
-        const { readImageFileAsBlob } = require('../adapters/WebAdapters.js');
+        const { readImageFileAsBlob } = require('../adapters/WebAdapters');
         blob = await readImageFileAsBlob(imageUri);
       } else {
         // 网络URL：使用 fetch
@@ -947,8 +948,19 @@ class ImageClassifierService {
         } catch (fetchError) {
           clearTimeout(timeoutId); // 失败后也要清除超时器
           if (fetchError.name === 'AbortError') {
-            logger.warn(`⚠️ 批次 ${Math.floor(i / batchSize) + 1} 缓存查询超时，跳过该批次`);
-            // 继续处理下一批次，不抛出错误
+            logger.warn(`⚠️ 批次 ${Math.floor(i / batchSize) + 1} 缓存查询超时，视为全部未命中`);
+            // 超时：该批次全部视为缓存未命中
+            batchItems.forEach(item => {
+              allItems.push({ image_hash: item.hash, cached: false, data: null });
+            });
+            continue;
+          }
+          // 网络错误（如 Failed to fetch、CORS、后端不可达）：该批次全部视为缓存未命中，不中断流程
+          if (fetchError instanceof TypeError && (fetchError.message === 'Failed to fetch' || fetchError.message?.includes('fetch'))) {
+            logger.warn(`⚠️ 批次 ${Math.floor(i / batchSize) + 1} 缓存查询网络错误（远程服务可能不可达），视为全部未命中: ${fetchError.message}`);
+            batchItems.forEach(item => {
+              allItems.push({ image_hash: item.hash, cached: false, data: null });
+            });
             continue;
           }
           throw fetchError;
@@ -964,6 +976,22 @@ class ImageClassifierService {
         items: allItems
       };
     } catch (error) {
+      // 网络错误（如 Failed to fetch、AbortError）：返回全部未命中，让流程继续走本地/远程推理
+      const isNetworkError =
+        error?.name === 'AbortError' ||
+        (error instanceof TypeError && (
+          error.message === 'Failed to fetch' ||
+          (error.message != null && String(error.message).includes('fetch'))
+        ));
+      if (isNetworkError) {
+        logger.warn(`⚠️ 批量缓存查询网络错误（远程服务可能不可达），全部视为未命中，将尝试后续推理: ${error.message}`);
+        const fallbackItems = imageHashes.map(item => ({
+          image_hash: (item.hash || item.image_hash),
+          cached: false,
+          data: null
+        }));
+        return { success: true, total: imageHashes.length, cached_count: 0, items: fallbackItems };
+      }
       logger.error('❌ 批量缓存查询失败:', error);
       throw error;
     }

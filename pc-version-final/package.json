@@ -1,6 +1,6 @@
 {
   "name": "imageclassifier-app",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "芯图相册-智能分类，便捷管理，仅你可见",
   "author": "ImageClassifier Team",
   "main": "public/electron.js",
@@ -24,7 +24,9 @@
   "dependencies": {
     "buffer": "^6.0.3",
     "canvas": "^2.11.2",
+    "crypto-js": "^4.2.0",
     "exif-parser": "^0.1.12",
+    "i18next": "^25.8.4",
     "jimp": "^1.6.0",
     "noop2": "^1.0.0",
     "onnxruntime-node": "^1.23.0",
@@ -32,10 +34,10 @@
     "opencv.js": "^1.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-i18next": "^16.5.4",
     "react-native": "^0.72.17",
-    "react-native-web": "^0.19.6",
-    "react-refresh": "^0.17.0",
-    "sharp": "^0.34.4"
+    "react-native-web": "^0.19.13",
+    "react-refresh": "^0.17.0"
   },
   "devDependencies": {
     "@craco/craco": "^7.1.0",
@@ -108,7 +110,7 @@
       "applicationId": "XinTuAlbum",
       "backgroundColor": "transparent",
       "showNameOnTiles": true,
-      "artifactName": "${productName}-${version}.${ext}",
+      "artifactName": "${productName}-win-amd-${version}.${ext}",
       "languages": [
         "zh-CN"
       ]
@@ -117,7 +119,9 @@
       {
         "from": "build/appx/Assets",
         "to": "Assets",
-        "filter": ["**/*.png"]
+        "filter": [
+          "**/*.png"
+        ]
       }
     ],
     "mac": {
@@ -125,15 +129,21 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.photography",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-mac-${arch}-${version}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -174,9 +184,12 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "include": "installer/installer.nsh",
-      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "artifactName": "${productName}-win-amd-setup-${version}.${ext}",
       "language": "2052",
       "warningsAsErrors": false
+    },
+    "portable": {
+      "artifactName": "${productName}-win-amd-portable-${version}.${ext}"
     }
   }
 }

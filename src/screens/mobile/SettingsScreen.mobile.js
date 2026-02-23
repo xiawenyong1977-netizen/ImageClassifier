@@ -1066,6 +1066,32 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                 {t('settings.enableMobileNetV3Desc')}
               </Text>
             </View>
+
+            {/* 相似度检测阈值 - 子区块 */}
+            <View style={styles.switchItemCompact}>
+              <Text style={styles.switchLabelCompact}>🔗 {t('settings.similarityThreshold')}</Text>
+              <Text style={styles.switchDescriptionCompact}>
+                {t('settings.similarityThresholdDesc')}
+              </Text>
+              <View style={styles.quickDirectoryRow}>
+                {[0.8, 0.85, 0.9, 0.95].map((val) => {
+                  let currentVal = (settings.similarityThreshold != null && settings.similarityThreshold >= 0 && settings.similarityThreshold <= 1)
+                    ? settings.similarityThreshold
+                    : 0.8;
+                  if (currentVal < 0.8) currentVal = 0.8; // 最低 80%
+                  const isSelected = Math.abs(currentVal - val) < 0.01;
+                  return (
+                    <TouchableOpacity
+                      key={val}
+                      style={[styles.quickDirectoryButton, isSelected && styles.quickDirectoryButtonDetecting]}
+                      onPress={() => updateSetting('similarityThreshold', val)}
+                    >
+                      <Text style={styles.quickDirectoryButtonText}>{Math.round(val * 100)}%</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
           </View>
           
           {/* 目录设置 - 与"清空相册信息"区域对齐 */}
@@ -1145,145 +1171,6 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
                 </TouchableOpacity>
               </View>
             ))}
-          </View>
-
-          {/* 显示设置 - 开关面板样式 */}
-          <View style={styles.switchPanel}>
-            <Text style={styles.switchPanelTitle}>{t('settings.displaySettings')}</Text>
-            
-            <View style={styles.switchGrid}>
-              {/* 显示城市分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🏙️ {t('settings.cityCategory')}</Text>
-                <Switch
-                  value={settings.showCityCategories !== false}
-                  onValueChange={(value) => updateSetting('showCityCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showCityCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示颜色分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🎨 {t('settings.colorCategory')}</Text>
-                <Switch
-                  value={settings.showColorCategories !== false}
-                  onValueChange={(value) => updateSetting('showColorCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showColorCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示存储分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📁 {t('settings.directoryCategory')}</Text>
-                <Switch
-                  value={settings.showDirectoryCategories !== false}
-                  onValueChange={(value) => updateSetting('showDirectoryCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showDirectoryCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示格式分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📄 {t('settings.formatCategory')}</Text>
-                <Switch
-                  value={settings.showFormatCategories !== false}
-                  onValueChange={(value) => updateSetting('showFormatCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showFormatCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示分辨率分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📏 {t('settings.resolutionCategory')}</Text>
-                <Switch
-                  value={settings.showResolutionCategories !== false}
-                  onValueChange={(value) => updateSetting('showResolutionCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showResolutionCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示方向分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🧭 {t('settings.orientationCategory')}</Text>
-                <Switch
-                  value={settings.showOrientationCategories !== false}
-                  onValueChange={(value) => updateSetting('showOrientationCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showOrientationCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示ISO分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📷 {t('settings.isoCategory')}</Text>
-                <Switch
-                  value={settings.showISOCategories !== false}
-                  onValueChange={(value) => updateSetting('showISOCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showISOCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示光圈分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📷 {t('settings.apertureCategory')}</Text>
-                <Switch
-                  value={settings.showApertureCategories !== false}
-                  onValueChange={(value) => updateSetting('showApertureCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showApertureCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示快门分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📷 {t('settings.shutterCategory')}</Text>
-                <Switch
-                  value={settings.showShutterCategories !== false}
-                  onValueChange={(value) => updateSetting('showShutterCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showShutterCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示焦距分类 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📷 {t('settings.focalLengthCategory')}</Text>
-                <Switch
-                  value={settings.showFocalLengthCategories !== false}
-                  onValueChange={(value) => updateSetting('showFocalLengthCategories', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showFocalLengthCategories !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示相似照片 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>🔗 {t('settings.similarityPhotos')}</Text>
-                <Switch
-                  value={settings.showSimilarityGroups !== false}
-                  onValueChange={(value) => updateSetting('showSimilarityGroups', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showSimilarityGroups !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-
-              {/* 显示最近照片 */}
-              <View style={styles.switchItem}>
-                <Text style={styles.switchLabel}>📸 {t('settings.recentPhotos')}</Text>
-                <Switch
-                  value={settings.showRecentPhotos !== false}
-                  onValueChange={(value) => updateSetting('showRecentPhotos', value)}
-                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                  thumbColor={settings.showRecentPhotos !== false ? '#FFFFFF' : '#FFFFFF'}
-                />
-              </View>
-            </View>
           </View>
         </View>
 

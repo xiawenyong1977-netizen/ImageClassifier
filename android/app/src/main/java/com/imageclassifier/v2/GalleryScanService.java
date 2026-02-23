@@ -1628,13 +1628,13 @@ public class GalleryScanService {
         String path = (image.relativePath != null ? image.relativePath : image.path);
         path = path != null ? path.toLowerCase() : "";
         
-        // 规则1: 文件名包含截图关键词
-        if (fileName.contains("screenshot") || fileName.contains("截图") || fileName.contains("screen")) {
+        // 规则1: 文件名包含截图/截屏关键词（含中文）
+        if (fileName.contains("screenshot") || fileName.contains("截图") || fileName.contains("截屏") || fileName.contains("screen")) {
             return true;
         }
         
-        // 规则2: 路径包含截图关键词
-        if (path.contains("screenshot") || path.contains("截图")) {
+        // 规则2: 路径包含截图/截屏关键词
+        if (path.contains("screenshot") || path.contains("截图") || path.contains("截屏")) {
             return true;
         }
         

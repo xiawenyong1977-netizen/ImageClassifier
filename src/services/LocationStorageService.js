@@ -3,74 +3,40 @@
 import { logger, Platform, SQLite } from '../adapters/WebAdapters';
 
 /**
- * 生成位置ID（基于 name_en + province + country_code）
- * 使用原始值构建，不去除行政区划后缀
- * @param {Object} cityData - 城市数据对象
- * @returns {string} location_id
+ * 生成位置ID（基于 country_code + admin1_en + admin2_en）
+ * 三级行政区：国家、一级行政区（省/直辖市/州）、二级行政区（市/区/县）
+ * @param {Object} cityData - 城市数据对象，需含 admin1_en、admin2_en
+ * @returns {string} location_id，格式如 CN_guangdong_shenzhen、CN_beijing_dongcheng
  * @throws {Error} 如果必填字段缺失
  */
 export function generateLocationId(cityData) {
-  // 1. 验证必填字段
-  if (!cityData.name_en || typeof cityData.name_en !== 'string' || cityData.name_en.trim() === '') {
-    logger.error('❌ 生成location_id失败：name_en字段为空或无效', {
-      cityData: cityData,
-      hasNameEn: !!cityData.name_en,
-      nameEnType: typeof cityData.name_en,
-      nameEnValue: cityData.name_en,
-      nameZh: cityData.name_zh,
-      province: cityData.province,
-      countryCode: cityData.country_code
-    });
-    throw new Error(`无法生成location_id：name_en字段为空。城市数据：${JSON.stringify(cityData)}`);
-  }
-  
+  // 1. 验证 country_code
   if (!cityData.country_code || typeof cityData.country_code !== 'string' || cityData.country_code.trim() === '') {
-    logger.error('❌ 生成location_id失败：country_code字段为空或无效', {
-      cityData: cityData,
-      hasCountryCode: !!cityData.country_code,
-      countryCodeType: typeof cityData.country_code,
-      countryCodeValue: cityData.country_code
-    });
+    logger.error('❌ 生成location_id失败：country_code字段为空或无效', { cityData });
     throw new Error(`无法生成location_id：country_code字段为空。城市数据：${JSON.stringify(cityData)}`);
   }
-  
-  // 2. 标准化字段值（用于生成 location_id，保留原始名称不去除行政区划后缀）
+
   const countryCode = cityData.country_code.trim().toUpperCase();
-  // province 字段可选（外国位置可能没有省份信息），如果为空则使用 "unknown"
-  const provinceRaw = cityData.province && typeof cityData.province === 'string' && cityData.province.trim() !== ''
-    ? cityData.province.trim()
+
+  // 2. 获取 admin1_en（一级行政区英文名）
+  const admin1En = (cityData.admin1_en && typeof cityData.admin1_en === 'string' && cityData.admin1_en.trim() !== '')
+    ? normalizeString(cityData.admin1_en.trim())
     : 'unknown';
-  const province = normalizeString(provinceRaw);
-  const nameEn = normalizeString(cityData.name_en.trim());
-  
-  // 3. 验证标准化后的值不为空
-  if (!nameEn || nameEn === '') {
-    logger.error('❌ 生成location_id失败：标准化后的name_en为空', {
-      originalNameEn: cityData.name_en,
-      normalizedNameEn: nameEn,
-      cityData: cityData
-    });
-    throw new Error(`无法生成location_id：标准化后的name_en为空。原始值：${cityData.name_en}`);
+
+  // 3. 获取 admin2_en（二级行政区英文名）
+  if (!cityData.admin2_en || typeof cityData.admin2_en !== 'string' || cityData.admin2_en.trim() === '') {
+    logger.error('❌ 生成location_id失败：admin2_en 为空', { cityData });
+    throw new Error(`无法生成location_id：缺少 admin2_en。城市数据：${JSON.stringify(cityData)}`);
   }
-  
-  // province 标准化后如果为空，使用 "unknown"
-  const finalProvince = province && province !== '' ? province : 'unknown';
-  
-  // 4. 组合生成ID
-  const locationId = `${countryCode}_${finalProvince}_${nameEn}`;
-  
-  // 5. 最终验证
+  const admin2En = normalizeString(cityData.admin2_en.trim());
+
+  const locationId = `${countryCode}_${admin1En}_${admin2En}`;
+
   if (!locationId || locationId.length === 0) {
-    logger.error('❌ 生成location_id失败：最终生成的ID为空', {
-      countryCode,
-      province: finalProvince,
-      nameEn,
-      locationId,
-      cityData: cityData
-    });
-    throw new Error(`无法生成location_id：最终生成的ID为空。组件：countryCode=${countryCode}, province=${finalProvince}, nameEn=${nameEn}`);
+    logger.error('❌ 生成location_id失败：最终生成的ID为空', { countryCode, admin1En, admin2En, cityData });
+    throw new Error(`无法生成location_id：最终生成的ID为空`);
   }
-  
+
   return locationId;
 }
 
@@ -83,12 +49,32 @@ function normalizeString(str) {
   if (!str || typeof str !== 'string') {
     return '';
   }
-  
-  // 保留原始名称，不去除行政区划后缀，只做基本清理
   return str.trim().toLowerCase()
-    .replace(/[^\w\u4e00-\u9fa5]/g, '_')  // 特殊字符转下划线
-    .replace(/_+/g, '_')             // 多个下划线合并为一个
-    .replace(/^_|_$/g, '');          // 移除首尾下划线
+    .replace(/[^\w\u4e00-\u9fa5]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+}
+
+/**
+ * 将 API 返回的城市数据映射为 location_details 表结构
+ * API 需返回 admin1_zh/en、admin2_zh/en
+ */
+function mapApiDataToLocationDetail(apiData) {
+  const admin1Zh = apiData.admin1_zh && String(apiData.admin1_zh).trim() ? String(apiData.admin1_zh).trim() : null;
+  const admin1En = apiData.admin1_en && String(apiData.admin1_en).trim() ? String(apiData.admin1_en).trim() : 'unknown';
+  const admin2Zh = apiData.admin2_zh && String(apiData.admin2_zh).trim() ? String(apiData.admin2_zh).trim() : null;
+  const admin2En = apiData.admin2_en && String(apiData.admin2_en).trim() ? String(apiData.admin2_en).trim() : 'unknown';
+
+  return {
+    country_code: (apiData.country_code || 'UN').trim().toUpperCase(),
+    admin1_zh: admin1Zh,
+    admin1_en: admin1En,
+    admin2_zh: admin2Zh,
+    admin2_en: admin2En,
+    latitude: Number(apiData.latitude),
+    longitude: Number(apiData.longitude),
+    data_source: apiData.data_source || 'unknown'
+  };
 }
 
 /**
@@ -144,8 +130,23 @@ class LocationSQLiteAdapter {
   }
 
   async createTables() {
+    // 迁移：检测旧 schema（有 name_en 列）则删除并重建
+    try {
+      const [tableInfo] = await this.db.executeSql(
+        "SELECT name FROM pragma_table_info('location_details') WHERE name='name_en'"
+      );
+      const hasOldSchema = tableInfo?.rows?.length > 0;
+      if (hasOldSchema) {
+        await this.db.executeSql('DROP TABLE IF EXISTS location_details');
+        await this.db.executeSql('DROP TABLE IF EXISTS location_coordinates');
+        logger.debug('📦 位置数据库已迁移至新 schema（三级行政区）');
+      }
+    } catch (e) {
+      // 表不存在时 pragma 可能报错，忽略
+    }
+
     const createTablesSql = `
-      -- 坐标映射表
+      -- 坐标映射表：坐标 -> location_id
       CREATE TABLE IF NOT EXISTS location_coordinates (
         latitude REAL NOT NULL,
         longitude REAL NOT NULL,
@@ -153,48 +154,34 @@ class LocationSQLiteAdapter {
         created_at TEXT NOT NULL,
         PRIMARY KEY (latitude, longitude)
       );
-
-      -- 坐标索引
       CREATE INDEX IF NOT EXISTS idx_location_coordinates_location_id ON location_coordinates(location_id);
 
-      -- 位置详情表
+      -- 位置详情表：三级行政区（国家、一级、二级）
       CREATE TABLE IF NOT EXISTS location_details (
         location_id TEXT PRIMARY KEY,
-        name_en TEXT NOT NULL,
-        name_zh TEXT,  -- 允许为空（外国位置可能没有中文名称）
-        province TEXT NOT NULL,
-        city TEXT NOT NULL,
-        district TEXT,
+        country_code TEXT NOT NULL,
+        admin1_zh TEXT,
+        admin1_en TEXT NOT NULL,
+        admin2_zh TEXT,
+        admin2_en TEXT NOT NULL,
         latitude REAL NOT NULL,
         longitude REAL NOT NULL,
-        country_code TEXT NOT NULL,
-        admin1_code TEXT,
-        admin2_code TEXT,
-        geoname_id INTEGER,
-        population INTEGER,
         data_source TEXT NOT NULL,
-        api_city_id TEXT,
-        api_adcode TEXT,
-        api_id INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-
-      -- 位置详情索引
-      CREATE INDEX IF NOT EXISTS idx_location_details_name_zh ON location_details(name_zh);
-      CREATE INDEX IF NOT EXISTS idx_location_details_name_en ON location_details(name_en);
+      CREATE INDEX IF NOT EXISTS idx_location_details_admin2_en ON location_details(admin2_en);
     `;
 
-    // 分割SQL语句并执行
     const statements = createTablesSql
       .split(';')
       .map(s => s.trim())
       .filter(s => s.length > 0);
-    
+
     for (const sql of statements) {
       await this.db.executeSql(sql);
     }
-    
+
     logger.debug('✅ 位置数据库 SQLite 表结构创建完成');
   }
 
@@ -433,45 +420,26 @@ class LocationSQLiteAdapter {
           // 保存位置详情（INSERT OR REPLACE）
           for (const location of locationsWithId) {
             const now = new Date().toISOString();
-            // 规范化 name_en 和 name_zh（用于显示）：去除末尾的行政区划后缀
-            const normalizeDisplayName = (str) => {
-              if (!str || typeof str !== 'string') return str;
-              const trimmed = str.trim();
-              return trimmed.length > 2 ? trimmed.replace(/[市省县区州]$/, '') : trimmed;
-            };
-            const normalizedNameEn = normalizeDisplayName(location.name_en);
-            const normalizedNameZh = normalizeDisplayName(location.name_zh);
-            // 如果 name_zh 为空，使用 name_en 作为 fallback（外国位置可能没有中文名称）
-            const finalNameZh = normalizedNameZh || location.name_zh || normalizedNameEn || location.name_en || null;
+            const detail = mapApiDataToLocationDetail(location);
             tx.executeSql(
               `INSERT OR REPLACE INTO location_details (
-                location_id, name_en, name_zh, province, city, district,
-                latitude, longitude, country_code, admin1_code, admin2_code,
-                geoname_id, population, data_source, api_city_id, api_adcode, api_id,
-                created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                location_id, country_code, admin1_zh, admin1_en, admin2_zh, admin2_en,
+                latitude, longitude, data_source, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 
                 COALESCE((SELECT created_at FROM location_details WHERE location_id = ?), ?), ?)`,
               [
                 location.locationId,
-                normalizedNameEn || location.name_en,
-                finalNameZh,
-                location.province || 'unknown',  // 如果 province 为空，使用 'unknown'
-                location.city || location.name_zh || location.name_en || 'unknown',  // city 字段也需要 fallback
-                location.district || null,
-                location.latitude,
-                location.longitude,
-                location.country_code,
-                location.admin1_code || null,
-                location.admin2_code || null,
-                location.geoname_id || null,
-                location.population || null,
-                location.data_source,
-                location.api_city_id || null,
-                location.api_adcode || null,
-                location.id || null,
-                location.locationId, // 用于COALESCE查询
-                now, // 如果不存在则使用当前时间
-                now  // updated_at
+                detail.country_code,
+                detail.admin1_zh,
+                detail.admin1_en,
+                detail.admin2_zh,
+                detail.admin2_en,
+                detail.latitude,
+                detail.longitude,
+                detail.data_source,
+                location.locationId,
+                now,
+                now
               ],
               (tx, result) => {
                 completed++;
@@ -601,22 +569,14 @@ class LocationSQLiteAdapter {
   rowToObject(row) {
     return {
       location_id: row.location_id,
-      name_en: row.name_en,
-      name_zh: row.name_zh,
-      province: row.province,
-      city: row.city,
-      district: row.district,
+      country_code: row.country_code,
+      admin1_zh: row.admin1_zh,
+      admin1_en: row.admin1_en,
+      admin2_zh: row.admin2_zh,
+      admin2_en: row.admin2_en,
       latitude: row.latitude,
       longitude: row.longitude,
-      country_code: row.country_code,
-      admin1_code: row.admin1_code,
-      admin2_code: row.admin2_code,
-      geoname_id: row.geoname_id,
-      population: row.population,
       data_source: row.data_source,
-      api_city_id: row.api_city_id,
-      api_adcode: row.api_adcode,
-      api_id: row.api_id,
       created_at: row.created_at,
       updated_at: row.updated_at
     };
@@ -627,7 +587,7 @@ class LocationSQLiteAdapter {
 class LocationIndexedDBAdapter {
   constructor() {
     this.dbName = 'LocationDB';
-    this.version = 1;
+    this.version = 2; // 升级以迁移至新 schema（三级行政区）
     this.db = null;
     this.isInitialized = false;
   }
@@ -669,22 +629,31 @@ class LocationIndexedDBAdapter {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        
-        // 创建坐标映射表
+        const oldVersion = event.oldVersion;
+
+        // 从 v1 升级：删除旧 store 并重建（schema 已变更）
+        if (oldVersion > 0 && oldVersion < 2) {
+          if (db.objectStoreNames.contains('location_details')) {
+            db.deleteObjectStore('location_details');
+          }
+          if (db.objectStoreNames.contains('location_coordinates')) {
+            db.deleteObjectStore('location_coordinates');
+          }
+          logger.debug('📦 IndexedDB 位置数据库已迁移至新 schema（三级行政区）');
+        }
+
         if (!db.objectStoreNames.contains('location_coordinates')) {
           const coordStore = db.createObjectStore('location_coordinates', {
             keyPath: ['latitude', 'longitude']
           });
           coordStore.createIndex('location_id', 'location_id', { unique: false });
         }
-        
-        // 创建位置详情表
+
         if (!db.objectStoreNames.contains('location_details')) {
           const detailStore = db.createObjectStore('location_details', {
             keyPath: 'location_id'
           });
-          detailStore.createIndex('name_zh', 'name_zh', { unique: false });
-          detailStore.createIndex('name_en', 'name_en', { unique: false });
+          detailStore.createIndex('admin2_en', 'admin2_en', { unique: false });
         }
       };
     });
@@ -943,34 +912,17 @@ class LocationIndexedDBAdapter {
         
         getRequest.onsuccess = () => {
           const existing = getRequest.result;
-          // 规范化 name_en 和 name_zh（用于显示）：去除末尾的行政区划后缀
-          const normalizeDisplayName = (str) => {
-            if (!str || typeof str !== 'string') return str;
-            const trimmed = str.trim();
-            return trimmed.length > 2 ? trimmed.replace(/[市省县区州]$/, '') : trimmed;
-          };
-          const normalizedNameEn = normalizeDisplayName(location.name_en);
-          const normalizedNameZh = normalizeDisplayName(location.name_zh);
-          // 如果 name_zh 为空，使用 name_en 作为 fallback（外国位置可能没有中文名称）
-          const finalNameZh = normalizedNameZh || location.name_zh || normalizedNameEn || location.name_en || null;
+          const detail = mapApiDataToLocationDetail(location);
           const detailData = {
             location_id: location.locationId,
-            name_en: normalizedNameEn || location.name_en,
-            name_zh: finalNameZh,
-            province: location.province || 'unknown',  // 如果 province 为空，使用 'unknown'
-            city: location.city || location.name_zh || location.name_en || 'unknown',  // city 字段也需要 fallback
-            district: location.district || null,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            country_code: location.country_code,
-            admin1_code: location.admin1_code || null,
-            admin2_code: location.admin2_code || null,
-            geoname_id: location.geoname_id || null,
-            population: location.population || null,
-            data_source: location.data_source,
-            api_city_id: location.api_city_id || null,
-            api_adcode: location.api_adcode || null,
-            api_id: location.id || null,
+            country_code: detail.country_code,
+            admin1_zh: detail.admin1_zh,
+            admin1_en: detail.admin1_en,
+            admin2_zh: detail.admin2_zh,
+            admin2_en: detail.admin2_en,
+            latitude: detail.latitude,
+            longitude: detail.longitude,
+            data_source: detail.data_source,
             created_at: existing ? existing.created_at : now,
             updated_at: now
           };

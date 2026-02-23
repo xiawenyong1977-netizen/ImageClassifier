@@ -1,0 +1,182 @@
+{
+  "name": "imageclassifier-app",
+  "version": "1.1.2",
+  "description": "芯图相册-智能分类，便捷管理，仅你可见",
+  "author": "ImageClassifier Team",
+  "main": "public/electron.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "craco start",
+    "prebuild": "node ../scripts/generate-build-info.js",
+    "build": "craco build",
+    "test": "craco test",
+    "eject": "react-scripts eject",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron-pack": "npm run build && electron-builder",
+    "electron:build": "npm run build && electron-builder --win nsis",
+    "electron:build-portable": "npm run build && electron-builder --win portable",
+    "electron:build-all": "npm run build && electron-builder --win nsis --win portable",
+    "electron:build-mac": "npm run build && electron-builder --mac dmg",
+    "electron:build-mac-zip": "npm run build && electron-builder --mac dmg --mac zip",
+    "preelectron-pack": "npm run build"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3",
+    "canvas": "^2.11.2",
+    "exif-parser": "^0.1.12",
+    "jimp": "^1.6.0",
+    "noop2": "^1.0.0",
+    "onnxruntime-node": "^1.23.0",
+    "onnxruntime-web": "^1.22.0",
+    "opencv.js": "^1.2.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-native": "^0.72.17",
+    "react-native-web": "^0.19.6",
+    "react-refresh": "^0.17.0",
+    "sharp": "^0.34.4"
+  },
+  "devDependencies": {
+    "@craco/craco": "^7.1.0",
+    "concurrently": "^8.2.0",
+    "copy-webpack-plugin": "^13.0.1",
+    "electron": "^25.3.0",
+    "electron-builder": "^24.6.3",
+    "react-scripts": "5.0.1",
+    "wait-on": "^7.0.1"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "resolutions": {
+    "react-native-fs": "npm:noop2@1.0.0",
+    "react-native-vector-icons": "npm:noop2@1.0.0"
+  },
+  "build": {
+    "appId": "com.imageclassifier.app",
+    "productName": "XinTuAlbum",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "public/**/*",
+      "node_modules/**/*",
+      "images/**/*"
+    ],
+    "buildDependenciesFromSource": false,
+    "npmRebuild": false,
+    "win": {
+      "icon": "public/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "appx",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "appx": {
+      "displayName": "芯图相册",
+      "publisher": "CN=03F46D22-3B0F-4788-A8BF-351A4DF78D3D",
+      "publisherDisplayName": "智语未来软件",
+      "identityName": "E8546D00.75903E98454E",
+      "applicationId": "XinTuAlbum",
+      "backgroundColor": "transparent",
+      "showNameOnTiles": true,
+      "artifactName": "${productName}-${version}.${ext}",
+      "languages": [
+        "zh-CN"
+      ]
+    },
+    "extraFiles": [
+      {
+        "from": "build/appx/Assets",
+        "to": "Assets",
+        "filter": ["**/*.png"]
+      }
+    ],
+    "mac": {
+      "icon": "public/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.photography",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "芯图相册",
+      "icon": "public/icon.icns",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "linux": {
+      "icon": "public/icon.png",
+      "target": "AppImage"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "芯图相册",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "include": "installer/installer.nsh",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "language": "2052",
+      "warningsAsErrors": false
+    }
+  }
+}

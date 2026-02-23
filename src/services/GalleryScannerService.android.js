@@ -119,7 +119,12 @@ class GalleryScannerService {
       // 调用startScan方法
       return await this.startScan(options, onProgress);
     } catch (error) {
-      logger.error('❌ 扫描失败:', error);
+      // 如果是"扫描已在进行中"的错误，使用 info 级别而不是 error
+      if (error.message && error.message.includes(i18n.t('home.scanAlreadyInProgress'))) {
+        logger.info('ℹ️ 扫描已在进行中:', error.message);
+      } else {
+        logger.error('❌ 扫描失败:', error);
+      }
       throw error;
     }
   }
@@ -151,7 +156,7 @@ class GalleryScannerService {
       const isRunning = await ScanService.isRunning();
       if (isRunning) {
         const errorMsg = i18n.t('home.scanAlreadyInProgress');
-        logger.warn(`⚠️ 检测到扫描服务正在运行，拒绝新扫描请求: ${errorMsg}`);
+        logger.info(`ℹ️ 检测到扫描服务正在运行，拒绝新扫描请求: ${errorMsg}`);
         throw new Error(errorMsg);
       }
     } catch (error) {
@@ -1096,10 +1101,15 @@ class GalleryScannerService {
    * 检测所有图片的相似度
    */
   async phase6_SimilarityDetection() {
-    // 使用共享的相似度检测函数（全量检测）
+    const settings = await UnifiedDataService.readSettings();
+    let similarityThreshold = (settings.similarityThreshold != null && settings.similarityThreshold >= 0 && settings.similarityThreshold <= 1)
+      ? settings.similarityThreshold
+      : 0.8;
+    if (similarityThreshold < 0.8) similarityThreshold = 0.8;
     await sharedSimilarityDetection({
       sendProgressMessage: this.sendProgressMessage.bind(this),
       similarityService: this.similarityService,
+      similarityThreshold,
       totalImagesToBeClassified: this.totalImagesToBeClassified, // Android 版本需要传递此参数
     });
   }
@@ -1111,10 +1121,15 @@ class GalleryScannerService {
    * @param {Array} candidateImages - 候选图片（可选，已废弃）
    */
   async similarityDetectionPhase(scanStartTime = null, candidateImages = []) {
-    // 调用共享的相似度检测函数（全量检测）
+    const settings = await UnifiedDataService.readSettings();
+    let similarityThreshold = (settings.similarityThreshold != null && settings.similarityThreshold >= 0 && settings.similarityThreshold <= 1)
+      ? settings.similarityThreshold
+      : 0.8;
+    if (similarityThreshold < 0.8) similarityThreshold = 0.8;
     await sharedSimilarityDetection({
       sendProgressMessage: this.sendProgressMessage.bind(this),
       similarityService: this.similarityService,
+      similarityThreshold,
       totalImagesToBeClassified: this.totalImagesToBeClassified, // Android 版本需要传递此参数
     });
   }

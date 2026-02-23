@@ -20,6 +20,21 @@ import RecentImagesGrid from '../../components/shared/RecentImagesGrid';
 import { logger, getUri, Alert, SafeAreaView } from '../../adapters/WebAdapters';
 import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// 与后端 model_client.BACKGROUND_COLORS 一致，10 种固定颜色
+const BACKGROUND_COLORS = [
+  '橙色', '蓝色', '红色', '绿色', '紫色',
+  '粉色', '黄色', '灰色', '黑色', '白色'
+];
+const COLOR_NAME_TO_HEX = {
+  '橙色': '#FF9800', '蓝色': '#2196F3', '红色': '#F44336', '绿色': '#4CAF50',
+  '紫色': '#9C27B0', '粉色': '#E91E63', '黄色': '#FFEB3B', '灰色': '#9E9E9E',
+  '黑色': '#212121', '白色': '#FFFFFF',
+  'Orange': '#FF9800', 'Blue': '#2196F3', 'Red': '#F44336', 'Green': '#4CAF50',
+  'Purple': '#9C27B0', 'Pink': '#E91E63', 'Yellow': '#FFEB3B', 'Gray': '#9E9E9E',
+  'Black': '#212121', 'White': '#FFFFFF',
+};
+
 const HomeScreen = () => {
   const { t, i18n } = useTranslation('common');
   
@@ -44,15 +59,6 @@ const HomeScreen = () => {
   const [focalLengthCounts, setFocalLengthCounts] = useState({});
   const [categoryRecentImages, setCategoryRecentImages] = useState({});
   const [cityRecentImages, setCityRecentImages] = useState({});
-  const [colorRecentImages, setColorRecentImages] = useState({});
-  const [directoryRecentImages, setDirectoryRecentImages] = useState({});
-  const [formatRecentImages, setFormatRecentImages] = useState({});
-  const [resolutionRecentImages, setResolutionRecentImages] = useState({});
-  const [orientationRecentImages, setOrientationRecentImages] = useState({});
-  const [isoRecentImages, setISORecentImages] = useState({});
-  const [apertureRecentImages, setApertureRecentImages] = useState({});
-  const [shutterRecentImages, setShutterRecentImages] = useState({});
-  const [focalLengthRecentImages, setFocalLengthRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
@@ -149,172 +155,6 @@ const HomeScreen = () => {
         cityImagesMap[cityName] = images;
       });
       
-      // 加载各颜色的最近图片（加载所有颜色，不限制数量）
-      const sortedColors = Object.entries(colorCountsData).sort(([,a], [,b]) => b - a);
-      const colorIds = sortedColors.map(([colorName]) => colorName);
-      const colorImagesPromises = colorIds.map(async (colorName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByColor(colorName, 1);
-          return { colorName, images };
-        } catch (error) {
-          logger.error(`加载颜色 ${colorName} 最近图片失败:`, error);
-          return { colorName, images: [] };
-        }
-      });
-      
-      const colorImagesResults = await Promise.all(colorImagesPromises);
-      const colorImagesMap = {};
-      colorImagesResults.forEach(({ colorName, images }) => {
-        colorImagesMap[colorName] = images;
-      });
-      
-      // 加载各目录的最近图片（加载所有目录，不限制数量）
-      const sortedDirectories = Object.entries(directoryCountsData).sort(([,a], [,b]) => b - a);
-      const directoryIds = sortedDirectories.map(([dirName]) => dirName);
-      const directoryImagesPromises = directoryIds.map(async (dirName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByDirectory(dirName, 1);
-          return { dirName, images };
-        } catch (error) {
-          logger.error(`加载目录 ${dirName} 最近图片失败:`, error);
-          return { dirName, images: [] };
-        }
-      });
-      
-      const directoryImagesResults = await Promise.all(directoryImagesPromises);
-      const directoryImagesMap = {};
-      directoryImagesResults.forEach(({ dirName, images }) => {
-        directoryImagesMap[dirName] = images;
-      });
-      
-      // 加载各格式的最近图片（按数量排序取前10个）
-      const sortedFormats = Object.entries(formatCountsData).sort(([,a], [,b]) => b - a);
-      const formatIds = sortedFormats.slice(0, 10).map(([formatName]) => formatName);
-      const formatImagesPromises = formatIds.map(async (formatName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByFormat(formatName, 1);
-          return { formatName, images };
-        } catch (error) {
-          logger.error(`加载格式 ${formatName} 最近图片失败:`, error);
-          return { formatName, images: [] };
-        }
-      });
-      
-      const formatImagesResults = await Promise.all(formatImagesPromises);
-      const formatImagesMap = {};
-      formatImagesResults.forEach(({ formatName, images }) => {
-        formatImagesMap[formatName] = images;
-      });
-      
-      // 加载各分辨率的最近图片（按数量排序取前10个）
-      const sortedResolutions = Object.entries(resolutionCountsData).sort(([,a], [,b]) => b - a);
-      const resolutionIds = sortedResolutions.slice(0, 10).map(([resolutionName]) => resolutionName);
-      const resolutionImagesPromises = resolutionIds.map(async (resolutionName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByResolution(resolutionName, 1);
-          return { resolutionName, images };
-        } catch (error) {
-          logger.error(`加载分辨率 ${resolutionName} 最近图片失败:`, error);
-          return { resolutionName, images: [] };
-        }
-      });
-      
-      const resolutionImagesResults = await Promise.all(resolutionImagesPromises);
-      const resolutionImagesMap = {};
-      resolutionImagesResults.forEach(({ resolutionName, images }) => {
-        resolutionImagesMap[resolutionName] = images;
-      });
-      
-      // 加载各方向的最近图片（所有方向）
-      const allOrientations = Object.keys(orientationCountsData);
-      const orientationImagesPromises = allOrientations.map(async (orientationName) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByOrientation(orientationName, 1);
-          return { orientationName, images };
-        } catch (error) {
-          logger.error(`加载方向 ${orientationName} 最近图片失败:`, error);
-          return { orientationName, images: [] };
-        }
-      });
-      
-      const orientationImagesResults = await Promise.all(orientationImagesPromises);
-      const orientationImagesMap = {};
-      orientationImagesResults.forEach(({ orientationName, images }) => {
-        orientationImagesMap[orientationName] = images;
-      });
-      
-      // 🔥 加载各ISO分类的最近图片（按数量排序取前10个）
-      const sortedISOs = Object.entries(isoCountsData).sort(([,a], [,b]) => b - a);
-      const isoIds = sortedISOs.slice(0, 10).map(([isoCategory]) => isoCategory);
-      const isoImagesPromises = isoIds.map(async (isoCategory) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByISO(isoCategory, 1);
-          return { isoCategory, images };
-        } catch (error) {
-          logger.error(`加载ISO ${isoCategory} 最近图片失败:`, error);
-          return { isoCategory, images: [] };
-        }
-      });
-      const isoImagesResults = await Promise.all(isoImagesPromises);
-      const isoImagesMap = {};
-      isoImagesResults.forEach(({ isoCategory, images }) => {
-        isoImagesMap[isoCategory] = images;
-      });
-      
-      // 🔥 加载各光圈分类的最近图片
-      const sortedApertures = Object.entries(apertureCountsData).sort(([,a], [,b]) => b - a);
-      const apertureIds = sortedApertures.slice(0, 10).map(([apertureCategory]) => apertureCategory);
-      const apertureImagesPromises = apertureIds.map(async (apertureCategory) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByAperture(apertureCategory, 1);
-          return { apertureCategory, images };
-        } catch (error) {
-          logger.error(`加载光圈 ${apertureCategory} 最近图片失败:`, error);
-          return { apertureCategory, images: [] };
-        }
-      });
-      const apertureImagesResults = await Promise.all(apertureImagesPromises);
-      const apertureImagesMap = {};
-      apertureImagesResults.forEach(({ apertureCategory, images }) => {
-        apertureImagesMap[apertureCategory] = images;
-      });
-      
-      // 🔥 加载各快门分类的最近图片
-      const sortedShutters = Object.entries(shutterCountsData).sort(([,a], [,b]) => b - a);
-      const shutterIds = sortedShutters.slice(0, 10).map(([shutterCategory]) => shutterCategory);
-      const shutterImagesPromises = shutterIds.map(async (shutterCategory) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByShutter(shutterCategory, 1);
-          return { shutterCategory, images };
-        } catch (error) {
-          logger.error(`加载快门 ${shutterCategory} 最近图片失败:`, error);
-          return { shutterCategory, images: [] };
-        }
-      });
-      const shutterImagesResults = await Promise.all(shutterImagesPromises);
-      const shutterImagesMap = {};
-      shutterImagesResults.forEach(({ shutterCategory, images }) => {
-        shutterImagesMap[shutterCategory] = images;
-      });
-      
-      // 🔥 加载各焦距分类的最近图片
-      const sortedFocalLengths = Object.entries(focalLengthCountsData).sort(([,a], [,b]) => b - a);
-      const focalLengthIds = sortedFocalLengths.slice(0, 10).map(([focalLengthCategory]) => focalLengthCategory);
-      const focalLengthImagesPromises = focalLengthIds.map(async (focalLengthCategory) => {
-        try {
-          const images = await UnifiedDataService.readRecentImagesByFocalLength(focalLengthCategory, 1);
-          return { focalLengthCategory, images };
-        } catch (error) {
-          logger.error(`加载焦距 ${focalLengthCategory} 最近图片失败:`, error);
-          return { focalLengthCategory, images: [] };
-        }
-      });
-      const focalLengthImagesResults = await Promise.all(focalLengthImagesPromises);
-      const focalLengthImagesMap = {};
-      focalLengthImagesResults.forEach(({ focalLengthCategory, images }) => {
-        focalLengthImagesMap[focalLengthCategory] = images;
-      });
-      
       // 处理新发现照片的结果（包含总数和图片列表）
       const recentImagesData = recentImagesResult.images || [];
       const recentImagesTotalCount = recentImagesResult.total || 0;
@@ -340,15 +180,6 @@ const HomeScreen = () => {
       setSimilarityGroups(similarityGroupsData);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
-      setColorRecentImages(colorImagesMap);
-      setDirectoryRecentImages(directoryImagesMap);
-      setFormatRecentImages(formatImagesMap);
-      setResolutionRecentImages(resolutionImagesMap);
-      setOrientationRecentImages(orientationImagesMap);
-      setISORecentImages(isoImagesMap);
-      setApertureRecentImages(apertureImagesMap);
-      setShutterRecentImages(shutterImagesMap);
-      setFocalLengthRecentImages(focalLengthImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
       // 只有当用户明确设置为 false 时才显示空分类
       const shouldHide = settings.hideEmptyCategories !== false;
@@ -956,7 +787,7 @@ const HomeScreen = () => {
     } catch (error) {
       // 🔥 如果是"扫描已在进行中"的错误，静默处理，不显示错误提示
       if (error.message && error.message.includes(t('home.scanAlreadyInProgress'))) {
-        logger.debug('ℹ️ 扫描已在进行中，跳过新扫描请求');
+        logger.info('ℹ️ 扫描已在进行中，跳过新扫描请求');
         setIsScanning(false); // 重置状态
         // 🔥 清除全局变量
         if (typeof window !== 'undefined') {
@@ -1171,22 +1002,51 @@ const HomeScreen = () => {
                 );
               }
               
-              // 渲染可见的分类
-              return visibleCategories.map(category => {
-                const count = categoryCounts[category.id] || 0;
-                const recentImages = categoryRecentImages[category.id] || [];
-                
-                return (
-                  <CategoryCard
-                    key={category.id}
-                    category={category}
-                    count={count}
-                    recentImages={recentImages}
-                    onPress={handleCategoryPress}
-                    onRightClick={category.id === 'NA' ? handleNACategoryAIClassify : undefined}
-                  />
-                );
-              });
+              // 渲染可见的分类 + 颜色芯片（颜色在内容卡片下方）
+              const filteredColors = showColorCategories
+                ? BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
+                    .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0))
+                : [];
+              
+              return (
+                <View style={{ flexDirection: 'column', width: '100%' }}>
+                  <View style={styles.categoriesContainer}>
+                    {visibleCategories.map(category => {
+                      const count = categoryCounts[category.id] || 0;
+                      const recentImages = categoryRecentImages[category.id] || [];
+                      return (
+                        <CategoryCard
+                          key={category.id}
+                          category={category}
+                          count={count}
+                          recentImages={recentImages}
+                          onPress={handleCategoryPress}
+                          onRightClick={category.id === 'NA' ? handleNACategoryAIClassify : undefined}
+                        />
+                      );
+                    })}
+                  </View>
+                  {filteredColors.length > 0 && (
+                    <View style={[styles.colorChipsContainer, { marginTop: visibleCategories.length > 0 ? 12 : 0 }]}>
+                      {filteredColors.map((color) => {
+                        const count = colorCounts[color] || 0;
+                        const hex = COLOR_NAME_TO_HEX[color] || '#9E9E9E';
+                        return (
+                          <TouchableOpacity
+                            key={color}
+                            style={styles.colorChip}
+                            onPress={() => handleColorPress(color)}
+                          >
+                            <View style={[styles.colorChipSwatch, { backgroundColor: hex }]} />
+                            <Text style={styles.colorChipName} numberOfLines={1}>{getColorNameTranslation(color, i18n.language)}</Text>
+                            <Text style={styles.colorChipCount}>{count}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              );
             })()}
           </View>
         </View>
@@ -1201,7 +1061,7 @@ const HomeScreen = () => {
               {cityCounts && Object.keys(cityCounts).length > 0 && (
                 <TouchableOpacity
                   style={[
-                    styles.refreshButton,
+                    styles.toggleButton,
                     isScanning && styles.refreshButtonDisabled
                   ]}
                   onPress={handleStartLocationEnrichment}
@@ -1209,9 +1069,9 @@ const HomeScreen = () => {
                   activeOpacity={0.7}
                 >
                   <Text style={[
-                    styles.refreshButtonText,
+                    styles.toggleButtonText,
                     isScanning && styles.refreshButtonTextDisabled
-                  ]}>🔄</Text>
+                  ]}>{t('home.recheck')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1257,415 +1117,31 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* 颜色分类卡片 - 根据设置显示 */}
-        {showColorCategories && (() => {
-          // 过滤掉 null、undefined 和空字符串
-          const filteredColorCounts = colorCounts ? Object.entries(colorCounts).filter(([color]) => {
-            return color && 
-                   typeof color === 'string' && 
-                   color.trim() !== '' && 
-                   color !== 'null' && 
-                   color !== 'undefined';
-          }) : [];
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🎨 {t('home.byColor')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredColorCounts.length > 0 ? (
-                filteredColorCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([color, count]) => {
-                    const recentImages = colorRecentImages[color] || [];
-                    return (
-                      <ColorCard
-                        key={color}
-                        color={color}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={handleColorPress}
-                      />
-                    );
-                  })
-              ) : (
-                  <Text style={styles.emptyMessage}>{t('home.noColorData')}</Text>
-                )}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 目录分类卡片 - 根据设置显示 */}
-        {showDirectoryCategories && (() => {
-          // 过滤掉无效目录
-          const filteredDirectoryCounts = directoryCounts ? Object.entries(directoryCounts).filter(([directory]) => {
-            return directory && 
-                   typeof directory === 'string' && 
-                   directory.trim() !== '' && 
-                   directory !== 'null' && 
-                   directory !== 'undefined';
-          }) : [];
-          
-          if (filteredDirectoryCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📁 {t('home.byStorage')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredDirectoryCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([directory, count]) => {
-                    const recentImages = directoryRecentImages[directory] || [];
-                    // 提取目录名（最后一个路径段）
-                    const directoryName = directory.split('/').pop() || directory;
-                    return (
-                      <DirectoryCard
-                        key={directory}
-                        directory={directory}
-                        directoryName={directoryName}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={handleDirectoryPress}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 格式分类卡片 */}
-        {showFormatCategories && (() => {
-          const filteredFormatCounts = formatCounts ? Object.entries(formatCounts).filter(([format]) => {
-            return format && 
-                   typeof format === 'string' && 
-                   format.trim() !== '' && 
-                   format !== 'null' && 
-                   format !== 'UNKNOWN';
-          }) : [];
-          
-          if (filteredFormatCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📄 {t('home.byFormat')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredFormatCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([format, count]) => {
-                    const recentImages = formatRecentImages[format] || [];
-                    return (
-                      <CategoryCard
-                        key={format}
-                        category={format}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={handleFormatPress}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 分辨率分类卡片 */}
-        {showResolutionCategories && (() => {
-          logger.debug('📐 检查分辨率统计显示:', {
-            resolutionCounts,
-            hasResolutionCounts: !!resolutionCounts,
-            resolutionCountsKeys: resolutionCounts ? Object.keys(resolutionCounts) : [],
-            resolutionCountsEntries: resolutionCounts ? Object.entries(resolutionCounts) : []
-          });
-          
-          // 如果没有分辨率统计数据，直接返回
-          if (!resolutionCounts || Object.keys(resolutionCounts).length === 0) {
-            logger.debug('📐 分辨率统计数据为空或未定义');
-            return null;
-          }
-          
-          const filteredResolutionCounts = Object.entries(resolutionCounts).filter(([resolution]) => {
-            const isValid = resolution && 
-                   typeof resolution === 'string' && 
-                   resolution.trim() !== '' && 
-                   resolution !== 'null' && 
-                   resolution !== 'UNKNOWN';
-            if (!isValid) {
-              logger.debug(`📐 过滤掉无效分辨率: "${resolution}"`);
-            }
-            return isValid;
-          });
-          
-          logger.debug('📐 过滤后的分辨率统计:', filteredResolutionCounts);
-          
-          if (filteredResolutionCounts.length === 0) {
-            logger.debug('📐 分辨率统计为空，不显示分辨率分类卡片');
-            return null;
-          }
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📏 {t('home.byResolution')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredResolutionCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([resolution, count]) => {
-                    const recentImages = resolutionRecentImages[resolution] || [];
-                    return (
-                      <CategoryCard
-                        key={resolution}
-                        category={resolution}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={handleResolutionPress}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 方向分类卡片 */}
-        {showOrientationCategories && (() => {
-          // 如果没有方向统计数据，直接返回
-          if (!orientationCounts || Object.keys(orientationCounts).length === 0) {
-            return null;
-          }
-          
-          const filteredOrientationCounts = Object.entries(orientationCounts).filter(([orientation]) => {
-            return orientation && 
-                   typeof orientation === 'string' && 
-                   orientation.trim() !== '' && 
-                   orientation !== 'null' && 
-                   orientation !== 'UNKNOWN';
-          });
-          
-          if (filteredOrientationCounts.length === 0) {
-            return null;
-          }
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>🧭 {t('home.byOrientation')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredOrientationCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([orientation, count]) => {
-                    const recentImages = orientationRecentImages[orientation] || [];
-                    // 翻译方向名称用于显示，但保留原始值用于 onPress
-                    const translatedOrientation = getOrientationNameTranslation(orientation, i18n.language || 'zh');
-                    return (
-                      <CategoryCard
-                        key={orientation}
-                        category={{ 
-                          id: orientation, // 保留原始值用于 onPress
-                          name: translatedOrientation // 显示翻译后的名称
-                        }}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={handleOrientationPress}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 🔥 ISO分类卡片 */}
-        {showISOCategories && (() => {
-          if (!isoCounts || Object.keys(isoCounts).length === 0) return null;
-          
-          const filteredISOCounts = Object.entries(isoCounts).filter(([iso]) => {
-            return iso && typeof iso === 'string' && iso.trim() !== '';
-          });
-          
-          if (filteredISOCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📷 {t('home.byISO')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredISOCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([isoCategory, count]) => {
-                    const recentImages = isoRecentImages[isoCategory] || [];
-                    const translatedCategory = getCameraSettingsCategoryTranslation('iso', isoCategory);
-                    return (
-                      <CategoryCard
-                        key={isoCategory}
-                        category={translatedCategory}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={() => handleISOPress(isoCategory)}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 🔥 光圈分类卡片 */}
-        {showApertureCategories && (() => {
-          if (!apertureCounts || Object.keys(apertureCounts).length === 0) return null;
-          
-          const filteredApertureCounts = Object.entries(apertureCounts).filter(([aperture]) => {
-            return aperture && typeof aperture === 'string' && aperture.trim() !== '';
-          });
-          
-          if (filteredApertureCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📷 {t('home.byAperture')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredApertureCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([apertureCategory, count]) => {
-                    const recentImages = apertureRecentImages[apertureCategory] || [];
-                    const translatedCategory = getCameraSettingsCategoryTranslation('aperture', apertureCategory);
-                    return (
-                      <CategoryCard
-                        key={apertureCategory}
-                        category={translatedCategory}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={() => handleAperturePress(apertureCategory)}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 🔥 快门分类卡片 */}
-        {showShutterCategories && (() => {
-          if (!shutterCounts || Object.keys(shutterCounts).length === 0) return null;
-          
-          const filteredShutterCounts = Object.entries(shutterCounts).filter(([shutter]) => {
-            return shutter && typeof shutter === 'string' && shutter.trim() !== '';
-          });
-          
-          if (filteredShutterCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📷 {t('home.byShutter')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredShutterCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([shutterCategory, count]) => {
-                    const recentImages = shutterRecentImages[shutterCategory] || [];
-                    const translatedCategory = getCameraSettingsCategoryTranslation('shutter', shutterCategory);
-                    return (
-                      <CategoryCard
-                        key={shutterCategory}
-                        category={translatedCategory}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={() => handleShutterPress(shutterCategory)}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 🔥 焦距分类卡片 */}
-        {showFocalLengthCategories && (() => {
-          if (!focalLengthCounts || Object.keys(focalLengthCounts).length === 0) return null;
-          
-          const filteredFocalLengthCounts = Object.entries(focalLengthCounts).filter(([focalLength]) => {
-            return focalLength && typeof focalLength === 'string' && focalLength.trim() !== '';
-          });
-          
-          if (filteredFocalLengthCounts.length === 0) return null;
-          
-          return (
-            <View style={styles.categoriesSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📷 {t('home.byFocalLength')}</Text>
-              </View>
-              <View style={styles.categoriesContainer}>
-                {filteredFocalLengthCounts
-                  .sort(([,a], [,b]) => b - a)
-                  .map(([focalLengthCategory, count]) => {
-                    const recentImages = focalLengthRecentImages[focalLengthCategory] || [];
-                    const translatedCategory = getCameraSettingsCategoryTranslation('focalLength', focalLengthCategory);
-                    return (
-                      <CategoryCard
-                        key={focalLengthCategory}
-                        category={translatedCategory}
-                        count={count}
-                        recentImages={recentImages}
-                        onPress={() => handleFocalLengthPress(focalLengthCategory)}
-                      />
-                    );
-                  })}
-              </View>
-            </View>
-          );
-        })()}
-
-        {/* 相似照片板块 - 根据设置显示 */}
+        {/* 相似照片板块 - 位于城市下方 */}
         {showSimilarityGroups && (
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
-                <Text style={styles.sectionTitle}>🔗 {t('category.similarityGroup')}</Text>
+                <Text style={styles.sectionTitle}>🔗 {t('home.similarPhotos')}</Text>
               </View>
               {similarityGroups && similarityGroups.length > 0 && (
                 <View style={styles.headerButtonsContainer}>
                   <TouchableOpacity
-                    style={[
-                      styles.refreshButton,
-                      isScanning && styles.refreshButtonDisabled
-                    ]}
+                    style={[styles.toggleButton, isScanning && styles.refreshButtonDisabled]}
                     onPress={handleStartSimilarityDetection}
                     disabled={isScanning}
                     activeOpacity={0.7}
                   >
-                    <Text style={[
-                      styles.refreshButtonText,
-                      isScanning && styles.refreshButtonTextDisabled
-                    ]}>🔄</Text>
+                    <Text style={[styles.toggleButtonText, isScanning && styles.refreshButtonTextDisabled]}>{t('home.recheck')}</Text>
                   </TouchableOpacity>
-                  {similarityGroups.length > 10 && !showAllSimilarityGroups && (
-                    <TouchableOpacity
-                      style={styles.moreButton}
-                      onPress={() => setShowAllSimilarityGroups(true)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.moreButtonText}>⋯</Text>
+                  {similarityGroups.length > 8 && !showAllSimilarityGroups && (
+                    <TouchableOpacity style={styles.toggleButton} onPress={() => setShowAllSimilarityGroups(true)} activeOpacity={0.7}>
+                      <Text style={styles.toggleButtonText}>{t('home.showMore')}</Text>
                     </TouchableOpacity>
                   )}
-                  {showAllSimilarityGroups && similarityGroups.length > 10 && (
-                    <TouchableOpacity
-                      style={styles.moreButton}
-                      onPress={() => setShowAllSimilarityGroups(false)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.moreButtonText}>−</Text>
+                  {showAllSimilarityGroups && similarityGroups.length > 8 && (
+                    <TouchableOpacity style={styles.toggleButton} onPress={() => setShowAllSimilarityGroups(false)} activeOpacity={0.7}>
+                      <Text style={styles.toggleButtonText}>{t('home.showLess')}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1673,36 +1149,31 @@ const HomeScreen = () => {
             </View>
             <View style={styles.categoriesContainer}>
               {similarityGroups && similarityGroups.length > 0 ? (
-                (() => {
-                  // PC端限制最多显示200个相似组，避免性能问题
-                  const MAX_DISPLAY_COUNT = 200;
-                  const displayGroups = showAllSimilarityGroups 
-                    ? similarityGroups.slice(0, MAX_DISPLAY_COUNT)
-                    : similarityGroups.slice(0, 10);
-                  const hasMore = showAllSimilarityGroups && similarityGroups.length > MAX_DISPLAY_COUNT;
-                  
-                  return (
-                    <>
-                      {displayGroups.map((group) => (
-                        <SimilarityCard
+                showAllSimilarityGroups ? (
+                  <View style={styles.attributesContainer}>
+                    <View style={styles.attributeRow}>
+                      {similarityGroups.map((group) => (
+                        <TouchableOpacity
                           key={group.groupId}
-                          group={group}
-                          onPress={(group) => {
-                            // 🆕 使用统一的过滤处理函数
-                            handleFilterPress('similarityGroup', group.groupId);
-                          }}
-                        />
-                      ))}
-                      {hasMore && (
-                        <View style={styles.moreGroupsHint}>
-                          <Text style={styles.moreGroupsHintText}>
-                            {t('home.moreSimilarityGroupsHint', { total: similarityGroups.length, displayed: MAX_DISPLAY_COUNT })}
+                          style={styles.attributeChip}
+                          onPress={() => handleFilterPress('similarityGroup', group.groupId)}
+                        >
+                          <Text style={styles.attributeChipName} numberOfLines={1}>
+                            {t('home.similarityGroupChip', { count: group.imageCount || 0 })}
                           </Text>
-                        </View>
-                      )}
-                    </>
-                  );
-                })()
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                ) : (
+                  similarityGroups.slice(0, 8).map((group) => (
+                    <SimilarityCard
+                      key={group.groupId}
+                      group={group}
+                      onPress={() => handleFilterPress('similarityGroup', group.groupId)}
+                    />
+                  ))
+                )
               ) : (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>🔗</Text>
@@ -1713,17 +1184,11 @@ const HomeScreen = () => {
                     <Text style={styles.emptyStateSubtext}>{t('home.startSimilarityDetectionHint')}</Text>
                   )}
                   <TouchableOpacity
-                    style={[
-                      styles.startSimilarityButton,
-                      (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonDisabled
-                    ]}
+                    style={[styles.startSimilarityButton, (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonDisabled]}
                     onPress={handleStartSimilarityDetection}
                     disabled={isScanning || isSimilarityDetecting}
                   >
-                    <Text style={[
-                      styles.startSimilarityButtonText,
-                      (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonTextDisabled
-                    ]}>
+                    <Text style={[styles.startSimilarityButtonText, (isScanning || isSimilarityDetecting) && styles.startSimilarityButtonTextDisabled]}>
                       {isSimilarityDetecting ? t('home.similarityDetectionInProgress') : t('home.startSimilarityDetection')}
                     </Text>
                   </TouchableOpacity>
@@ -1732,6 +1197,123 @@ const HomeScreen = () => {
             </View>
           </View>
         )}
+
+        {/* 按属性（合并存储/格式/分辨率/方向，芯片样式无缩略图） */}
+        {(() => {
+          const dirItems = Object.entries(directoryCounts || {}).filter(([d]) => d && typeof d === 'string' && d.trim() && d !== 'null' && d !== 'undefined').sort(([,a], [,b]) => b - a);
+          const formatItems = Object.entries(formatCounts || {}).filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const resolutionItems = Object.entries(resolutionCounts || {}).filter(([r]) => r && typeof r === 'string' && r.trim() && r !== 'null' && r !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const orientationItems = Object.entries(orientationCounts || {}).filter(([o]) => o && typeof o === 'string' && o.trim() && o !== 'null' && o !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const hasDir = showDirectoryCategories && dirItems.length > 0;
+          const hasFormat = showFormatCategories && formatItems.length > 0;
+          const hasResolution = showResolutionCategories && resolutionItems.length > 0;
+          const hasOrientation = showOrientationCategories && orientationItems.length > 0;
+          if (!hasDir && !hasFormat && !hasResolution && !hasOrientation) return null;
+          const renderAttributeChip = (filterType, filterValue, displayName, count) => (
+            <TouchableOpacity key={`${filterType}-${filterValue}`} style={styles.attributeChip} onPress={() => handleFilterPress(filterType, filterValue)}>
+              <Text style={styles.attributeChipName} numberOfLines={1}>{displayName}</Text>
+              <Text style={styles.attributeChipCount}>{count}</Text>
+            </TouchableOpacity>
+          );
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📋 {t('home.byAttributes')}</Text>
+              </View>
+              <View style={styles.attributesContainer}>
+                {hasDir && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byStorage')}</Text>
+                    <View style={styles.attributeRow}>
+                      {dirItems.map(([directory]) => {
+                        const count = directoryCounts[directory] || 0;
+                        const displayName = directory.split('/').pop() || directory;
+                        return renderAttributeChip('directory', directory, displayName, count);
+                      })}
+                    </View>
+                  </View>
+                )}
+                {hasFormat && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byFormat')}</Text>
+                    <View style={styles.attributeRow}>
+                      {formatItems.map(([format]) => renderAttributeChip('format', format, format, (formatCounts || {})[format] || 0))}
+                    </View>
+                  </View>
+                )}
+                {hasResolution && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byResolution')}</Text>
+                    <View style={styles.attributeRow}>
+                      {resolutionItems.map(([resolution]) => renderAttributeChip('resolution', resolution, resolution, (resolutionCounts || {})[resolution] || 0))}
+                    </View>
+                  </View>
+                )}
+                {hasOrientation && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byOrientation')}</Text>
+                    <View style={styles.attributeRow}>
+                      {orientationItems.map(([orientation]) => renderAttributeChip('orientation', orientation, getOrientationNameTranslation(orientation, i18n.language || 'zh'), (orientationCounts || {})[orientation] || 0))}
+                    </View>
+                  </View>
+                )}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 按拍摄参数（合并 ISO/光圈/快门/焦距，芯片样式无缩略图） */}
+        {(() => {
+          const currentLang = i18n.language || 'zh';
+          const isoItems = Object.entries(isoCounts || {}).filter(([i]) => i && typeof i === 'string' && i.trim() && i !== 'null' && i !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const apertureItems = Object.entries(apertureCounts || {}).filter(([k]) => k && typeof k === 'string' && k.trim() && k !== 'null' && k !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const shutterItems = Object.entries(shutterCounts || {}).filter(([k]) => k && typeof k === 'string' && k.trim() && k !== 'null' && k !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const focalLengthItems = Object.entries(focalLengthCounts || {}).filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
+          const hasISO = showISOCategories && isoItems.length > 0;
+          const hasAperture = showApertureCategories && apertureItems.length > 0;
+          const hasShutter = showShutterCategories && shutterItems.length > 0;
+          const hasFocalLength = showFocalLengthCategories && focalLengthItems.length > 0;
+          if (!hasISO && !hasAperture && !hasShutter && !hasFocalLength) return null;
+          const renderAttrChip = (filterType, filterValue, displayName, count) => (
+            <TouchableOpacity key={`${filterType}-${filterValue}`} style={styles.attributeChip} onPress={() => handleFilterPress(filterType, filterValue)}>
+              <Text style={styles.attributeChipName} numberOfLines={1}>{displayName}</Text>
+              <Text style={styles.attributeChipCount}>{count}</Text>
+            </TouchableOpacity>
+          );
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📸 {t('home.byShootingParams')}</Text>
+              </View>
+              <View style={styles.attributesContainer}>
+                {hasISO && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byISO')}</Text>
+                    <View style={styles.attributeRow}>{isoItems.map(([iso]) => renderAttrChip('iso', iso, getCameraSettingsCategoryTranslation('iso', iso, currentLang) || iso, (isoCounts || {})[iso] || 0))}</View>
+                  </View>
+                )}
+                {hasAperture && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byAperture')}</Text>
+                    <View style={styles.attributeRow}>{apertureItems.map(([aperture]) => renderAttrChip('aperture', aperture, getCameraSettingsCategoryTranslation('aperture', aperture, currentLang) || aperture, (apertureCounts || {})[aperture] || 0))}</View>
+                  </View>
+                )}
+                {hasShutter && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byShutter')}</Text>
+                    <View style={styles.attributeRow}>{shutterItems.map(([shutter]) => renderAttrChip('shutter', shutter, getCameraSettingsCategoryTranslation('shutter', shutter, currentLang) || shutter, (shutterCounts || {})[shutter] || 0))}</View>
+                  </View>
+                )}
+                {hasFocalLength && (
+                  <View style={styles.attributeSubBlock}>
+                    <Text style={styles.attributeSubLabel}>{t('home.byFocalLength')}</Text>
+                    <View style={styles.attributeRow}>{focalLengthItems.map(([focalLength]) => renderAttrChip('focalLength', focalLength, getCameraSettingsCategoryTranslation('focalLength', focalLength, currentLang) || focalLength, (focalLengthCounts || {})[focalLength] || 0))}</View>
+                  </View>
+                )}
+              </View>
+            </View>
+          );
+        })()}
 
         {/* 最新发现照片 - 根据设置显示 */}
         {showRecentPhotos && (
@@ -1772,15 +1354,19 @@ const HomeScreen = () => {
     
     return (
       <SafeAreaView style={styles.container}>
-        {/* 自定义标题栏 */}
+        {/* 自定义标题栏；macOS 上不显示左侧图标和标题，只留设置与暂存箱 */}
         <View style={styles.customTitleBar}>
           <View style={styles.titleBarLeft}>
-            <Image 
-              source={{ uri: './icon.png' }}
-              style={styles.titleBarIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.titleBarTitle}>{t('app.name')}</Text>
+            {typeof process !== 'undefined' && process.platform !== 'darwin' && (
+              <>
+                <Image 
+                  source={{ uri: './icon.png' }}
+                  style={styles.titleBarIcon}
+                  resizeMode="contain"
+                />
+                <Text style={styles.titleBarTitle}>{t('app.name')}</Text>
+              </>
+            )}
           </View>
           <View style={styles.titleBarRight}>
             {/* 暂存箱按钮 */}
@@ -1953,7 +1539,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, colorRecentImages, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -2458,6 +2044,7 @@ const styles = StyleSheet.create({
   recentSectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 16,
   },
   refreshButton: {
@@ -2709,6 +2296,86 @@ const styles = StyleSheet.create({
   },
   startSimilarityButtonTextDisabled: {
     color: '#999999',
+  },
+  // 颜色芯片、按属性、按拍摄参数
+  colorChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  colorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    gap: 6,
+  },
+  colorChipSwatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  colorChipName: {
+    flex: 1,
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+  },
+  colorChipCount: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  attributesContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  attributeSubBlock: {
+    gap: 6,
+  },
+  attributeSubLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+    paddingHorizontal: 4,
+  },
+  attributeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 8,
+    backgroundColor: '#FAFAFA',
+  },
+  attributeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    gap: 6,
+  },
+  attributeChipName: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+    maxWidth: 120,
+  },
+  attributeChipCount: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#666',
   },
 });
 

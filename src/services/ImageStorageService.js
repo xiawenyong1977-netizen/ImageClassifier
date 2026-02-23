@@ -2,50 +2,59 @@ import { AsyncStorage, logger, Platform, SQLite } from '../adapters/WebAdapters'
 import configService from './ConfigService.js';
 import { getDefaultPresets } from '../i18n/index.js';
 
-// ========== 拍摄参数分类函数 ==========
+// ========== 拍摄参数档位化分类（折中方案：标准档位，非高中低） ==========
+
+const ISO_BUCKETS = [50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600];
+const APERTURE_BUCKETS = [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22];
+// 快门：秒 -> 显示档位（1/1000, 1/125, 1", 2" 等）
+const SHUTTER_BUCKETS_SEC = [1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 1/8, 1/4, 1/2, 1, 2, 4, 8];
+const FOCAL_BUCKETS = [14, 24, 35, 50, 85, 135, 200, 300, 400];
+
+function bucketToNearest(value, buckets) {
+  if (value <= buckets[0]) return buckets[0];
+  for (let i = 0; i < buckets.length - 1; i++) {
+    const mid = (buckets[i] + buckets[i + 1]) / 2;
+    if (value <= mid) return buckets[i];
+  }
+  return buckets[buckets.length - 1];
+}
+
 /**
- * ISO分类：low(<400), medium(400-1600), high(>1600)
+ * ISO档位：50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600
  */
 function categorizeISO(iso) {
   if (!iso || typeof iso !== 'number' || iso <= 0) return null;
-  if (iso < 400) return 'low';
-  if (iso <= 1600) return 'medium';
-  return 'high';
+  const bucketed = bucketToNearest(iso, ISO_BUCKETS);
+  return String(bucketed);
 }
 
 /**
- * 光圈分类：wide(<f/2.8), medium(f/2.8-f/5.6), narrow(>f/5.6)
+ * 光圈档位：1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22
  */
 function categorizeAperture(fNumber) {
   if (!fNumber || typeof fNumber !== 'number' || fNumber <= 0) return null;
-  if (fNumber < 2.8) return 'wide';
-  if (fNumber <= 5.6) return 'medium';
-  return 'narrow';
+  const bucketed = bucketToNearest(fNumber, APERTURE_BUCKETS);
+  return String(bucketed);
 }
 
 /**
- * 快门分类：fast(>1/250s), medium(1/30-1/250s), slow(<1/30s)
+ * 快门档位：1/8000, 1/4000, ..., 1/8, 1/4, 1/2, 1", 2", 4", 8"
  */
 function categorizeShutterSpeed(exposureTime) {
   if (!exposureTime || typeof exposureTime !== 'number' || exposureTime <= 0) return null;
-  if (exposureTime > 1/250) return 'fast';
-  if (exposureTime >= 1/30) return 'medium';
-  return 'slow';
+  const bucketed = bucketToNearest(exposureTime, SHUTTER_BUCKETS_SEC);
+  if (bucketed >= 1) return `${bucketed}"`;
+  const denom = Math.round(1 / bucketed);
+  return `1/${denom}`;
 }
 
 /**
- * 焦距分类：
- * - ultrawide(<3mm): 超广角/微距（手机贴得比较近的时候）
- * - wide(3-35mm): 广角（正常拍摄）
- * - standard(35-85mm): 标准
- * - telephoto(>85mm): 长焦
+ * 焦距档位：14, 24, 35, 50, 85, 135, 200, 300, 400 mm
  */
 function categorizeFocalLength(focalLength) {
   if (!focalLength || typeof focalLength !== 'number' || focalLength <= 0) return null;
-  if (focalLength < 3) return 'ultrawide';  // 手机微距/超广角模式
-  if (focalLength < 35) return 'wide';       // 正常广角
-  if (focalLength <= 85) return 'standard';  // 标准
-  return 'telephoto';                        // 长焦
+  const bucketed = bucketToNearest(focalLength, FOCAL_BUCKETS);
+  return String(bucketed);
 }
 
 /**
@@ -4351,7 +4360,7 @@ class ImageStorageService {
         images,
         stats,
         exportDate: new Date().toISOString(),
-        version: '1.1.2',
+        version: '1.1.3',
       };
       
       logger.debug(`Exported ${images.length} images and statistics`);

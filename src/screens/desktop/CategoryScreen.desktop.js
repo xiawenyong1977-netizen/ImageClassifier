@@ -6,6 +6,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Mod
 // 分页方案实现
 import { SafeAreaView, Alert, createFixedStyle } from '../../adapters/WebAdapters';
 import UnifiedDataService from '../../services/UnifiedDataService';
+import cityLocationService from '../../services/CityLocationService';
 import ImageEnhanceService from '../../services/ImageEnhanceService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import EnhanceResultScreen from './EnhanceResultScreen.desktop';
@@ -312,6 +313,18 @@ const CategoryScreen = ({
   useEffect(() => {
     loadImages();
   }, [loadImages, filterType, filterValue]);
+
+  // 按城市筛选时，locationId 对应的显示名称（与当前语言一致）
+  const [cityDisplayName, setCityDisplayName] = useState('');
+  useEffect(() => {
+    if (filterType !== 'city' || !filterValue) {
+      setCityDisplayName('');
+      return;
+    }
+    cityLocationService.getLocationName(filterValue, i18n.language || 'zh')
+      .then((name) => setCityDisplayName(name || filterValue))
+      .catch(() => setCityDisplayName(filterValue));
+  }, [filterType, filterValue, i18n.language]);
 
   // 必要的UI状态
   const [selectAll, setSelectAll] = useState(false);
@@ -1334,7 +1347,7 @@ const CategoryScreen = ({
           : filterType === 'directory'
           ? tHeader('category.directoryWithCount', { name: truncateText(filterValue.split('/').pop() || filterValue, 20), count: allImages.length })
           : filterType === 'city'
-          ? tHeader('category.cityWithCount', { city: filterValue, count: allImages.length })
+          ? tHeader('category.cityWithCount', { city: cityDisplayName || filterValue, count: allImages.length })
           : filterType === 'color'
           ? tHeader('category.colorWithCount', { color: getColorNameTranslation(filterValue, i18n.language || 'zh'), count: allImages.length })
           : filterType === 'category'
@@ -1801,7 +1814,7 @@ const CategoryScreen = ({
               : filterType === 'directory'
               ? t('category.directoryEmpty')
               : filterType === 'city'
-              ? t('category.cityEmpty', { city: filterValue })
+              ? t('category.cityEmpty', { city: cityDisplayName || filterValue })
               : filterType === 'color'
               ? t('category.colorEmpty')
               : filterType === 'stagingBox'
@@ -2102,7 +2115,7 @@ const CategoryScreen = ({
           : filterType === 'directory'
           ? t('category.directoryEmpty')
           : filterType === 'city'
-          ? t('category.cityEmpty', { city: filterValue })
+          ? t('category.cityEmpty', { city: cityDisplayName || filterValue })
           : filterType === 'color'
           ? t('category.colorEmpty')
           : filterType === 'stagingBox'

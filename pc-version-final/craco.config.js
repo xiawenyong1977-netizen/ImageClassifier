@@ -19,6 +19,8 @@ module.exports = {
       webpackConfig.resolve.alias = {
         ...webpackConfig.resolve.alias,
         'react-native': 'react-native-web',
+        // PC 构建不包含 onnxruntime-react-native，用桩模块避免 resolve 报错（Electron 用 onnxruntime-node）
+        'onnxruntime-react-native': path.resolve(__dirname, 'stubs/onnxruntime-react-native.js'),
         // 强制使用正确的React版本
         'react': path.resolve(__dirname, 'node_modules/react'),
         'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
