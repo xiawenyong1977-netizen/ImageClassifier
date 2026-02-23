@@ -104,6 +104,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write  # 创建 Release 和上传制品需要
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -120,6 +122,7 @@ jobs:
         with:
           tag_name: v${{ vars.CURRENT_VERSION || '1.1.3' }}
           name: Release v${{ vars.CURRENT_VERSION || '1.1.3' }}
+          allow_updates: true  # 若 tag 已存在则更新而非报错
           body: |
             Automatic release for ImageClassifier v${{ vars.CURRENT_VERSION || '1.1.3' }}
             
