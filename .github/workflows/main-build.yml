@@ -117,12 +117,19 @@ jobs:
           echo "Available artifacts:"
           find ./artifacts -type f -name "*.*"
 
+      - name: Prepare release files (flatten, avoid duplicates)
+        run: |
+          mkdir -p ./release
+          find ./artifacts -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.apk" -o -name "*.appx" \) -exec cp {} ./release/ \;
+          echo "Release files:"
+          ls -la ./release/
+
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.4.2
         with:
           tag_name: v${{ vars.CURRENT_VERSION || '1.1.3' }}
           name: Release v${{ vars.CURRENT_VERSION || '1.1.3' }}
-          allow_updates: true  # 若 tag 已存在则更新而非报错
+          allow_updates: true
           body: |
             Automatic release for ImageClassifier v${{ vars.CURRENT_VERSION || '1.1.3' }}
             
@@ -135,7 +142,4 @@ jobs:
             - Android (APK)
           draft: false
           prerelease: false
-          files: |
-            ./artifacts/XinTuAlbum-mac-*/*
-            ./artifacts/XinTuAlbum-win-*/*
-            ./artifacts/XinTuAlbum-android-*/*
+          files: ./release/*
