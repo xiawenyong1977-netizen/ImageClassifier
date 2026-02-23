@@ -169,20 +169,27 @@ try {
 # 步骤3: 检查文件生成时间
 Write-Host "`n🔍 步骤3: 检查文件生成时间..." -ForegroundColor Yellow
 
+# 从 package.json 读取版本，动态查找 Windows 制品
+$pcPkgPath = Join-Path $scriptDir "pc-version-final\package.json"
+$pcVersion = "1.1.3"
+if (Test-Path $pcPkgPath) {
+    $pcPkg = Get-Content $pcPkgPath -Raw | ConvertFrom-Json
+    $pcVersion = $pcPkg.version
+}
+
+$distPath = Join-Path $scriptDir "pc-version-final\dist"
+# 按修改时间取最新，避免选中旧构建产物
+$portableExe = Get-ChildItem -Path $distPath -Filter "*portable*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$setupExe = Get-ChildItem -Path $distPath -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $portableExe) { $portableExe = Get-ChildItem -Path $distPath -Filter "XinTuAlbum*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*Setup*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+if (-not $setupExe) { $setupExe = Get-ChildItem -Path $distPath -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+
+$apkPath = Join-Path $scriptDir "android\app\build\outputs\apk\release\app-release-signed.apk"
 $files = @(
-    @{
-        Path = "pc-version-final\dist\XinTuAlbum 1.1.2.exe"
-        Name = "便携版"
-    },
-    @{
-        Path = "pc-version-final\dist\XinTuAlbum-Setup-1.1.2.exe"
-        Name = "安装版"
-    },
-    @{
-        Path = "android\app\build\outputs\apk\release\app-release-signed.apk"
-        Name = "Android APK"
-    }
+    @{ Path = $apkPath; Name = "Android APK" }
 )
+if ($portableExe) { $files = @(@{ Path = $portableExe.FullName; Name = "便携版" }) + $files }
+if ($setupExe) { $files = @(@{ Path = $setupExe.FullName; Name = "安装版" }) + $files }
 
 $allRecent = $true
 foreach ($file in $files) {
@@ -211,23 +218,23 @@ if (Test-Path $tempDir) {
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 
 # 压缩便携版
-$portableSource = "pc-version-final\dist\XinTuAlbum 1.1.2.exe"
+$portableSource = if ($portableExe) { $portableExe.FullName } else { $null }
 $portableZipLocal = "$tempDir\xtxc$timestamp.zip"
 $portableZipRemote = "xtxc$timestamp.zip"
-if (Test-Path $portableSource) {
+if ($portableSource -and (Test-Path $portableSource)) {
     Compress-File -FilePath $portableSource -OutputPath $portableZipLocal
 } else {
-    throw "便携版文件不存在: $portableSource"
+    throw "便携版文件不存在，请在 pc-version-final\dist 中查找 *portable*.exe 或 XinTuAlbum*.exe"
 }
 
 # 压缩安装版
-$setupSource = "pc-version-final\dist\XinTuAlbum-Setup-1.1.2.exe"
+$setupSource = if ($setupExe) { $setupExe.FullName } else { $null }
 $setupZipLocal = "$tempDir\xtxcsetup$timestamp.zip"
 $setupZipRemote = "xtxcsetup$timestamp.zip"
-if (Test-Path $setupSource) {
+if ($setupSource -and (Test-Path $setupSource)) {
     Compress-File -FilePath $setupSource -OutputPath $setupZipLocal
 } else {
-    throw "安装版文件不存在: $setupSource"
+    throw "安装版文件不存在，请在 pc-version-final\dist 中查找 *Setup*.exe"
 }
 
 # 处理 Android APK（不压缩，直接重命名）

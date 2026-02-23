@@ -10,14 +10,45 @@ param(
 
 Write-Host "🔐 开始自动签名Release APK..." -ForegroundColor Green
 
-# 检查APK文件是否存在
-$unsignedApk = "app\build\outputs\apk\release\app-release-unsigned.apk"
-$signedApk = "app\build\outputs\apk\release\app-release-signed.apk"
+# 检查APK文件：优先 app-release-unsigned.apk，其次 app-release.apk（Gradle 可能已签名）
+$releaseDir = "app\build\outputs\apk\release"
+$signedApk = "$releaseDir\app-release-signed.apk"
 
-if (-not (Test-Path $unsignedApk)) {
-    Write-Host "❌ 未找到未签名的APK文件: $unsignedApk" -ForegroundColor Red
-    Write-Host "请先运行: .\gradlew assembleRelease" -ForegroundColor Yellow
+$unsignedApk = $null
+foreach ($name in @("app-release-unsigned.apk", "app-release.apk")) {
+    $path = Join-Path $releaseDir $name
+    if (Test-Path $path) {
+        $unsignedApk = $path
+        break
+    }
+}
+
+if (-not $unsignedApk) {
+    $anyApk = Get-ChildItem -Path $releaseDir -Filter "*.apk" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($anyApk) {
+        $unsignedApk = $anyApk.FullName
+        Write-Host "📄 使用找到的 APK: $unsignedApk" -ForegroundColor Cyan
+    }
+}
+
+if (-not $unsignedApk) {
+    Write-Host "❌ 未找到 APK 文件，请先运行: .\gradlew assembleRelease" -ForegroundColor Red
+    Write-Host "   查找目录: $releaseDir" -ForegroundColor Yellow
     exit 1
+}
+
+# 若已是 app-release-signed.apk 则跳过
+if ((Split-Path $unsignedApk -Leaf) -eq "app-release-signed.apk") {
+    Write-Host "✅ APK 已签名: $unsignedApk" -ForegroundColor Green
+    exit 0
+}
+
+# 若源文件是 app-release.apk（Gradle 已签名），直接复制为 signed
+if ($unsignedApk -like "*app-release.apk" -and $unsignedApk -notlike "*unsigned*") {
+    Write-Host "📄 Gradle 已签名，复制为: $signedApk" -ForegroundColor Cyan
+    Copy-Item -Path $unsignedApk -Destination $signedApk -Force
+    Write-Host "✅ 完成: $signedApk" -ForegroundColor Green
+    exit 0
 }
 
 # 自动检测Android SDK路径
