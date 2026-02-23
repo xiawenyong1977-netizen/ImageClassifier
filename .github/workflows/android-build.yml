@@ -244,16 +244,18 @@ jobs:
             ls -la artifacts/ || echo "artifacts directory not found"
             exit 1
           fi
+          [ -z "$VERSION" ] && VERSION="unknown"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Upload unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-android-arm
+          name: XinTuAlbum-android-arm-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.unsigned_apk }}
 
       - name: Upload signed APK (if available)
         if: steps.check-secrets.outputs.secrets_configured == 'true' && steps.build.outputs.signed_apk != ''
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-android-arm-signed
+          name: XinTuAlbum-android-arm-signed-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.signed_apk }}

@@ -180,11 +180,15 @@ jobs:
               "EOF" >> $env:GITHUB_OUTPUT
           }
           
+          # 输出版本号供 artifact 名称使用
+          "version=$version" >> $env:GITHUB_OUTPUT
+          
           # 检查是否至少找到一个类型的制品
           $totalFound = 0
           if ($nsisInstallers) { $totalFound += $nsisInstallers.Count }
           if ($portableExes) { $totalFound += $portableExes.Count }
-          if ($appxPackages) { $totalFound += $appxPackages.Count }
+          if ($unsignedAppx) { $totalFound += $unsignedAppx.Count }
+          if ($signedAppx) { $totalFound += $signedAppx.Count }
           
           Write-Host "Total artifacts found: $totalFound"
           
@@ -199,26 +203,26 @@ jobs:
         if: steps.build.outputs.nsis_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-win-amd-setup
+          name: XinTuAlbum-win-amd-setup-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.nsis_paths }}
 
       - name: Upload Portable EXE
         if: steps.build.outputs.portable_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-win-amd-portable
+          name: XinTuAlbum-win-amd-portable-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.portable_paths }}
 
       - name: Upload Unsigned APPX
         if: steps.build.outputs.unsigned_appx_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-win-amd
+          name: XinTuAlbum-win-amd-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.unsigned_appx_paths }}
 
       - name: Upload Signed APPX
         if: steps.build.outputs.signed_appx_paths != ''
         uses: actions/upload-artifact@v4
         with:
-          name: XinTuAlbum-win-amd-signed
+          name: XinTuAlbum-win-amd-signed-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.signed_appx_paths }}
