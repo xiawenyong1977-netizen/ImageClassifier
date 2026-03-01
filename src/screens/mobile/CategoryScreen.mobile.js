@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 芯图相册 - 移动端分类详情页（通用）
  * 
  * 支持4种形态：
@@ -37,6 +37,32 @@ import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettin
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_COLUMNS = 3;
 const GRID_ITEM_SIZE = (SCREEN_WIDTH - 8) / GRID_COLUMNS; // 减去间距
+
+/** 时间轴某日下的照片相关地点（异步解析 location_id 为显示名） */
+const TimelineLocationLine = React.memo(({ imagesForDate }) => {
+  const { i18n } = useTranslation('common');
+  const [locationNames, setLocationNames] = useState([]);
+  const lang = i18n.language || 'zh';
+  useEffect(() => {
+    const cityIds = [...new Set((imagesForDate || []).map(img => img.city).filter(Boolean))];
+    if (cityIds.length === 0) {
+      setLocationNames([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(cityIds.map(id => cityLocationService.getLocationName(id, lang).catch(() => id)))
+      .then(names => {
+        if (!cancelled) setLocationNames(names || []);
+      });
+    return () => { cancelled = true; };
+  }, [imagesForDate, lang]);
+  if (locationNames.length === 0) return null;
+  return (
+    <Text style={styles.timelineLocation} numberOfLines={1}>
+      {locationNames.join('、')}
+    </Text>
+  );
+});
 
 const CategoryScreen = ({ route, navigation }) => {
   const { t, i18n } = useTranslation('common');
@@ -235,6 +261,12 @@ const CategoryScreen = ({ route, navigation }) => {
         });
       case 'stagingBox':
         return t('category.stagingBoxWithCount', { count });
+      case 'time':
+        if (filterValue) {
+          const timeLabel = /^\d{4}$/.test(filterValue) ? t('home.yearLabel', { year: filterValue }) : t(`home.${filterValue}`);
+          return t('category.timeWithCount', { label: timeLabel, count });
+        }
+        return t('category.imageList');
       case 'category':
         if (filterValue) {
           // 使用 configService 获取对应语言的分类名称（与 PC 端一致）
@@ -1697,7 +1729,10 @@ const CategoryScreen = ({ route, navigation }) => {
                 activeOpacity={0.7}
               >
                 <View style={styles.timelineHeaderContent}>
-                  <Text style={styles.timelineDate}>{dateKey}</Text>
+                  <View style={styles.timelineHeaderLeft}>
+                    <Text style={styles.timelineDate}>{dateKey}</Text>
+                    <TimelineLocationLine imagesForDate={imagesForDate} />
+                  </View>
                   <Text style={styles.timelineCount}>
                     ({t('category.photosCount', { count: imagesForDate.length })}{someSelected && ` · ${t('category.selectedCount', { selected: selectedCountInGroup, total: imagesForDate.length })}`})
                   </Text>
@@ -2226,8 +2261,16 @@ const styles = StyleSheet.create({
   timelineHeaderContent: {
     flexDirection: 'row',
     alignItems: 'center',
-     flex: 1,
-   },
+    flex: 1,
+  },
+  timelineHeaderLeft: {
+    flex: 1,
+  },
+  timelineLocation: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
   timelineDate: {
     fontSize: 15,
      fontWeight: '600',

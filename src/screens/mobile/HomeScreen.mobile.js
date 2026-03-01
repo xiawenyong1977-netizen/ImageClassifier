@@ -84,6 +84,26 @@ const CityCard = ({ locationId, count, latestImageUri, onPress }) => {
   );
 };
 
+/** 按时间卡片（与 CityCard 同结构：缩略图 + 覆盖层文案 + 数量） */
+const TimeCard = ({ timeKey, label, count, recentImages, onPress }) => {
+  const imageUri = (recentImages && recentImages.length > 0 && getUri(recentImages[0])) || null;
+  return (
+    <TouchableOpacity style={styles.categoryCard} onPress={() => onPress && onPress(timeKey)}>
+      {imageUri ? (
+        <Image source={{ uri: imageUri }} style={styles.thumbnail} resizeMode="cover" />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#5C6BC0' }]}>
+          <Text style={styles.emptyThumbnailText}>📅</Text>
+        </View>
+      )}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName} numberOfLines={1}>{label}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 const HomeScreen = ({ navigation }) => {
   const { t, i18n } = useTranslation('common');
   
@@ -93,6 +113,10 @@ const HomeScreen = ({ navigation }) => {
   
   // 分类数据
   const [categories, setCategories] = useState([]);
+  
+  // 按时间数据（时间桶数量 + 各桶代表图）
+  const [timeCounts, setTimeCounts] = useState({});
+  const [timeRecentImages, setTimeRecentImages] = useState({});
   
   // 城市数据
   const [cities, setCities] = useState([]);
@@ -135,64 +159,15 @@ const HomeScreen = ({ navigation }) => {
   
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
-  
-  // 显示设置
-  const [showCityCategories, setShowCityCategories] = useState(true);
-  const [showColorCategories, setShowColorCategories] = useState(true);
-  const [showDirectoryCategories, setShowDirectoryCategories] = useState(true);
-  const [showFormatCategories, setShowFormatCategories] = useState(true);
-  const [showResolutionCategories, setShowResolutionCategories] = useState(true);
-  const [showOrientationCategories, setShowOrientationCategories] = useState(true);
-  const [showISOCategories, setShowISOCategories] = useState(true);
-  const [showApertureCategories, setShowApertureCategories] = useState(true);
-  const [showShutterCategories, setShowShutterCategories] = useState(true);
-  const [showFocalLengthCategories, setShowFocalLengthCategories] = useState(true);
-  const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
-  const [showRecentPhotos, setShowRecentPhotos] = useState(true);
 
   // ==================== 初始化加载 ====================
   useEffect(() => {
     initializeData();
     loadLastScanTime();
     loadHideEmptyCategoriesSetting();
-    loadDisplaySettings();
     
     // 调试：检查当前权限状态
     checkCurrentPermissionStatus();
-    
-    // 监听设置更新事件（使用多种方式确保兼容性）
-    const handleSettingsUpdate = (eventData) => {
-      // 处理Web环境的CustomEvent
-      const detail = eventData?.detail || eventData;
-      const { key, settings: newSettings } = detail || {};
-      if (key === 'showCityCategories' || key === 'showColorCategories' || 
-          key === 'showSimilarityGroups' || key === 'showRecentPhotos' || 
-          key === 'showDirectoryCategories') {
-        if (newSettings) {
-          setShowCityCategories(newSettings.showCityCategories !== false);
-          setShowColorCategories(newSettings.showColorCategories !== false);
-          setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
-          setShowRecentPhotos(newSettings.showRecentPhotos !== false);
-          setShowDirectoryCategories(newSettings.showDirectoryCategories !== false);
-        }
-      }
-    };
-    
-    // 方式1: Web环境的CustomEvent
-    if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
-      window.addEventListener('settingsUpdated', handleSettingsUpdate);
-    }
-    
-    // 方式2: React Native的DeviceEventEmitter
-    let deviceEventSubscription = null;
-    try {
-      const { DeviceEventEmitter } = require('react-native');
-      if (DeviceEventEmitter && DeviceEventEmitter.addListener) {
-        deviceEventSubscription = DeviceEventEmitter.addListener('settingsUpdated', handleSettingsUpdate);
-      }
-    } catch (e) {
-      // DeviceEventEmitter不可用，忽略
-    }
     
     // 监听语言变化，重新加载分类数据（城市名称由 CityCard 根据 i18n.language 自行获取）
     const handleLanguageChange = () => {
@@ -206,12 +181,6 @@ const HomeScreen = ({ navigation }) => {
     }
     
     return () => {
-      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
-        window.removeEventListener('settingsUpdated', handleSettingsUpdate);
-      }
-      if (deviceEventSubscription) {
-        deviceEventSubscription.remove();
-      }
       if (languageSubscription && i18n && i18n.off) {
         i18n.off('languageChanged', handleLanguageChange);
       }
@@ -264,8 +233,6 @@ const HomeScreen = ({ navigation }) => {
       // 如果正在扫描，不要刷新（避免覆盖扫描进度消息）
       if (!loading && !isScanning) {
         logger.debug('🔄 首页获得焦点，刷新数据...');
-        // 只重新加载显示设置（其他页面可能修改了显示设置）
-        loadDisplaySettings();
         // 重新加载数据（hideEmptyCategories 状态在内存中，不需要重新加载）
         loadAllData();
         loadLastScanTime();
@@ -305,34 +272,6 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
-   * 加载显示设置
-   */
-  const loadDisplaySettings = async () => {
-    try {
-      const settings = await UnifiedDataService.readSettings();
-      setShowCityCategories(settings.showCityCategories !== false);
-      setShowColorCategories(settings.showColorCategories !== false);
-      setShowDirectoryCategories(settings.showDirectoryCategories !== false);
-      setShowFormatCategories(settings.showFormatCategories !== false);
-      setShowResolutionCategories(settings.showResolutionCategories !== false);
-      setShowOrientationCategories(settings.showOrientationCategories !== false);
-      setShowISOCategories(settings.showISOCategories !== false);
-      setShowApertureCategories(settings.showApertureCategories !== false);
-      setShowShutterCategories(settings.showShutterCategories !== false);
-      setShowFocalLengthCategories(settings.showFocalLengthCategories !== false);
-      setShowSimilarityGroups(settings.showSimilarityGroups !== false);
-      setShowRecentPhotos(settings.showRecentPhotos !== false);
-    } catch (error) {
-      logger.error('加载显示设置失败:', error);
-      // 出错时默认全部显示
-      setShowCityCategories(true);
-      setShowColorCategories(true);
-      setShowSimilarityGroups(true);
-      setShowRecentPhotos(true);
-    }
-  };
-  
-  /**
    * 当 hideEmptyCategories 改变时，不需要重新加载分类
    * 因为过滤逻辑在渲染时进行，只需要触发重新渲染即可
    */
@@ -370,6 +309,7 @@ const HomeScreen = ({ navigation }) => {
       
       // 延迟加载次要数据（第二优先级）
       setTimeout(() => {
+        loadTimeData();
         loadCities();
         loadSimilarityGroups();
         loadColors();
@@ -478,6 +418,30 @@ const HomeScreen = ({ navigation }) => {
       setCategories(categoryWithImages);
     } catch (error) {
       logger.error('❌ 加载分类列表失败:', error);
+    }
+  };
+
+  /**
+   * 加载按时间分类数据（时间桶数量 + 各桶代表图，用于按时间卡片）
+   */
+  const loadTimeData = async () => {
+    try {
+      const counts = await UnifiedDataService.readTimeCounts();
+      setTimeCounts(counts || {});
+      const keysWithCount = Object.entries(counts || {}).filter(([, c]) => c > 0).map(([k]) => k);
+      const map = {};
+      await Promise.all(keysWithCount.map(async (timeKey) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByTimeRange(timeKey, 1);
+          map[timeKey] = images;
+        } catch (e) {
+          logger.error(`加载时间桶 ${timeKey} 代表图失败:`, e);
+          map[timeKey] = [];
+        }
+      }));
+      setTimeRecentImages(map);
+    } catch (error) {
+      logger.error('❌ 加载按时间数据失败:', error);
     }
   };
 
@@ -1547,6 +1511,48 @@ const HomeScreen = ({ navigation }) => {
   };
 
   /**
+   * 渲染按时间区（图片卡片，与按城市一致，在按内容之前）
+   */
+  const renderTimeSection = () => {
+    const nowYear = new Date().getFullYear();
+    const timeOrder = ['thisWeek', 'thisMonth', 'thisYear', 'lastYear', 'yearBeforeLast', String(nowYear - 3), String(nowYear - 4), 'past'];
+    const timeKeysToShow = timeOrder.filter((k) => (timeCounts || {})[k] > 0);
+    if (timeKeysToShow.length === 0) return null;
+    const getTimeLabel = (key) => {
+      if (/^\d{4}$/.test(key)) return t('home.yearLabel', { year: key });
+      return t(`home.${key}`);
+    };
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>📅 {t('home.byTime')}</Text>
+          </View>
+        </View>
+        <View style={styles.categoriesGrid}>
+          {timeKeysToShow.map((timeKey) => (
+            <TimeCard
+              key={timeKey}
+              timeKey={timeKey}
+              label={getTimeLabel(timeKey)}
+              count={timeCounts[timeKey] || 0}
+              recentImages={timeRecentImages[timeKey] || []}
+              onPress={(key) => {
+                if (!navigation) return;
+                navigation.navigate('Category', {
+                  filterType: 'time',
+                  filterValue: key,
+                  fromScreen: 'Home',
+                });
+              }}
+            />
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  /**
    * 渲染按内容分类区（4列网格，含按颜色芯片合并展示）
    */
   const renderCategoriesSection = () => {
@@ -1556,10 +1562,8 @@ const HomeScreen = ({ navigation }) => {
       : categories;
     
     const hasUnclassifiedPhotos = categories.some(cat => cat.id === 'NA' && cat.count > 0);
-    const filteredColors = showColorCategories
-      ? BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
-          .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0))
-      : [];
+    const filteredColors = BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
+      .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0));
     const hasContent = filteredCategories.length > 0 || filteredColors.length > 0;
 
     return (
@@ -1689,9 +1693,6 @@ const HomeScreen = ({ navigation }) => {
    * 渲染相似照片区（与"按内容"保持一致：4列网格布局）
    */
   const renderSimilarityGroupsSection = () => {
-    // 如果设置中关闭了相似组显示，不渲染
-    if (!showSimilarityGroups) return null;
-    
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -1861,10 +1862,10 @@ const HomeScreen = ({ navigation }) => {
       .filter(([o]) => o && typeof o === 'string' && o.trim() && o !== 'null' && o !== 'UNKNOWN')
       .sort(([,a], [,b]) => b - a);
 
-    const hasDir = showDirectoryCategories && dirItems.length > 0;
-    const hasFormat = showFormatCategories && formatItems.length > 0;
-    const hasResolution = showResolutionCategories && resolutionItems.length > 0;
-    const hasOrientation = showOrientationCategories && orientationItems.length > 0;
+    const hasDir = dirItems.length > 0;
+    const hasFormat = formatItems.length > 0;
+    const hasResolution = resolutionItems.length > 0;
+    const hasOrientation = orientationItems.length > 0;
 
     if (!hasDir && !hasFormat && !hasResolution && !hasOrientation) return null;
 
@@ -1951,10 +1952,10 @@ const HomeScreen = ({ navigation }) => {
       .filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN')
       .sort(([,a], [,b]) => b - a);
 
-    const hasISO = showISOCategories && isoItems.length > 0;
-    const hasAperture = showApertureCategories && apertureItems.length > 0;
-    const hasShutter = showShutterCategories && shutterItems.length > 0;
-    const hasFocalLength = showFocalLengthCategories && focalLengthItems.length > 0;
+    const hasISO = isoItems.length > 0;
+    const hasAperture = apertureItems.length > 0;
+    const hasShutter = shutterItems.length > 0;
+    const hasFocalLength = focalLengthItems.length > 0;
 
     if (!hasISO && !hasAperture && !hasShutter && !hasFocalLength) return null;
 
@@ -2003,9 +2004,6 @@ const HomeScreen = ({ navigation }) => {
    * 渲染按城市区（与"按内容"保持一致：4列网格布局）
    */
   const renderCitiesSection = () => {
-    // 如果设置中关闭了城市显示，不渲染
-    if (!showCityCategories) return null;
-
     // 按照片数量降序排列，显示最多的城市在前
     const sortedCities = cities && cities.length > 0
       ? [...cities].sort((a, b) => (b.count || 0) - (a.count || 0))
@@ -2234,12 +2232,13 @@ const HomeScreen = ({ navigation }) => {
           />
         }
       >
+        {renderTimeSection()}
         {renderCategoriesSection()}
-        {showCityCategories && renderCitiesSection()}
-        {showSimilarityGroups && renderSimilarityGroupsSection()}
+        {renderCitiesSection()}
+        {renderSimilarityGroupsSection()}
         {renderAttributesSection()}
         {renderShootingParamsSection()}
-        {showRecentPhotos && renderRecentPhotos()}
+        {renderRecentPhotos()}
       </ScrollView>
 
       {/* FAB扫描按钮 */}

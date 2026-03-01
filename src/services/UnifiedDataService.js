@@ -237,6 +237,102 @@ class UnifiedDataService {
   }
 
   /**
+   * 获取图片时间（毫秒），用于按时间分类
+   * @param {Object} img - 图片对象
+   * @returns {number}
+   */
+  _getImageTime(img) {
+    if (!img) return 0;
+    const t = img.takenAt != null ? (typeof img.takenAt === 'number' ? img.takenAt : new Date(img.takenAt).getTime()) : img.timestamp;
+    return t || 0;
+  }
+
+  /**
+   * 判断图片时间落在哪个时间桶（周一为一周起点，本地时区）
+   * @param {number} ms - 时间戳毫秒
+   * @returns {string} thisWeek | thisMonth | thisYear | lastYear | yearBeforeLast | YYYY | past
+   */
+  _getTimeBucketKey(ms) {
+    if (ms <= 0) return 'past';
+    const now = new Date();
+    const nowMs = now.getTime();
+    const nowYear = now.getFullYear();
+    const nowMonth = now.getMonth();
+    const d = new Date(ms);
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const getMonday = (date) => {
+      const x = new Date(date);
+      x.setHours(0, 0, 0, 0);
+      x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+      return x.getTime();
+    };
+    const weekStart = getMonday(now);
+    if (ms >= weekStart && ms <= nowMs) return 'thisWeek';
+    if (year === nowYear && month === nowMonth && ms < weekStart) return 'thisMonth';
+    if (year === nowYear && month < nowMonth) return 'thisYear';
+    if (year === nowYear - 1) return 'lastYear';
+    if (year === nowYear - 2) return 'yearBeforeLast';
+    if (year === nowYear - 3) return String(nowYear - 3);
+    if (year === nowYear - 4) return String(nowYear - 4);
+    return 'past';
+  }
+
+  /**
+   * 按时间桶统计数量（最多 8 桶：本周、本月、本年、去年、前年、前年之前两年、过去）
+   * @returns {Promise<Object>} { [timeKey]: number }
+   */
+  async readTimeCounts() {
+    try {
+      await this.imageCache.buildCache();
+      const allImages = this.imageCache.getCache().allImages || [];
+      const counts = {};
+      allImages.forEach((img) => {
+        const key = this._getTimeBucketKey(this._getImageTime(img));
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      return counts;
+    } catch (error) {
+      logger.error('readTimeCounts 失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 按时间桶获取图片列表（时间倒序）
+   * @param {string} timeKey - thisWeek | thisMonth | thisYear | lastYear | yearBeforeLast | YYYY | past
+   * @returns {Promise<Array>}
+   */
+  async readImagesByTimeRange(timeKey) {
+    try {
+      await this.imageCache.buildCache();
+      const allImages = this.imageCache.getCache().allImages || [];
+      const list = allImages.filter((img) => this._getTimeBucketKey(this._getImageTime(img)) === timeKey);
+      list.sort((a, b) => this._getImageTime(b) - this._getImageTime(a));
+      return list;
+    } catch (error) {
+      logger.error('readImagesByTimeRange 失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 按时间桶获取最近若干张图（用于首页卡片缩略图）
+   * @param {string} timeKey
+   * @param {number} limit
+   * @returns {Promise<Array>}
+   */
+  async readRecentImagesByTimeRange(timeKey, limit = 1) {
+    try {
+      const list = await this.readImagesByTimeRange(timeKey);
+      return list.slice(0, limit);
+    } catch (error) {
+      logger.error('readRecentImagesByTimeRange 失败:', error);
+      return [];
+    }
+  }
+
+  /**
    * 获取指定城市的最近图片
    * 优先从缓存读取，缓存没有则从数据库读取
    */
@@ -1914,6 +2010,13 @@ class UnifiedDataService {
           }
           return await this.readImagesByFocalLength(filterValue);
         
+        case 'time':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('readImagesByFilter: time 需要 filterValue');
+            return [];
+          }
+          return await this.readImagesByTimeRange(filterValue);
+        
         default:
           logger.error(`readImagesByFilter: 未知的 filterType: ${filterType}`);
           return [];
@@ -2051,6 +2154,14 @@ class UnifiedDataService {
           }
           const focalLengthImages = this.imageCache.getImagesByFocalLength(filterValue);
           return focalLengthImages.filter(img => img.selected === true);
+        
+        case 'time':
+          if (!filterValue || (typeof filterValue === 'string' && filterValue.trim() === '')) {
+            logger.warn('getSelectedImagesByFilter: time 需要 filterValue');
+            return [];
+          }
+          const timeImages = await this.readImagesByTimeRange(filterValue);
+          return timeImages.filter(img => img.selected === true);
         
         default:
           logger.error(`getSelectedImagesByFilter: 未知的 filterType: ${filterType}`);

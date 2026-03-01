@@ -7,6 +7,7 @@ import { loadSavedLanguage } from './i18n';
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTranslation } from 'react-i18next';
 
 console.log('📦 App.js: 开始导入模块...');
@@ -384,7 +385,8 @@ export default function App() {
   
   // 服务就绪后，渲染主界面
   return (
-    <View style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
+      <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -396,7 +398,8 @@ export default function App() {
           <Stack.Screen name="EnhanceResult" component={EnhanceResultScreen} options={{ presentation: 'modal' }} />
         </Stack.Navigator>
       </NavigationContainer>
-    </View>
+      </View>
+    </GestureHandlerRootView>
   );
 }
 

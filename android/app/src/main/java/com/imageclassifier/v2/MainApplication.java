@@ -18,7 +18,6 @@ import com.dylanvann.fastimage.FastImageViewPackage;
 import com.rnfs.RNFSPackage;
 import com.imagepicker.ImagePickerPackage;
 import fr.bamlab.rnimageresizer.ImageResizerPackage;
-import com.swmansion.reanimated.ReanimatedPackage;
 import com.oblador.vectoricons.VectorIconsPackage;
 import org.pgsqlite.SQLitePluginPackage;
 import ai.onnxruntime.reactnative.OnnxruntimePackage;
@@ -50,7 +49,6 @@ public class MainApplication extends Application implements ReactApplication {
             new RNFSPackage(),
             new ImagePickerPackage(),
             new ImageResizerPackage(),
-            new ReanimatedPackage(),
             new VectorIconsPackage(),
             new SQLitePluginPackage(),
             new OnnxruntimePackage(),

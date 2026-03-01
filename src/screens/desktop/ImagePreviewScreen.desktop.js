@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n, { getDefaultPresets, getCameraSettingsCategoryTranslation, getOrientationNameTranslation } from '../../i18n';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, Alert, logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
+import Toast from '../../components/shared/Toast';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import ImageClassifierService from '../../services/ImageClassifierService';
@@ -70,6 +71,9 @@ const getAllCategories = () => {
 };
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+/** 最小缩放 = 刚开始显示的比例（contain 适配），缩小到此为止 */
+const IMAGE_ZOOM_MIN = 1;
+const IMAGE_ZOOM_MAX = 4;
 
 // 注意：已移除 getWebAccessibleUri，直接使用 getUri
 // 由于 Electron 设置了 webSecurity: false，可以直接使用 file:// URI
@@ -131,6 +135,7 @@ const ImagePreviewScreen = ({
   const [deleteProgress, setDeleteProgress] = useState({ filesDeleted: 0, filesFailed: 0, total: 1 });
   const [loading, setLoading] = useState(true);
   const [isInStagingBox, setIsInStagingBox] = useState(false); // 跟踪图片是否在暂存箱
+  const [toastMessage, setToastMessage] = useState(null);
   const [locationDetailString, setLocationDetailString] = useState(null); // 位置详细信息字符串
   
   // 导航相关状态
@@ -142,6 +147,17 @@ const ImagePreviewScreen = ({
   
   // 操作区二级面板展开状态：null | 'category' | 'enhance'
   const [expandedAction, setExpandedAction] = useState(null);
+
+  // 图片缩放与平移（滚轮缩放 + 鼠标拖拽）
+  const [imageZoomScale, setImageZoomScale] = useState(1);
+  const [imageTranslateX, setImageTranslateX] = useState(0);
+  const [imageTranslateY, setImageTranslateY] = useState(0);
+  const imageContentRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, translateX: 0, translateY: 0 });
+  const imageZoomScaleRef = useRef(1);
+  const imageTranslateXRef = useRef(0);
+  const imageTranslateYRef = useRef(0);
   
   // 增强模态框状态
   const [showEnhanceModal, setShowEnhanceModal] = useState(false);
@@ -196,6 +212,97 @@ const ImagePreviewScreen = ({
 
     loadImageDetails();
   }, [finalImageId]);
+
+  // 换图时重置缩放与平移
+  useEffect(() => {
+    setImageZoomScale(1);
+    setImageTranslateX(0);
+    setImageTranslateY(0);
+    imageZoomScaleRef.current = 1;
+    imageTranslateXRef.current = 0;
+    imageTranslateYRef.current = 0;
+  }, [currentImageIndex, currentImage?.id]);
+
+  const onMouseDown = useCallback((e) => {
+    if (e.button !== 0 || imageZoomScaleRef.current <= 1) return;
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      translateX: imageTranslateXRef.current,
+      translateY: imageTranslateYRef.current,
+    };
+  }, []);
+
+  const onMouseUp = useCallback(() => { isDraggingRef.current = false; }, []);
+  const onMouseLeave = useCallback(() => { isDraggingRef.current = false; }, []);
+
+  // 滚轮缩放：react-native-web 的 View 不暴露 onWheel，用 nativeID 取 DOM 并绑定
+  // 切换图片后 DOM 可能稍晚更新，用 rAF + 重试确保绑到当前节点
+  useEffect(() => {
+    if (typeof window === 'undefined' || document == null) return;
+    const id = 'image-zoom-content';
+    let remove = null;
+    let cancelled = false;
+    let retryTimer = null;
+    const bind = () => {
+      const el = document.getElementById(id);
+      if (cancelled || !el || typeof el.addEventListener !== 'function') return el;
+      const onWheel = (e) => {
+        e.preventDefault();
+        const delta = -e.deltaY * 0.002;
+        setImageZoomScale((s) => {
+          const next = Math.max(IMAGE_ZOOM_MIN, Math.min(IMAGE_ZOOM_MAX, s + delta));
+          imageZoomScaleRef.current = next;
+          if (next <= 1) {
+            imageTranslateXRef.current = 0;
+            imageTranslateYRef.current = 0;
+            setImageTranslateX(0);
+            setImageTranslateY(0);
+          }
+          return next;
+        });
+      };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      remove = () => el.removeEventListener('wheel', onWheel);
+      return el;
+    };
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      if (bind()) return;
+      retryTimer = setTimeout(() => { if (!cancelled) bind(); }, 50);
+    });
+    return () => {
+      cancelled = true;
+      if (retryTimer != null) clearTimeout(retryTimer);
+      if (remove) remove();
+    };
+  }, [currentImageIndex]);
+
+  // 拖拽时在 window 上监听 move/up/leave（鼠标会移出图片区域）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onMove = (e) => {
+      if (!isDraggingRef.current) return;
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+      const newX = dragStartRef.current.translateX + dx;
+      const newY = dragStartRef.current.translateY + dy;
+      imageTranslateXRef.current = newX;
+      imageTranslateYRef.current = newY;
+      setImageTranslateX(newX);
+      setImageTranslateY(newY);
+    };
+    const onUp = () => { isDraggingRef.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseleave', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseleave', onUp);
+    };
+  }, []);
 
   // 根据 location_id 获取位置详细信息字符串
   useEffect(() => {
@@ -623,120 +730,52 @@ const ImagePreviewScreen = ({
   };
 
   // 添加到暂存箱（只在不在暂存箱时显示）
-  const handleAddToStagingBox = () => {
-    logger.debug('暂存按钮被点击，currentImage:', currentImage);
-    logger.debug('图片ID:', currentImage?.id);
-    
+  const handleAddToStagingBox = async () => {
     if (!currentImage || !currentImage.id) {
-      logger.error('错误：currentImage 或 currentImage.id 不存在');
       Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
-    
     logger.debug('添加到暂存箱...');
-    Alert.alert(
-      t('category.addToStagingBox'),
-      t('imagePreview.confirmAddToStagingBox'),
-      [
-        { 
-          text: t('common.cancel'), 
-          style: 'cancel',
-          onPress: () => logger.debug('用户取消添加到暂存箱')
-        },
-        {
-          text: t('common.add'),
-          style: 'default',
-          onPress: async () => {
-            logger.debug('用户确认添加到暂存箱，开始操作...');
-            try {
-              // 添加到暂存箱（不修改category字段）
-              const addResult = await UnifiedDataService.addToStagingBox([currentImage.id]);
-              if (!addResult.success) {
-                throw new Error(`添加到暂存箱失败: ${addResult.errors.map(e => e.error).join(', ')}`);
-              }
-              
-              // 更新本地状态
-              setIsInStagingBox(true);
-              
-              logger.debug('添加到暂存箱成功');
-              
-              // 重新加载图片列表
-              await reloadImageList();
-              
-              // 通知父组件数据已变化
-              if (onDataChange) {
-                onDataChange();
-              }
-            } catch (error) {
-              logger.error('添加到暂存箱失败:', error);
-              Alert.alert(t('common.error'), t('imagePreview.addToStagingBoxFailed', { error: error.message }));
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const addResult = await UnifiedDataService.addToStagingBox([currentImage.id]);
+      if (!addResult.success) {
+        throw new Error(`添加到暂存箱失败: ${addResult.errors.map(e => e.error).join(', ')}`);
+      }
+      setIsInStagingBox(true);
+      logger.debug('添加到暂存箱成功');
+      await reloadImageList();
+      if (onDataChange) onDataChange();
+      setToastMessage(t('imagePreview.stagedMessage'));
+    } catch (error) {
+      logger.error('添加到暂存箱失败:', error);
+      Alert.alert(t('common.error'), t('imagePreview.addToStagingBoxFailed', { error: error.message }));
+    }
   };
 
   // 从暂存箱移除（只在暂存箱中时显示）
-  const handleRemoveFromStagingBox = () => {
-    logger.debug('从暂存箱移除按钮被点击，currentImage:', currentImage);
-    logger.debug('图片ID:', currentImage?.id);
-    
+  const handleRemoveFromStagingBox = async () => {
     if (!currentImage || !currentImage.id) {
-      logger.error('错误：currentImage 或 currentImage.id 不存在');
       Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
-    
     logger.debug('从暂存箱移除...');
-    Alert.alert(
-      t('category.removeFromStagingBox'),
-      t('imagePreview.confirmRemoveFromStagingBox'),
-      [
-        { 
-          text: t('common.cancel'), 
-          style: 'cancel',
-          onPress: () => logger.debug('用户取消从暂存箱移除')
-        },
-        {
-          text: t('imagePreview.remove'),
-          style: 'default',
-          onPress: async () => {
-            logger.debug('用户确认从暂存箱移除，开始操作...');
-            try {
-              // 从暂存箱移除
-              const removeResult = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
-              if (!removeResult.success) {
-                const errorMessages = removeResult.errors?.map(e => e.error || e.message || t('common.error')).join(', ') || t('common.error');
-                throw new Error(`${t('imagePreview.removeFromStagingBoxFailed', { error: errorMessages })}`);
-              }
-              
-              // 更新本地状态
-              setIsInStagingBox(false);
-              
-              logger.debug('从暂存箱移除成功');
-              
-              // 如果当前是从暂存箱进入的，重新加载图片列表（会自动处理导航）
-              // 如果列表为空，reloadImageList 会自动返回上一页
-              const reloadSuccess = await reloadImageList();
-              
-              // 如果重新加载失败或列表为空，不显示成功提示（reloadImageList 已处理）
-              if (reloadSuccess) {
-                // 通知父组件数据已变化
-                if (onDataChange) {
-                  onDataChange();
-                }
-                
-                Alert.alert(t('imagePreview.operationComplete'), t('imagePreview.removeFromStagingBoxSuccessMessage'));
-              }
-            } catch (error) {
-              logger.error('从暂存箱移除失败:', error);
-              Alert.alert(t('common.error'), t('imagePreview.removeFromStagingBoxFailed', { error: error.message }));
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const removeResult = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
+      if (!removeResult.success) {
+        const errorMessages = removeResult.errors?.map(e => e.error || e.message || t('common.error')).join(', ') || t('common.error');
+        throw new Error(errorMessages);
+      }
+      setIsInStagingBox(false);
+      logger.debug('从暂存箱移除成功');
+      const reloadSuccess = await reloadImageList();
+      if (reloadSuccess) {
+        if (onDataChange) onDataChange();
+        setToastMessage(t('imagePreview.removedFromStagingMessage'));
+      }
+    } catch (error) {
+      logger.error('从暂存箱移除失败:', error);
+      Alert.alert(t('common.error'), t('imagePreview.removeFromStagingBoxFailed', { error: error.message }));
+    }
   };
 
   // 处理分类修改
@@ -1186,21 +1225,38 @@ const ImagePreviewScreen = ({
               )}
               
               {/* 图片内容 */}
-              <View style={styles.imageContent}>
+              <View
+                ref={imageContentRef}
+                nativeID="image-zoom-content"
+                style={styles.imageContent}
+                onMouseDown={onMouseDown}
+                onMouseUp={onMouseUp}
+                onMouseLeave={onMouseLeave}
+              >
                 {(() => {
                   const imageUri = getUri(currentImage);
                   return imageUri ? (
-                    <Image
-                      source={{ uri: imageUri }}
-                      style={styles.image}
-                      resizeMode="contain"
-                      onError={(error) => {
-                        logger.error('Image load error:', error.nativeEvent?.error);
-                      }}
-                      onLoad={() => {
-                        logger.debug('Image loaded successfully');
-                      }}
-                    />
+                    <View style={styles.imageContentClip}>
+                      <View style={[styles.imageTransformWrap, {
+                        transform: [
+                          { scale: imageZoomScale },
+                          { translateX: imageTranslateX },
+                          { translateY: imageTranslateY },
+                        ],
+                      }]}>
+                        <Image
+                        source={{ uri: imageUri }}
+                        style={styles.image}
+                        resizeMode="contain"
+                        onError={(error) => {
+                          logger.error('Image load error:', error.nativeEvent?.error);
+                        }}
+                        onLoad={() => {
+                          logger.debug('Image loaded successfully');
+                        }}
+                      />
+                    </View>
+                    </View>
                   ) : (
                     <View style={styles.imagePlaceholder}>
                       <Text style={styles.placeholderText}>📷</Text>
@@ -1755,6 +1811,8 @@ const ImagePreviewScreen = ({
           isInStagingBox={isInStagingBox}
         />
       )}
+
+      {toastMessage ? <Toast message={toastMessage} onDone={() => setToastMessage(null)} /> : null}
     </SafeAreaView>
   );
 };
@@ -1856,6 +1914,21 @@ const styles = StyleSheet.create({
     position: 'relative', // 为导航按钮定位
   },
   imageContent: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageContentClip: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  imageTransformWrap: {
     flex: 1,
     width: '100%',
     height: '100%',

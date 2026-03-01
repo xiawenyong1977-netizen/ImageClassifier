@@ -47,6 +47,8 @@ const HomeScreen = () => {
   const [recentImages, setRecentImages] = useState([]);
   const [recentImagesTotal, setRecentImagesTotal] = useState(0); // 新发现照片的总数
   const [categoryCounts, setCategoryCounts] = useState({});
+  const [timeCounts, setTimeCounts] = useState({});
+  const [timeRecentImages, setTimeRecentImages] = useState({});
   const [cityCounts, setCityCounts] = useState({});
   const [colorCounts, setColorCounts] = useState({});
   const [directoryCounts, setDirectoryCounts] = useState({});
@@ -64,19 +66,6 @@ const HomeScreen = () => {
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
-  // 显示设置
-  const [showCityCategories, setShowCityCategories] = useState(true);
-  const [showColorCategories, setShowColorCategories] = useState(true);
-  const [showDirectoryCategories, setShowDirectoryCategories] = useState(true);
-  const [showFormatCategories, setShowFormatCategories] = useState(true);
-  const [showResolutionCategories, setShowResolutionCategories] = useState(true);
-  const [showOrientationCategories, setShowOrientationCategories] = useState(true);
-  const [showISOCategories, setShowISOCategories] = useState(true);
-  const [showApertureCategories, setShowApertureCategories] = useState(true);
-  const [showShutterCategories, setShowShutterCategories] = useState(true);
-  const [showFocalLengthCategories, setShowFocalLengthCategories] = useState(true);
-  const [showSimilarityGroups, setShowSimilarityGroups] = useState(true);
-  const [showRecentPhotos, setShowRecentPhotos] = useState(true);
   const [globalMessage, setGlobalMessage] = useState(''); // 初始化为空字符串，稍后通过 useEffect 设置
   const [showScanTip, setShowScanTip] = useState(false);
   const [lastScanTime, setLastScanTime] = useState(null);
@@ -96,9 +85,10 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesResult, categoryCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, isoCountsData, apertureCountsData, shutterCountsData, focalLengthCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
+      const [recentImagesResult, categoryCountsData, timeCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, isoCountsData, apertureCountsData, shutterCountsData, focalLengthCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
         UnifiedDataService.readNewDiscoveredImages(12),
         UnifiedDataService.readCategoryCounts(),
+        UnifiedDataService.readTimeCounts(),
         UnifiedDataService.readCityCounts(),
         UnifiedDataService.readColorCounts(),
         UnifiedDataService.readDirectoryCounts(),
@@ -155,6 +145,23 @@ const HomeScreen = () => {
         cityImagesMap[cityName] = images;
       });
       
+      // 加载按时间各桶的最近图片（用于时间卡片缩略图）
+      const timeKeysWithCount = Object.entries(timeCountsData || {}).filter(([, c]) => c > 0).map(([k]) => k);
+      const timeImagesPromises = timeKeysWithCount.map(async (timeKey) => {
+        try {
+          const images = await UnifiedDataService.readRecentImagesByTimeRange(timeKey, 1);
+          return { timeKey, images };
+        } catch (error) {
+          logger.error(`加载时间桶 ${timeKey} 最近图片失败:`, error);
+          return { timeKey, images: [] };
+        }
+      });
+      const timeImagesResults = await Promise.all(timeImagesPromises);
+      const timeImagesMap = {};
+      timeImagesResults.forEach(({ timeKey, images }) => {
+        timeImagesMap[timeKey] = images;
+      });
+      
       // 处理新发现照片的结果（包含总数和图片列表）
       const recentImagesData = recentImagesResult.images || [];
       const recentImagesTotalCount = recentImagesResult.total || 0;
@@ -166,6 +173,8 @@ const HomeScreen = () => {
       setRecentImages(recentImagesData);
       setRecentImagesTotal(recentImagesTotalCount);
       setCategoryCounts(categoryCountsData);
+      setTimeCounts(timeCountsData || {});
+      setTimeRecentImages(timeImagesMap);
       setCityCounts(cityCountsData);
       setColorCounts(colorCountsData);
       setDirectoryCounts(directoryCountsData);
@@ -185,32 +194,6 @@ const HomeScreen = () => {
       const shouldHide = settings.hideEmptyCategories !== false;
       setHideEmptyCategories(shouldHide);
       hideEmptyCategoriesRef.current = shouldHide;
-      
-      // 读取显示设置（默认为 true）
-      const shouldShowCities = settings.showCityCategories !== false;
-      const shouldShowColors = settings.showColorCategories !== false;
-      const shouldShowDirectories = settings.showDirectoryCategories !== false;
-      const shouldShowFormats = settings.showFormatCategories !== false;
-      const shouldShowResolutions = settings.showResolutionCategories !== false;
-      const shouldShowOrientations = settings.showOrientationCategories !== false;
-      const shouldShowISOs = settings.showISOCategories !== false;
-      const shouldShowApertures = settings.showApertureCategories !== false;
-      const shouldShowShutters = settings.showShutterCategories !== false;
-      const shouldShowFocalLengths = settings.showFocalLengthCategories !== false;
-      const shouldShowSimilarity = settings.showSimilarityGroups !== false;
-      const shouldShowRecent = settings.showRecentPhotos !== false;
-      setShowCityCategories(shouldShowCities);
-      setShowColorCategories(shouldShowColors);
-      setShowDirectoryCategories(shouldShowDirectories);
-      setShowFormatCategories(shouldShowFormats);
-      setShowResolutionCategories(shouldShowResolutions);
-      setShowOrientationCategories(shouldShowOrientations);
-      setShowISOCategories(shouldShowISOs);
-      setShowApertureCategories(shouldShowApertures);
-      setShowShutterCategories(shouldShowShutters);
-      setShowFocalLengthCategories(shouldShowFocalLengths);
-      setShowSimilarityGroups(shouldShowSimilarity);
-      setShowRecentPhotos(shouldShowRecent);
       
       const totalCount = Array.isArray(allImages) ? allImages.length : 0;
       setTotalImagesCount(totalCount);
@@ -345,18 +328,6 @@ const HomeScreen = () => {
 
     const handleSettingsUpdated = (event) => {
       logger.debug('收到设置更新事件，重新加载数据');
-      const { key, settings: newSettings } = event.detail || {};
-      // 如果更新了显示相关的设置，立即更新状态
-      if (key === 'showCityCategories' || key === 'showColorCategories' || 
-          key === 'showDirectoryCategories' || key === 'showSimilarityGroups' || key === 'showRecentPhotos') {
-        if (newSettings) {
-          setShowCityCategories(newSettings.showCityCategories !== false);
-          setShowColorCategories(newSettings.showColorCategories !== false);
-          setShowDirectoryCategories(newSettings.showDirectoryCategories !== false);
-          setShowSimilarityGroups(newSettings.showSimilarityGroups !== false);
-          setShowRecentPhotos(newSettings.showRecentPhotos !== false);
-        }
-      }
       // 重新加载数据以应用所有设置
       loadData();
     };
@@ -931,6 +902,36 @@ const HomeScreen = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {/* 按时间（图片卡片，在按内容之前） */}
+        {(() => {
+          const nowYear = new Date().getFullYear();
+          const timeOrder = ['thisWeek', 'thisMonth', 'thisYear', 'lastYear', 'yearBeforeLast', String(nowYear - 3), String(nowYear - 4), 'past'];
+          const timeKeysToShow = timeOrder.filter((k) => (timeCounts || {})[k] > 0);
+          if (timeKeysToShow.length === 0) return null;
+          const getTimeLabel = (key) => {
+            if (/^\d{4}$/.test(key)) return t('home.yearLabel', { year: key });
+            return t(`home.${key}`);
+          };
+          return (
+            <View style={styles.categoriesSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>📅 {t('home.byTime')}</Text>
+              </View>
+              <View style={styles.categoriesContainer}>
+                {timeKeysToShow.map((timeKey) => (
+                  <TimeCard
+                    key={timeKey}
+                    timeKey={timeKey}
+                    label={getTimeLabel(timeKey)}
+                    count={timeCounts[timeKey] || 0}
+                    recentImages={timeRecentImages[timeKey] || []}
+                    onPress={(key) => handleFilterPress('time', key)}
+                  />
+                ))}
+              </View>
+            </View>
+          );
+        })()}
         {/* 分类卡片 */}
         <View style={styles.categoriesSection}>
           <View style={styles.sectionHeader}>
@@ -1003,10 +1004,8 @@ const HomeScreen = () => {
               }
               
               // 渲染可见的分类 + 颜色芯片（颜色在内容卡片下方）
-              const filteredColors = showColorCategories
-                ? BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
-                    .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0))
-                : [];
+              const filteredColors = BACKGROUND_COLORS.filter((color) => (colorCounts[color] || 0) > 0)
+                .sort((a, b) => (colorCounts[b] || 0) - (colorCounts[a] || 0));
               
               return (
                 <View style={{ flexDirection: 'column', width: '100%' }}>
@@ -1051,8 +1050,8 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* 城市分类卡片 - 根据设置显示 */}
-        {showCityCategories && (
+        {/* 城市分类卡片 */}
+        {(
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
@@ -1118,7 +1117,7 @@ const HomeScreen = () => {
         )}
 
         {/* 相似照片板块 - 位于城市下方 */}
-        {showSimilarityGroups && (
+        {(
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
@@ -1204,10 +1203,10 @@ const HomeScreen = () => {
           const formatItems = Object.entries(formatCounts || {}).filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
           const resolutionItems = Object.entries(resolutionCounts || {}).filter(([r]) => r && typeof r === 'string' && r.trim() && r !== 'null' && r !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
           const orientationItems = Object.entries(orientationCounts || {}).filter(([o]) => o && typeof o === 'string' && o.trim() && o !== 'null' && o !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
-          const hasDir = showDirectoryCategories && dirItems.length > 0;
-          const hasFormat = showFormatCategories && formatItems.length > 0;
-          const hasResolution = showResolutionCategories && resolutionItems.length > 0;
-          const hasOrientation = showOrientationCategories && orientationItems.length > 0;
+          const hasDir = dirItems.length > 0;
+          const hasFormat = formatItems.length > 0;
+          const hasResolution = resolutionItems.length > 0;
+          const hasOrientation = orientationItems.length > 0;
           if (!hasDir && !hasFormat && !hasResolution && !hasOrientation) return null;
           const renderAttributeChip = (filterType, filterValue, displayName, count) => (
             <TouchableOpacity key={`${filterType}-${filterValue}`} style={styles.attributeChip} onPress={() => handleFilterPress(filterType, filterValue)}>
@@ -1269,10 +1268,10 @@ const HomeScreen = () => {
           const apertureItems = Object.entries(apertureCounts || {}).filter(([k]) => k && typeof k === 'string' && k.trim() && k !== 'null' && k !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
           const shutterItems = Object.entries(shutterCounts || {}).filter(([k]) => k && typeof k === 'string' && k.trim() && k !== 'null' && k !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
           const focalLengthItems = Object.entries(focalLengthCounts || {}).filter(([f]) => f && typeof f === 'string' && f.trim() && f !== 'null' && f !== 'UNKNOWN').sort(([,a], [,b]) => b - a);
-          const hasISO = showISOCategories && isoItems.length > 0;
-          const hasAperture = showApertureCategories && apertureItems.length > 0;
-          const hasShutter = showShutterCategories && shutterItems.length > 0;
-          const hasFocalLength = showFocalLengthCategories && focalLengthItems.length > 0;
+          const hasISO = isoItems.length > 0;
+          const hasAperture = apertureItems.length > 0;
+          const hasShutter = shutterItems.length > 0;
+          const hasFocalLength = focalLengthItems.length > 0;
           if (!hasISO && !hasAperture && !hasShutter && !hasFocalLength) return null;
           const renderAttrChip = (filterType, filterValue, displayName, count) => (
             <TouchableOpacity key={`${filterType}-${filterValue}`} style={styles.attributeChip} onPress={() => handleFilterPress(filterType, filterValue)}>
@@ -1315,8 +1314,8 @@ const HomeScreen = () => {
           );
         })()}
 
-        {/* 最新发现照片 - 根据设置显示 */}
-        {showRecentPhotos && (
+        {/* 最新发现照片 */}
+        {(
           <View style={styles.recentSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
@@ -1539,7 +1538,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, showColorCategories, showSimilarityGroups, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1738,6 +1737,31 @@ const ColorCard = React.memo(({ color, count, recentImages, onPress }) => {
     </TouchableOpacity>
   );
 });
+
+// 按时间卡片组件（与 CityCard 同结构）
+const TimeCard = ({ timeKey, label, count, recentImages, onPress }) => {
+  const imageSource = useMemo(() => {
+    if (!recentImages || recentImages.length === 0) return null;
+    const imageUri = getUri(recentImages[0]);
+    return imageUri ? { uri: imageUri } : null;
+  }, [recentImages]);
+
+  return (
+    <TouchableOpacity style={styles.categoryCard} onPress={() => onPress(timeKey)}>
+      {imageSource ? (
+        <Image source={imageSource} style={styles.thumbnail} resizeMode="cover" />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#5C6BC0' }]}>
+          <Text style={styles.emptyThumbnailText}>📅</Text>
+        </View>
+      )}
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName}>{label}</Text>
+        <Text style={styles.categoryCount}>{count}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 // 渲染城市卡片组件
 const CityCard = ({ city, count, recentImages, onPress }) => {

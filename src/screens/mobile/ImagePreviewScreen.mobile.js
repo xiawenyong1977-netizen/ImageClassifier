@@ -9,7 +9,7 @@
  * 5. 图片操作（删除、暂存、重新分类、分享、照片创玩）
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,10 +22,13 @@ import {
   Modal,
   Share,
   NativeModules,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { getDefaultPresets, getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 import { SafeAreaView, Alert } from '../../adapters/WebAdapters';
+import Toast from '../../components/shared/Toast';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import WeChatAuthService from '../../services/WeChatAuthService';
 import configService from '../../services/ConfigService';
@@ -33,6 +36,16 @@ import cityLocationService from '../../services/CityLocationService';
 import { logger, getUri, getLocalPath } from '../../adapters/WebAdapters';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+/** 最小缩放 = 刚开始显示的比例，缩小到此为止 */
+const MIN_SCALE = 1;
+const MAX_SCALE = 4;
+
+const clampScale = (v) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+const getTouchDistance = (touches) => {
+  if (!touches || touches.length < 2) return 0;
+  const [a, b] = touches;
+  return Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY) || 1;
+};
 
 const ImagePreviewScreen = ({ route, navigation }) => {
   const { t, i18n } = useTranslation('common');
@@ -93,8 +106,98 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   const [enhancePresets, setEnhancePresets] = useState({});
   const flatListRef = useRef(null);
   const [isInStagingBox, setIsInStagingBox] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
   const isNavigatingBackRef = useRef(false); // 防止递归循环的标志
   const [locationDetail, setLocationDetail] = useState(null); // 位置详细信息
+
+  // 手势缩放/平移（RN Animated + PanResponder，不依赖 Reanimated 以兼容部分 Android 环境）
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const translateXAnim = useRef(new Animated.Value(0)).current;
+  const translateYAnim = useRef(new Animated.Value(0)).current;
+  const savedScaleRef = useRef(1);
+  const savedTranslateXRef = useRef(0);
+  const savedTranslateYRef = useRef(0);
+  const lastScaleRef = useRef(1);
+  const initialPinchDistanceRef = useRef(null);
+  const gestureModeRef = useRef(null); // 'pinch' | 'pan'
+
+  useEffect(() => {
+    scaleAnim.setValue(1);
+    translateXAnim.setValue(0);
+    translateYAnim.setValue(0);
+    savedScaleRef.current = 1;
+    savedTranslateXRef.current = 0;
+    savedTranslateYRef.current = 0;
+    lastScaleRef.current = 1;
+    initialPinchDistanceRef.current = null;
+  }, [currentImageIndex, scaleAnim, translateXAnim, translateYAnim]);
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onStartShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponder: (evt) => {
+      const n = evt.nativeEvent.touches.length;
+      if (n >= 2) return true;
+      if (n === 1 && savedScaleRef.current > 1) return true;
+      return false;
+    },
+    onMoveShouldSetPanResponderCapture: (evt) => evt.nativeEvent.touches.length >= 2,
+    onPanResponderGrant: (evt) => {
+      if (evt.nativeEvent.touches.length === 2) {
+        gestureModeRef.current = 'pinch';
+        initialPinchDistanceRef.current = getTouchDistance(evt.nativeEvent.touches);
+      }
+    },
+    onPanResponderMove: (evt, g) => {
+      const touches = evt.nativeEvent.touches;
+      if (touches.length >= 2) {
+        gestureModeRef.current = 'pinch';
+        if (initialPinchDistanceRef.current == null) {
+          initialPinchDistanceRef.current = getTouchDistance(touches) || 1;
+        }
+        const d = getTouchDistance(touches) || 1;
+        const newScale = clampScale(savedScaleRef.current * (d / initialPinchDistanceRef.current));
+        lastScaleRef.current = newScale;
+        scaleAnim.setValue(newScale);
+        if (newScale <= 1) {
+          translateXAnim.setValue(0);
+          translateYAnim.setValue(0);
+          savedTranslateXRef.current = 0;
+          savedTranslateYRef.current = 0;
+        }
+      } else if (touches.length === 1 && savedScaleRef.current > 1) {
+        gestureModeRef.current = 'pan';
+        const tx = savedTranslateXRef.current + g.dx;
+        const ty = savedTranslateYRef.current + g.dy;
+        translateXAnim.setValue(tx);
+        translateYAnim.setValue(ty);
+      }
+    },
+    onPanResponderRelease: (evt, g) => {
+      if (evt.nativeEvent.touches.length < 2) {
+        if (gestureModeRef.current === 'pinch') {
+          savedScaleRef.current = lastScaleRef.current;
+          if (savedScaleRef.current <= 1) {
+            savedTranslateXRef.current = 0;
+            savedTranslateYRef.current = 0;
+          }
+        } else if (gestureModeRef.current === 'pan') {
+          savedTranslateXRef.current = savedTranslateXRef.current + g.dx;
+          savedTranslateYRef.current = savedTranslateYRef.current + g.dy;
+        }
+        initialPinchDistanceRef.current = null;
+        gestureModeRef.current = null;
+      }
+    },
+  }), [scaleAnim, translateXAnim, translateYAnim]);
+
+  const zoomableStyle = useMemo(() => ({
+    transform: [
+      { scale: scaleAnim },
+      { translateX: translateXAnim },
+      { translateY: translateYAnim },
+    ],
+  }), [scaleAnim, translateXAnim, translateYAnim]);
 
   // 使用 getUri 统一获取图片 URI
   const resolveImageUri = useCallback((image) => {
@@ -623,116 +726,61 @@ const ImagePreviewScreen = ({ route, navigation }) => {
   /**
    * 暂存图片（移动到暂存箱）
    */
-  const handleStaging = () => {
+  const handleStaging = async () => {
     if (!currentImage || !currentImage.id) {
       Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
-    
     logger.debug('放入暂存箱...');
-    Alert.alert(
-      t('category.addToStagingBox'),
-      t('imagePreview.confirmAddToStagingBox'),
-      [
-        { 
-          text: t('common.cancel'), 
-          style: 'cancel',
-          onPress: () => logger.debug('用户取消放入暂存箱')
-        },
-        {
-          text: t('common.confirm'),
-          onPress: async () => {
-            logger.debug('用户确认放入暂存箱，开始操作...');
-            try {
-              // 🆕 使用 UnifiedDataService.addToStagingBox 添加到暂存箱
-              // 注意：addToStagingBox 内部已经会刷新缓存，不需要再次刷新
-              const result = await UnifiedDataService.addToStagingBox([currentImage.id]);
-              
-              if (result.success) {
-                logger.debug('放入暂存箱成功');
-                
-                // 更新本地状态（移除相似组信息，因为暂存箱中的图片不应该有相似组信息）
-                setCurrentImage(prev => ({ 
-                  ...prev, 
-                  similarityGroupIndex: null,
-                  similarityScore: null,
-                  similarityGroupType: null
-                }));
-                
-                // 更新暂存箱状态
-                setIsInStagingBox(true);
-                
-                // 图片保留在当前列表中，不需要重新加载
-                Alert.alert(t('common.success'), t('category.addToStagingBoxSuccess', { count: 1 }));
-              } else {
-                logger.error('放入暂存箱失败:', result);
-                Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
-              }
-            } catch (error) {
-              logger.error('放入暂存箱失败:', error);
-              Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const result = await UnifiedDataService.addToStagingBox([currentImage.id]);
+      if (result.success) {
+        logger.debug('放入暂存箱成功');
+        setCurrentImage(prev => ({
+          ...prev,
+          similarityGroupIndex: null,
+          similarityScore: null,
+          similarityGroupType: null
+        }));
+        setIsInStagingBox(true);
+        setToastMessage(t('imagePreview.stagedMessage'));
+      } else {
+        logger.error('放入暂存箱失败:', result);
+        Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
+      }
+    } catch (error) {
+      logger.error('放入暂存箱失败:', error);
+      Alert.alert(t('common.error'), t('category.addToStagingBoxFailed') || t('common.retry'));
+    }
   };
 
   /**
    * 从暂存箱移除图片
    */
-  const handleRemoveFromStagingBox = () => {
+  const handleRemoveFromStagingBox = async () => {
     if (!currentImage || !currentImage.id) {
       Alert.alert(t('common.error'), t('imagePreview.imageInfoIncomplete'));
       return;
     }
-    
     logger.debug('从暂存箱移除...');
-    Alert.alert(
-      t('category.removeFromStagingBox'),
-      t('imagePreview.confirmRemoveFromStagingBox'),
-      [
-        { 
-          text: t('common.cancel'), 
-          style: 'cancel',
-          onPress: () => logger.debug('用户取消移出暂存箱')
-        },
-        {
-          text: t('imagePreview.remove'),
-          onPress: async () => {
-            logger.debug('用户确认移出暂存箱，开始操作...');
-            try {
-              // 使用 UnifiedDataService.removeFromStagingBox 从暂存箱移除
-              const result = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
-              
-              if (result.success) {
-                logger.debug('从暂存箱移除成功');
-                
-                // 更新暂存箱状态
-                setIsInStagingBox(false);
-                
-                // 如果当前是从暂存箱进入的，重新加载图片列表
-                if (finalFilterType === 'stagingBox') {
-                  const reloadSuccess = await reloadImageList();
-                  if (!reloadSuccess) {
-                    // 列表为空，reloadImageList 已经处理了返回逻辑
-                    return;
-                  }
-                }
-                
-                Alert.alert(t('common.success'), t('imagePreview.removeFromStagingBoxSuccess'));
-              } else {
-                logger.error('从暂存箱移除失败:', result);
-                Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
-              }
-            } catch (error) {
-              logger.error('从暂存箱移除失败:', error);
-              Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const result = await UnifiedDataService.removeFromStagingBox([currentImage.id]);
+      if (result.success) {
+        logger.debug('从暂存箱移除成功');
+        setIsInStagingBox(false);
+        if (finalFilterType === 'stagingBox') {
+          const reloadSuccess = await reloadImageList();
+          if (!reloadSuccess) return;
+        }
+        setToastMessage(t('imagePreview.removedFromStagingMessage'));
+      } else {
+        logger.error('从暂存箱移除失败:', result);
+        Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
+      }
+    } catch (error) {
+      logger.error('从暂存箱移除失败:', error);
+      Alert.alert(t('common.error'), t('category.removeFromStagingBoxFailed') || t('common.retry'));
+    }
   };
 
   /**
@@ -1729,22 +1777,41 @@ const ImagePreviewScreen = ({ route, navigation }) => {
           }}
           renderItem={({ item, index }) => {
             const itemUri = resolveImageUri(item);
+            const isCurrentPage = index === currentImageIndex;
+            const showZoomable = isCurrentPage && !!itemUri;
             return (
               <View style={styles.imagePage}>
+                <View style={styles.imagePageClip}>
                 {itemUri ? (
-                  <Image
-                    source={{ uri: itemUri }}
-                    style={styles.image}
-                    resizeMode="contain"
-                    onError={(e) => {
-                      logger.error(`❌ 图片[${index}]加载失败: ${e.nativeEvent.error}`);
-                    }}
-                  />
+                  showZoomable ? (
+                    <View style={styles.imageWrap} {...panResponder.panHandlers}>
+                      <Animated.View style={[styles.imageWrap, zoomableStyle]}>
+                        <Image
+                          source={{ uri: itemUri }}
+                          style={styles.image}
+                          resizeMode="contain"
+                          onError={(e) => {
+                            logger.error(`❌ 图片[${index}]加载失败: ${e.nativeEvent.error}`);
+                          }}
+                        />
+                      </Animated.View>
+                    </View>
+                  ) : (
+                    <Image
+                      source={{ uri: itemUri }}
+                      style={styles.image}
+                      resizeMode="contain"
+                      onError={(e) => {
+                        logger.error(`❌ 图片[${index}]加载失败: ${e.nativeEvent.error}`);
+                      }}
+                    />
+                  )
                 ) : (
                   <View style={[styles.image, styles.imagePlaceholder]}>
                     <Text style={styles.placeholderText}>{t('imagePreview.imageNotFound')}</Text>
                   </View>
                 )}
+                </View>
             </View>
             );
           }}
@@ -1765,6 +1832,8 @@ const ImagePreviewScreen = ({ route, navigation }) => {
 
       {/* 分类选择器模态框 */}
       {renderCategoryModal()}
+
+      {toastMessage ? <Toast message={toastMessage} onDone={() => setToastMessage(null)} /> : null}
     </SafeAreaView>
   );
 };
@@ -1817,6 +1886,19 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   imagePage: {
+    width: SCREEN_WIDTH,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePageClip: {
+    width: SCREEN_WIDTH,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  imageWrap: {
     width: SCREEN_WIDTH,
     height: '100%',
     justifyContent: 'center',

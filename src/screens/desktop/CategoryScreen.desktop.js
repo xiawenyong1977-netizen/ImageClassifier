@@ -14,12 +14,30 @@ import EnhanceResultScreen from './EnhanceResultScreen.desktop';
 // 使用统一数据服务
 
 
-// 时间轴标题组件 - 独立监听选中状态变化
+// 时间轴标题组件 - 独立监听选中状态变化，并显示该日期下照片的相关地点
 const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPress }) => {
-  const { t } = useTranslation('common');
+  const { t, i18n } = useTranslation('common');
   const [selectedCount, setSelectedCount] = useState(0);
   const [allSelected, setAllSelected] = useState(false);
-  
+  const [locationNames, setLocationNames] = useState([]);
+
+  const lang = i18n.language || 'zh';
+  useEffect(() => {
+    const cityIds = [...new Set((imagesForDate || []).map(img => img.city).filter(Boolean))];
+    if (cityIds.length === 0) {
+      setLocationNames([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(cityIds.map(id => cityLocationService.getLocationName(id, lang).catch(() => id)))
+      .then(names => {
+        if (!cancelled) setLocationNames(names || []);
+      });
+    return () => { cancelled = true; };
+  }, [imagesForDate, lang]);
+
+  const locationText = locationNames.length > 0 ? locationNames.join('、') : '';
+
   // 计算选中状态
   const updateSelectionState = useCallback(() => {
     const imageIds = imagesForDate.map(img => img.id);
@@ -65,7 +83,12 @@ const TimelineHeader = React.memo(({ dateKey, formattedDate, imagesForDate, onPr
       activeOpacity={0.7}
     >
       <View style={styles.timelineHeaderContent}>
-        <Text style={styles.timelineDate}>{formattedDate}</Text>
+        <View style={styles.timelineHeaderLeft}>
+          <Text style={styles.timelineDate}>{formattedDate}</Text>
+          {locationText ? (
+            <Text style={styles.timelineLocation} numberOfLines={1}>{locationText}</Text>
+          ) : null}
+        </View>
         <Text style={styles.timelineCount}>
           ({t('category.photosCount', { count: imagesForDate.length })}
           {someSelected && ` · ${t('category.selectedCountSimple', { count: selectedCount })}`}
@@ -1371,6 +1394,11 @@ const CategoryScreen = ({
           ? tHeader('category.shutterWithCount', { shutter: getCameraSettingsCategoryTranslation('shutter', filterValue, i18n.language || 'zh'), count: allImages.length })
           : filterType === 'focalLength'
           ? tHeader('category.focalLengthWithCount', { focalLength: getCameraSettingsCategoryTranslation('focalLength', filterValue, i18n.language || 'zh'), count: allImages.length })
+          : filterType === 'time'
+          ? (() => {
+              const timeLabel = /^\d{4}$/.test(filterValue) ? tHeader('home.yearLabel', { year: filterValue }) : tHeader(`home.${filterValue}`);
+              return tHeader('category.timeWithCount', { label: timeLabel, count: allImages.length });
+            })()
           : tHeader('category.imageList')
         }
       </Text>
@@ -2850,6 +2878,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+  },
+  timelineHeaderLeft: {
+    flex: 1,
+  },
+  timelineLocation: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
   },
   timelineDate: {
     fontSize: 16,
