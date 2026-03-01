@@ -1281,6 +1281,11 @@ const ImagePreviewScreen = ({
                   <Text style={styles.navButtonText}>›</Text>
                 </TouchableOpacity>
               )}
+
+              {/* Toast：在图片显示区内底部居中 */}
+              {toastMessage ? (
+                <Toast message={toastMessage} onDone={() => setToastMessage(null)} placement="bottom" />
+              ) : null}
             </View>
 
           {/* 操作区 */}
@@ -1812,7 +1817,6 @@ const ImagePreviewScreen = ({
         />
       )}
 
-      {toastMessage ? <Toast message={toastMessage} onDone={() => setToastMessage(null)} /> : null}
     </SafeAreaView>
   );
 };

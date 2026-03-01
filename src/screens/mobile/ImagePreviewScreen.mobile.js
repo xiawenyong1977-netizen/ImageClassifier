@@ -1833,7 +1833,9 @@ const ImagePreviewScreen = ({ route, navigation }) => {
       {/* 分类选择器模态框 */}
       {renderCategoryModal()}
 
-      {toastMessage ? <Toast message={toastMessage} onDone={() => setToastMessage(null)} /> : null}
+      {toastMessage ? (
+        <Toast message={toastMessage} onDone={() => setToastMessage(null)} placement="screenCenter" />
+      ) : null}
     </SafeAreaView>
   );
 };
