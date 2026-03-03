@@ -9,7 +9,8 @@ features/
 ├── ai-enhancement/    # AI图像增强功能
 ├── api/               # API调用指南
 ├── image-preview/     # 图片预览功能
-└── mediastore/        # MediaStore集成
+├── mediastore/        # MediaStore集成
+└── person-classification/ # 按具体人物分类
 ```
 
 ## 🤖 AI图像增强 (ai-enhancement/)
@@ -32,6 +33,11 @@ features/
 - **MediaStore性能优化报告.md** - MediaStore性能优化报告
 - **MediaStore文件清单.md** - MediaStore相关文件清单
 - **MediaStore集成说明.md** - MediaStore集成详细说明
+
+## 👤 按具体人物分类 (person-classification/)
+
+- **按具体人物分类-产品设计方案.md** - 按具体人物分类产品方案（MVP范围与里程碑）
+- **按具体人物分类-技术设计文档.md** - 按具体人物分类技术架构与落地方案
 
 ## 📖 相关文档
 
