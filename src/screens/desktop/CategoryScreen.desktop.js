@@ -248,6 +248,7 @@ ImageItem.displayName = 'ImageItem';
 const CategoryScreen = ({ 
   filterType: propFilterType,
   filterValue: propFilterValue,
+  filterDisplayName: propFilterDisplayName,
   currentImageId: propCurrentImageId,
   currentPage: propCurrentPage,
   onBack, 
@@ -264,6 +265,7 @@ const CategoryScreen = ({
   // 统一使用 filterType 和 filterValue
   const filterType = propFilterType || route?.params?.filterType;
   const filterValue = propFilterValue || route?.params?.filterValue;
+  const filterDisplayName = propFilterDisplayName || route?.params?.filterDisplayName || null;
   
   
   // 从统一数据服务获取数据
@@ -1367,6 +1369,11 @@ const CategoryScreen = ({
           ? tHeader('category.imageList')
           : filterType === 'similarityGroup'
           ? tHeader('category.similarityGroupWithCount', { count: allImages.length })
+          : filterType === 'person'
+          ? tHeader('category.personWithCount', {
+              name: filterDisplayName || tHeader('category.person'),
+              count: allImages.length
+            })
           : filterType === 'directory'
           ? tHeader('category.directoryWithCount', { name: truncateText(filterValue.split('/').pop() || filterValue, 20), count: allImages.length })
           : filterType === 'city'
@@ -1845,6 +1852,8 @@ const CategoryScreen = ({
               ? t('category.cityEmpty', { city: cityDisplayName || filterValue })
               : filterType === 'color'
               ? t('category.colorEmpty')
+              : filterType === 'person'
+              ? t('category.personEmpty')
               : filterType === 'stagingBox'
               ? t('category.stagingBoxEmpty')
               : t('category.categoryEmpty')
@@ -2146,6 +2155,8 @@ const CategoryScreen = ({
           ? t('category.cityEmpty', { city: cityDisplayName || filterValue })
           : filterType === 'color'
           ? t('category.colorEmpty')
+          : filterType === 'person'
+          ? t('category.personEmpty')
           : filterType === 'stagingBox'
           ? t('category.stagingBoxEmpty')
           : t('category.categoryEmpty')

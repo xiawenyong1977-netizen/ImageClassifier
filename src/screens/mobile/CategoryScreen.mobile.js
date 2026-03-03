@@ -70,6 +70,7 @@ const CategoryScreen = ({ route, navigation }) => {
   // ==================== 路由参数 ====================
   // 统一使用 filterType 和 filterValue，从旧参数推导（过渡期）
   const { filterType: propFilterType, filterValue: propFilterValue, fromScreen } = route.params || {};
+  const filterDisplayName = route?.params?.filterDisplayName || null;
   
   // 从旧参数推导 filterType 和 filterValue（向后兼容，但优先使用新参数）
   const { category, city, similarityGroupId, color } = route.params || {};
@@ -214,6 +215,11 @@ const CategoryScreen = ({ route, navigation }) => {
     switch (filterType) {
       case 'similarityGroup':
         return t('category.similarityGroupWithCount', { count });
+      case 'person':
+        return t('category.personWithCount', {
+          name: filterDisplayName || t('category.person'),
+          count
+        });
       case 'directory':
         if (filterValue) {
           // 提取目录名（最后一个路径段）

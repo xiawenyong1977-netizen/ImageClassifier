@@ -1067,6 +1067,53 @@ const SettingsScreen = ({ navigation, startSmartScan, onScanProgress }) => {
               </Text>
             </View>
 
+            {/* 人物分组开关 - 子区块 */}
+            <View style={styles.switchItemCompact}>
+              <View style={styles.switchItemCompactLeft}>
+                <Text style={styles.switchLabelCompact} numberOfLines={1}>👤 {t('settings.enablePersonClassification')}</Text>
+                <Switch
+                  value={settings.enablePersonClassification !== false}
+                  onValueChange={(value) => updateSetting('enablePersonClassification', value)}
+                  trackColor={{ false: '#E5E5EA', true: '#34C759' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.switchDescriptionCompact}>
+                {t('settings.enablePersonClassificationDesc')}
+              </Text>
+            </View>
+
+            {/* 人物分组阈值 - 子区块 */}
+            <View style={styles.switchItemCompact}>
+              <Text style={styles.switchLabelCompact}>🎯 {t('settings.personIndexSimilarityThreshold')}</Text>
+              <Text style={styles.switchDescriptionCompact}>
+                {t('settings.personIndexSimilarityThresholdDesc')}
+              </Text>
+              <View style={styles.quickDirectoryRow}>
+                {[0.7, 0.78, 0.85, 0.9].map((val) => {
+                  let currentVal = (settings.personIndexSimilarityThreshold != null && settings.personIndexSimilarityThreshold >= 0.5 && settings.personIndexSimilarityThreshold <= 0.95)
+                    ? settings.personIndexSimilarityThreshold
+                    : 0.78;
+                  const isSelected = Math.abs(currentVal - val) < 0.01;
+                  const personIndexEnabled = settings.enablePersonClassification !== false;
+                  return (
+                    <TouchableOpacity
+                      key={val}
+                      style={[
+                        styles.quickDirectoryButton,
+                        isSelected && styles.quickDirectoryButtonDetecting,
+                        !personIndexEnabled && { opacity: 0.5 }
+                      ]}
+                      onPress={() => updateSetting('personIndexSimilarityThreshold', val)}
+                      disabled={!personIndexEnabled}
+                    >
+                      <Text style={styles.quickDirectoryButtonText}>{Math.round(val * 100)}%</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
             {/* 相似度检测阈值 - 子区块 */}
             <View style={styles.switchItemCompact}>
               <Text style={styles.switchLabelCompact}>🔗 {t('settings.similarityThreshold')}</Text>

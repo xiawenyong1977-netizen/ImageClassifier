@@ -345,6 +345,23 @@ class SQLiteAdapter {
         created_at TEXT
       );
 
+      -- 人物分组数据表
+      CREATE TABLE IF NOT EXISTS person_data (
+        imageId TEXT PRIMARY KEY,
+        person_group_id TEXT,
+        person_score REAL,
+        person_source TEXT,
+        updatedAt TEXT,
+        FOREIGN KEY (imageId) REFERENCES images(id) ON DELETE CASCADE
+      );
+
+      -- 人物分组索引表
+      CREATE TABLE IF NOT EXISTS person_group_index (
+        groupId TEXT PRIMARY KEY,
+        imageIds TEXT,
+        created_at TEXT
+      );
+
       -- 暂存箱表
       CREATE TABLE IF NOT EXISTS staging_box (
         imageId TEXT PRIMARY KEY,
@@ -642,6 +659,45 @@ class SQLiteAdapter {
       }
       
       return index;
+    } else if (key === 'personData') {
+      // 查询人物分组数据
+      const results = await this.db.executeSql(
+        'SELECT * FROM person_data'
+      );
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        return null;
+      }
+
+      const data = {};
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        data[row.imageId] = {
+          person_group_id: row.person_group_id,
+          person_score: row.person_score,
+          person_source: row.person_source,
+          updatedAt: row.updatedAt
+        };
+      }
+
+      return data;
+    } else if (key === 'personGroupIndex') {
+      // 查询人物分组索引
+      const results = await this.db.executeSql(
+        'SELECT * FROM person_group_index'
+      );
+      const result = results && results.length > 0 ? results[0] : null;
+      if (!result || !result.rows) {
+        return null;
+      }
+
+      const index = {};
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        index[row.groupId] = JSON.parse(row.imageIds);
+      }
+
+      return index;
     }
     
     return null;
@@ -900,6 +956,116 @@ class SQLiteAdapter {
       });
       
       return true;
+    } else if (key === 'personData') {
+      // 保存人物分组数据
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          const entries = Object.entries(value);
+          let completed = 0;
+          let hasError = false;
+
+          tx.executeSql(
+            'DELETE FROM person_data',
+            [],
+            () => {
+              if (entries.length === 0) {
+                resolve(true);
+                return;
+              }
+
+              for (const [imageId, data] of entries) {
+                tx.executeSql(
+                  `INSERT OR REPLACE INTO person_data
+                   (imageId, person_group_id, person_score, person_source, updatedAt)
+                   VALUES (?, ?, ?, ?, ?)`,
+                  [
+                    imageId,
+                    data.person_group_id || null,
+                    data.person_score || 0,
+                    data.person_source || null,
+                    data.updatedAt || new Date().toISOString()
+                  ],
+                  () => {
+                    completed++;
+                    if (completed === entries.length && !hasError) {
+                      resolve(true);
+                    }
+                  },
+                  (tx, error) => {
+                    if (!hasError) {
+                      hasError = true;
+                      reject(error);
+                    }
+                  }
+                );
+              }
+            },
+            (tx, error) => {
+              if (!hasError) {
+                hasError = true;
+                reject(error);
+              }
+            }
+          );
+        }, (error) => {
+          if (error) {
+            reject(error);
+          }
+        });
+      });
+
+      return true;
+    } else if (key === 'personGroupIndex') {
+      // 保存人物分组索引
+      await new Promise((resolve, reject) => {
+        this.db.transaction((tx) => {
+          const entries = Object.entries(value);
+          let hasError = false;
+          let insertCompleted = 0;
+
+          tx.executeSql(
+            'DELETE FROM person_group_index',
+            [],
+            () => {
+              if (entries.length === 0) {
+                resolve(true);
+                return;
+              }
+
+              for (const [groupId, imageIds] of entries) {
+                tx.executeSql(
+                  'INSERT INTO person_group_index (groupId, imageIds, created_at) VALUES (?, ?, ?)',
+                  [groupId, JSON.stringify(imageIds), new Date().toISOString()],
+                  () => {
+                    insertCompleted++;
+                    if (insertCompleted === entries.length && !hasError) {
+                      resolve(true);
+                    }
+                  },
+                  (tx, error) => {
+                    if (!hasError) {
+                      hasError = true;
+                      reject(error);
+                    }
+                  }
+                );
+              }
+            },
+            (tx, error) => {
+              if (!hasError) {
+                hasError = true;
+                reject(error);
+              }
+            }
+          );
+        }, (error) => {
+          if (error) {
+            reject(error);
+          }
+        });
+      });
+
+      return true;
     }
     
     return false;
@@ -974,6 +1140,10 @@ class SQLiteAdapter {
       await this.db.executeSql('DELETE FROM similarity_data');
     } else if (key === 'similarityGroupIndex') {
       await this.db.executeSql('DELETE FROM similarity_group_index');
+    } else if (key === 'personData') {
+      await this.db.executeSql('DELETE FROM person_data');
+    } else if (key === 'personGroupIndex') {
+      await this.db.executeSql('DELETE FROM person_group_index');
     } else if (key === 'stagingBox') {
       await this.db.executeSql('DELETE FROM staging_box');
       logger.debug('✅ SQLite清空staging_box表');
@@ -989,7 +1159,7 @@ class SQLiteAdapter {
       this.db.transaction((tx) => {
         let completed = 0;
         let hasError = false;
-        const totalOperations = 5; // 增加暂存箱
+        const totalOperations = 7; // 增加人物分组相关表和暂存箱
 
         const checkComplete = () => {
           if (completed === totalOperations && !hasError) {
@@ -1028,6 +1198,26 @@ class SQLiteAdapter {
         });
 
         tx.executeSql('DELETE FROM similarity_group_index', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+
+        tx.executeSql('DELETE FROM person_data', [], (tx, result) => {
+          completed++;
+          checkComplete();
+        }, (tx, error) => {
+          if (!hasError) {
+            hasError = true;
+            reject(error);
+          }
+        });
+
+        tx.executeSql('DELETE FROM person_group_index', [], (tx, result) => {
           completed++;
           checkComplete();
         }, (tx, error) => {
@@ -1204,7 +1394,7 @@ class SQLiteAdapter {
 class IndexedDBAdapter {
   constructor() {
     this.dbName = 'ImageClassifierDB';
-    this.version = 4; // 版本 4：添加 stagingBox 对象存储
+    this.version = 5; // 版本 5：添加人物分组对象存储
     this.db = null;
     this.isInitialized = false;
   }
@@ -1345,6 +1535,24 @@ class IndexedDBAdapter {
             logger.debug(' similarityGroupIndex 对象存储创建完成');
           } else {
             logger.debug(' similarityGroupIndex 对象存储已存在');
+          }
+
+          // 创建人物分组数据表
+          if (!db.objectStoreNames.contains('personData')) {
+            logger.debug(' 创建 personData 对象存储...');
+            db.createObjectStore('personData', { keyPath: 'key' });
+            logger.debug(' personData 对象存储创建完成');
+          } else {
+            logger.debug(' personData 对象存储已存在');
+          }
+
+          // 创建人物分组索引表
+          if (!db.objectStoreNames.contains('personGroupIndex')) {
+            logger.debug(' 创建 personGroupIndex 对象存储...');
+            db.createObjectStore('personGroupIndex', { keyPath: 'key' });
+            logger.debug(' personGroupIndex 对象存储创建完成');
+          } else {
+            logger.debug(' personGroupIndex 对象存储已存在');
           }
           
           // 创建暂存箱表
@@ -1707,6 +1915,8 @@ class ImageStorageService {
       classificationRules: 'classificationRules',
       similarityData: 'similarityData', // 新增：相似度数据表
       similarityGroupIndex: 'similarityGroupIndex', // 新增：相似组索引
+      personData: 'personData', // 新增：人物分组数据
+      personGroupIndex: 'personGroupIndex', // 新增：人物分组索引
       stagingBox: 'stagingBox', // 新增：暂存箱
     };
     this.isInitialized = false;
@@ -3790,6 +4000,25 @@ class ImageStorageService {
         if (result.scanInterval === undefined || result.scanInterval === null) {
           result.scanInterval = 5;
         }
+
+        // 人物分组设置默认值
+        if (result.enablePersonClassification === undefined || result.enablePersonClassification === null) {
+          result.enablePersonClassification = true;
+        }
+        if (typeof result.enablePersonClassification !== 'boolean') {
+          result.enablePersonClassification = result.enablePersonClassification !== 'false';
+        }
+        if (result.personIndexSimilarityThreshold === undefined || result.personIndexSimilarityThreshold === null) {
+          result.personIndexSimilarityThreshold = 0.78;
+        }
+        if (typeof result.personIndexSimilarityThreshold !== 'number' ||
+            result.personIndexSimilarityThreshold < 0.5 ||
+            result.personIndexSimilarityThreshold > 0.95) {
+          result.personIndexSimilarityThreshold = 0.78;
+        }
+        if (!result.personGroupNames || typeof result.personGroupNames !== 'object') {
+          result.personGroupNames = {};
+        }
         
         // 🆕 初始化语言设置（如果不存在）
         if (result.app_language === undefined || result.app_language === null) {
@@ -3922,6 +4151,9 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
+        enablePersonClassification: true,
+        personIndexSimilarityThreshold: 0.78,
+        personGroupNames: {},
         
         // 🆕 语言设置（默认中文）
         app_language: 'zh',
@@ -3990,6 +4222,9 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5,
+        enablePersonClassification: true,
+        personIndexSimilarityThreshold: 0.78,
+        personGroupNames: {},
         
         // 🆕 语言设置（默认中文）
         app_language: 'zh',
@@ -4076,6 +4311,9 @@ class ImageStorageService {
       // 清空相似度数据
       await this.storage.removeItem(this.storageKeys.similarityData);
       await this.storage.removeItem(this.storageKeys.similarityGroupIndex);
+      // 清空人物分组数据
+      await this.storage.removeItem(this.storageKeys.personData);
+      await this.storage.removeItem(this.storageKeys.personGroupIndex);
       // 清空暂存箱
       await this.storage.removeItem(this.storageKeys.stagingBox);
       logger.debug(' IndexedDB 数据已清空');
@@ -4340,6 +4578,9 @@ class ImageStorageService {
       
       // Clear settings
       await this.storage.removeItem(this.storageKeys.settings);
+      // Clear person grouping data
+      await this.storage.removeItem(this.storageKeys.personData);
+      await this.storage.removeItem(this.storageKeys.personGroupIndex);
       
       logger.debug('All data cleared successfully');
       return true;
@@ -5533,6 +5774,299 @@ class ImageStorageService {
     } catch (error) {
       logger.error(' 删除相似组失败:', error);
       return false;
+    }
+  }
+
+  // ==================== 人物分组相关方法 ====================
+
+  /**
+   * 获取人物分组数据表
+   * @returns {Promise<Object>} 人物分组数据映射表 {imageId: personData}
+   */
+  async getPersonData() {
+    try {
+      await this.ensureInitialized();
+      const data = await this.storage.getItem(this.storageKeys.personData);
+      return data || {};
+    } catch (error) {
+      logger.error(' 获取人物分组数据失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 保存人物分组数据表
+   * @param {Object} personData - 人物分组数据映射表
+   * @returns {Promise<boolean>} 是否保存成功
+   */
+  async savePersonData(personData) {
+    try {
+      await this.ensureInitialized();
+      await this.storage.setItem(this.storageKeys.personData, personData);
+      return true;
+    } catch (error) {
+      logger.error(' 保存人物分组数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取人物分组索引
+   * @returns {Promise<Object>} 人物分组索引 {groupId: [imageId1, imageId2, ...]}
+   */
+  async getPersonGroupIndex() {
+    try {
+      await this.ensureInitialized();
+      const index = await this.storage.getItem(this.storageKeys.personGroupIndex);
+      return index || {};
+    } catch (error) {
+      logger.error(' 获取人物分组索引失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 保存人物分组索引
+   * @param {Object} groupIndex - 人物分组索引
+   * @returns {Promise<boolean>} 是否保存成功
+   */
+  async savePersonGroupIndex(groupIndex) {
+    try {
+      await this.ensureInitialized();
+      await this.storage.setItem(this.storageKeys.personGroupIndex, groupIndex);
+      return true;
+    } catch (error) {
+      logger.error(' 保存人物分组索引失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量更新人物分组结果
+   * @param {Array} imagePersonArray - 人物分组数组 [{ imageId, personGroupId, personScore, personSource }]
+   * @param {Object} options - 选项
+   * @param {boolean} options.replaceAll - 是否替换全部现有人物分组
+   */
+  async updateImagesPersonGrouping(imagePersonArray, options = {}) {
+    try {
+      const { replaceAll = false } = options;
+      const personData = replaceAll ? {} : await this.getPersonData();
+      const groupIndex = replaceAll ? {} : await this.getPersonGroupIndex();
+      const now = new Date().toISOString();
+
+      if (!Array.isArray(imagePersonArray) || imagePersonArray.length === 0) {
+        if (replaceAll) {
+          await this.savePersonData({});
+          await this.savePersonGroupIndex({});
+        }
+        return true;
+      }
+
+      for (const item of imagePersonArray) {
+        const imageId = item?.imageId || item?.id;
+        if (!imageId) {
+          continue;
+        }
+
+        const oldGroupId = personData[imageId]?.person_group_id;
+        const newGroupId = item?.personGroupId || item?.person_group_id || null;
+
+        // 从旧组移除
+        if (oldGroupId && oldGroupId !== newGroupId && groupIndex[oldGroupId]) {
+          groupIndex[oldGroupId] = groupIndex[oldGroupId].filter(id => id !== imageId);
+          if (groupIndex[oldGroupId].length === 0) {
+            delete groupIndex[oldGroupId];
+          }
+        }
+
+        // 无新组则清理该图片人物分组
+        if (!newGroupId) {
+          delete personData[imageId];
+          continue;
+        }
+
+        // 添加到新组
+        if (!groupIndex[newGroupId]) {
+          groupIndex[newGroupId] = [];
+        }
+        if (!groupIndex[newGroupId].includes(imageId)) {
+          groupIndex[newGroupId].push(imageId);
+        }
+
+        personData[imageId] = {
+          ...personData[imageId],
+          person_group_id: newGroupId,
+          person_score: item?.personScore ?? item?.person_score ?? personData[imageId]?.person_score ?? 0,
+          person_source: item?.personSource ?? item?.person_source ?? personData[imageId]?.person_source ?? 'unknown',
+          updatedAt: now
+        };
+      }
+
+      // 清理空组
+      Object.keys(groupIndex).forEach(groupId => {
+        if (!Array.isArray(groupIndex[groupId]) || groupIndex[groupId].length === 0) {
+          delete groupIndex[groupId];
+        }
+      });
+
+      await this.savePersonData(personData);
+      await this.savePersonGroupIndex(groupIndex);
+      return true;
+    } catch (error) {
+      logger.error(' 批量更新人物分组失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取人物分组列表
+   * @returns {Promise<Array>} 人物分组列表
+   */
+  async getPersonGroups() {
+    try {
+      const groupIndex = await this.getPersonGroupIndex();
+      const personData = await this.getPersonData();
+      const groups = {};
+
+      Object.entries(groupIndex).forEach(([groupId, imageIds]) => {
+        if (!Array.isArray(imageIds) || imageIds.length === 0) return;
+
+        const validImageIds = imageIds.filter(imageId => {
+          const data = personData[imageId];
+          return data && data.person_group_id === groupId;
+        });
+        if (validImageIds.length === 0) return;
+
+        const firstImageData = personData[validImageIds[0]];
+        groups[groupId] = {
+          id: groupId,
+          images: [],
+          confidence: 0,
+          created_at: firstImageData?.updatedAt || null
+        };
+
+        validImageIds.forEach(imageId => {
+          const data = personData[imageId];
+          if (!data) return;
+          groups[groupId].images.push({
+            id: imageId,
+            person_score: data.person_score || 0,
+            person_source: data.person_source || 'unknown'
+          });
+
+          const imageCount = groups[groupId].images.length;
+          const currentConfidence = groups[groupId].confidence;
+          const score = data.person_score || 0;
+          groups[groupId].confidence =
+            (currentConfidence * (imageCount - 1) + score) / imageCount;
+        });
+      });
+
+      const result = Object.values(groups);
+      result.sort((a, b) => {
+        if (b.images.length !== a.images.length) {
+          return b.images.length - a.images.length;
+        }
+        return (b.confidence || 0) - (a.confidence || 0);
+      });
+      return result;
+    } catch (error) {
+      logger.error(' 获取人物分组失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 根据组ID获取人物分组信息
+   * @param {string} groupId - 组ID
+   * @returns {Promise<Object|null>} 人物分组信息
+   */
+  async getPersonGroupById(groupId) {
+    try {
+      if (!groupId) return null;
+      const groupIndex = await this.getPersonGroupIndex();
+      const imageIds = groupIndex[groupId];
+      if (!Array.isArray(imageIds) || imageIds.length === 0) {
+        return null;
+      }
+
+      const personData = await this.getPersonData();
+      const validImageIds = imageIds.filter(imageId => {
+        const data = personData[imageId];
+        return data && data.person_group_id === groupId;
+      });
+      if (validImageIds.length === 0) {
+        return null;
+      }
+
+      const firstImageData = personData[validImageIds[0]];
+      const group = {
+        id: groupId,
+        images: [],
+        confidence: 0,
+        created_at: firstImageData?.updatedAt || null
+      };
+
+      validImageIds.forEach(imageId => {
+        const data = personData[imageId];
+        if (!data) return;
+        group.images.push({
+          id: imageId,
+          person_score: data.person_score || 0,
+          person_source: data.person_source || 'unknown'
+        });
+
+        const imageCount = group.images.length;
+        const currentConfidence = group.confidence;
+        const score = data.person_score || 0;
+        group.confidence = (currentConfidence * (imageCount - 1) + score) / imageCount;
+      });
+
+      return group;
+    } catch (error) {
+      logger.error(' 获取人物分组详情失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 清理人物分组数据
+   * @param {Array<string>|null} imageIds - 指定图片ID，null 表示清理全部
+   */
+  async clearPersonGrouping(imageIds = null) {
+    try {
+      if (imageIds === null) {
+        await this.storage.removeItem(this.storageKeys.personData);
+        await this.storage.removeItem(this.storageKeys.personGroupIndex);
+        return true;
+      }
+
+      const personData = await this.getPersonData();
+      const groupIndex = await this.getPersonGroupIndex();
+
+      imageIds.forEach(imageId => {
+        const data = personData[imageId];
+        if (!data?.person_group_id) {
+          delete personData[imageId];
+          return;
+        }
+
+        const groupId = data.person_group_id;
+        delete personData[imageId];
+        if (groupIndex[groupId]) {
+          groupIndex[groupId] = groupIndex[groupId].filter(id => id !== imageId);
+          if (groupIndex[groupId].length === 0) {
+            delete groupIndex[groupId];
+          }
+        }
+      });
+
+      await this.savePersonData(personData);
+      await this.savePersonGroupIndex(groupIndex);
+      return true;
+    } catch (error) {
+      logger.error(' 清理人物分组数据失败:', error);
+      throw error;
     }
   }
 

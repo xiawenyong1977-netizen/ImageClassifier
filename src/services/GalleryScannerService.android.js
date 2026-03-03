@@ -46,6 +46,7 @@ class GalleryScannerService {
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
     this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
     this.lastLocationRefreshCount = 0; // 上次位置信息补全刷新时的处理数量
+    this.lastPersonRefreshCount = 0; // 上次人物分组刷新时的处理数量
     this.scanStartTimestamp = null; // 扫描开始时间戳
     
     // 初始化事件监听器
@@ -185,6 +186,7 @@ class GalleryScannerService {
     this.lastSimilarityRefreshCount = 0;
     this.lastScreenshotRefreshCount = 0;
     this.lastLocationRefreshCount = 0;
+    this.lastPersonRefreshCount = 0;
     this.currentScanId = null;
 
     // 创建 Promise 来等待扫描完成
@@ -512,6 +514,7 @@ class GalleryScannerService {
     this.lastSimilarityRefreshCount = 0;
     this.lastScreenshotRefreshCount = 0;
     this.lastLocationRefreshCount = 0;
+    this.lastPersonRefreshCount = 0;
     this.currentScanId = null;
 
     // 创建 Promise 来等待AI分类完成
@@ -1266,6 +1269,14 @@ class GalleryScannerService {
           simpleMessage = i18n.t('home.scanProgress.localRecognition', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
         break;
+
+      case 'person_indexing':
+        if (filesFound > 0 && filesProcessed === 0) {
+          simpleMessage = i18n.t('home.scanProgress.personIndexingStart', { count: filesFound });
+        } else {
+          simpleMessage = i18n.t('home.scanProgress.personIndexing', { processed: filesProcessed || 0, total: filesFound || 0 });
+        }
+        break;
         
         
       case 'location_enrichment':
@@ -1360,6 +1371,14 @@ class GalleryScannerService {
         shouldRefresh = true;
         this.lastLocationRefreshCount = filesProcessed;
         logger.debug(`🔄 位置信息补全刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
+      }
+    } else if (stage === 'person_indexing' && filesProcessed && filesProcessed > 0) {
+      // 人物分组阶段：每处理完30张图片刷新一次（比较差值）
+      const lastRefresh = this.lastPersonRefreshCount;
+      if (filesProcessed - lastRefresh >= 30) {
+        shouldRefresh = true;
+        this.lastPersonRefreshCount = filesProcessed;
+        logger.debug(`🔄 人物分组刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
     } else if (imagesClassified > 0 && imagesClassified - this.lastRefreshCount >= 50) {
       // 其他阶段：每50张成功分类的图片刷新一次

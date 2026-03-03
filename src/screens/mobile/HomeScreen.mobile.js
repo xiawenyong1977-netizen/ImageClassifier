@@ -124,6 +124,8 @@ const HomeScreen = ({ navigation }) => {
   // 相似组数据
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
+  const [personGroups, setPersonGroups] = useState([]);
+  const [showAllPersonGroups, setShowAllPersonGroups] = useState(false);
   const [showAllCities, setShowAllCities] = useState(false);
   
   // 颜色分类数据（按颜色区不再加载缩略图，仅用色块+数量展示）
@@ -312,6 +314,7 @@ const HomeScreen = ({ navigation }) => {
         loadTimeData();
         loadCities();
         loadSimilarityGroups();
+        loadPersonGroups();
         loadColors();
         loadDirectories();
         loadFormats();
@@ -595,6 +598,18 @@ const HomeScreen = ({ navigation }) => {
       
     } catch (error) {
       logger.error('❌ 加载相似组失败:', error);
+    }
+  };
+
+  /**
+   * 加载人物分组
+   */
+  const loadPersonGroups = async () => {
+    try {
+      const groups = await UnifiedDataService.getPersonGroupsStats();
+      setPersonGroups(groups || []);
+    } catch (error) {
+      logger.error('❌ 加载人物分组失败:', error);
     }
   };
 
@@ -1690,6 +1705,140 @@ const HomeScreen = ({ navigation }) => {
   );
 
   /**
+   * 渲染人物分组芯片（展开更多时使用）
+   */
+  const renderPersonGroupChip = (group) => (
+    <TouchableOpacity
+      key={group.groupId}
+      style={styles.attributeChip}
+      onPress={() => {
+        try {
+          if (!group?.groupId || !navigation) return;
+          navigation.navigate('Category', {
+            filterType: 'person',
+            filterValue: group.groupId,
+            filterDisplayName: group.displayName,
+            fromScreen: 'PersonGroup',
+          });
+        } catch (error) {
+          logger.error('❌ 人物分组芯片点击失败:', error);
+        }
+      }}
+    >
+      <Text style={styles.attributeChipName} numberOfLines={1}>
+        {t('home.personGroupChip', {
+          name: group.displayName || t('category.person'),
+          count: group.imageCount || 0
+        })}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染人物分组卡片
+   */
+  const renderPersonGroupCard = (group) => (
+    <TouchableOpacity
+      key={group.groupId}
+      style={styles.categoryCard}
+      onPress={() => {
+        try {
+          if (!group?.groupId || !navigation) return;
+          navigation.navigate('Category', {
+            filterType: 'person',
+            filterValue: group.groupId,
+            filterDisplayName: group.displayName,
+            fromScreen: 'PersonGroup',
+          });
+        } catch (error) {
+          logger.error('❌ 人物分组卡片点击失败:', error);
+        }
+      }}
+    >
+      {group.latestImageUri ? (
+        <Image
+          source={{ uri: group.latestImageUri }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#6A5ACD' }]}>
+          <Text style={styles.emptyThumbnailText}>👤</Text>
+        </View>
+      )}
+
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName} numberOfLines={1}>
+          {group.displayName || t('category.person')}
+        </Text>
+        <Text style={styles.categoryCount}>{group.imageCount || 0}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  /**
+   * 渲染按人物分组区
+   */
+  const renderPersonGroupsSection = () => {
+    const sortedGroups = personGroups && personGroups.length > 0
+      ? [...personGroups].sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0))
+      : [];
+    const displayGroups = showAllPersonGroups ? sortedGroups : sortedGroups.slice(0, 8);
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>👤 {t('home.byPerson')}</Text>
+          </View>
+          {sortedGroups.length > 0 && (
+            <View style={styles.headerButtonsContainer}>
+              {sortedGroups.length > 8 && !showAllPersonGroups && (
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowAllPersonGroups(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.toggleButtonText}>{t('home.showMore')}</Text>
+                </TouchableOpacity>
+              )}
+              {showAllPersonGroups && sortedGroups.length > 8 && (
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowAllPersonGroups(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.toggleButtonText}>{t('home.showLess')}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+
+        {sortedGroups.length > 0 ? (
+          showAllPersonGroups ? (
+            <View style={styles.attributesContainer}>
+              <View style={styles.attributeRow}>
+                {displayGroups.map(renderPersonGroupChip)}
+              </View>
+            </View>
+          ) : (
+            <View style={styles.categoriesGrid}>
+              {displayGroups.map(renderPersonGroupCard)}
+            </View>
+          )
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>👤</Text>
+            <Text style={styles.emptyStateText}>{t('home.noPersonGroups')}</Text>
+            <Text style={styles.emptyStateSubtext}>{t('home.personGroupHint')}</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  /**
    * 渲染相似照片区（与"按内容"保持一致：4列网格布局）
    */
   const renderSimilarityGroupsSection = () => {
@@ -2234,6 +2383,7 @@ const HomeScreen = ({ navigation }) => {
       >
         {renderTimeSection()}
         {renderCategoriesSection()}
+        {renderPersonGroupsSection()}
         {renderCitiesSection()}
         {renderSimilarityGroupsSection()}
         {renderAttributesSection()}

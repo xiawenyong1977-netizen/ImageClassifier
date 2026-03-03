@@ -18,6 +18,7 @@ import ImageClassifierService from './ImageClassifierService';
 import cityLocationService from './CityLocationService';
 import ImageProcessor from './ImageProcessor';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
+import PersonIndexingService from './PersonIndexingService';
 import { getCurrentLanguageAsync } from '../i18n';
 import i18n from '../i18n';
 
@@ -530,6 +531,8 @@ class GalleryScannerService {
 
     // 初始化相似度检测服务
     this.similarityService = new ImageSimilarityService();
+    // 初始化人物分组服务
+    this.personIndexingService = new PersonIndexingService();
 
     this.galleryPaths = [];
     
@@ -543,6 +546,8 @@ class GalleryScannerService {
     this.lastRefreshCount = 0; // 上次刷新时的分类成功数
     this.lastSimilarityRefreshCount = 0; // 上次相似度检测刷新时的相似组数
     this.lastScreenshotRefreshCount = 0; // 上次截图检测刷新时的处理数量
+    this.lastLocationRefreshCount = 0; // 上次位置补全刷新时的处理数量
+    this.lastPersonRefreshCount = 0; // 上次人物分组刷新时的处理数量
     
     // AppState 监听器，用于保持后台执行
     this.appStateSubscription = null;
@@ -704,6 +709,17 @@ class GalleryScannerService {
           total: filesFound || 0 
         });
         break;
+
+      case 'person_indexing':
+        if (filesFound > 0 && filesProcessed === 0) {
+          simpleMessage = i18n.t('home.scanProgress.personIndexingStart', { count: filesFound });
+        } else {
+          simpleMessage = i18n.t('home.scanProgress.personIndexing', {
+            processed: filesProcessed || 0,
+            total: filesFound || 0
+          });
+        }
+        break;
         
         
       case 'removing_files':
@@ -796,6 +812,14 @@ class GalleryScannerService {
         this.lastLocationRefreshCount = filesProcessed;
         logger.debug(`🔄 位置信息补全刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
+    } else if (stage === 'person_indexing' && filesProcessed && filesProcessed > 0) {
+      // 人物分组阶段：每处理完30张图片刷新一次
+      const lastRefresh = this.lastPersonRefreshCount;
+      if (filesProcessed - lastRefresh >= 30) {
+        shouldRefresh = true;
+        this.lastPersonRefreshCount = filesProcessed;
+        logger.debug(`🔄 人物分组刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
+      }
     } else if (this.imagesClassified > 0 && this.imagesClassified - this.lastRefreshCount >= 50) {
       // 其他阶段：每50张成功分类的图片刷新一次
       shouldRefresh = true;
@@ -881,6 +905,8 @@ class GalleryScannerService {
       this.lastRefreshCount = 0;
       this.lastSimilarityRefreshCount = 0;
       this.lastScreenshotRefreshCount = 0;
+      this.lastLocationRefreshCount = 0;
+      this.lastPersonRefreshCount = 0;
 
       // 使用独立扫描线程方案，避免阻塞UI
       return await this.scanWithIndependentThread(this.galleryPaths, onProgress, scanStartTime);
@@ -2716,9 +2742,15 @@ class GalleryScannerService {
     
     if (naImages.length === 0) {
       logger.info('✅ 没有未分类图片，跳过后续处理');
+      const personIndexResult = await this.personIndexingPhase(scanStartTime);
       // 发送完成消息（没有需要处理的图片）
       this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
-      return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: [] };
+      return {
+        processedCount: totalProcessed,
+        failedCount: totalFailed,
+        personIndexedCount: personIndexResult.processedCount || 0,
+        similarityCandidates: []
+      };
     }
     
     // 第2层和第3层：根据远程服务是否可用，决定执行缓存查询和远程推理
@@ -2731,31 +2763,24 @@ class GalleryScannerService {
       
       if (afterCache.length === 0) {
         logger.info(`✅ 漏斗处理完成：缓存已覆盖，已处理 ${totalProcessed} 张`);
-        // 发送完成消息
-        this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
-        return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
-      }
-      
-      // 第3层：批量远程推理（处理缓存未命中的图片）
-      const { remainingImages: afterRemote, processedCount: remoteCount, failedCount: remoteFailed } = 
-        await this.classifyImagesbyLLM(afterCache, scanStartTime);
-      totalProcessed += remoteCount;
-      totalFailed += remoteFailed;
-      
-      if (afterRemote.length === 0) {
-        logger.info(`✅ 漏斗处理完成：远程推理已覆盖，已处理 ${totalProcessed} 张`);
-        // 发送完成消息
-        this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
-        return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
-      }
-      
-      // 如果还有剩余图片（远程推理失败），这些图片将继续保持为NA分类
-      if (afterRemote.length > 0) {
-        logger.info(`⚠️ 远程推理完成，但仍有 ${afterRemote.length} 张图片分类失败，将继续保持为待分类（NA）状态`);
+      } else {
+        // 第3层：批量远程推理（处理缓存未命中的图片）
+        const { remainingImages: afterRemote, processedCount: remoteCount, failedCount: remoteFailed } =
+          await this.classifyImagesbyLLM(afterCache, scanStartTime);
+        totalProcessed += remoteCount;
+        totalFailed += remoteFailed;
+
+        if (afterRemote.length === 0) {
+          logger.info(`✅ 漏斗处理完成：远程推理已覆盖，已处理 ${totalProcessed} 张`);
+        } else {
+          logger.info(`⚠️ 远程推理完成，但仍有 ${afterRemote.length} 张图片分类失败，将继续保持为待分类（NA）状态`);
+        }
       }
     } else {
       logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将继续保持为待分类状态`);
     }
+
+    const personIndexResult = await this.personIndexingPhase(scanStartTime);
     
     logger.info(`✅ 漏斗处理完成：总共处理 ${totalProcessed} 张，失败 ${totalFailed} 张，剩余图片保持为待分类状态`);
     
@@ -2763,7 +2788,74 @@ class GalleryScannerService {
     this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
     
     // 阶段3-4完成
-    return { processedCount: totalProcessed, failedCount: totalFailed, similarityCandidates: naImages };
+    return {
+      processedCount: totalProcessed,
+      failedCount: totalFailed,
+      personIndexedCount: personIndexResult.processedCount || 0,
+      similarityCandidates: naImages
+    };
+  }
+
+  /**
+   * 人物分组阶段：对 single_person 图片做人物聚类
+   */
+  async personIndexingPhase(_scanStartTime = null) {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      if (settings.enablePersonClassification === false) {
+        logger.info('⏭️ 人物分组已禁用，跳过');
+        return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+      }
+
+      const singlePersonImages = await UnifiedDataService.readImagesByCategory('single_person');
+      if (!singlePersonImages || singlePersonImages.length === 0) {
+        return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+      }
+
+      const existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      const candidates = singlePersonImages.filter(img => {
+        if (!img?.id) return false;
+        return !existingPersonData[img.id]?.person_group_id;
+      });
+
+      if (candidates.length === 0) {
+        logger.info('✅ 人物分组跳过：没有待分组的单人照片');
+        return {
+          processedCount: 0,
+          assignedCount: 0,
+          skippedCount: singlePersonImages.length,
+          totalSinglePerson: singlePersonImages.length
+        };
+      }
+
+      await this.sendProgressMessage('person_indexing', 0, candidates.length, this.imagesClassified, this.totalImagesToBeClassified);
+
+      const result = await this.personIndexingService.indexSinglePersonImages({
+        images: singlePersonImages,
+        source: 'heuristic-js',
+        threshold: settings.personIndexSimilarityThreshold,
+        onProgress: (processed, total) => {
+          if (processed === total || processed % 20 === 0) {
+            this.sendProgressMessage('person_indexing', processed, total, this.imagesClassified, this.totalImagesToBeClassified)
+              .catch(error => logger.error('发送人物分组进度失败:', error));
+          }
+        }
+      });
+
+      await this.sendProgressMessage(
+        'person_indexing',
+        result.processedCount || candidates.length,
+        candidates.length,
+        this.imagesClassified,
+        this.totalImagesToBeClassified
+      );
+
+      logger.info(`👤 人物分组阶段完成：处理 ${result.processedCount || 0} 张，新增分组 ${result.assignedCount || 0} 张`);
+      return result;
+    } catch (error) {
+      logger.error('❌ 人物分组阶段失败（不影响主流程）:', error);
+      return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+    }
   }
 
   /**

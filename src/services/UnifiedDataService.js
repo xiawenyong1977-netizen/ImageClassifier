@@ -1928,6 +1928,15 @@ class UnifiedDataService {
           const groupData = await this.getSimilarityGroupImages(filterValue);
           return groupData.images || [];
         }
+
+        case 'person': {
+          if (!filterValue) {
+            logger.error('readImagesByFilter: person 需要 filterValue');
+            return [];
+          }
+          const groupData = await this.getPersonGroupImages(filterValue);
+          return groupData.images || [];
+        }
         
         case 'directory':
           if (!filterValue) {
@@ -2048,6 +2057,14 @@ class UnifiedDataService {
             return [];
           }
           return this.getSelectedImagesBySimilarityGroup(filterValue);
+
+        case 'person':
+          if (!filterValue) {
+            logger.error('getSelectedImagesByFilter: person 需要 filterValue');
+            return [];
+          }
+          const personGroupData = await this.getPersonGroupImages(filterValue);
+          return (personGroupData.images || []).filter(img => img.selected === true);
         
         case 'city':
           if (!filterValue) {
@@ -2690,6 +2707,170 @@ class UnifiedDataService {
       return true;
     } catch (error) {
       console.error('❌ 添加图片到相似组失败:', error);
+      throw error;
+    }
+  }
+
+  // ==================== 人物分组接口 ====================
+
+  /**
+   * 批量更新人物分组结果
+   * @param {Array} imagePersonArray - [{ imageId, personGroupId, personScore, personSource }]
+   * @param {Object} options - 选项，支持 replaceAll / refreshCache
+   */
+  async updateImagesPersonGrouping(imagePersonArray, options = {}) {
+    const { refreshCache = true } = options;
+    try {
+      await this.imageStorageService.updateImagesPersonGrouping(imagePersonArray, options);
+      if (refreshCache) {
+        await this.imageCache.buildCache();
+      }
+      return true;
+    } catch (error) {
+      logger.error('更新人物分组结果失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取人物分组统计信息
+   * @returns {Promise<Array>} 人物分组统计数组
+   */
+  async getPersonGroupsStats() {
+    try {
+      const personGroups = await this.imageStorageService.getPersonGroups();
+      if (!personGroups || personGroups.length === 0) {
+        return [];
+      }
+
+      const allImages = await this.readAllImages();
+      const imageMap = new Map(allImages.map(img => [img.id, img]));
+      const settings = await this.readSettings();
+      const nameMap = settings?.personGroupNames || {};
+
+      const groups = personGroups.map(group => {
+        let latestImage = null;
+        let latestTime = 0;
+        let validImageCount = 0;
+
+        group.images.forEach(imageInfo => {
+          const image = imageMap.get(imageInfo.id);
+          if (!image) return;
+          validImageCount++;
+          const imageTime = image.timestamp ? (typeof image.timestamp === 'string' ? new Date(image.timestamp).getTime() : image.timestamp) : 0;
+          if (imageTime > latestTime) {
+            latestTime = imageTime;
+            latestImage = image;
+          }
+        });
+
+        return {
+          groupId: group.id,
+          imageCount: validImageCount,
+          latestImageUri: latestImage ? getUri(latestImage) : null,
+          latestTime: latestTime > 0 ? new Date(latestTime) : null,
+          confidence: group.confidence || 0,
+          displayName: nameMap[group.id] || null
+        };
+      });
+
+      const validGroups = groups.filter(group => group.imageCount > 0);
+      validGroups.sort((a, b) => {
+        if (b.imageCount !== a.imageCount) {
+          return b.imageCount - a.imageCount;
+        }
+        return (b.confidence || 0) - (a.confidence || 0);
+      });
+
+      // 没有自定义名称时，按排序顺序提供默认展示名称
+      return validGroups.map((group, index) => ({
+        ...group,
+        displayName: group.displayName || `人物${index + 1}`
+      }));
+    } catch (error) {
+      logger.error('获取人物分组统计失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定人物分组的照片
+   * @param {string} groupId - 人物分组ID
+   * @returns {Promise<Object>} 人物分组详情
+   */
+  async getPersonGroupImages(groupId) {
+    try {
+      if (!groupId) {
+        throw new Error('人物分组ID不能为空');
+      }
+
+      const group = await this.imageStorageService.getPersonGroupById(groupId);
+      if (!group) {
+        return {
+          groupId,
+          imageCount: 0,
+          images: [],
+          notFound: true
+        };
+      }
+
+      const allImages = await this.readAllImages();
+      const imageMap = new Map(allImages.map(img => [img.id, img]));
+
+      const images = group.images
+        .map(imageInfo => {
+          const image = imageMap.get(imageInfo.id);
+          if (!image) return null;
+          image.personGroupId = groupId;
+          image.personScore = imageInfo.person_score || 0;
+          image.personSource = imageInfo.person_source || 'unknown';
+          return image;
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          const timeA = a.takenAt || a.timestamp || a.createdAt || a.modifiedAt || 0;
+          const timeB = b.takenAt || b.timestamp || b.createdAt || b.modifiedAt || 0;
+          return new Date(timeB) - new Date(timeA);
+        });
+
+      return {
+        groupId: group.id,
+        imageCount: images.length,
+        images,
+        confidence: group.confidence || 0,
+        createdAt: group.created_at,
+        notFound: false
+      };
+    } catch (error) {
+      logger.error('获取人物分组照片失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 重命名人物分组
+   */
+  async renamePersonGroup(groupId, displayName) {
+    try {
+      if (!groupId) {
+        throw new Error('人物分组ID不能为空');
+      }
+
+      const settings = await this.readSettings();
+      const personGroupNames = { ...(settings.personGroupNames || {}) };
+      const nextName = (displayName || '').trim();
+
+      if (nextName) {
+        personGroupNames[groupId] = nextName;
+      } else {
+        delete personGroupNames[groupId];
+      }
+
+      settings.personGroupNames = personGroupNames;
+      await this.writeSettings(settings);
+      return true;
+    } catch (error) {
+      logger.error('重命名人物分组失败:', error);
       throw error;
     }
   }

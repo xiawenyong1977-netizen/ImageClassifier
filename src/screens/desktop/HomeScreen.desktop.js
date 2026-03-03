@@ -63,6 +63,8 @@ const HomeScreen = () => {
   const [cityRecentImages, setCityRecentImages] = useState({});
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
+  const [personGroups, setPersonGroups] = useState([]);
+  const [showAllPersonGroups, setShowAllPersonGroups] = useState(false);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
@@ -85,7 +87,7 @@ const HomeScreen = () => {
       logger.debug('HomeScreen 开始加载数据...');
       
       // 并行加载所有数据
-      const [recentImagesResult, categoryCountsData, timeCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, isoCountsData, apertureCountsData, shutterCountsData, focalLengthCountsData, similarityGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
+      const [recentImagesResult, categoryCountsData, timeCountsData, cityCountsData, colorCountsData, directoryCountsData, formatCountsData, resolutionCountsData, orientationCountsData, isoCountsData, apertureCountsData, shutterCountsData, focalLengthCountsData, similarityGroupsData, personGroupsData, settings, allImages, stagingBoxCountData] = await Promise.all([
         UnifiedDataService.readNewDiscoveredImages(12),
         UnifiedDataService.readCategoryCounts(),
         UnifiedDataService.readTimeCounts(),
@@ -100,6 +102,7 @@ const HomeScreen = () => {
         UnifiedDataService.readShutterCounts(),
         UnifiedDataService.readFocalLengthCounts(),
         UnifiedDataService.getSimilarityGroupsStats(),
+        UnifiedDataService.getPersonGroupsStats(),
         UnifiedDataService.readSettings(),
         UnifiedDataService.readAllImages(),
         UnifiedDataService.getStagingBoxCount()
@@ -170,6 +173,7 @@ const HomeScreen = () => {
       logger.debug('准备更新状态 - 分类统计:', categoryCountsData);
       logger.debug('准备更新状态 - 最近图片数量:', recentImagesData.length);
       logger.debug('准备更新状态 - 相似照片组数量:', similarityGroupsData.length);
+      logger.debug('准备更新状态 - 人物分组数量:', (personGroupsData || []).length);
       setRecentImages(recentImagesData);
       setRecentImagesTotal(recentImagesTotalCount);
       setCategoryCounts(categoryCountsData);
@@ -186,7 +190,8 @@ const HomeScreen = () => {
       setShutterCounts(shutterCountsData);
       setFocalLengthCounts(focalLengthCountsData);
       setStagingBoxCount(stagingBoxCountData);
-      setSimilarityGroups(similarityGroupsData);
+      setSimilarityGroups(similarityGroupsData || []);
+      setPersonGroups(personGroupsData || []);
       setCategoryRecentImages(categoryImagesMap);
       setCityRecentImages(cityImagesMap);
       // 如果设置未定义，默认为 true（隐藏空分类）
@@ -270,7 +275,8 @@ const HomeScreen = () => {
         progress.stage === 'screenshot_detection' || progress.stage === 'cache_checking' ||
         progress.stage === 'remote_inference' || progress.stage === 'local_inference' ||
         progress.stage === 'removing_files' ||
-        progress.stage === 'similarity_detection' || progress.stage === 'location_enrichment') {
+        progress.stage === 'similarity_detection' || progress.stage === 'location_enrichment' ||
+        progress.stage === 'person_indexing') {
       setIsScanning(true);
     }
     
@@ -358,13 +364,14 @@ const HomeScreen = () => {
 
   // 处理目录点击
   // 🆕 统一的过滤处理函数
-  const handleFilterPress = (filterType, filterValue) => {
+  const handleFilterPress = (filterType, filterValue, filterDisplayName = null) => {
     logger.debug(`点击${filterType}:`, filterValue);
     setCurrentScreen('Category');
     setScreenProps(prev => ({
       ...prev,
       filterType,
       filterValue,
+      filterDisplayName,
       currentImageId: null,
       currentPage: null,
       viewMode: null
@@ -1055,6 +1062,66 @@ const HomeScreen = () => {
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
+                <Text style={styles.sectionTitle}>👤 {t('home.byPerson')}</Text>
+              </View>
+              {personGroups && personGroups.length > 8 && (
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowAllPersonGroups(!showAllPersonGroups)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.toggleButtonText}>
+                    {showAllPersonGroups ? t('home.showLess') : t('home.showMore')}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.categoriesContainer}>
+              {personGroups && personGroups.length > 0 ? (
+                showAllPersonGroups ? (
+                  <View style={styles.attributesContainer}>
+                    <View style={styles.attributeRow}>
+                      {personGroups.map((group) => (
+                        <TouchableOpacity
+                          key={group.groupId}
+                          style={styles.attributeChip}
+                          onPress={() => handleFilterPress('person', group.groupId, group.displayName)}
+                        >
+                          <Text style={styles.attributeChipName} numberOfLines={1}>
+                            {t('home.personGroupChip', {
+                              name: group.displayName || t('category.person'),
+                              count: group.imageCount || 0
+                            })}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                ) : (
+                  personGroups.slice(0, 8).map((group) => (
+                    <PersonCard
+                      key={group.groupId}
+                      group={group}
+                      onPress={() => handleFilterPress('person', group.groupId, group.displayName)}
+                    />
+                  ))
+                )
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateIcon}>👤</Text>
+                  <Text style={styles.emptyStateText}>{t('home.noPersonGroups')}</Text>
+                  <Text style={styles.emptyStateSubtext}>{t('home.personGroupHint')}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* 城市分类卡片 */}
+        {(
+          <View style={styles.categoriesSection}>
+            <View style={styles.recentSectionHeader}>
+              <View style={styles.sectionTitleContainer}>
                 <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
               </View>
               {cityCounts && Object.keys(cityCounts).length > 0 && (
@@ -1538,7 +1605,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, personGroups, showAllPersonGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -1865,6 +1932,41 @@ const SimilarityCard = React.memo(({ group, onPress }) => {
       <View style={styles.categoryOverlay}>
         <Text style={styles.categoryName}>{t('category.similarityGroup')}</Text>
         <Text style={styles.categoryCount}>{group.imageCount}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const PersonCard = React.memo(({ group, onPress }) => {
+  const { t } = useTranslation('common');
+  const imageSource = useMemo(() => {
+    if (!group.latestImageUri) return null;
+    const imageUri = getUri(group.latestImageUri);
+    return imageUri ? { uri: imageUri } : null;
+  }, [group.latestImageUri]);
+
+  return (
+    <TouchableOpacity
+      style={styles.categoryCard}
+      onPress={() => onPress(group)}
+    >
+      {imageSource ? (
+        <Image
+          source={imageSource}
+          style={styles.thumbnail}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.thumbnail, { backgroundColor: '#6A5ACD' }]}>
+          <Text style={styles.emptyThumbnailText}>👤</Text>
+        </View>
+      )}
+
+      <View style={styles.categoryOverlay}>
+        <Text style={styles.categoryName} numberOfLines={1}>
+          {group.displayName || t('category.person')}
+        </Text>
+        <Text style={styles.categoryCount}>{group.imageCount || 0}</Text>
       </View>
     </TouchableOpacity>
   );

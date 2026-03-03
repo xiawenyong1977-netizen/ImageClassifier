@@ -756,6 +756,211 @@ public class ImageDataService {
         
         return images;
     }
+
+    /**
+     * 获取用于人物分组的单人照片（精简字段）
+     * 仅返回人物分组算法需要的字段，避免 Cursor 窗口过大。
+     */
+    public List<Map<String, Object>> getSinglePersonImagesForIndexing() {
+        SQLiteDatabase db = dbHelper.getDatabase();
+        List<Map<String, Object>> images = new ArrayList<>();
+
+        String[] columns = {
+            "id", "uri", "fileName", "message", "timestamp"
+        };
+
+        Cursor cursor = db.query(
+            "images",
+            columns,
+            "category = ?",
+            new String[]{"single_person"},
+            null,
+            null,
+            "timestamp DESC"
+        );
+
+        try {
+            while (cursor.moveToNext()) {
+                Map<String, Object> image = new HashMap<>();
+                putStringIfNotNull(image, "id", cursor, "id");
+                putStringIfNotNull(image, "uri", cursor, "uri");
+                putStringIfNotNull(image, "fileName", cursor, "fileName");
+                putStringIfNotNull(image, "message", cursor, "message");
+                putLongIfNotNull(image, "timestamp", cursor, "timestamp");
+                images.add(image);
+            }
+        } finally {
+            cursor.close();
+        }
+
+        return images;
+    }
+
+    /**
+     * 获取现有人物分组结果
+     * @return Map<imageId, {person_group_id, person_score, person_source, updatedAt}>
+     */
+    public Map<String, Map<String, Object>> getPersonAssignments() {
+        SQLiteDatabase db = dbHelper.getDatabase();
+        Map<String, Map<String, Object>> assignments = new HashMap<>();
+
+        Cursor cursor = db.query(
+            "person_data",
+            new String[]{"imageId", "person_group_id", "person_score", "person_source", "updatedAt"},
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        try {
+            while (cursor.moveToNext()) {
+                String imageId = cursor.getString(cursor.getColumnIndex("imageId"));
+                if (imageId == null || imageId.isEmpty()) {
+                    continue;
+                }
+
+                Map<String, Object> item = new HashMap<>();
+                putStringIfNotNull(item, "person_group_id", cursor, "person_group_id");
+                putDoubleIfNotNull(item, "person_score", cursor, "person_score");
+                putStringIfNotNull(item, "person_source", cursor, "person_source");
+                putStringIfNotNull(item, "updatedAt", cursor, "updatedAt");
+                assignments.put(imageId, item);
+            }
+        } finally {
+            cursor.close();
+        }
+
+        return assignments;
+    }
+
+    /**
+     * 批量写入人物分组结果（增量写入），并重建 group index
+     * @param personGroupingList [{imageId, person_group_id, person_score, person_source}]
+     */
+    public Map<String, Object> upsertPersonGrouping(List<Map<String, Object>> personGroupingList) {
+        Map<String, Object> result = new HashMap<>();
+        if (personGroupingList == null || personGroupingList.isEmpty()) {
+            result.put("success", true);
+            result.put("updatedCount", 0);
+            result.put("failedCount", 0);
+            return result;
+        }
+
+        SQLiteDatabase db = dbHelper.getDatabase();
+        int updatedCount = 0;
+        int failedCount = 0;
+
+        try {
+            db.beginTransaction();
+
+            for (Map<String, Object> item : personGroupingList) {
+                try {
+                    String imageId = getStringValue(item, "imageId", null);
+                    if (imageId == null || imageId.isEmpty()) {
+                        failedCount++;
+                        continue;
+                    }
+
+                    String groupId = getStringValue(item, "person_group_id", null);
+                    if (groupId == null || groupId.isEmpty()) {
+                        db.delete("person_data", "imageId = ?", new String[]{imageId});
+                        updatedCount++;
+                        continue;
+                    }
+
+                    ContentValues values = new ContentValues();
+                    values.put("imageId", imageId);
+                    values.put("person_group_id", groupId);
+                    values.put("person_score", getDoubleValue(item.get("person_score")));
+                    values.put("person_source", getStringValue(item, "person_source", "heuristic-native"));
+                    values.put("updatedAt", dateFormat.format(new Date()));
+
+                    long rowId = db.insertWithOnConflict(
+                        "person_data",
+                        null,
+                        values,
+                        SQLiteDatabase.CONFLICT_REPLACE
+                    );
+
+                    if (rowId >= -1) {
+                        updatedCount++;
+                    } else {
+                        failedCount++;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "写入人物分组单条数据失败", e);
+                    failedCount++;
+                }
+            }
+
+            rebuildPersonGroupIndex(db);
+            db.setTransactionSuccessful();
+
+            result.put("success", true);
+            result.put("updatedCount", updatedCount);
+            result.put("failedCount", failedCount);
+            return result;
+        } catch (Exception e) {
+            Log.e(TAG, "批量写入人物分组失败", e);
+            result.put("success", false);
+            result.put("updatedCount", 0);
+            result.put("failedCount", personGroupingList.size());
+            result.put("error", e.getMessage());
+            return result;
+        } finally {
+            if (db.inTransaction()) {
+                db.endTransaction();
+            }
+        }
+    }
+
+    /**
+     * 从 person_data 重建 person_group_index
+     */
+    private void rebuildPersonGroupIndex(SQLiteDatabase db) {
+        Cursor cursor = null;
+        try {
+            Map<String, List<String>> groupMap = new HashMap<>();
+
+            cursor = db.query(
+                "person_data",
+                new String[]{"imageId", "person_group_id"},
+                "person_group_id IS NOT NULL AND person_group_id != ''",
+                null,
+                null,
+                null,
+                null
+            );
+
+            while (cursor.moveToNext()) {
+                String imageId = cursor.getString(cursor.getColumnIndex("imageId"));
+                String groupId = cursor.getString(cursor.getColumnIndex("person_group_id"));
+                if (imageId == null || imageId.isEmpty() || groupId == null || groupId.isEmpty()) {
+                    continue;
+                }
+                if (!groupMap.containsKey(groupId)) {
+                    groupMap.put(groupId, new ArrayList<>());
+                }
+                groupMap.get(groupId).add(imageId);
+            }
+
+            db.delete("person_group_index", null, null);
+
+            for (Map.Entry<String, List<String>> entry : groupMap.entrySet()) {
+                ContentValues values = new ContentValues();
+                values.put("groupId", entry.getKey());
+                values.put("imageIds", new JSONArray(entry.getValue()).toString());
+                values.put("created_at", dateFormat.format(new Date()));
+                db.insert("person_group_index", null, values);
+            }
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+    }
     
     /**
      * 获取所有图片URI
