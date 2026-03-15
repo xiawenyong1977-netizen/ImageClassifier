@@ -636,11 +636,31 @@ const CategoryScreen = ({
   }, []);
 
   // 按日期分组当前页面的图片（时间轴功能）- 使用useMemo缓存结果
+  const UNKNOWN_DATE_KEY = 'unknown';
+
   const getLocalDateKey = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+
+  const getDateKeyFromImage = (image) => {
+    if (!image || typeof image !== 'object') {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    const rawTime = image.takenAt || image.timestamp || image.createdAt || image.modifiedAt || null;
+    if (!rawTime) {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    const date = new Date(rawTime);
+    if (Number.isNaN(date.getTime())) {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    return getLocalDateKey(date);
   };
 
   const groupedImages = useMemo(() => {
@@ -668,21 +688,7 @@ const CategoryScreen = ({
     
     // 只对当前页面的图片进行分组，提高性能
     currentPageImages.forEach(image => {
-      // 优先使用拍摄时间（takenAt），如果没有则使用文件时间（timestamp）
-      let date;
-      if (image.takenAt) {
-        date = new Date(image.takenAt);
-      } else if (image.timestamp) {
-        date = new Date(image.timestamp);
-      } else if (image.createdAt) {
-        date = new Date(image.createdAt);
-      } else if (image.modifiedAt) {
-        date = new Date(image.modifiedAt);
-      } else {
-        date = new Date();
-      }
-      
-      const dateKey = getLocalDateKey(date); // YYYY-MM-DD格式
+      const dateKey = getDateKeyFromImage(image); // YYYY-MM-DD格式或 unknown
       
       if (!grouped[dateKey]) {
         grouped[dateKey] = [];
@@ -701,7 +707,12 @@ const CategoryScreen = ({
     });
     
     // 按日期倒序排列（最新的日期在前）
-    const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+    const sortedDates = Object.keys(grouped).sort((a, b) => {
+      if (a === UNKNOWN_DATE_KEY && b === UNKNOWN_DATE_KEY) return 0;
+      if (a === UNKNOWN_DATE_KEY) return 1;
+      if (b === UNKNOWN_DATE_KEY) return -1;
+      return new Date(b) - new Date(a);
+    });
     
     return { grouped, sortedDates };
   }, [allImages, currentPage, itemsPerPage]);
@@ -1875,23 +1886,27 @@ const CategoryScreen = ({
       >
         {sortedDates.map((dateKey) => {
           const imagesForDate = grouped[dateKey];
-          const date = new Date(dateKey);
-          
-          // 自定义中文日期格式化
-          const year = date.getFullYear();
-          const month = date.getMonth() + 1;
-          const day = date.getDate();
-          const weekday = date.getDay();
-          
-          const weekdayNames = t('category.weekdayNames', { returnObjects: true });
-          
-          // 月份直接使用数字格式，如"11月"而不是"十一月"
-          const formattedDate = t('category.dateFormat', {
-            year,
-            month: `${month}月`,
-            day,
-            weekday: weekdayNames[weekday]
-          });
+          let formattedDate = t('unknown');
+
+          if (dateKey !== UNKNOWN_DATE_KEY) {
+            const date = new Date(dateKey);
+
+            // 自定义中文日期格式化
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const day = date.getDate();
+            const weekday = date.getDay();
+
+            const weekdayNames = t('category.weekdayNames', { returnObjects: true });
+
+            // 月份直接使用数字格式，如"11月"而不是"十一月"
+            formattedDate = t('category.dateFormat', {
+              year,
+              month: `${month}月`,
+              day,
+              weekday: weekdayNames[weekday]
+            });
+          }
           
           return (
             <View key={dateKey} style={styles.timelineSection}>

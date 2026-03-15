@@ -335,11 +335,6 @@ public class GalleryScanService {
         try {
             if (naImages == null || naImages.isEmpty()) {
                 fileLogger.d(TAG, "AI分类完成: 没有图片需要分类");
-                try {
-                    performPersonIndexing(scanId);
-                } catch (Exception personError) {
-                    fileLogger.e(TAG, "人物分组阶段失败（已忽略）", personError);
-                }
                 completeAiClassification(scanId);
                 return;
             }
@@ -362,13 +357,6 @@ public class GalleryScanService {
             RemoteInferenceResult inferenceResult = performRemoteInference(cacheResult);
             fileLogger.d(TAG, "阶段3c完成: 推理成功 " + inferenceResult.successCount + " 张");
 
-            // 阶段3d: 人物分组（仅处理 single_person）
-            try {
-                performPersonIndexing(scanId);
-            } catch (Exception personError) {
-                fileLogger.e(TAG, "人物分组阶段失败（已忽略）", personError);
-            }
-            
             // AI分类完成
             completeAiClassification(scanId);
             

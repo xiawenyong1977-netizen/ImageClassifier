@@ -17,6 +17,7 @@ import UnifiedDataService from './UnifiedDataService';
 import ImageClassifierService from './ImageClassifierService';
 import cityLocationService from './CityLocationService';
 import ImageSimilarityService from './ImageSimilarityService';
+import PersonIndexingService from './PersonIndexingService';
 import { ScanService } from '../adapters/ScanServiceAdapter';
 import { similarityDetectionPhase as sharedSimilarityDetection } from './similarityDetectionPhase';
 import i18n from '../i18n';
@@ -34,6 +35,7 @@ class GalleryScannerService {
     this.onProgress = null;
     this.imageClassifier = new ImageClassifierService();
     this.similarityService = new ImageSimilarityService();
+    this.personIndexingService = new PersonIndexingService();
     this.eventEmitter = null;
     this.progressSubscriptions = [];
     
@@ -567,6 +569,9 @@ class GalleryScannerService {
       // 等待AI分类完成（通过事件监听器 resolve/reject）
       await scanPromise;
 
+      // JS层人物分组（使用人脸 embedding）
+      await this.personIndexingPhase();
+
       // 返回扫描结果
       return {
         success: true,
@@ -585,6 +590,76 @@ class GalleryScannerService {
         this.scanReject = null;
       }
       throw error;
+    }
+  }
+
+  /**
+   * 人物分组阶段：对 single_person 图片做人物聚类（JS embedding）
+   */
+  async personIndexingPhase() {
+    try {
+      const settings = await UnifiedDataService.readSettings();
+      if (settings.enablePersonClassification === false) {
+        logger.info('⏭️ 人物分组已禁用，跳过');
+        return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+      }
+
+      const singlePersonImages = await UnifiedDataService.readImagesByCategory('single_person');
+      if (!singlePersonImages || singlePersonImages.length === 0) {
+        return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+      }
+
+      let existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      const singlePersonIdSet = new Set(singlePersonImages.map(img => img?.id).filter(Boolean));
+      const stalePersonIds = Object.keys(existingPersonData || {}).filter(imageId => !singlePersonIdSet.has(imageId));
+      if (stalePersonIds.length > 0) {
+        logger.debug(`🧹 清理人物分组脏数据: ${stalePersonIds.length} 张`);
+        await UnifiedDataService.imageStorageService.clearPersonGrouping(stalePersonIds);
+        existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      }
+
+      const candidates = singlePersonImages.filter(img => {
+        if (!img?.id) return false;
+        return !existingPersonData[img.id]?.person_group_id;
+      });
+
+      if (candidates.length === 0) {
+        logger.info('✅ 人物分组跳过：没有待分组的单人照片');
+        return {
+          processedCount: 0,
+          assignedCount: 0,
+          skippedCount: singlePersonImages.length,
+          totalSinglePerson: singlePersonImages.length
+        };
+      }
+
+      await this.sendProgressMessage('person_indexing', 0, candidates.length, this.imagesClassified, this.totalImagesToBeClassified);
+
+      const result = await this.personIndexingService.indexSinglePersonImages({
+        images: singlePersonImages,
+        source: 'face-embedding',
+        threshold: settings.personIndexSimilarityThreshold,
+        onProgress: (processed, total) => {
+          if (processed === total || processed % 20 === 0) {
+            this.sendProgressMessage('person_indexing', processed, total, this.imagesClassified, this.totalImagesToBeClassified)
+              .catch(error => logger.error('发送人物分组进度失败:', error));
+          }
+        }
+      });
+
+      await this.sendProgressMessage(
+        'person_indexing',
+        result.processedCount || candidates.length,
+        candidates.length,
+        this.imagesClassified,
+        this.totalImagesToBeClassified
+      );
+
+      logger.info(`👤 人物分组阶段完成：处理 ${result.processedCount || 0} 张，新增分组 ${result.assignedCount || 0} 张`);
+      return result;
+    } catch (error) {
+      logger.error('❌ 人物分组阶段失败（不影响主流程）:', error);
+      return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
     }
   }
 

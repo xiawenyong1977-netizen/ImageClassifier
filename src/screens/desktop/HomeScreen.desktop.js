@@ -76,6 +76,7 @@ const HomeScreen = () => {
   const [totalImagesCount, setTotalImagesCount] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
   const [isSimilarityDetecting, setIsSimilarityDetecting] = useState(false); // 相似度检测状态
+  const [isPersonDetecting, setIsPersonDetecting] = useState(false); // 人物分组检测状态
   const rotationValue = useRef(new Animated.Value(0)).current;
   
   // 使用 ref 存储设置值，避免异步状态更新问题
@@ -488,6 +489,88 @@ const HomeScreen = () => {
       setIsScanning(false);
       setIsSimilarityDetecting(false); // 清除相似度检测状态
       // 🔥 清除全局变量
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, loadData, t, handleScanProgress]);
+
+  // 启动人物分组
+  const handleStartPersonDetection = useCallback(async () => {
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过人物分组请求');
+      return;
+    }
+
+    try {
+      logger.debug('开始人物分组');
+      setIsScanning(true);
+      setIsPersonDetecting(true);
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.personDetectionInProgress'));
+
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('人物分组进度:', progress);
+        handleScanProgress(progress);
+      };
+
+      const result = await galleryScannerService.personIndexingPhase(new Date());
+      const groups = await UnifiedDataService.getPersonGroupsStats();
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      await loadData();
+    } catch (error) {
+      logger.error('人物分组失败:', error);
+      setGlobalMessage(t('home.personDetectionFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+      setIsPersonDetecting(false);
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, loadData, t, handleScanProgress]);
+
+  // 清空人物分组并重新检测
+  const handleRecheckPersonDetection = useCallback(async () => {
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过人物分组重检请求');
+      return;
+    }
+
+    try {
+      logger.debug('开始清空人物分组并重新检测');
+      setIsScanning(true);
+      setIsPersonDetecting(true);
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.personDetectionResetting'));
+
+      await UnifiedDataService.clearPersonGrouping({ clearNames: true });
+      await loadData();
+
+      const galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('人物分组重检进度:', progress);
+        handleScanProgress(progress);
+      };
+
+      setGlobalMessage(t('home.personDetectionInProgress'));
+      const result = await galleryScannerService.personIndexingPhase(new Date());
+      const groups = await UnifiedDataService.getPersonGroupsStats();
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      await loadData();
+    } catch (error) {
+      logger.error('人物分组重检失败:', error);
+      setGlobalMessage(t('home.personDetectionFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+      setIsPersonDetecting(false);
       if (typeof window !== 'undefined') {
         window.isScanning = false;
       }
@@ -1057,24 +1140,38 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* 城市分类卡片 */}
-        {(
+        {/* 按人物 */}
+        {((categoryCounts?.single_person || 0) > 0) && (
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
                 <Text style={styles.sectionTitle}>👤 {t('home.byPerson')}</Text>
               </View>
-              {personGroups && personGroups.length > 8 && (
-                <TouchableOpacity
-                  style={styles.toggleButton}
-                  onPress={() => setShowAllPersonGroups(!showAllPersonGroups)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.toggleButtonText}>
-                    {showAllPersonGroups ? t('home.showLess') : t('home.showMore')}
-                  </Text>
-                </TouchableOpacity>
-              )}
+              {personGroups && personGroups.length > 0 ? (
+                <View style={styles.headerButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.toggleButton, (isScanning || isPersonDetecting) && styles.refreshButtonDisabled]}
+                    onPress={handleRecheckPersonDetection}
+                    disabled={isScanning || isPersonDetecting}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleButtonText, (isScanning || isPersonDetecting) && styles.refreshButtonTextDisabled]}>
+                      {t('home.recheck')}
+                    </Text>
+                  </TouchableOpacity>
+                  {personGroups.length > 8 && (
+                    <TouchableOpacity
+                      style={styles.toggleButton}
+                      onPress={() => setShowAllPersonGroups(!showAllPersonGroups)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.toggleButtonText}>
+                        {showAllPersonGroups ? t('home.showLess') : t('home.showMore')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : null}
             </View>
             <View style={styles.categoriesContainer}>
               {personGroups && personGroups.length > 0 ? (
@@ -1110,7 +1207,18 @@ const HomeScreen = () => {
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>👤</Text>
                   <Text style={styles.emptyStateText}>{t('home.noPersonGroups')}</Text>
-                  <Text style={styles.emptyStateSubtext}>{t('home.personGroupHint')}</Text>
+                  {!isPersonDetecting && (
+                    <Text style={styles.emptyStateSubtext}>{t('home.startPersonDetectionHint')}</Text>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.startSimilarityButton, (isScanning || isPersonDetecting) && styles.startSimilarityButtonDisabled]}
+                    onPress={handleStartPersonDetection}
+                    disabled={isScanning || isPersonDetecting}
+                  >
+                    <Text style={[styles.startSimilarityButtonText, (isScanning || isPersonDetecting) && styles.startSimilarityButtonTextDisabled]}>
+                      {isPersonDetecting ? t('home.personDetectionInProgress') : t('home.startPersonDetection')}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
@@ -1605,7 +1713,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, personGroups, showAllPersonGroups, totalImagesCount, isScanning, isSimilarityDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, personGroups, showAllPersonGroups, totalImagesCount, isScanning, isSimilarityDetecting, isPersonDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment, handleStartPersonDetection, handleRecheckPersonDetection]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 

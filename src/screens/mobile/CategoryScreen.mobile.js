@@ -478,11 +478,31 @@ const CategoryScreen = ({ route, navigation }) => {
     }
   };
   
+  const UNKNOWN_DATE_KEY = 'unknown';
+
   const getLocalDateKey = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+
+  const getDateKeyFromImage = (image) => {
+    if (!image || typeof image !== 'object') {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    const rawTime = image.takenAt || image.timestamp || image.createdAt || image.modifiedAt || null;
+    if (!rawTime) {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    const date = new Date(rawTime);
+    if (Number.isNaN(date.getTime())) {
+      return UNKNOWN_DATE_KEY;
+    }
+
+    return getLocalDateKey(date);
   };
 
   // 按日期分组图片（与 PC 端字段对齐）
@@ -495,28 +515,7 @@ const CategoryScreen = ({ route, navigation }) => {
     }
     
     imageList.forEach((image) => {
-      // 添加空值检查
-      if (!image || typeof image !== 'object') {
-        return;
-      }
-      
-      // 优先使用拍摄时间（takenAt），如果没有则使用文件时间（timestamp）
-      let date;
-      if (image.takenAt) {
-        date = new Date(image.takenAt);
-      } else if (image.timestamp) {
-        date = new Date(image.timestamp);
-      } else if (image.createdAt) {
-        date = new Date(image.createdAt);
-      } else if (image.modifiedAt) {
-        date = new Date(image.modifiedAt);
-      } else {
-        // 如果都没有，使用当前日期
-        date = new Date();
-      }
-      
-      // 使用本地日期键，避免 UTC 时区偏移导致跨天
-      const dateKey = getLocalDateKey(date);
+      const dateKey = getDateKeyFromImage(image);
       
       if (!groups[dateKey]) {
         groups[dateKey] = [];
@@ -613,14 +612,8 @@ const CategoryScreen = ({ route, navigation }) => {
     }
     
     // 获取图片的时间，优先使用takenAt，没有则使用timestamp
-    const imageTime = targetImage.takenAt || targetImage.timestamp;
-    if (!imageTime) {
-      return;
-    }
-    
-    // 将时间转换为日期键格式
-    const date = new Date(imageTime);
-    const targetDateKey = getLocalDateKey(date);
+    const targetDateKey = getDateKeyFromImage(targetImage);
+    if (!targetDateKey) return;
     
     // 在日期组中找到对应的索引
     const targetDateIndex = dateKeys.indexOf(targetDateKey);
@@ -1716,6 +1709,7 @@ const CategoryScreen = ({ route, navigation }) => {
         }}
         renderItem={({ item: dateKey }) => {
           const imagesForDate = groupedImages[dateKey];
+          const displayDateKey = dateKey === UNKNOWN_DATE_KEY ? t('unknown') : dateKey;
           // 使用 UnifiedDataService 直接查询选中状态（与 PC 端一致）
           const selectedCountInGroup = imagesForDate.filter(img => {
             // 🆕 添加空值检查
@@ -1736,7 +1730,7 @@ const CategoryScreen = ({ route, navigation }) => {
               >
                 <View style={styles.timelineHeaderContent}>
                   <View style={styles.timelineHeaderLeft}>
-                    <Text style={styles.timelineDate}>{dateKey}</Text>
+                    <Text style={styles.timelineDate}>{displayDateKey}</Text>
                     <TimelineLocationLine imagesForDate={imagesForDate} />
                   </View>
                   <Text style={styles.timelineCount}>

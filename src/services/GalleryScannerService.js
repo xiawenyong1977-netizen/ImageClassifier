@@ -1061,9 +1061,8 @@ class GalleryScannerService {
               ctime = new Date(ctimeValue).getTime();
             }
 
-            const currentTime = Date.now();
-
-            const fileTime = ctime || mtime || currentTime;
+            // 优先 mtime（修改时间）：云盘/同步文件夹下 ctime 常为“下载到本机”时间，mtime 更接近原始拍摄/修改时间
+            const fileTime = mtime || ctime || null;
 
             
 
@@ -1095,7 +1094,15 @@ class GalleryScannerService {
               // takenAt, locationInfo 等EXIF数据在后续阶段提取
             };
 
-           
+            // 时间调试：前 3 张、每 500 张、或文件名含 IMG_20250904_194845/1762778556240 时打出 timestamp，便于排查「本周」错误
+            const shouldLogTime = images.length < 3 ||
+              (images.length + 1) % 500 === 0 ||
+              item.name.includes('IMG_20250904_194845') ||
+              item.name.includes('1762778556240');
+            if (shouldLogTime) {
+              const dateStr = fileTime ? new Date(fileTime).toISOString() : 'null';
+              logger.warn(`[时间调试] fileName=${item.name} timestamp=${fileTime} 日期=${dateStr}`);
+            }
 
             images.push(imageData);
 
@@ -2742,7 +2749,9 @@ class GalleryScannerService {
     
     if (naImages.length === 0) {
       logger.info('✅ 没有未分类图片，跳过后续处理');
-      const personIndexResult = await this.personIndexingPhase(scanStartTime);
+      const personIndexResult = Platform.OS === 'web'
+        ? { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 }
+        : await this.personIndexingPhase(scanStartTime);
       // 发送完成消息（没有需要处理的图片）
       this.sendProgressMessage('completed', totalProcessed, totalProcessed, totalProcessed, this.totalImagesToBeClassified);
       return {
@@ -2780,7 +2789,9 @@ class GalleryScannerService {
       logger.info(`⚠️ 远程服务不可用，跳过远程缓存查询和远程推理，${naImages.length} 张NA分类图片将继续保持为待分类状态`);
     }
 
-    const personIndexResult = await this.personIndexingPhase(scanStartTime);
+    const personIndexResult = Platform.OS === 'web'
+      ? { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 }
+      : await this.personIndexingPhase(scanStartTime);
     
     logger.info(`✅ 漏斗处理完成：总共处理 ${totalProcessed} 张，失败 ${totalFailed} 张，剩余图片保持为待分类状态`);
     
@@ -2812,7 +2823,15 @@ class GalleryScannerService {
         return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
       }
 
-      const existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      let existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      const singlePersonIdSet = new Set(singlePersonImages.map(img => img?.id).filter(Boolean));
+      const stalePersonIds = Object.keys(existingPersonData || {}).filter(imageId => !singlePersonIdSet.has(imageId));
+      if (stalePersonIds.length > 0) {
+        logger.debug(`🧹 清理人物分组脏数据: ${stalePersonIds.length} 张`);
+        await UnifiedDataService.imageStorageService.clearPersonGrouping(stalePersonIds);
+        existingPersonData = await UnifiedDataService.imageStorageService.getPersonData();
+      }
+
       const candidates = singlePersonImages.filter(img => {
         if (!img?.id) return false;
         return !existingPersonData[img.id]?.person_group_id;
@@ -2832,7 +2851,7 @@ class GalleryScannerService {
 
       const result = await this.personIndexingService.indexSinglePersonImages({
         images: singlePersonImages,
-        source: 'heuristic-js',
+        source: 'face-embedding',
         threshold: settings.personIndexSimilarityThreshold,
         onProgress: (processed, total) => {
           if (processed === total || processed % 20 === 0) {

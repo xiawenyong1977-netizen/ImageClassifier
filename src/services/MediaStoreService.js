@@ -304,7 +304,7 @@ class MediaStoreService {
    */
   convertMediaStoreTimestamp(timestamp) {
     if (!timestamp || typeof timestamp !== 'number') {
-      return Date.now(); // 默认使用当前时间
+      return null;
     }
     
     // 调试日志：检查MediaStore时间戳
@@ -317,6 +317,11 @@ class MediaStoreService {
       const convertedTimestamp = Math.floor(timestamp / 1000); // 转换为毫秒级
       logger.debug(`🔍 MediaStore时间戳转换: ${timestamp} -> ${convertedTimestamp}, 日期: ${new Date(convertedTimestamp).toISOString()}`);
       return convertedTimestamp;
+    }
+
+    // 兼容秒级时间戳（10位左右）
+    if (timestamp > 0 && timestamp < 100000000000) {
+      return timestamp * 1000;
     }
     
     return timestamp;
@@ -408,4 +413,3 @@ class MediaStoreService {
 // 导出单例
 const mediaStoreService = new MediaStoreService();
 export default mediaStoreService;
-

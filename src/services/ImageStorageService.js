@@ -4009,12 +4009,12 @@ class ImageStorageService {
           result.enablePersonClassification = result.enablePersonClassification !== 'false';
         }
         if (result.personIndexSimilarityThreshold === undefined || result.personIndexSimilarityThreshold === null) {
-          result.personIndexSimilarityThreshold = 0.78;
+          result.personIndexSimilarityThreshold = 0.75;
         }
         if (typeof result.personIndexSimilarityThreshold !== 'number' ||
             result.personIndexSimilarityThreshold < 0.5 ||
             result.personIndexSimilarityThreshold > 0.95) {
-          result.personIndexSimilarityThreshold = 0.78;
+          result.personIndexSimilarityThreshold = 0.75;
         }
         if (!result.personGroupNames || typeof result.personGroupNames !== 'object') {
           result.personGroupNames = {};
@@ -4152,7 +4152,7 @@ class ImageStorageService {
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
         enablePersonClassification: true,
-        personIndexSimilarityThreshold: 0.78,
+        personIndexSimilarityThreshold: 0.75,
         personGroupNames: {},
         
         // 🆕 语言设置（默认中文）
@@ -4223,7 +4223,7 @@ class ImageStorageService {
         hideEmptyCategories: false,
         scanInterval: 5,
         enablePersonClassification: true,
-        personIndexSimilarityThreshold: 0.78,
+        personIndexSimilarityThreshold: 0.75,
         personGroupNames: {},
         
         // 🆕 语言设置（默认中文）

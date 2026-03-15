@@ -258,7 +258,7 @@ const SettingsScreen = ({ navigation, onRescanGallery, onScanProgress, isScannin
     try {
       if ('indexedDB' in window) {
         const db = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('ImageClassifierDB', 4); // 版本 4：添加 stagingBox 对象存储
+          const request = indexedDB.open('ImageClassifierDB'); // 打开现有版本，避免版本号回退报错
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });

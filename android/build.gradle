@@ -40,3 +40,11 @@ allprojects {
     }
 }
 
+subprojects {
+    tasks.matching { it.class.name == "org.jetbrains.kotlin.gradle.tasks.KotlinCompile" }.configureEach { task ->
+        task.kotlinOptions {
+            jvmTarget = "11"
+        }
+    }
+}
+

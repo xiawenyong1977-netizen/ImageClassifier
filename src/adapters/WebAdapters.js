@@ -844,13 +844,16 @@ export const RNFS = {
           birthtime: stats.birthtime, // Windows上这是真正的创建时间
         };
       } catch (error) {
-        logger.debug(`[Web] File stat failed: ${error.message}`);
-        return { 
-          size: 1024, 
+        // 记录路径与错误码，便于排查：ENOENT=文件不存在，EACCES=权限，ENAMETOOLONG=路径过长，EINVAL=路径非法等
+        const errCode = error.code || error.errno;
+        logger.warn(`[Web] File stat failed: path=${filePath}, code=${errCode}, message=${error.message}`);
+        // 不返回当前时间，避免 stat 失败时照片被错误归入「本周」
+        return {
+          size: 1024,
           isFile: () => true,
           isDirectory: () => false,
-          mtime: new Date(),
-          ctime: new Date(),
+          mtime: null,
+          ctime: null,
         };
       }
     } else {
@@ -1904,27 +1907,14 @@ export const ModelPathAdapter = {
       const isDevelopment = window.location.hostname === 'localhost' && 
                            window.location.port === '3000';
       
-      if (isDevelopment) {
+      if (isElectron) {
+        // Electron（开发/生产）都优先使用本地文件路径，onnxruntime-node 不能加载 HTTP URL
+        logger.debug('💻 Electron环境: 使用本地 public/models 路径');
+        return './public/models';
+      } else if (isDevelopment) {
         // 开发环境（npm start）：使用开发服务器路径
         logger.debug('🔧 开发环境: 使用开发服务器路径');
         return 'http://localhost:3000/models';
-      } else if (isElectron) {
-        // Electron生产环境：使用相对于 app.getAppPath() 的路径
-        logger.debug('💻 Electron生产环境: 使用相对于应用的模型路径');
-        try {
-          // 在渲染进程中通过 window.require 获取主进程模块
-          if (window.require) {
-            const electron = window.require('electron');
-            // 通过ipcRenderer请求主进程提供模型路径
-            if (electron.ipcRenderer) {
-              // 返回相对于应用根目录的路径
-              return './models';
-            }
-          }
-        } catch (e) {
-          logger.debug('⚠️ 无法获取Electron主进程引用，使用默认路径');
-        }
-        return './models';
       } else {
         // Web浏览器生产环境：使用相对路径
         logger.debug('🌐 Web浏览器环境: 使用相对路径 ./models');
@@ -1989,6 +1979,11 @@ export const ModelPathAdapter = {
         // Android: 优先NNAPI，fallback到CPU
         return ['nnapi', 'cpu'];
       }
+    }
+
+    // Electron 渲染进程：优先使用 node 版 ORT，固定走 CPU 避免开发态/HMR 下 provider 初始化不稳定
+    if (typeof window !== 'undefined' && typeof window.require === 'function') {
+      return ['cpu'];
     }
     
     // Web环境（包括Electron）
@@ -2056,9 +2051,23 @@ export const ModelPathAdapter = {
         
         case 'electron':
           logger.debug('加载 onnxruntime-node (Electron环境)...');
-          // For Electron apps, we typically want to use the node version for better performance
+          // Electron 渲染进程优先使用 window.require 直接加载 Node 版本，避免被 webpack/bundler 处理后出现运行时兼容问题
           try {
-            return await import('onnxruntime-node');
+            if (typeof window !== 'undefined' && window.__XINTU_ORT_NODE__) {
+              return window.__XINTU_ORT_NODE__;
+            }
+            if (typeof window !== 'undefined' && typeof window.require === 'function') {
+              const ortNode = window.require('onnxruntime-node');
+              if (typeof window !== 'undefined') {
+                window.__XINTU_ORT_NODE__ = ortNode;
+              }
+              return ortNode;
+            }
+            const ortNodeModule = await import('onnxruntime-node');
+            if (typeof window !== 'undefined') {
+              window.__XINTU_ORT_NODE__ = ortNodeModule;
+            }
+            return ortNodeModule;
           } catch (error) {
             logger.warn('onnxruntime-node 加载失败，回退到 onnxruntime-web:', error.message);
             // If node version fails, fall back to web version

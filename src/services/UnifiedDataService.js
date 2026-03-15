@@ -2782,10 +2782,9 @@ class UnifiedDataService {
         return (b.confidence || 0) - (a.confidence || 0);
       });
 
-      // 没有自定义名称时，按排序顺序提供默认展示名称
-      return validGroups.map((group, index) => ({
+      return validGroups.map(group => ({
         ...group,
-        displayName: group.displayName || `人物${index + 1}`
+        displayName: group.displayName || null
       }));
     } catch (error) {
       logger.error('获取人物分组统计失败:', error);
@@ -2871,6 +2870,27 @@ class UnifiedDataService {
       return true;
     } catch (error) {
       logger.error('重命名人物分组失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 清空人物分组数据
+   * @param {Object} options
+   * @param {boolean} options.clearNames - 是否同时清空人物分组命名
+   */
+  async clearPersonGrouping(options = {}) {
+    const { clearNames = true } = options;
+    try {
+      await this.imageStorageService.clearPersonGrouping();
+      if (clearNames) {
+        const settings = await this.readSettings();
+        settings.personGroupNames = {};
+        await this.writeSettings(settings);
+      }
+      return true;
+    } catch (error) {
+      logger.error('清空人物分组失败:', error);
       throw error;
     }
   }
