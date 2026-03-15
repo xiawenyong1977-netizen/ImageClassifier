@@ -150,6 +150,7 @@ const HomeScreen = ({ navigation }) => {
   // 扫描状态
   const [isScanning, setIsScanning] = useState(false);
   const [isSimilarityDetecting, setIsSimilarityDetecting] = useState(false); // 相似度检测状态
+  const [isPersonDetecting, setIsPersonDetecting] = useState(false);
   
   // 消息提示
   const [globalMessage, setGlobalMessage] = useState(t('home.ready'));
@@ -731,6 +732,109 @@ const HomeScreen = ({ navigation }) => {
         window.isScanning = false;
       }
       // 🔥 清除 GalleryScannerService 的扫描状态
+      if (galleryScannerService) {
+        galleryScannerService.isScanning = false;
+      }
+    }
+  }, [isScanning, loadAllData, t]);
+
+  /**
+   * 启动人物分组
+   */
+  const handleStartPersonDetection = useCallback(async () => {
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过人物分组请求');
+      Alert.alert(t('common.tip'), t('home.scanAlreadyInProgress'));
+      return;
+    }
+
+    let galleryScannerService = null;
+    try {
+      logger.debug('开始人物分组');
+      setIsScanning(true);
+      setIsPersonDetecting(true);
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.personDetectionInProgress'));
+
+      galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('人物分组进度:', progress);
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || t('home.personDetectionInProgress');
+          setGlobalMessage(message);
+        }
+      };
+
+      const result = await galleryScannerService.personIndexingPhase();
+      const groups = await UnifiedDataService.getPersonGroupsStats();
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      await loadAllData();
+    } catch (error) {
+      logger.error('人物分组失败:', error);
+      setGlobalMessage(t('home.personDetectionFailed', { error: error.message }));
+      Alert.alert(t('home.personDetectionFailed', { error: '' }), error.message);
+    } finally {
+      setIsScanning(false);
+      setIsPersonDetecting(false);
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+      if (galleryScannerService) {
+        galleryScannerService.isScanning = false;
+      }
+    }
+  }, [isScanning, loadAllData, t]);
+
+  /**
+   * 清空人物分组并重新检测
+   */
+  const handleRecheckPersonDetection = useCallback(async () => {
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过人物分组重检请求');
+      Alert.alert(t('common.tip'), t('home.scanAlreadyInProgress'));
+      return;
+    }
+
+    let galleryScannerService = null;
+    try {
+      logger.debug('开始清空人物分组并重新检测');
+      setIsScanning(true);
+      setIsPersonDetecting(true);
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.personDetectionResetting'));
+
+      await UnifiedDataService.clearPersonGrouping({ clearNames: true });
+      await loadAllData();
+
+      galleryScannerService = new GalleryScannerService();
+      await galleryScannerService.initialize();
+      galleryScannerService.onProgress = (progress) => {
+        logger.debug('人物分组重检进度:', progress);
+        if (progress) {
+          const message = progress.simpleMessage || progress.message || t('home.personDetectionInProgress');
+          setGlobalMessage(message);
+        }
+      };
+
+      const result = await galleryScannerService.personIndexingPhase();
+      const groups = await UnifiedDataService.getPersonGroupsStats();
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      await loadAllData();
+    } catch (error) {
+      logger.error('人物分组重检失败:', error);
+      setGlobalMessage(t('home.personDetectionFailed', { error: error.message }));
+      Alert.alert(t('home.personDetectionFailed', { error: '' }), error.message);
+    } finally {
+      setIsScanning(false);
+      setIsPersonDetecting(false);
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
       if (galleryScannerService) {
         galleryScannerService.isScanning = false;
       }
@@ -1793,6 +1897,20 @@ const HomeScreen = ({ navigation }) => {
           </View>
           {sortedGroups.length > 0 && (
             <View style={styles.headerButtonsContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.toggleButton,
+                  (isScanning || isPersonDetecting) && styles.toggleButtonDisabled
+                ]}
+                onPress={handleRecheckPersonDetection}
+                disabled={isScanning || isPersonDetecting}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.toggleButtonText,
+                  (isScanning || isPersonDetecting) && styles.toggleButtonTextDisabled
+                ]}>{t('home.recheck')}</Text>
+              </TouchableOpacity>
               {sortedGroups.length > 8 && !showAllPersonGroups && (
                 <TouchableOpacity
                   style={styles.toggleButton}
@@ -1831,7 +1949,24 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>👤</Text>
             <Text style={styles.emptyStateText}>{t('home.noPersonGroups')}</Text>
-            <Text style={styles.emptyStateSubtext}>{t('home.personGroupHint')}</Text>
+            {!isPersonDetecting && (
+              <Text style={styles.emptyStateSubtext}>{t('home.startPersonDetectionHint')}</Text>
+            )}
+            <TouchableOpacity
+              style={[
+                styles.startSimilarityButton,
+                (isScanning || isPersonDetecting) && styles.startSimilarityButtonDisabled
+              ]}
+              onPress={handleStartPersonDetection}
+              disabled={isScanning || isPersonDetecting}
+            >
+              <Text style={[
+                styles.startSimilarityButtonText,
+                (isScanning || isPersonDetecting) && styles.startSimilarityButtonTextDisabled
+              ]}>
+                {isPersonDetecting ? t('home.personDetectionInProgress') : t('home.startPersonDetection')}
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>

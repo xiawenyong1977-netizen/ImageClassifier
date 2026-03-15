@@ -1148,6 +1148,163 @@ export const PermissionAdapter = {
 };
 
 // ========== 15. 模型路径适配器 ==========
+const MODEL_DOWNLOAD_BASE_URL = 'https://m.xintuxiangce.top/models';
+const CDN_ENABLED_MODELS = new Set([
+  'face_embedding.onnx',
+  'face_detector.onnx',
+]);
+const pendingModelOperations = new Map();
+const modelDownloadListeners = new Set();
+let currentModelDownloadStatus = {
+  active: false,
+  modelRelativePath: null,
+  phase: null,
+  progress: null,
+  receivedBytes: 0,
+  totalBytes: 0,
+  message: '',
+};
+
+const emitModelDownloadStatus = (status) => {
+  currentModelDownloadStatus = {
+    ...currentModelDownloadStatus,
+    ...status,
+  };
+
+  modelDownloadListeners.forEach(listener => {
+    try {
+      listener(currentModelDownloadStatus);
+    } catch (error) {
+      logger.warn('⚠️ 模型下载状态监听失败:', error?.message || error);
+    }
+  });
+};
+
+const getModelDownloadUrl = (modelRelativePath) => {
+  if (!CDN_ENABLED_MODELS.has(modelRelativePath)) {
+    return null;
+  }
+
+  return `${MODEL_DOWNLOAD_BASE_URL}/${encodeURIComponent(modelRelativePath)}`;
+};
+
+const ensureModelDirectoryExists = async (dirPath) => {
+  const dirExists = await RNFS_Native.exists(dirPath);
+  if (!dirExists) {
+    await RNFS_Native.mkdir(dirPath);
+  }
+};
+
+const tryCopyModelFromAssets = async (modelRelativePath, destPath) => {
+  const sourcePath = `models/${modelRelativePath}`;
+
+  try {
+    logger.debug(`📋 尝试从 assets 复制模型: ${modelRelativePath}`);
+    await RNFS_Native.copyFileAssets(sourcePath, destPath);
+    logger.debug(`✅ 模型从 assets 复制完成: ${modelRelativePath}`);
+    return true;
+  } catch (error) {
+    logger.warn(`⚠️ assets 中未找到模型，准备尝试 CDN: ${modelRelativePath}`, error?.message || error);
+    return false;
+  }
+};
+
+const downloadModelFromCdn = async (modelRelativePath, destPath) => {
+  const downloadUrl = getModelDownloadUrl(modelRelativePath);
+  if (!downloadUrl) {
+    throw new Error(`模型文件缺失，且未配置 CDN 下载地址: ${modelRelativePath}`);
+  }
+
+  const tempPath = `${destPath}.download`;
+  if (await RNFS_Native.exists(tempPath)) {
+    await RNFS_Native.unlink(tempPath);
+  }
+
+  logger.info(`🌐 开始从 CDN 下载模型: ${modelRelativePath}`, downloadUrl);
+
+  emitModelDownloadStatus({
+    active: true,
+    modelRelativePath,
+    phase: 'downloading',
+    progress: 0,
+    receivedBytes: 0,
+    totalBytes: 0,
+    message: `正在下载人物分类模型 (${modelRelativePath})...`,
+  });
+
+  try {
+    const task = RNFS_Native.downloadFile({
+      fromUrl: downloadUrl,
+      toFile: tempPath,
+      background: false,
+      discretionary: false,
+      progressDivider: 1,
+      progressInterval: 200,
+      begin: (res) => {
+        emitModelDownloadStatus({
+          active: true,
+          modelRelativePath,
+          phase: 'downloading',
+          progress: 0,
+          receivedBytes: 0,
+          totalBytes: res?.contentLength || 0,
+          message: `正在下载人物分类模型 (${modelRelativePath})...`,
+        });
+      },
+      progress: (res) => {
+        const totalBytes = res?.contentLength || 0;
+        const receivedBytes = res?.bytesWritten || 0;
+        const progress = totalBytes > 0
+          ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100))
+          : null;
+
+        emitModelDownloadStatus({
+          active: true,
+          modelRelativePath,
+          phase: 'downloading',
+          progress,
+          receivedBytes,
+          totalBytes,
+          message: progress !== null
+            ? `正在下载人物分类模型 (${progress}%)...`
+            : `正在下载人物分类模型 (${modelRelativePath})...`,
+        });
+      },
+    });
+
+    const result = await task.promise;
+    if (result.statusCode < 200 || result.statusCode >= 300) {
+      throw new Error(`下载失败，HTTP ${result.statusCode}`);
+    }
+
+    await RNFS_Native.moveFile(tempPath, destPath);
+
+    emitModelDownloadStatus({
+      active: true,
+      modelRelativePath,
+      phase: 'completed',
+      progress: 100,
+      message: '人物分类模型下载完成，正在初始化...',
+    });
+
+    logger.info(`✅ 模型下载完成: ${modelRelativePath}`);
+  } catch (error) {
+    if (await RNFS_Native.exists(tempPath)) {
+      await RNFS_Native.unlink(tempPath);
+    }
+
+    emitModelDownloadStatus({
+      active: false,
+      modelRelativePath,
+      phase: 'error',
+      progress: null,
+      message: `人物分类模型下载失败: ${error?.message || error}`,
+    });
+
+    throw error;
+  }
+};
+
 export const ModelPathAdapter = {
   detectEnvironment: () => 'react-native',
   
@@ -1175,42 +1332,76 @@ export const ModelPathAdapter = {
     }
   },
   
-  // Android: 从 APK assets 复制模型到文档目录（只复制一次）
+  subscribeToModelDownloads: (listener) => {
+    if (typeof listener !== 'function') {
+      return () => {};
+    }
+
+    modelDownloadListeners.add(listener);
+    listener(currentModelDownloadStatus);
+
+    return () => {
+      modelDownloadListeners.delete(listener);
+    };
+  },
+
+  getCurrentModelDownloadStatus: () => currentModelDownloadStatus,
+
+  // Android: 优先使用本地文件，缺失时从 assets 或 CDN 准备模型
   ensureModelExists: async (modelRelativePath) => {
     if (Platform.OS !== 'android') {
-      logger.debug(`📱 非Android平台，跳过模型复制: ${modelRelativePath}`);
-      return; // iOS/Web 无需复制
+      logger.debug(`📱 非Android平台，跳过模型准备: ${modelRelativePath}`);
+      return;
     }
-    
+
     const destPath = `${RNFS_Native.DocumentDirectoryPath}/models/${modelRelativePath}`;
     const dirPath = `${RNFS_Native.DocumentDirectoryPath}/models`;
-    
     logger.debug(`🔍 检查模型文件: ${destPath}`);
-    
-    try {
-      // 检查文件是否已复制
-      const fileExists = await RNFS_Native.exists(destPath);
-      logger.debug(`📋 文件存在检查: ${modelRelativePath} = ${fileExists}`);
-      if (fileExists) {
-        return; // 已存在，跳过
-      }
-      
-      // 确保目录存在
-      const dirExists = await RNFS_Native.exists(dirPath);
-      if (!dirExists) {
-        await RNFS_Native.mkdir(dirPath);
-      }
-      
-      // 从 APK assets 复制到文档目录（一次性操作）
-      const sourcePath = `models/${modelRelativePath}`;
-      logger.debug(`📋 从 APK 复制模型: ${modelRelativePath}`);
-      await RNFS_Native.copyFileAssets(sourcePath, destPath);
-      logger.debug(`✅ 模型复制完成: ${modelRelativePath}`);
-    } catch (error) {
-      const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
-      logger.error(`❌ 模型复制失败 (${modelRelativePath}): ${errorMessage}`);
-      throw error;
+
+    const fileExists = await RNFS_Native.exists(destPath);
+    logger.debug(`📋 文件存在检查: ${modelRelativePath} = ${fileExists}`);
+    if (fileExists) {
+      return;
     }
+
+    if (pendingModelOperations.has(modelRelativePath)) {
+      await pendingModelOperations.get(modelRelativePath);
+      return;
+    }
+
+    const pendingOperation = (async () => {
+      try {
+        await ensureModelDirectoryExists(dirPath);
+
+        const copiedFromAssets = await tryCopyModelFromAssets(modelRelativePath, destPath);
+        if (copiedFromAssets) {
+          return;
+        }
+
+        await downloadModelFromCdn(modelRelativePath, destPath);
+      } catch (error) {
+        const errorMessage = error && typeof error === 'object' ? (error.message || String(error)) : String(error || 'Unknown error');
+        logger.error(`❌ 模型准备失败 (${modelRelativePath}): ${errorMessage}`);
+        throw error;
+      } finally {
+        pendingModelOperations.delete(modelRelativePath);
+
+        if (currentModelDownloadStatus.modelRelativePath === modelRelativePath) {
+          emitModelDownloadStatus({
+            active: false,
+            modelRelativePath: null,
+            phase: null,
+            progress: null,
+            receivedBytes: 0,
+            totalBytes: 0,
+            message: '',
+          });
+        }
+      }
+    })();
+
+    pendingModelOperations.set(modelRelativePath, pendingOperation);
+    await pendingOperation;
   },
   
   getExecutionProviders: () => {

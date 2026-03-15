@@ -204,6 +204,15 @@ export default function App() {
   const [privacyAgreed, setPrivacyAgreed] = React.useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = React.useState(false);
   const [checkingPrivacy, setCheckingPrivacy] = React.useState(true);
+  const [modelDownloadStatus, setModelDownloadStatus] = React.useState(() => (
+    ModelPathAdapter?.getCurrentModelDownloadStatus
+      ? ModelPathAdapter.getCurrentModelDownloadStatus()
+      : {
+          active: false,
+          message: '',
+          progress: null,
+        }
+  ));
   
   // 检查隐私政策是否已同意
   useEffect(() => {
@@ -287,6 +296,16 @@ export default function App() {
     }
   }, [privacyAgreed]);
 
+  useEffect(() => {
+    if (!ModelPathAdapter?.subscribeToModelDownloads) {
+      return undefined;
+    }
+
+    return ModelPathAdapter.subscribeToModelDownloads((status) => {
+      setModelDownloadStatus(status);
+    });
+  }, []);
+
   // 加载暂存箱数量
   useEffect(() => {
     if (!isServiceReady) return;
@@ -323,18 +342,11 @@ export default function App() {
       await UnifiedDataService.initialize();
       console.log('✅ UnifiedDataService 初始化完成');
       
-      // 3. 后台复制模型文件（移动端）
-      console.log('📋 [3/3] 复制模型文件...');
+      // 3. 启动阶段只准备内容分类模型，人物分类模型延迟到首次使用时再下载
+      console.log('📋 [3/3] 准备内容分类模型...');
       if (ModelPathAdapter && ModelPathAdapter.ensureModelExists) {
-        const models = [
-          'mobilenetv3_rw_Opset17.onnx',
-          'face_embedding.onnx',
-          'face_detector.onnx'
-        ];
-        for (const model of models) {
-          await ModelPathAdapter.ensureModelExists(model);
-        }
-        console.log('✅ 模型文件初始化完成');
+        await ModelPathAdapter.ensureModelExists('mobilenetv3_rw_Opset17.onnx');
+        console.log('✅ 内容分类模型初始化完成');
       }
       
       console.log('🎉 应用核心服务初始化完成！');
@@ -387,6 +399,12 @@ export default function App() {
     );
   }
   
+  const showModelDownloadOverlay = Boolean(modelDownloadStatus?.active);
+  const modelDownloadMessage = modelDownloadStatus?.message || '正在准备人物分类模型...';
+  const modelDownloadProgress = typeof modelDownloadStatus?.progress === 'number'
+    ? `${modelDownloadStatus.progress}%`
+    : null;
+
   // 服务就绪后，渲染主界面
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -402,6 +420,17 @@ export default function App() {
           <Stack.Screen name="EnhanceResult" component={EnhanceResultScreen} options={{ presentation: 'modal' }} />
         </Stack.Navigator>
       </NavigationContainer>
+      {showModelDownloadOverlay ? (
+        <View style={styles.modelDownloadOverlay}>
+          <View style={styles.modelDownloadCard}>
+            <Text style={styles.modelDownloadTitle}>人物分类模型准备中</Text>
+            <Text style={styles.modelDownloadText}>{modelDownloadMessage}</Text>
+            {modelDownloadProgress ? (
+              <Text style={styles.modelDownloadProgress}>{modelDownloadProgress}</Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       </View>
     </GestureHandlerRootView>
   );
@@ -429,6 +458,40 @@ const styles = StyleSheet.create({
   loadingSubText: {
     fontSize: 14,
     color: '#666',
+  },
+  modelDownloadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modelDownloadCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  modelDownloadTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  modelDownloadText: {
+    fontSize: 14,
+    color: '#4B5563',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modelDownloadProgress: {
+    marginTop: 10,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#007AFF',
   },
 });
 

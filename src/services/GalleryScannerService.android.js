@@ -569,9 +569,6 @@ class GalleryScannerService {
       // 等待AI分类完成（通过事件监听器 resolve/reject）
       await scanPromise;
 
-      // JS层人物分组（使用人脸 embedding）
-      await this.personIndexingPhase();
-
       // 返回扫描结果
       return {
         success: true,

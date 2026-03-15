@@ -173,6 +173,7 @@ class PersonIndexingService {
 
     const embeddingCache = new Map();
     const faceCache = new Map();
+    const detectionTimings = [];
     const profiles = new Map();
     const currentAssignments = new Map(existingAssignments);
     const personScores = new Map(
@@ -193,8 +194,15 @@ class PersonIndexingService {
 
       let faceResult = faceCache.get(image.id);
       if (!faceResult) {
+        const detectStart = this._nowMs();
         faceResult = await this.detectionService.detectPrimaryFace(imageUri);
+        const detectElapsedMs = this._nowMs() - detectStart;
+        detectionTimings.push(detectElapsedMs);
         faceCache.set(image.id, faceResult || null);
+        logger.debug(
+          `👤 [人物分组] 人脸检测耗时 imageId=${image.id}, fileName=${image.fileName || 'unknown'}, ` +
+          `elapsedMs=${detectElapsedMs.toFixed(1)}, detected=${faceResult?.box ? 'yes' : 'no'}`
+        );
       }
 
       if (!faceResult || !faceResult.box) {
@@ -355,6 +363,7 @@ class PersonIndexingService {
       `👤 人物分组完成: 总单人照片=${allSinglePersonImages.length}, 候选=${candidates.length}, ` +
       `已有分组=${existingAssignments.size}, 成功归组=${finalUpdates.length}, 跳过=${skippedCount}, 阈值=${similarityThreshold}`
     );
+    this._logDetectionTimingSummary(detectionTimings);
 
     return {
       processedCount: candidates.length,
@@ -874,6 +883,45 @@ class PersonIndexingService {
       return DEFAULT_SIMILARITY_THRESHOLD;
     }
     return value;
+  }
+
+  _logDetectionTimingSummary(detectionTimings) {
+    if (!Array.isArray(detectionTimings) || detectionTimings.length === 0) {
+      logger.info('👤 [人物分组] 人脸检测耗时统计: 无新增检测样本');
+      return;
+    }
+
+    const sorted = [...detectionTimings].sort((a, b) => a - b);
+    const sum = sorted.reduce((total, value) => total + value, 0);
+    const average = sum / sorted.length;
+    const p50 = this._percentile(sorted, 0.5);
+    const p90 = this._percentile(sorted, 0.9);
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+
+    logger.info(
+      `👤 [人物分组] 人脸检测耗时统计: count=${sorted.length}, avgMs=${average.toFixed(1)}, ` +
+      `p50Ms=${p50.toFixed(1)}, p90Ms=${p90.toFixed(1)}, minMs=${min.toFixed(1)}, maxMs=${max.toFixed(1)}`
+    );
+  }
+
+  _percentile(sortedValues, ratio) {
+    if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
+      return 0;
+    }
+
+    const index = Math.min(
+      sortedValues.length - 1,
+      Math.max(0, Math.ceil(sortedValues.length * ratio) - 1)
+    );
+    return sortedValues[index];
+  }
+
+  _nowMs() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
   }
 }
 

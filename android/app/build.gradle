@@ -149,12 +149,6 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
-
-    // Align Java/Kotlin targets to avoid 1.8 vs 11 mismatch
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
-    }
     
     // 复制 ONNX 模型文件到 assets 目录
     sourceSets {

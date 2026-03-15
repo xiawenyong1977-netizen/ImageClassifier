@@ -13,7 +13,7 @@ import android.util.Log;
 public class ImageDatabaseHelper extends SQLiteOpenHelper {
     private static final String TAG = "ImageDatabaseHelper";
     private static final String DATABASE_NAME = "ImageClassifier.db";
-    private static final int DATABASE_VERSION = 3; // 🔥 版本3：添加人物分组表
+    private static final int DATABASE_VERSION = 2; // 🔥 升级版本号，添加拍摄参数字段
     
     private static ImageDatabaseHelper instance;
     private SQLiteDatabase database;
@@ -54,29 +54,6 @@ public class ImageDatabaseHelper extends SQLiteOpenHelper {
                 Log.d(TAG, "数据库升级完成：添加拍摄参数字段");
             } catch (Exception e) {
                 Log.e(TAG, "数据库升级失败", e);
-            }
-        }
-
-        // 版本3：添加人物分组相关表
-        if (oldVersion < 3) {
-            try {
-                db.execSQL("CREATE TABLE IF NOT EXISTS person_data (" +
-                    "imageId TEXT PRIMARY KEY, " +
-                    "person_group_id TEXT, " +
-                    "person_score REAL, " +
-                    "person_source TEXT, " +
-                    "updatedAt TEXT, " +
-                    "FOREIGN KEY (imageId) REFERENCES images(id) ON DELETE CASCADE" +
-                    ")");
-
-                db.execSQL("CREATE TABLE IF NOT EXISTS person_group_index (" +
-                    "groupId TEXT PRIMARY KEY, " +
-                    "imageIds TEXT, " +
-                    "created_at TEXT" +
-                    ")");
-                Log.d(TAG, "数据库升级完成：添加人物分组表");
-            } catch (Exception e) {
-                Log.e(TAG, "数据库升级失败（人物分组表）", e);
             }
         }
     }
@@ -149,23 +126,6 @@ public class ImageDatabaseHelper extends SQLiteOpenHelper {
         
         // 相似组索引表
         db.execSQL("CREATE TABLE IF NOT EXISTS similarity_group_index (" +
-            "groupId TEXT PRIMARY KEY, " +
-            "imageIds TEXT, " +
-            "created_at TEXT" +
-            ")");
-
-        // 人物分组数据表
-        db.execSQL("CREATE TABLE IF NOT EXISTS person_data (" +
-            "imageId TEXT PRIMARY KEY, " +
-            "person_group_id TEXT, " +
-            "person_score REAL, " +
-            "person_source TEXT, " +
-            "updatedAt TEXT, " +
-            "FOREIGN KEY (imageId) REFERENCES images(id) ON DELETE CASCADE" +
-            ")");
-
-        // 人物分组索引表
-        db.execSQL("CREATE TABLE IF NOT EXISTS person_group_index (" +
             "groupId TEXT PRIMARY KEY, " +
             "imageIds TEXT, " +
             "created_at TEXT" +
