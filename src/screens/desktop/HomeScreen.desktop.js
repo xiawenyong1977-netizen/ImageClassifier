@@ -1242,6 +1242,7 @@ const HomeScreen = () => {
                 </View>
               ) : null}
             </View>
+            <Text style={styles.byPersonScopeHint}>{t('home.byPersonScopeHint')}</Text>
             {Platform.OS === 'web' &&
               personGroups &&
               personGroups.length > 0 && (
@@ -2459,12 +2460,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
+  /** 「按人物」标题下：适用范围说明 */
+  byPersonScopeHint: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 20,
+    marginTop: -6,
+    marginBottom: 8,
+    maxWidth: 720,
+  },
   /** 「按人物」标题下：合并操作说明 */
   personMergeSectionHint: {
     fontSize: 13,
     color: '#6B7280',
     lineHeight: 20,
-    marginTop: -8,
+    marginTop: 0,
     marginBottom: 14,
     maxWidth: 720,
   },

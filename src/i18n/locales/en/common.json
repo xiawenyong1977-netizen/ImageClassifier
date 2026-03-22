@@ -236,6 +236,7 @@
     "goToSettings": "Go to Settings →",
     "byContent": "By Content",
     "byPerson": "By Person",
+    "byPersonScopeHint": "Person grouping applies to single-person photos only.",
     "byTime": "By Time",
     "thisWeek": "This Week",
     "thisMonth": "This Month",

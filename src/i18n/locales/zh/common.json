@@ -236,6 +236,7 @@
     "goToSettings": "进入设置 →",
     "byContent": "按内容",
     "byPerson": "按人物",
+    "byPersonScopeHint": "仅针对「单人照片」进行人物归类与分组。",
     "byTime": "按时间",
     "thisWeek": "本周",
     "thisMonth": "本月",

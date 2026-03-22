@@ -1497,10 +1497,16 @@ export const Alert = {
         // 添加到页面
         document.body.appendChild(overlay);
 
-        // 点击遮罩层关闭（可选）
+        // 点击遮罩层关闭：必须触发「取消」回调，否则 Promise 版 confirm（如城市重新检测）永不 resolve
         overlay.onclick = (e) => {
           if (e.target === overlay) {
-            document.body.removeChild(overlay);
+            const cancelButton = buttons && buttons.find((b) => b && b.style === 'cancel');
+            if (cancelButton && typeof cancelButton.onPress === 'function') {
+              cancelButton.onPress();
+            }
+            if (overlay.parentNode) {
+              overlay.parentNode.removeChild(overlay);
+            }
           }
         };
       };

@@ -2153,6 +2153,7 @@ const HomeScreen = ({ navigation }) => {
             )
           )}
         </View>
+        <Text style={styles.byPersonScopeHint}>{t('home.byPersonScopeHint')}</Text>
 
         {sortedGroups.length > 0 ? (
             <View style={styles.categoriesGrid}>
@@ -2871,6 +2872,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666666',
     fontWeight: '400',
+  },
+  /** 「按人物」标题下：单人照适用范围说明 */
+  byPersonScopeHint: {
+    fontSize: 12,
+    color: '#666666',
+    lineHeight: 18,
+    fontWeight: '400',
+    paddingHorizontal: 16,
+    marginTop: -8,
+    marginBottom: 12,
   },
   countBadge: {
     backgroundColor: '#007AFF',
