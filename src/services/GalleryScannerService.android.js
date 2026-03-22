@@ -592,14 +592,13 @@ class GalleryScannerService {
 
   /**
    * 人物分组阶段：对 single_person 图片做人物聚类（JS embedding）
+   * @param _scanStartTime 与通用 GalleryScannerService 签名对齐（Android 未使用）
+   * @param opts.nestedUnderGalleryScan 为 true 时不与相册扫描互斥、且不在 finally 里 stop ScanService（流水线内嵌）
    */
-  async personIndexingPhase() {
+  async personIndexingPhase(_scanStartTime = null, opts = {}) {
+    const nestedUnderGalleryScan = opts.nestedUnderGalleryScan === true;
     try {
       const settings = await UnifiedDataService.readSettings();
-      if (settings.enablePersonClassification === false) {
-        logger.info('⏭️ 人物分组已禁用，跳过');
-        return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
-      }
 
       const singlePersonImages = await UnifiedDataService.readImagesByCategory('single_person');
       if (!singlePersonImages || singlePersonImages.length === 0) {
@@ -630,33 +629,55 @@ class GalleryScannerService {
         };
       }
 
-      await this.sendProgressMessage('person_indexing', 0, candidates.length, this.imagesClassified, this.totalImagesToBeClassified);
+      await this.sendProgressMessage('person_indexing', 0, candidates.length, this.imagesClassified, this.totalImagesToBeClassified, 0);
 
       const result = await this.personIndexingService.indexSinglePersonImages({
         images: singlePersonImages,
         source: 'face-embedding',
         threshold: settings.personIndexSimilarityThreshold,
-        onProgress: (processed, total) => {
-          if (processed === total || processed % 20 === 0) {
-            this.sendProgressMessage('person_indexing', processed, total, this.imagesClassified, this.totalImagesToBeClassified)
-              .catch(error => logger.error('发送人物分组进度失败:', error));
+        onProgress: (processed, total, detectSuccess = 0) => {
+          if (processed === total || processed % 10 === 0) {
+            this.sendProgressMessage(
+              'person_indexing',
+              processed,
+              total,
+              this.imagesClassified,
+              this.totalImagesToBeClassified,
+              detectSuccess
+            ).catch(error => logger.error('发送人物分组进度失败:', error));
           }
         }
       });
 
+      const personProcessedFinal =
+        typeof result.processedCount === 'number' ? result.processedCount : candidates.length;
+      const finalDetectSuccess =
+        typeof result.detectSuccessCount === 'number' ? result.detectSuccessCount : (result.assignedCount ?? 0);
       await this.sendProgressMessage(
         'person_indexing',
-        result.processedCount || candidates.length,
+        personProcessedFinal,
         candidates.length,
         this.imagesClassified,
-        this.totalImagesToBeClassified
+        this.totalImagesToBeClassified,
+        finalDetectSuccess
       );
 
-      logger.info(`👤 人物分组阶段完成：处理 ${result.processedCount || 0} 张，新增分组 ${result.assignedCount || 0} 张`);
+      logger.info(
+        `👤 人物分组阶段完成：已处理(尝试) ${personProcessedFinal}/${candidates.length} 张，成功归组写入 ${result.assignedCount || 0} 张`
+      );
       return result;
     } catch (error) {
       logger.error('❌ 人物分组阶段失败（不影响主流程）:', error);
       return { processedCount: 0, assignedCount: 0, skippedCount: 0, totalSinglePerson: 0 };
+    } finally {
+      // 独立人物分组结束可清理扫描前台；流水线内嵌时不要 stop，避免打断尚未结束的相册扫描前台
+      if (!nestedUnderGalleryScan) {
+        try {
+          ScanService.stop();
+        } catch (e) {
+          logger.debug('人物分组结束停止扫描前台(可忽略):', e?.message || e);
+        }
+      }
     }
   }
 
@@ -703,9 +724,10 @@ class GalleryScannerService {
         return;
       }
 
-      const totalFoundThisPhase = validImages.length;
-      logger.info(`📍 开始处理 ${totalFoundThisPhase} 张有效图片（界面显示NA=${naCountValid}张，其中${naNeedLocation}张需要位置补全，${naWithoutCoordinates}张NA图片无GPS坐标）`);
-      await this.sendProgressMessage('location_enrichment', 0, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+      const validImageCount = validImages.length;
+      const locationEnrichmentTotal = imagesWithCoordinatesButNoLocation.length;
+      logger.info(`📍 开始位置补全流水线: 有效图 ${validImageCount} 张（排除截图/二维码）；符合补全条件 ${locationEnrichmentTotal} 张（界面 NA=${naCountValid}，其中需补全 ${naNeedLocation}）`);
+      await this.sendProgressMessage('location_enrichment', 0, locationEnrichmentTotal, this.imagesClassified, this.totalImagesToBeClassified);
 
       // 🔥 检查设置，判断是否需要MobileNetV3推理
       const settings = await UnifiedDataService.readSettings();
@@ -735,7 +757,7 @@ class GalleryScannerService {
 
       const batchSize = 50; // 每批处理50张
       const totalBatches = Math.ceil(validImages.length / batchSize);
-      logger.info(`🚀 开始流水线处理: ${totalFoundThisPhase} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批`);
+      logger.info(`🚀 开始流水线处理: ${validImageCount} 张图片，批次大小: ${batchSize}，共 ${totalBatches} 批`);
 
       // 🔥 流水线队列：节点1 -> 节点2（每个节点自己负责保存）
       const inferenceQueue = []; // 节点1输入
@@ -813,9 +835,22 @@ class GalleryScannerService {
           await UnifiedDataService.updateImagesCity(batchResults, false);
           logger.debug(`✅ [节点2] 批量保存位置信息: ${batchResults.length} 张`);
         }
+        return batchResults.length;
+      };
+
+      /** 与 locationEnrichmentTotal 同一规则：本批次内需尝试补全的张数（成败都计入 filesProcessed） */
+      const countNeedingLocationInTask = (task) => {
+        if (!task?.batchImages?.length) return 0;
+        return task.batchImages.filter((image) => {
+          if (!image.latitude || !image.longitude) return false;
+          const hasCity = image.city && image.city.trim() !== '';
+          const hasCountry = image.country && image.country.trim() !== '';
+          return !hasCity || !hasCountry;
+        }).length;
       };
 
       let processedThisPhase = 0;
+      let locationSaveSuccessCount = 0;
       let completedBatches = 0;
 
       // ========== 节点1：MobileNetV3推理（单线程，每5个批次保存一次）==========
@@ -1035,17 +1070,12 @@ class GalleryScannerService {
               // 处理所有待处理的任务，按批次索引排序确保顺序正确
               const sortedTasks = [...pendingTasks].sort((a, b) => a.batchIndex - b.batchIndex);
               
-              // 🔥 保存位置信息
-              await saveLocationResults(sortedTasks);
-              
-              // 更新进度和完成计数
-              const savedCount = sortedTasks.reduce((sum, t) => {
-                return sum + (t.locationResults?.length || 0);
-              }, 0);
-              processedThisPhase += savedCount;
+              // 🔥 保存位置信息（进度按「需补全张数」累加，与 filesFound 对齐，成败都计）
+              locationSaveSuccessCount += await saveLocationResults(sortedTasks);
+              processedThisPhase += sortedTasks.reduce((sum, t) => sum + countNeedingLocationInTask(t), 0);
               completedBatches += sortedTasks.length;
               
-              await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+              await this.sendProgressMessage('location_enrichment', processedThisPhase, locationEnrichmentTotal, this.imagesClassified, this.totalImagesToBeClassified);
               
               shouldExit = true;
               continue;
@@ -1105,23 +1135,22 @@ class GalleryScannerService {
                 // 按批次索引排序，确保保存顺序正确
                 completedTasks.sort((a, b) => a.batchIndex - b.batchIndex);
                 
-                // 🔥 保存位置信息
-                await saveLocationResults(completedTasks);
-                
-                // 更新进度和完成计数
-                const savedCount = completedTasks.reduce((sum, t) => {
-                  return sum + (t.locationResults?.length || 0);
-                }, 0);
-                processedThisPhase += savedCount;
+                // 🔥 保存位置信息（进度按「需补全张数」累加）
+                locationSaveSuccessCount += await saveLocationResults(completedTasks);
+                processedThisPhase += completedTasks.reduce((sum, t) => sum + countNeedingLocationInTask(t), 0);
                 completedBatches += completedTasks.length;
                 
-                await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+                await this.sendProgressMessage('location_enrichment', processedThisPhase, locationEnrichmentTotal, this.imagesClassified, this.totalImagesToBeClassified);
               }
 
             } catch (error) {
               logger.error(`❌ [节点2] 批次 ${batchNumber} 处理异常:`, error);
               // 失败时标记为无位置结果
               task.locationResults = [];
+              const needN = countNeedingLocationInTask(task);
+              if (needN > 0) {
+                processedThisPhase += needN;
+              }
               completedBatches++;
             }
 
@@ -1153,12 +1182,19 @@ class GalleryScannerService {
       // 等待节点1和节点2完成
       await Promise.all([node1Promise, node2Promise]);
 
-      logger.info(`✅ 位置信息补全完成（流水线版本）: 补全了 ${processedThisPhase} 张图片的位置信息`);
+      if (processedThisPhase !== locationEnrichmentTotal) {
+        logger.debug(`📍 位置补全进度与分母对齐: ${processedThisPhase} -> ${locationEnrichmentTotal}`);
+        processedThisPhase = locationEnrichmentTotal;
+      }
 
-      // 发送完成消息（会触发 processProgressData 自动重建缓存）
+      logger.info(
+        `✅ 位置信息补全完成（流水线版本）: 需处理 ${locationEnrichmentTotal} 张均已计入进度，成功写入城市 ${locationSaveSuccessCount} 条`
+      );
+
+      // 发送完成消息（filesFound=locationEnrichmentTotal，与 filesProcessed 对齐时由 processProgressData 刷新缓存）
       // 🔥 修复：位置信息补全完成后发送 location_enrichment 阶段消息（与相似度检测保持一致），而不是 completed
       // 这样 sendProgressMessage 中的判断 stage !== 'location_enrichment' 会排除它，不会调用前台服务
-      await this.sendProgressMessage('location_enrichment', processedThisPhase, totalFoundThisPhase, this.imagesClassified, this.totalImagesToBeClassified);
+      await this.sendProgressMessage('location_enrichment', processedThisPhase, locationEnrichmentTotal, this.imagesClassified, this.totalImagesToBeClassified);
 
     } catch (error) {
       const errorMessage = error?.message || error?.toString() || '未知错误';
@@ -1218,15 +1254,19 @@ class GalleryScannerService {
    * @param {number} totalFoundThisPhase - 当前阶段总数量
    * @param {number} imagesClassified - 已分类数量（可选，不更新时传当前值）
    * @param {number} totalImagesToBeClassified - 总分类目标（可选，不更新时传当前值）
+   * @param {number} [personDetectSuccess] - 人物分组阶段：人脸检测+嵌入成功张数（可选，与 filesProcessed 独立）
    */
-  async sendProgressMessage(stage, processedThisPhase, totalFoundThisPhase, imagesClassified = this.imagesClassified, totalImagesToBeClassified = this.totalImagesToBeClassified) {
+  async sendProgressMessage(stage, processedThisPhase, totalFoundThisPhase, imagesClassified = this.imagesClassified, totalImagesToBeClassified = this.totalImagesToBeClassified, personDetectSuccess) {
     if (!this.onProgress) {
       logger.warn(`⚠️ onProgress 回调未设置，跳过进度消息: ${stage}`);
       return;
     }
     
     // 🔥 已移除去重逻辑，允许所有进度更新通过（包括更频繁的更新）
-    logger.info(`📊 扫描进度: ${stage}, 已处理: ${processedThisPhase}/${totalFoundThisPhase}, 总分类: ${imagesClassified}/${totalImagesToBeClassified}`);
+    const detectPart = stage === 'person_indexing' && typeof personDetectSuccess === 'number'
+      ? `, 检测成功: ${personDetectSuccess}`
+      : '';
+    logger.info(`📊 扫描进度: ${stage}, 已处理: ${processedThisPhase}/${totalFoundThisPhase}${detectPart}, 总分类: ${imagesClassified}/${totalImagesToBeClassified}`);
     
     // 生成进度数据并直接调用 onProgress
     const progressData = await this.processProgressData({
@@ -1235,12 +1275,15 @@ class GalleryScannerService {
       filesProcessed: processedThisPhase,
       imagesClassified,
       totalImagesToBeClassified,
+      personDetectSuccess,
     });
     
     // Android平台：更新前台服务通知
-    // 🔥 相似度检测和位置信息补全不使用前台服务，因为它们在JS线程运行，不能后台执行
-    // 只有原生扫描流程（可以后台运行）才使用前台服务
-    if (stage !== 'similarity_detection' && stage !== 'location_enrichment') {
+    // 🔥 相似度检测、位置信息补全、人物分组不使用前台服务：均在 JS 线程执行；
+    // 若对 person_indexing 调用 updateProgress，会间接 startService 拉起 ScanForegroundService，
+    // 而人物流程结束不会走 _cleanupScanState → ScanService.stop()，导致 isRunning 一直为 true、阻塞后续扫描。
+    // 只有原生扫描 / AI 分类等真正需要前台保活的流程才更新通知。
+    if (stage !== 'similarity_detection' && stage !== 'location_enrichment' && stage !== 'person_indexing') {
       // progressData.message 已经包含国际化的消息，如果为空则让原生层使用资源文件的默认消息
       // 通知标题也由JS层传递，根据应用内语言设置国际化
       const notificationTitle = i18n.t('home.scanNotificationTitle');
@@ -1263,8 +1306,10 @@ class GalleryScannerService {
       this.onProgress({
         stage: progressData.stage,
         message: progressData.message,
+        simpleMessage: progressData.simpleMessage,
         filesProcessed: processedThisPhase,
         filesFound: totalFoundThisPhase,
+        personDetectSuccess: typeof personDetectSuccess === 'number' ? personDetectSuccess : undefined,
         imagesClassified,
         totalImagesToBeClassified,
         isComplete: progressData.isComplete,
@@ -1280,7 +1325,7 @@ class GalleryScannerService {
    * 包括消息生成、缓存刷新频率控制、统计信息
    */
   async processProgressData(rawProgress) {
-    const { stage, filesProcessed, filesFound, imagesClassified, totalImagesToBeClassified } = rawProgress;
+    const { stage, filesProcessed, filesFound, imagesClassified, totalImagesToBeClassified, personDetectSuccess } = rawProgress;
     
     let simpleMessage = '';
     let shouldRefresh = false;
@@ -1345,6 +1390,12 @@ class GalleryScannerService {
       case 'person_indexing':
         if (filesFound > 0 && filesProcessed === 0) {
           simpleMessage = i18n.t('home.scanProgress.personIndexingStart', { count: filesFound });
+        } else if (typeof personDetectSuccess === 'number') {
+          simpleMessage = i18n.t('home.scanProgress.personIndexingWithDetect', {
+            processed: filesProcessed || 0,
+            total: filesFound || 0,
+            detected: personDetectSuccess
+          });
         } else {
           simpleMessage = i18n.t('home.scanProgress.personIndexing', { processed: filesProcessed || 0, total: filesFound || 0 });
         }
@@ -1445,9 +1496,9 @@ class GalleryScannerService {
         logger.debug(`🔄 位置信息补全刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
       }
     } else if (stage === 'person_indexing' && filesProcessed && filesProcessed > 0) {
-      // 人物分组阶段：每处理完30张图片刷新一次（比较差值）
+      // 人物分组阶段：每处理完 10 张刷新一次（比较差值）
       const lastRefresh = this.lastPersonRefreshCount;
-      if (filesProcessed - lastRefresh >= 30) {
+      if (filesProcessed - lastRefresh >= 10) {
         shouldRefresh = true;
         this.lastPersonRefreshCount = filesProcessed;
         logger.debug(`🔄 人物分组刷新: 已处理 ${filesProcessed} 张图片（上次刷新: ${lastRefresh}）`);
@@ -1487,6 +1538,7 @@ class GalleryScannerService {
     
     return {
       stage,
+      simpleMessage,
       message: finalMessage,
       isComplete: stage === 'completed',
       shouldRefresh // 返回刷新标记

@@ -293,17 +293,28 @@ class WeChatAuthService {
       const result = await response.json();
       logger.debug('📡 额度API返回结果:', result);
       
-      // 解析返回结构：{ success, total_credits, used_credits, remaining_credits, is_followed, is_member, member_expire_at }
+      // 解析返回结构：兼容 { success, data: {...} }、扁平 JSON、以及未带 success 字段的后端响应
+      // 此前仅当 result.success 为真才解析，若后端 200 但未设 success，会导致 isMember 恒为 false，
+      // 首页扫描一直带上 compareLimit:100，表现为「会员仍只处理 100 张」。
       let total = 0, used = 0, remaining = 0, isFollowed = false, isMember = false, memberExpireAt = null;
-      
-      if (result.success) {
-        const source = result.data || result;
-        total = source.total_credits || source.total || 0;
-        used = source.used_credits || source.used || 0;
-        remaining = source.remaining_credits || source.remaining || 0;
-        isFollowed = source.is_followed === true || source.is_followed === 'true' || source.is_followed === 1;
-        isMember = source.is_member === true || source.is_member === 'true' || source.is_member === 1;
-        memberExpireAt = source.member_expire_at || null;
+
+      const pickSource = (r) => {
+        if (!r || typeof r !== 'object') return null;
+        const d = r.data;
+        if (d && typeof d === 'object' && !Array.isArray(d)) return d;
+        return r;
+      };
+
+      const source = pickSource(result);
+      if (source && typeof source === 'object') {
+        total = Number(source.total_credits ?? source.total ?? 0) || 0;
+        used = Number(source.used_credits ?? source.used ?? 0) || 0;
+        remaining = Number(source.remaining_credits ?? source.remaining ?? 0) || 0;
+        const f = source.is_followed ?? source.isFollowed;
+        isFollowed = f === true || f === 'true' || f === 1 || f === '1';
+        const m = source.is_member ?? source.isMember ?? source.member;
+        isMember = m === true || m === 'true' || m === 1 || m === '1';
+        memberExpireAt = source.member_expire_at || source.memberExpireAt || null;
       }
 
       if (total > 0 || used > 0 || remaining > 0) {

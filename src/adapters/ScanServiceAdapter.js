@@ -1,5 +1,5 @@
 // 安全导入：PC端使用 react-native-web，可能没有 NativeModules
-let NativeModules, Platform, ScanServiceModule;
+let NativeModules, Platform, ScanServiceModule, PersonIndexForegroundModule;
 
 try {
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -7,18 +7,21 @@ try {
     Platform = { OS: 'web' };
     NativeModules = {};
     ScanServiceModule = null;
+    PersonIndexForegroundModule = null;
   } else {
     // 移动端环境：使用 react-native
     const RN = require('react-native');
     NativeModules = RN.NativeModules || {};
     Platform = RN.Platform;
     ScanServiceModule = NativeModules.ScanServiceModule || null;
+    PersonIndexForegroundModule = NativeModules.PersonIndexForeground || null;
   }
 } catch (error) {
   // 如果导入失败，设置为默认值
   Platform = { OS: 'web' };
   NativeModules = {};
   ScanServiceModule = null;
+  PersonIndexForegroundModule = null;
 }
 
 /**
@@ -27,8 +30,8 @@ try {
  */
 export const ScanService = {
   /**
-   * 检查扫描服务是否正在运行
-   * @returns {Promise<boolean>} 服务是否运行
+   * 独占任务是否占用：相册扫描前台或人物分组前台任一在跑即为 true（防止并发写库）
+   * @returns {Promise<boolean>}
    */
   isRunning: () => {
     if (Platform.OS === 'android' && ScanServiceModule) {
@@ -101,6 +104,49 @@ export const ScanService = {
         ScanServiceModule.stopScanService();
       } catch (error) {
         console.warn('停止扫描服务失败:', error);
+      }
+    }
+  }
+};
+
+/**
+ * Android 人物分组专用前台服务（通知渠道/文案与相册扫描分离）
+ * isRunning 与 ScanService.isRunning 语义一致（全局独占）
+ */
+export const PersonIndexForeground = {
+  isRunning: () => ScanService.isRunning(),
+
+  start: () => {
+    if (Platform.OS === 'android' && PersonIndexForegroundModule?.startPersonIndexForeground) {
+      try {
+        PersonIndexForegroundModule.startPersonIndexForeground();
+      } catch (error) {
+        console.warn('启动人物分组前台服务失败:', error);
+      }
+    }
+  },
+
+  updateProgress: (message, processed, total, title = null) => {
+    if (Platform.OS === 'android' && PersonIndexForegroundModule?.updatePersonIndexProgress) {
+      try {
+        PersonIndexForegroundModule.updatePersonIndexProgress(
+          message || null,
+          processed || 0,
+          total || 0,
+          title || null
+        );
+      } catch (error) {
+        console.warn('更新人物分组通知失败:', error);
+      }
+    }
+  },
+
+  stop: () => {
+    if (Platform.OS === 'android' && PersonIndexForegroundModule?.stopPersonIndexForeground) {
+      try {
+        PersonIndexForegroundModule.stopPersonIndexForeground();
+      } catch (error) {
+        console.warn('停止人物分组前台服务失败:', error);
       }
     }
   }

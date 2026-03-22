@@ -102,8 +102,8 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
     }
     
     /**
-     * 检查扫描服务是否正在运行
-     * @param promise Promise对象，返回服务是否运行
+     * 检查「独占后台任务」是否正在运行（相册扫描或人物分组前台任一）
+     * @param promise Promise对象，返回是否占用
      */
     @ReactMethod
     public void isScanServiceRunning(Promise promise) {
@@ -113,24 +113,9 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
                 promise.resolve(false);
                 return;
             }
-            
-            ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (manager == null) {
-                promise.resolve(false);
-                return;
-            }
-            
-            // 检查服务是否在运行
-            for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
-                if (ScanForegroundService.class.getName().equals(service.service.getClassName())) {
-                    Log.d(TAG, "扫描服务正在运行");
-                    promise.resolve(true);
-                    return;
-                }
-            }
-            
-            Log.d(TAG, "扫描服务未运行");
-            promise.resolve(false);
+            boolean busy = ExclusiveForegroundTasks.isAnyExclusiveForegroundRunning(context);
+            Log.d(TAG, busy ? "独占任务占用中" : "独占任务未占用");
+            promise.resolve(busy);
         } catch (Exception e) {
             Log.e(TAG, "检查服务状态失败: " + e.getMessage(), e);
             promise.resolve(false);
@@ -144,14 +129,17 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void forceStopScanService() {
         try {
-            Log.d(TAG, "🔄 强制停止扫描服务...");
+            Log.d(TAG, "🔄 强制停止独占前台服务（扫描 + 人物分组）...");
             // 先发送停止命令
             ReactApplicationContext context = getReactApplicationContext();
             if (context != null) {
+                Intent personIntent = new Intent(context, PersonIndexForegroundService.class);
+                personIntent.setAction("STOP_PERSON_INDEX");
+                context.stopService(personIntent);
                 Intent intent = new Intent(context, ScanForegroundService.class);
                 intent.setAction("STOP_SCAN");
                 context.stopService(intent);
-                Log.d(TAG, "✅ 已发送停止命令");
+                Log.d(TAG, "✅ 已发送停止扫描/人物分组前台命令");
             }
             
             // 等待一小段时间确保服务停止
@@ -165,8 +153,10 @@ public class ScanServiceModule extends ReactContextBaseJavaModule {
             ActivityManager manager = (ActivityManager) getReactApplicationContext().getSystemService(Context.ACTIVITY_SERVICE);
             if (manager != null) {
                 for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
-                    if (ScanForegroundService.class.getName().equals(service.service.getClassName())) {
-                        Log.w(TAG, "⚠️ 服务仍在运行，尝试强制停止");
+                    String cn = service.service.getClassName();
+                    if (ScanForegroundService.class.getName().equals(cn)
+                        || PersonIndexForegroundService.class.getName().equals(cn)) {
+                        Log.w(TAG, "⚠️ 前台服务仍在运行，尝试强制停止: " + cn);
                         android.os.Process.killProcess(service.pid);
                         Log.d(TAG, "✅ 已强制停止服务进程");
                     }

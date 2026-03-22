@@ -10,6 +10,7 @@ import {
   Dimensions,
   Image,
   Animated,
+  Platform,
 } from 'react-native';
 import UnifiedDataService from '../../services/UnifiedDataService';
 import GalleryScannerService from '../../services/GalleryScannerService';
@@ -21,6 +22,9 @@ import { logger, getUri, Alert, SafeAreaView } from '../../adapters/WebAdapters'
 import { getColorNameTranslation, getOrientationNameTranslation, getCameraSettingsCategoryTranslation } from '../../i18n';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+/** 桌面 Web/Electron 人物卡片拖放合并 */
+const PERSON_GROUP_DND_TYPE = 'application/x-xintu-person-group-id';
 // 与后端 model_client.BACKGROUND_COLORS 一致，10 种固定颜色
 const BACKGROUND_COLORS = [
   '橙色', '蓝色', '红色', '绿色', '紫色',
@@ -34,6 +38,36 @@ const COLOR_NAME_TO_HEX = {
   'Purple': '#9C27B0', 'Pink': '#E91E63', 'Yellow': '#FFEB3B', 'Gray': '#9E9E9E',
   'Black': '#212121', 'White': '#FFFFFF',
 };
+
+/** 模块级：城市重新检测确认（非 Hook，避免多余 useCallback 与热更新时 hook 数量不一致） */
+function confirmLocationFullResetDialog(t, AlertImpl) {
+  return new Promise((resolve) => {
+    AlertImpl.alert(
+      t('home.locationFullResetTitle'),
+      t('home.locationFullResetMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+        { text: t('common.confirm'), style: 'default', onPress: () => resolve(true) },
+      ]
+    );
+  });
+}
+
+/** 模块级：执行位置补全流水线（非 Hook） */
+async function runLocationEnrichmentPipelineDesktop(handleScanProgress, loadData, t, setGlobalMessage) {
+  const galleryScannerService = new GalleryScannerService();
+  await galleryScannerService.initialize();
+  galleryScannerService.onProgress = (progress) => {
+    logger.debug('位置信息补全进度:', progress);
+    handleScanProgress(progress);
+  };
+  await galleryScannerService.enrichLocationInfo();
+  const cityCountsData = await UnifiedDataService.readCityCounts();
+  const citiesCount = Object.keys(cityCountsData).length;
+  logger.debug(`位置信息补全完成: 发现${citiesCount}个城市`);
+  setGlobalMessage(t('home.locationEnrichmentCompleted', { count: citiesCount }));
+  await loadData();
+}
 
 const HomeScreen = () => {
   const { t, i18n } = useTranslation('common');
@@ -64,7 +98,6 @@ const HomeScreen = () => {
   const [similarityGroups, setSimilarityGroups] = useState([]);
   const [showAllSimilarityGroups, setShowAllSimilarityGroups] = useState(false);
   const [personGroups, setPersonGroups] = useState([]);
-  const [showAllPersonGroups, setShowAllPersonGroups] = useState(false);
   const [stagingBoxCount, setStagingBoxCount] = useState(0);
   // 隐藏空分类设置（默认隐藏空分类）
   const [hideEmptyCategories, setHideEmptyCategories] = useState(true);
@@ -77,7 +110,23 @@ const HomeScreen = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [isSimilarityDetecting, setIsSimilarityDetecting] = useState(false); // 相似度检测状态
   const [isPersonDetecting, setIsPersonDetecting] = useState(false); // 人物分组检测状态
+  /** 人物卡片拖放合并：当前拖动的源分组 id */
+  const [personMergeDragSourceId, setPersonMergeDragSourceId] = useState(null);
+  /** 悬停在其上的放置目标分组 id（用于描边高亮） */
+  const [personMergeHoverTargetId, setPersonMergeHoverTargetId] = useState(null);
   const rotationValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return undefined;
+    }
+    const onDragEnd = () => {
+      setPersonMergeDragSourceId(null);
+      setPersonMergeHoverTargetId(null);
+    };
+    window.addEventListener('dragend', onDragEnd);
+    return () => window.removeEventListener('dragend', onDragEnd);
+  }, []);
   
   // 使用 ref 存储设置值，避免异步状态更新问题
   const hideEmptyCategoriesRef = useRef(hideEmptyCategories);
@@ -291,10 +340,8 @@ const HomeScreen = () => {
       }
       // 显示扫描完成时间
       loadLastScanTime();
-    }
-    
-    // 位置信息补全阶段：如果shouldRefresh为true，刷新数据
-    if (progress.stage === 'location_enrichment' && progress.shouldRefresh) {
+    } else if (progress.shouldRefresh) {
+      // 与城市补全、相似度、人物分组、截图检测等阶段一致：中途 shouldRefresh 则刷新首页（与智能扫描/单任务共用同一机制）
       setTimeout(() => {
         loadData();
       }, 0);
@@ -399,18 +446,6 @@ const HomeScreen = () => {
       galleryScannerService.onProgress = (progress) => {
         logger.debug('AI分类进度:', progress);
         handleScanProgress(progress);
-        
-        // 检查是否需要刷新页面
-        if (progress.shouldRefresh) {
-          logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
-          setTimeout(async () => {
-            try {
-              await loadData();
-            } catch (error) {
-              logger.error('❌ 刷新失败:', error);
-            }
-          }, 0);
-        }
       };
       
       // 记录扫描开始时间
@@ -520,7 +555,11 @@ const HomeScreen = () => {
 
       const result = await galleryScannerService.personIndexingPhase(new Date());
       const groups = await UnifiedDataService.getPersonGroupsStats();
-      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      const detected =
+        typeof result?.detectSuccessCount === 'number'
+          ? result.detectSuccessCount
+          : (result?.assignedCount ?? 0);
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, detected }));
       await loadData();
     } catch (error) {
       logger.error('人物分组失败:', error);
@@ -563,7 +602,11 @@ const HomeScreen = () => {
       setGlobalMessage(t('home.personDetectionInProgress'));
       const result = await galleryScannerService.personIndexingPhase(new Date());
       const groups = await UnifiedDataService.getPersonGroupsStats();
-      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, processed: result?.processedCount || 0 }));
+      const detected =
+        typeof result?.detectSuccessCount === 'number'
+          ? result.detectSuccessCount
+          : (result?.assignedCount ?? 0);
+      setGlobalMessage(t('home.personDetectionCompleted', { count: groups.length, detected }));
       await loadData();
     } catch (error) {
       logger.error('人物分组重检失败:', error);
@@ -577,9 +620,45 @@ const HomeScreen = () => {
     }
   }, [isScanning, loadData, t, handleScanProgress]);
 
-  // 启动位置信息补全
+  /** 拖放合并人物分组：确认后写入存储并刷新 */
+  const handlePersonMergeRequest = useCallback((sourceGroupId, targetGroupId) => {
+    if (!sourceGroupId || !targetGroupId || sourceGroupId === targetGroupId) {
+      return;
+    }
+    const sourceG = personGroups.find((g) => g.groupId === sourceGroupId);
+    const targetG = personGroups.find((g) => g.groupId === targetGroupId);
+    const sourceLabel = sourceG?.displayName || t('category.person');
+    const targetLabel = targetG?.displayName || t('category.person');
+    const count = sourceG?.imageCount ?? 0;
+
+    Alert.alert(
+      t('home.personMergeConfirmTitle'),
+      t('home.personMergeConfirmMessage', {
+        source: sourceLabel,
+        target: targetLabel,
+        count,
+      }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.confirm'),
+          onPress: async () => {
+            try {
+              const result = await UnifiedDataService.mergePersonGroups(sourceGroupId, targetGroupId);
+              await loadData();
+              setGlobalMessage(t('home.personMergeSuccess', { count: result.mergedCount }));
+            } catch (err) {
+              logger.error('人物分组合并失败:', err);
+              Alert.alert(t('common.error'), t('home.personMergeFailed', { error: err.message || String(err) }));
+            }
+          },
+        },
+      ]
+    );
+  }, [personGroups, t, loadData]);
+
+  // 补充城市：仅对「有 GPS 但未写全城市/国家」的照片补全（现有逻辑）
   const handleStartLocationEnrichment = useCallback(async () => {
-    // 检查是否正在扫描
     if (isScanning) {
       logger.debug('正在扫描中，跳过位置信息补全请求');
       return;
@@ -587,49 +666,52 @@ const HomeScreen = () => {
 
     try {
       logger.debug('开始位置信息补全');
-      
-      // 设置扫描状态
       setIsScanning(true);
-      // 🔥 设置全局变量，供设置页面检查扫描状态
       if (typeof window !== 'undefined') {
         window.isScanning = true;
       }
       setGlobalMessage(t('home.locationEnrichmentInProgress'));
-      
-      // 创建 GalleryScannerService 实例
-      const galleryScannerService = new GalleryScannerService();
-      await galleryScannerService.initialize();
-      
-      // 设置进度回调，复用 handleScanProgress
-      galleryScannerService.onProgress = (progress) => {
-        logger.debug('位置信息补全进度:', progress);
-        handleScanProgress(progress);
-      };
-      
-      // 调用位置信息补全方法
-      await galleryScannerService.enrichLocationInfo();
-      
-      // 获取城市统计以显示完成消息
-      const cityCountsData = await UnifiedDataService.readCityCounts();
-      const citiesCount = Object.keys(cityCountsData).length;
-      
-      logger.debug(`位置信息补全完成: 发现${citiesCount}个城市`);
-      setGlobalMessage(t('home.locationEnrichmentCompleted', { count: citiesCount }));
-      
-      // 刷新数据以显示新的城市数据
-      await loadData();
-      
+      await runLocationEnrichmentPipelineDesktop(handleScanProgress, loadData, t, setGlobalMessage);
     } catch (error) {
       logger.error('位置信息补全失败:', error);
       setGlobalMessage(t('home.locationEnrichmentFailed', { error: error.message }));
     } finally {
       setIsScanning(false);
-      // 🔥 清除全局变量
       if (typeof window !== 'undefined') {
         window.isScanning = false;
       }
     }
-  }, [isScanning, loadData, t, handleScanProgress]);
+  }, [isScanning, handleScanProgress, loadData, t]);
+
+  // 重新检测：清空本地位置库 + 清空所有照片的 city，再跑位置补全
+  const handleLocationFullRecheck = useCallback(async () => {
+    if (isScanning) {
+      logger.debug('正在扫描中，跳过城市重新检测');
+      return;
+    }
+    const ok = await confirmLocationFullResetDialog(t, Alert);
+    if (!ok) return;
+
+    try {
+      setIsScanning(true);
+      if (typeof window !== 'undefined') {
+        window.isScanning = true;
+      }
+      setGlobalMessage(t('home.locationDataResetting'));
+      await UnifiedDataService.resetLocationDatabaseAndClearImageLocations();
+      await loadData();
+      setGlobalMessage(t('home.locationEnrichmentInProgress'));
+      await runLocationEnrichmentPipelineDesktop(handleScanProgress, loadData, t, setGlobalMessage);
+    } catch (error) {
+      logger.error('城市重新检测失败:', error);
+      setGlobalMessage(t('home.locationEnrichmentFailed', { error: error.message }));
+    } finally {
+      setIsScanning(false);
+      if (typeof window !== 'undefined') {
+        window.isScanning = false;
+      }
+    }
+  }, [isScanning, handleScanProgress, loadData, t]);
 
   // 处理 NA 分类的 AI 分类（右键点击触发）
   const handleNACategoryAIClassify = useCallback(() => {
@@ -822,21 +904,7 @@ const HomeScreen = () => {
       const galleryScannerService = new GalleryScannerService();
       await galleryScannerService.scanGalleryWithProgress((progress) => {
         logger.debug('扫描进度:', progress);
-        // 更新进度
         handleScanProgress(progress);
-        
-        // 🆕 检查是否需要刷新页面
-        if (progress.shouldRefresh) {
-          logger.debug('🔄 收到刷新标记，主动刷新页面数据...');
-          // 异步刷新，不阻塞扫描进度
-          setTimeout(async () => {
-            try {
-              await loadData();
-            } catch (error) {
-              logger.error('❌ 定期刷新失败:', error);
-            }
-          }, 0);
-        }
       }, compareLimitOption);
       
       logger.debug('智能扫描完成');
@@ -1140,8 +1208,10 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* 按人物 */}
-        {((categoryCounts?.single_person || 0) > 0) && (
+        {/* 按人物：有单人照、已有分组或正在人物分组时都展示，避免统计未跟上时整块消失 */}
+        {(((categoryCounts?.single_person || 0) > 0) ||
+          (personGroups && personGroups.length > 0) ||
+          isPersonDetecting) && (
           <View style={styles.categoriesSection}>
             <View style={styles.recentSectionHeader}>
               <View style={styles.sectionTitleContainer}>
@@ -1149,6 +1219,16 @@ const HomeScreen = () => {
               </View>
               {personGroups && personGroups.length > 0 ? (
                 <View style={styles.headerButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.toggleButton, (isScanning || isPersonDetecting) && styles.refreshButtonDisabled]}
+                    onPress={handleStartPersonDetection}
+                    disabled={isScanning || isPersonDetecting}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleButtonText, (isScanning || isPersonDetecting) && styles.refreshButtonTextDisabled]}>
+                      {t('home.supplementPersonGrouping')}
+                    </Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.toggleButton, (isScanning || isPersonDetecting) && styles.refreshButtonDisabled]}
                     onPress={handleRecheckPersonDetection}
@@ -1159,50 +1239,30 @@ const HomeScreen = () => {
                       {t('home.recheck')}
                     </Text>
                   </TouchableOpacity>
-                  {personGroups.length > 8 && (
-                    <TouchableOpacity
-                      style={styles.toggleButton}
-                      onPress={() => setShowAllPersonGroups(!showAllPersonGroups)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.toggleButtonText}>
-                        {showAllPersonGroups ? t('home.showLess') : t('home.showMore')}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               ) : null}
             </View>
+            {Platform.OS === 'web' &&
+              personGroups &&
+              personGroups.length > 0 && (
+                <Text style={styles.personMergeSectionHint}>
+                  {t('home.personMergeSectionHint')}
+                </Text>
+              )}
             <View style={styles.categoriesContainer}>
               {personGroups && personGroups.length > 0 ? (
-                showAllPersonGroups ? (
-                  <View style={styles.attributesContainer}>
-                    <View style={styles.attributeRow}>
-                      {personGroups.map((group) => (
-                        <TouchableOpacity
-                          key={group.groupId}
-                          style={styles.attributeChip}
-                          onPress={() => handleFilterPress('person', group.groupId, group.displayName)}
-                        >
-                          <Text style={styles.attributeChipName} numberOfLines={1}>
-                            {t('home.personGroupChip', {
-                              name: group.displayName || t('category.person'),
-                              count: group.imageCount || 0
-                            })}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                ) : (
-                  personGroups.slice(0, 8).map((group) => (
-                    <PersonCard
-                      key={group.groupId}
-                      group={group}
-                      onPress={() => handleFilterPress('person', group.groupId, group.displayName)}
-                    />
-                  ))
-                )
+                personGroups.map((group) => (
+                  <PersonCard
+                    key={group.groupId}
+                    group={group}
+                    onPress={() => handleFilterPress('person', group.groupId, group.displayName)}
+                    mergeDragSourceId={personMergeDragSourceId}
+                    mergeHoverTargetId={personMergeHoverTargetId}
+                    onMergeDragStart={setPersonMergeDragSourceId}
+                    onMergeCardDragOver={setPersonMergeHoverTargetId}
+                    onMergeRequest={handlePersonMergeRequest}
+                  />
+                ))
               ) : (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>👤</Text>
@@ -1233,20 +1293,36 @@ const HomeScreen = () => {
                 <Text style={styles.sectionTitle}>🏙️ {t('home.byCity')}</Text>
               </View>
               {cityCounts && Object.keys(cityCounts).length > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.toggleButton,
-                    isScanning && styles.refreshButtonDisabled
-                  ]}
-                  onPress={handleStartLocationEnrichment}
-                  disabled={isScanning}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.toggleButtonText,
-                    isScanning && styles.refreshButtonTextDisabled
-                  ]}>{t('home.recheck')}</Text>
-                </TouchableOpacity>
+                <View style={styles.headerButtonsContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleButton,
+                      isScanning && styles.refreshButtonDisabled
+                    ]}
+                    onPress={handleStartLocationEnrichment}
+                    disabled={isScanning}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.toggleButtonText,
+                      isScanning && styles.refreshButtonTextDisabled
+                    ]}>{t('home.supplementLocation')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleButton,
+                      isScanning && styles.refreshButtonDisabled
+                    ]}
+                    onPress={handleLocationFullRecheck}
+                    disabled={isScanning}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.toggleButtonText,
+                      isScanning && styles.refreshButtonTextDisabled
+                    ]}>{t('home.recheck')}</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
             <View style={styles.categoriesContainer}>
@@ -1282,7 +1358,7 @@ const HomeScreen = () => {
                       styles.startSimilarityButtonText,
                       isScanning && styles.startSimilarityButtonTextDisabled
                     ]}>
-                      {t('home.startLocationEnrichment')}
+                      {t('home.startClassifyByCity')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1713,7 +1789,7 @@ const HomeScreen = () => {
         )}
       </SafeAreaView>
     );
-  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, personGroups, showAllPersonGroups, totalImagesCount, isScanning, isSimilarityDetecting, isPersonDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment, handleStartPersonDetection, handleRecheckPersonDetection]);
+  }, [loadedScreens, currentScreen, screenProps, globalMessage, handleScanProgress, startSmartScan, hideEmptyCategories, categoryCounts, recentImages, categoryRecentImages, cityCounts, cityRecentImages, colorCounts, similarityGroups, showAllSimilarityGroups, personGroups, personMergeDragSourceId, personMergeHoverTargetId, totalImagesCount, isScanning, isSimilarityDetecting, isPersonDetecting, refreshing, onRefresh, rotationValue, t, handleNACategoryAIClassify, executeAIClassify, handleStartSimilarityDetection, handleStartLocationEnrichment, handleLocationFullRecheck, handleStartPersonDetection, handleRecheckPersonDetection, handlePersonMergeRequest]);
 
   logger.debug('HomeScreen 状态初始化完成:', { 
     currentScreen, 
@@ -2045,7 +2121,15 @@ const SimilarityCard = React.memo(({ group, onPress }) => {
   );
 });
 
-const PersonCard = React.memo(({ group, onPress }) => {
+const PersonCard = React.memo(({
+  group,
+  onPress,
+  mergeDragSourceId,
+  mergeHoverTargetId,
+  onMergeDragStart,
+  onMergeCardDragOver,
+  onMergeRequest,
+}) => {
   const { t } = useTranslation('common');
   const imageSource = useMemo(() => {
     if (!group.latestImageUri) return null;
@@ -2053,11 +2137,63 @@ const PersonCard = React.memo(({ group, onPress }) => {
     return imageUri ? { uri: imageUri } : null;
   }, [group.latestImageUri]);
 
-  return (
-    <TouchableOpacity
-      style={styles.categoryCard}
-      onPress={() => onPress(group)}
+  const useWebDnD =
+    Platform.OS === 'web' &&
+    typeof document !== 'undefined' &&
+    typeof onMergeRequest === 'function';
+
+  const isDropActive =
+    useWebDnD &&
+    mergeDragSourceId &&
+    mergeDragSourceId !== group.groupId &&
+    mergeHoverTargetId === group.groupId;
+
+  const dragHandleWeb = useWebDnD ? (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(PERSON_GROUP_DND_TYPE, group.groupId);
+        e.dataTransfer.effectAllowed = 'move';
+        onMergeDragStart?.(group.groupId);
+      }}
+      title={t('home.personMergeDragHint')}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 28,
+        height: 22,
+        borderRadius: 4,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        color: '#fff',
+        fontSize: 14,
+        lineHeight: '22px',
+        cursor: 'grab',
+        userSelect: 'none',
+        flexShrink: 0,
+      }}
     >
+      ⋮
+    </div>
+  ) : null;
+
+  const overlay = useWebDnD ? (
+    <View style={[styles.categoryOverlay, styles.personCardOverlayMerge]}>
+      {dragHandleWeb}
+      <Text style={styles.categoryCount}>{group.imageCount || 0}</Text>
+    </View>
+  ) : (
+    <View style={styles.categoryOverlay}>
+      <Text style={styles.categoryName} numberOfLines={1}>
+        {group.displayName || t('category.person')}
+      </Text>
+      <Text style={styles.categoryCount}>{group.imageCount || 0}</Text>
+    </View>
+  );
+
+  const cardInner = (
+    <>
       {imageSource ? (
         <Image
           source={imageSource}
@@ -2069,14 +2205,56 @@ const PersonCard = React.memo(({ group, onPress }) => {
           <Text style={styles.emptyThumbnailText}>👤</Text>
         </View>
       )}
+      {overlay}
+    </>
+  );
 
-      <View style={styles.categoryOverlay}>
-        <Text style={styles.categoryName} numberOfLines={1}>
-          {group.displayName || t('category.person')}
-        </Text>
-        <Text style={styles.categoryCount}>{group.imageCount || 0}</Text>
-      </View>
-    </TouchableOpacity>
+  if (!useWebDnD) {
+    return (
+      <TouchableOpacity
+        style={styles.categoryCard}
+        onPress={() => onPress(group)}
+      >
+        {cardInner}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: 140,
+        height: 140,
+        borderRadius: 8,
+        position: 'relative',
+        overflow: 'hidden',
+        outline: isDropActive ? '3px solid #007AFF' : 'none',
+        outlineOffset: 0,
+      }}
+      onDragOver={(e) => {
+        if (!mergeDragSourceId || mergeDragSourceId === group.groupId) {
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        onMergeCardDragOver?.(group.groupId);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const sourceId = e.dataTransfer.getData(PERSON_GROUP_DND_TYPE);
+        if (sourceId && sourceId !== group.groupId) {
+          onMergeRequest(sourceId, group.groupId);
+        }
+      }}
+    >
+      <TouchableOpacity
+        style={styles.categoryCard}
+        onPress={() => onPress(group)}
+        activeOpacity={0.88}
+      >
+        {cardInner}
+      </TouchableOpacity>
+    </div>
   );
 });
 
@@ -2281,6 +2459,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
+  /** 「按人物」标题下：合并操作说明 */
+  personMergeSectionHint: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 20,
+    marginTop: -8,
+    marginBottom: 14,
+    maxWidth: 720,
+  },
   refreshButton: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -2369,6 +2556,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  /** 人物卡片：底栏左侧为拖放手柄，右侧为张数 */
+  personCardOverlayMerge: {
+    gap: 8,
   },
   categoryName: {
     fontSize: 12,

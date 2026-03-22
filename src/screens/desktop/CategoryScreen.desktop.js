@@ -1898,11 +1898,16 @@ const CategoryScreen = ({
             const weekday = date.getDay();
 
             const weekdayNames = t('category.weekdayNames', { returnObjects: true });
+            const monthNames = t('category.monthNames', { returnObjects: true });
+            // 中文 dateFormat 含「{{month}}月」，此处只传数字；英文 dateFormat 使用英文月份名
+            const isZhLocale = (i18n.language || '').toLowerCase().startsWith('zh');
+            const monthLabel = isZhLocale
+              ? String(month)
+              : (Array.isArray(monthNames) && monthNames[month - 1] ? monthNames[month - 1] : String(month));
 
-            // 月份直接使用数字格式，如"11月"而不是"十一月"
             formattedDate = t('category.dateFormat', {
               year,
-              month: `${month}月`,
+              month: monthLabel,
               day,
               weekday: weekdayNames[weekday]
             });
@@ -1943,7 +1948,7 @@ const CategoryScreen = ({
                 })}
       </ScrollView>
     );
-  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, handleTimelineHeaderPress, highlightedImageId, stagingBoxImageIds]);
+  }, [groupedImages, getIsSelected, handleImagePress, handleImageLongPress, handleImageRightPress, handleTimelineHeaderPress, highlightedImageId, stagingBoxImageIds, i18n.language, t]);
 
   // 分页控制已集成到头部区域
 

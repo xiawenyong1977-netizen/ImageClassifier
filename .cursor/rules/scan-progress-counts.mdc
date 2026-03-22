@@ -1,0 +1,38 @@
+---
+description: 扫描/分阶段任务中「待处理、已处理、处理成功」三个统计量的语义与命名约定，避免与 filesFound/filesProcessed 混用
+globs: src/services/GalleryScannerService*.js,src/screens/**/*.js
+alwaysApply: false
+---
+
+# 进度三统计量（待处理 / 已处理 / 成功）
+
+涉及多阶段扫描、位置补全、相似度等「批量处理」逻辑时，应区分下面 **三个** 含义，**不要**用同一个变量既表示「试过」又表示「写库成功」。
+
+## 1. 待处理的图片数量（分母）
+
+- **含义**：本阶段**计划要覆盖**的图片张数（进入本阶段漏斗的总量）。
+- **典型命名**：`totalPending`、`totalThisPhase`、`filesFound`（与 `sendProgressMessage` 第三参一致时）、`locationEnrichmentTotal`（位置补全专用）。
+- **注意**：应与「本阶段筛选条件」严格一致（例如仅「有 GPS 且缺城市/国家」），不要用整条流水线的「有效图总数」当分母，除非产品定义就是全量。
+
+## 2. 已经处理的图片数量（进度分子，成败都计）
+
+- **含义**：本阶段对每张「待处理」图**已结束一次处理尝试**（含 API 失败、无结果、异常路径），**每张待处理图只应计 1 次**。
+- **典型命名**：`processedThisPhase`、`filesProcessed`（与 `sendProgressMessage` 第二参一致时）、`processedCount`。
+- **用途**：驱动进度条、以及需要 **`filesProcessed === filesFound`** 时触发后续逻辑（如缓存刷新）时，**必须用这一层**，不能用「仅成功写入」的张数代替。
+
+## 3. 处理成功的图片数量
+
+- **含义**：处理尝试中**达到业务成功条件**的张数（例如成功反查并写入城市、成功推理并落库等）。
+- **典型命名**：`*SuccessCount`、`*SavedCount`、如 `locationSaveSuccessCount`。
+- **用途**：日志、运营数据、用户提示「实际生效多少张」；**不得**单独作为与 `filesFound` 对齐的进度分子，否则失败场景下进度永远走不满。
+
+## 实现要点
+
+- **进度消息**（`sendProgressMessage` / `processProgressData`）：第二参应对齐 **已处理（2）**，第三参应对齐 **待处理（1）**；成功数（3）通过单独字段、日志或内部变量维护。
+- **阶段结束**：若存在异常分支导致（2）漏计，可在阶段末尾将（2）与（1）**校准一致**，并打 debug 日志说明校准原因（避免缓存刷新条件永远不成立）。
+- **终态 `filesProcessed` 禁止滥用 `||`**：当合法值为 `0` 时（例如模型不可用、零张处理），不能用 `value || total` 把分子改成 total，否则会误满足 `filesProcessed === filesFound`。
+
+## 本仓库已对标的阶段（维护时请自检）
+
+- **`location_enrichment`（按城市/位置信息补全）**：（1）`locationEnrichmentTotal`；（2）`processedThisPhase` 按「需补全张数」尝试累计 + 阶段末与（1）对齐；（3）`locationSaveSuccessCount` + 日志。
+- **`person_indexing`（人物分组）**：（1）`candidates.length`（待写入分组的单人照）；（2）`PersonIndexingService` 内对每个 candidate 先 `processedCount++` 再检测/嵌入，失败也推进进度；终态第二参须为真实数值（含 0）；（3）`result.assignedCount` / `result.detectSuccessCount` 表示检测+嵌入成功并完成归组条数；进度文案通过 `sendProgressMessage` 第六参 `personDetectSuccess` 与 `home.scanProgress.personIndexingWithDetect` 展示「检测成功」张数，与（2）分子区分。

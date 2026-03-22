@@ -1,4 +1,6 @@
-import { logger, getUri } from '../adapters/WebAdapters';
+import { logger, getUri, NativeModules, Platform, ModelPathAdapter } from '../adapters/WebAdapters';
+import { PersonIndexForeground, ScanService } from '../adapters/ScanServiceAdapter';
+import i18n from '../i18n';
 import UnifiedDataService from './UnifiedDataService';
 import FaceEmbeddingService from './FaceEmbeddingService';
 import FaceDetectionService from './FaceDetectionService';
@@ -22,6 +24,9 @@ const SINGLE_MEMBER_REASSIGN_OFFSET = 0.07;
 const MIN_SINGLE_MEMBER_REASSIGN_THRESHOLD = 0.68;
 const SINGLE_MEMBER_REASSIGN_AVG_OFFSET = 0.05;
 const MIN_SINGLE_MEMBER_REASSIGN_AVG_THRESHOLD = 0.7;
+/** 逐张归组后中途落库：每满此条数写一批（末尾合并后仍会全量校正） */
+const PERSON_INDEXING_PERSIST_BATCH_SIZE = 10;
+
 const ARCFACE_TEMPLATE_112 = [
   { x: 38.2946, y: 51.6963 },
   { x: 73.5318, y: 51.5014 },
@@ -103,6 +108,28 @@ class PersonIndexingService {
     return `${DEFAULT_GROUP_PREFIX}_${Date.now().toString(36)}_${this.groupCounter.toString(36)}`;
   }
 
+  /**
+   * 人物分组中途批量写库（与末尾 merge 后 finalUpdates 全量写配合使用）
+   * @param {Array<{imageId:string,personGroupId:string,personScore:number,personSource:string}>} batch
+   */
+  async _flushPersonGroupingBatch(batch, useAndroidNativeFace, personFaceNative) {
+    if (!batch || batch.length === 0) {
+      return;
+    }
+    if (useAndroidNativeFace && personFaceNative && typeof personFaceNative.applyPersonGroupingUpdates === 'function') {
+      try {
+        await personFaceNative.applyPersonGroupingUpdates(batch);
+        await UnifiedDataService.imageCache.buildCache();
+      } catch (e) {
+        logger.warn('👤 [人物分组] 中途批量写库原生失败，回退 JS:', e?.message || e);
+        await UnifiedDataService.updateImagesPersonGrouping(batch, { refreshCache: true });
+      }
+    } else {
+      await UnifiedDataService.updateImagesPersonGrouping(batch, { refreshCache: true });
+    }
+    logger.debug(`👤 [人物分组] 中途批量写库: ${batch.length} 条`);
+  }
+
   async indexSinglePersonImages(options = {}) {
     const {
       images = null,
@@ -110,6 +137,14 @@ class PersonIndexingService {
       source = 'face-embedding',
       threshold = null
     } = options;
+
+    // Android：相册扫描前台与人物分组前台全局互斥（见原生 isScanServiceRunning），防止并发写库
+    if (Platform.OS === 'android') {
+      const busy = await ScanService.isRunning();
+      if (busy) {
+        throw new Error(i18n.t('home.scanAlreadyInProgress'));
+      }
+    }
 
     const settings = await UnifiedDataService.readSettings();
     const storedThreshold = settings.personIndexSimilarityThreshold;
@@ -130,19 +165,41 @@ class PersonIndexingService {
       };
     }
 
-    await this.embeddingService.initialize();
-    await this.detectionService.initialize();
+    const personFaceNative = Platform.OS === 'android' ? NativeModules.PersonFaceNative : null;
+    let useAndroidNativeFace = false;
 
-    if (!this.embeddingService.isReady() || !this.detectionService.isReady()) {
-      logger.warn('⚠️ 人脸模型不可用，跳过人物分组');
-      return {
-        processedCount: 0,
-        assignedCount: 0,
-        skippedCount: allSinglePersonImages.length,
-        totalSinglePerson: allSinglePersonImages.length
-      };
+    if (personFaceNative && ModelPathAdapter && typeof ModelPathAdapter.ensureModelExists === 'function') {
+      try {
+        await ModelPathAdapter.ensureModelExists('face_detector.onnx');
+        await ModelPathAdapter.ensureModelExists('face_embedding.onnx');
+        const detPath = ModelPathAdapter.getModelPath('face_detector.onnx').replace(/^file:\/\//, '');
+        const embPath = ModelPathAdapter.getModelPath('face_embedding.onnx').replace(/^file:\/\//, '');
+        await personFaceNative.initialize(detPath, embPath, similarityThreshold);
+        useAndroidNativeFace = true;
+        logger.info('👤 [人物分组] 已启用 Android 原生 ONNX 流水线（聚类/合并仍在 JS；人物表 SQLite 由原生写入）');
+      } catch (e) {
+        logger.warn('👤 [人物分组] 原生流水线初始化失败，回退 JS ONNX:', e?.message || e);
+        useAndroidNativeFace = false;
+      }
     }
 
+    if (!useAndroidNativeFace) {
+      await this.embeddingService.initialize();
+      await this.detectionService.initialize();
+      this.detectionService.scoreThreshold = this._mapPersonSimilarityToScrfdScore(similarityThreshold);
+
+      if (!this.embeddingService.isReady() || !this.detectionService.isReady()) {
+        logger.warn('⚠️ 人脸模型不可用，跳过人物分组');
+        return {
+          processedCount: 0,
+          assignedCount: 0,
+          skippedCount: allSinglePersonImages.length,
+          totalSinglePerson: allSinglePersonImages.length
+        };
+      }
+    }
+
+    try {
     const imageById = new Map(
       allSinglePersonImages
         .filter(img => img && img.id)
@@ -171,6 +228,20 @@ class PersonIndexingService {
       };
     }
 
+    if (useAndroidNativeFace && typeof PersonIndexForeground.start === 'function') {
+      try {
+        PersonIndexForeground.start();
+        PersonIndexForeground.updateProgress(
+          i18n.t('home.scanProgress.personIndexingStart', { count: candidates.length }),
+          0,
+          candidates.length,
+          i18n.t('home.personIndexingNotificationTitle')
+        );
+      } catch (e) {
+        logger.debug('PersonIndexForeground.start:', e?.message || e);
+      }
+    }
+
     const embeddingCache = new Map();
     const faceCache = new Map();
     const detectionTimings = [];
@@ -192,6 +263,31 @@ class PersonIndexingService {
         return null;
       }
 
+      if (useAndroidNativeFace && personFaceNative) {
+        const detectStart = this._nowMs();
+        let map;
+        try {
+          map = await personFaceNative.detectAndEmbed(imageUri);
+        } catch (err) {
+          logger.warn(`👤 [人物分组] 原生 detectAndEmbed 失败 imageId=${image.id}:`, err?.message || err);
+          return null;
+        }
+        const detectElapsedMs = this._nowMs() - detectStart;
+        detectionTimings.push(detectElapsedMs);
+        const ok = !!(map && map.embedding && map.embedding.length > 0);
+        logger.debug(
+          `👤 [人物分组] 原生人脸流水线 imageId=${image.id}, fileName=${image.fileName || 'unknown'}, ` +
+            `elapsedMs=${detectElapsedMs.toFixed(1)}, ok=${ok ? 'yes' : 'no'}`
+        );
+        if (!ok) {
+          logger.debug(`👤 [人物分组] 未检测到有效人脸 imageId=${image.id}, fileName=${image.fileName || 'unknown'}`);
+          return null;
+        }
+        const embedding = Float32Array.from(map.embedding);
+        embeddingCache.set(image.id, embedding);
+        return embedding;
+      }
+
       let faceResult = faceCache.get(image.id);
       if (!faceResult) {
         const detectStart = this._nowMs();
@@ -206,7 +302,7 @@ class PersonIndexingService {
       }
 
       if (!faceResult || !faceResult.box) {
-        logger.warn(`👤 [人物分组] 未检测到有效人脸 imageId=${image.id}, fileName=${image.fileName || 'unknown'}`);
+        logger.debug(`👤 [人物分组] 未检测到有效人脸 imageId=${image.id}, fileName=${image.fileName || 'unknown'}`);
         return null;
       }
 
@@ -265,20 +361,38 @@ class PersonIndexingService {
     }
 
     const updates = [];
+    /** 待中途落库的分配（merge 前为中间组 id，末尾 finalUpdates 会全量校正） */
+    const pendingPersistBatch = [];
     let processedCount = 0;
     let skippedCount = 0;
+    /** 检测+嵌入成功（与本轮 updates 条数一致，用于进度文案） */
+    let faceDetectSuccessCount = 0;
 
     for (const image of candidates) {
       processedCount += 1;
       const embedding = await buildEmbedding(image);
       if (!embedding) {
         skippedCount += 1;
-        logger.warn(`👤 [人物分组] 跳过图片 imageId=${image.id}, fileName=${image.fileName || 'unknown'}, processed=${processedCount}/${candidates.length}`);
+        logger.debug(`👤 [人物分组] 跳过图片 imageId=${image.id}, fileName=${image.fileName || 'unknown'}, processed=${processedCount}/${candidates.length}`);
         if (typeof onProgress === 'function') {
-          onProgress(processedCount, candidates.length);
+          onProgress(processedCount, candidates.length, faceDetectSuccessCount);
+        }
+        if (useAndroidNativeFace) {
+          PersonIndexForeground.updateProgress(
+            i18n.t('home.scanProgress.personIndexingWithDetect', {
+              processed: processedCount,
+              total: candidates.length,
+              detected: faceDetectSuccessCount
+            }),
+            processedCount,
+            candidates.length,
+            i18n.t('home.personIndexingNotificationTitle')
+          );
         }
         continue;
       }
+
+      faceDetectSuccessCount += 1;
 
       if (!embeddingDimension) {
         embeddingDimension = embedding.length;
@@ -326,9 +440,37 @@ class PersonIndexingService {
         `groupId=${assignedGroupId}, score=${assignedScore.toFixed(4)}, matched=${bestGroupId ? 'yes' : 'no'}`
       );
 
-      if (typeof onProgress === 'function') {
-        onProgress(processedCount, candidates.length);
+      pendingPersistBatch.push({
+        imageId: image.id,
+        personGroupId: assignedGroupId,
+        personScore: assignedScore,
+        personSource: source
+      });
+      if (pendingPersistBatch.length >= PERSON_INDEXING_PERSIST_BATCH_SIZE) {
+        const slice = pendingPersistBatch.splice(0, PERSON_INDEXING_PERSIST_BATCH_SIZE);
+        await this._flushPersonGroupingBatch(slice, useAndroidNativeFace, personFaceNative);
       }
+
+      if (typeof onProgress === 'function') {
+        onProgress(processedCount, candidates.length, faceDetectSuccessCount);
+      }
+      if (useAndroidNativeFace) {
+        PersonIndexForeground.updateProgress(
+          i18n.t('home.scanProgress.personIndexingWithDetect', {
+            processed: processedCount,
+            total: candidates.length,
+            detected: faceDetectSuccessCount
+          }),
+          processedCount,
+          candidates.length,
+          i18n.t('home.personIndexingNotificationTitle')
+        );
+      }
+    }
+
+    if (pendingPersistBatch.length > 0) {
+      const tail = pendingPersistBatch.splice(0, pendingPersistBatch.length);
+      await this._flushPersonGroupingBatch(tail, useAndroidNativeFace, personFaceNative);
     }
 
     const groupRemap = this._mergeSimilarGroups(profiles, similarityThreshold);
@@ -356,21 +498,47 @@ class PersonIndexingService {
     });
 
     if (finalUpdates.length > 0) {
-      await UnifiedDataService.updateImagesPersonGrouping(finalUpdates, { refreshCache: false });
+      logger.debug(`👤 [人物分组] 末尾全量校正写库: ${finalUpdates.length} 条（含 merge 后组变更）`);
+      if (useAndroidNativeFace && personFaceNative && typeof personFaceNative.applyPersonGroupingUpdates === 'function') {
+        try {
+          await personFaceNative.applyPersonGroupingUpdates(finalUpdates);
+          await UnifiedDataService.imageCache.buildCache();
+        } catch (e) {
+          logger.warn('👤 [人物分组] 原生写 SQLite 失败，回退 JS 写库:', e?.message || e);
+          await UnifiedDataService.updateImagesPersonGrouping(finalUpdates, { refreshCache: true });
+        }
+      } else {
+        await UnifiedDataService.updateImagesPersonGrouping(finalUpdates, { refreshCache: true });
+      }
     }
 
     logger.info(
       `👤 人物分组完成: 总单人照片=${allSinglePersonImages.length}, 候选=${candidates.length}, ` +
-      `已有分组=${existingAssignments.size}, 成功归组=${finalUpdates.length}, 跳过=${skippedCount}, 阈值=${similarityThreshold}`
+      `已有分组=${existingAssignments.size}, 成功归组=${updates.length}, 末尾校正=${finalUpdates.length}, 跳过=${skippedCount}, 阈值=${similarityThreshold}`
     );
     this._logDetectionTimingSummary(detectionTimings);
 
     return {
       processedCount: candidates.length,
       assignedCount: updates.length,
+      detectSuccessCount: faceDetectSuccessCount,
       skippedCount: skippedCount + (allSinglePersonImages.length - candidates.length),
       totalSinglePerson: allSinglePersonImages.length
     };
+    } finally {
+      if (useAndroidNativeFace) {
+        if (typeof PersonIndexForeground.stop === 'function') {
+          try {
+            PersonIndexForeground.stop();
+          } catch (e) {
+            logger.debug('PersonIndexForeground.stop:', e?.message || e);
+          }
+        }
+        if (personFaceNative && typeof personFaceNative.release === 'function') {
+          Promise.resolve(personFaceNative.release()).catch(() => {});
+        }
+      }
+    }
   }
 
   _cropAndResizeFace(pixelData, width, height, box, targetSize) {
@@ -883,6 +1051,20 @@ class PersonIndexingService {
       return DEFAULT_SIMILARITY_THRESHOLD;
     }
     return value;
+  }
+
+  /**
+   * 与 Android PersonFaceOnnxPipeline.deriveScrfdScoreThresholdFromPersonSimilarity 一致：
+   * 人物相似度越高，SCRFD 检测置信度阈值略抬高，减少弱框带来的 embedding 噪声。
+   */
+  _mapPersonSimilarityToScrfdScore(similarityThreshold) {
+    let s =
+      typeof similarityThreshold === 'number' && Number.isFinite(similarityThreshold)
+        ? similarityThreshold
+        : DEFAULT_SIMILARITY_THRESHOLD;
+    s = Math.max(0.5, Math.min(0.95, s));
+    const det = 0.65 + (s - 0.75) * 0.5;
+    return Math.max(0.48, Math.min(0.72, det));
   }
 
   _logDetectionTimingSummary(detectionTimings) {

@@ -566,6 +566,16 @@ class LocationSQLiteAdapter {
     }
   }
 
+  /**
+   * 清空位置库全部数据（坐标映射 + 位置详情）
+   */
+  async clearAllData() {
+    await this.init();
+    await this.db.executeSql('DELETE FROM location_coordinates');
+    await this.db.executeSql('DELETE FROM location_details');
+    logger.info('🧹 SQLite 位置数据库已清空');
+  }
+
   rowToObject(row) {
     return {
       location_id: row.location_id,
@@ -1026,6 +1036,23 @@ class LocationIndexedDBAdapter {
       };
     });
   }
+
+  /**
+   * 清空位置库全部数据（坐标映射 + 位置详情）
+   */
+  async clearAllData() {
+    await this.init();
+    await new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['location_coordinates', 'location_details'], 'readwrite');
+      transaction.objectStore('location_coordinates').clear();
+      transaction.objectStore('location_details').clear();
+      transaction.oncomplete = () => {
+        logger.info('🧹 IndexedDB 位置数据库已清空');
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
 }
 
 // LocationStorageService 主类
@@ -1153,6 +1180,18 @@ class LocationStorageService {
     }
     
     return savedDetails || [];
+  }
+
+  /**
+   * 清空本地位置数据库（坐标→location_id 映射与 location 详情），并清空内存缓存
+   */
+  async clearAllLocationData() {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+    await this.storage.clearAllData();
+    this.locationDetailsCache.clear();
+    logger.info('🧹 本地位置库与内存缓存已清空');
   }
 
 }

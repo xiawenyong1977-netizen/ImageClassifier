@@ -271,9 +271,12 @@ class FaceDetectionService {
 
   async _decodeScrfd(results) {
     if (!results) return null;
-    let bestScore = this.scoreThreshold;
+    /** 超过 scoreThreshold 的最佳候选（勿用 threshold 作初值，否则未检出时 bestScore 会误等于阈值） */
+    let bestScore = -Infinity;
     let bestBox = null;
     let bestKeypoints = null;
+    /** 全图遍历到的最高 raw score，用于未检出时的日志（与 threshold 无关） */
+    let globalMaxScore = -Infinity;
     const strideSummaries = [];
 
     for (const stride of this.strides) {
@@ -322,6 +325,10 @@ class FaceDetectionService {
               if (score > strideBestScore) {
                 strideBestScore = score;
               }
+              if (score > globalMaxScore) {
+                globalMaxScore = score;
+              }
+              if (score <= this.scoreThreshold) continue;
               if (score <= bestScore) continue;
 
               const bboxBase = (a * 4) * height * width;
@@ -375,6 +382,10 @@ class FaceDetectionService {
           if (score > strideBestScore) {
             strideBestScore = score;
           }
+          if (score > globalMaxScore) {
+            globalMaxScore = score;
+          }
+          if (score <= this.scoreThreshold) continue;
           if (score <= bestScore) continue;
 
           // SCRFD 导出的 [1, N, *] 版本通常按 cell-major 展平，同一 cell 的多 anchor 连续排列。
@@ -413,7 +424,10 @@ class FaceDetectionService {
     logger.debug(`👤 [人脸检测] SCRFD解码摘要: threshold=${this.scoreThreshold}, ${strideSummaries.join(' | ')}`);
 
     if (!bestBox) {
-      logger.warn(`👤 [人脸检测] 未找到超过阈值的人脸框，threshold=${this.scoreThreshold}, bestScore=${bestScore}`);
+      const maxStr = Number.isFinite(globalMaxScore) ? globalMaxScore.toFixed(4) : 'n/a';
+      logger.warn(
+        `👤 [人脸检测] 未找到超过阈值的人脸框，threshold=${this.scoreThreshold}，全图最高置信度=${maxStr}（候选须 score > threshold）`
+      );
       return null;
     }
     logger.debug(`👤 [人脸检测] 检测成功: score=${bestScore.toFixed(6)}, box=${JSON.stringify(bestBox)}`);

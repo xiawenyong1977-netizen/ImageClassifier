@@ -661,27 +661,32 @@ public class GalleryScanService {
             // 获取数据库中的现有URI
             Set<String> existingUris = getExistingImageUris();
             
-            // 限制比对数量（如果设置了限制）
+            // 设备上当前存在的全部 URI（用于删除判定，必须与 JS 版 GalleryScannerService 一致）
+            Set<String> fullDeviceUris = new HashSet<>();
+            for (ImageInfo image : scannedImages) {
+                if (image.uri != null && !image.uri.isEmpty()) {
+                    fullDeviceUris.add(image.uri);
+                }
+            }
+
+            // 限制比对数量（如果设置了限制）：仅限制「新增」检测范围，不限制删除判定
             // 注意：scannedImages已经按DATE_TAKEN DESC排序，所以最新的在前面
             List<ImageInfo> imagesToCompare = scannedImages;
             if (compareLimit > 0 && scannedImages.size() > compareLimit) {
-                // 只比对最新的compareLimit张图片（已经按时间倒序排列）
                 imagesToCompare = new ArrayList<>(scannedImages.subList(0, compareLimit));
-                fileLogger.d(TAG, "比对限制生效: 扫描到 " + scannedImages.size() + " 张，只比对最新的 " + compareLimit + " 张");
+                fileLogger.d(TAG, "比对限制生效: 扫描到 " + scannedImages.size() + " 张，新增检测仅针对最新的 " + compareLimit + " 张（删除仍按全量）");
             }
-            
-            // 找出新增的图片
-            Set<String> currentUris = new HashSet<>();
+
+            // 找出新增的图片（仅在 imagesToCompare 范围内）
             for (ImageInfo image : imagesToCompare) {
-                currentUris.add(image.uri);
-                if (!existingUris.contains(image.uri)) {
+                if (image.uri != null && !existingUris.contains(image.uri)) {
                     result.newImages.add(image);
                 }
             }
-            
-            // 找出删除的图片
+
+            // 找出删除的图片：数据库有而当前设备全量扫描结果中不存在
             for (String existingUri : existingUris) {
-                if (!currentUris.contains(existingUri)) {
+                if (!fullDeviceUris.contains(existingUri)) {
                     result.deletedUris.add(existingUri);
                 }
             }

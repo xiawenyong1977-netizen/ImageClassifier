@@ -1347,7 +1347,7 @@ export const ModelPathAdapter = {
 
   getCurrentModelDownloadStatus: () => currentModelDownloadStatus,
 
-  // Android: 优先使用本地文件，缺失时从 assets 或 CDN 准备模型
+  // Android：本地已有则跳过；人脸模型不再从 APK assets 拷贝（包体不含），直接 CDN；其它模型仍尝试 assets
   ensureModelExists: async (modelRelativePath) => {
     if (Platform.OS !== 'android') {
       logger.debug(`📱 非Android平台，跳过模型准备: ${modelRelativePath}`);
@@ -1372,6 +1372,13 @@ export const ModelPathAdapter = {
     const pendingOperation = (async () => {
       try {
         await ensureModelDirectoryExists(dirPath);
+
+        const useCdnOnly = CDN_ENABLED_MODELS.has(modelRelativePath);
+        if (useCdnOnly) {
+          logger.debug(`📋 人脸模型不从 assets 拷贝，使用 CDN: ${modelRelativePath}`);
+          await downloadModelFromCdn(modelRelativePath, destPath);
+          return;
+        }
 
         const copiedFromAssets = await tryCopyModelFromAssets(modelRelativePath, destPath);
         if (copiedFromAssets) {

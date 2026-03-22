@@ -2435,6 +2435,51 @@ class ImageStorageService {
     return { success: true, updatedCount, failedCount };
   }
 
+  /**
+   * 清空所有照片的地理位置归类（city 存 location_id、国家及衍生地址字段），保留 GPS 坐标
+   * 用于「重新检测城市」前移除旧归类
+   * @returns {Promise<{ success: boolean, updatedCount: number, error?: string }>}
+   */
+  async clearAllImageLocationAssignment() {
+    const updatedAt = new Date().toISOString();
+    try {
+      if (Platform.OS === 'web') {
+        await this.storage.init();
+        const images = await this.storage.getItem('images');
+        if (!images || !Array.isArray(images)) {
+          return { success: true, updatedCount: 0 };
+        }
+        const next = images.map((img) => ({
+          ...img,
+          city: null,
+          country: null,
+          address: null,
+          province: null,
+          district: null,
+          street: null,
+          locationSource: null,
+          cityDistance: null,
+          updatedAt,
+        }));
+        await this.storage.setItem('images', next);
+        logger.info(`🧹 已清空 ${next.length} 张图片的城市/位置字段（IndexedDB）`);
+        return { success: true, updatedCount: next.length };
+      }
+
+      await this.ensureInitialized();
+      const [result] = await this.storage.db.executeSql(
+        `UPDATE images SET city = NULL, country = NULL, address = NULL, province = NULL, district = NULL, street = NULL, locationSource = NULL, cityDistance = NULL, updatedAt = ?`,
+        [updatedAt]
+      );
+      const n = result?.rowsAffected ?? 0;
+      logger.info(`🧹 已清空图片的城市/位置字段（SQLite），影响行数: ${n}`);
+      return { success: true, updatedCount: n };
+    } catch (error) {
+      logger.error('❌ 清空照片位置字段失败:', error);
+      return { success: false, updatedCount: 0, error: error.message };
+    }
+  }
+
   // 实际执行保存操作的方法
   async _performSaveOptimized(imageDataArray) {
     // 优化的保存方法：使用真正的批量插入
@@ -4001,13 +4046,6 @@ class ImageStorageService {
           result.scanInterval = 5;
         }
 
-        // 人物分组设置默认值
-        if (result.enablePersonClassification === undefined || result.enablePersonClassification === null) {
-          result.enablePersonClassification = true;
-        }
-        if (typeof result.enablePersonClassification !== 'boolean') {
-          result.enablePersonClassification = result.enablePersonClassification !== 'false';
-        }
         if (result.personIndexSimilarityThreshold === undefined || result.personIndexSimilarityThreshold === null) {
           result.personIndexSimilarityThreshold = 0.75;
         }
@@ -4151,7 +4189,6 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5, // 默认5分钟扫描间隔
-        enablePersonClassification: true,
         personIndexSimilarityThreshold: 0.75,
         personGroupNames: {},
         
@@ -4222,7 +4259,6 @@ class ImageStorageService {
         scanPaths: defaultScanPaths,
         hideEmptyCategories: false,
         scanInterval: 5,
-        enablePersonClassification: true,
         personIndexSimilarityThreshold: 0.75,
         personGroupNames: {},
         
@@ -4601,7 +4637,7 @@ class ImageStorageService {
         images,
         stats,
         exportDate: new Date().toISOString(),
-        version: '1.1.4',
+        version: '1.2.0',
       };
       
       logger.debug(`Exported ${images.length} images and statistics`);

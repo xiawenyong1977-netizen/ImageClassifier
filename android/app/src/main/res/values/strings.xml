@@ -5,5 +5,8 @@
     <string name="scan_notification_channel_name">照片扫描服务</string>
     <string name="scan_notification_channel_description">显示照片扫描进度</string>
     <string name="scan_notification_title">照片智能分类</string>
+    <string name="person_index_notification_channel_name">人物分组服务</string>
+    <string name="person_index_notification_channel_description">显示人物分组处理进度</string>
+    <string name="person_index_notification_title">人物分组</string>
     <!-- 扫描进展消息已解耦，由JS层通过message参数控制，不再在此定义 -->
 </resources>

@@ -70,6 +70,14 @@
         android:exported="false"
         android:foregroundServiceType="dataSync"
         android:stopWithTask="false" />  <!-- 🔥 新增：应用关闭时不停止服务 -->
+
+      <!-- 人物分组专用前台服务（与相册扫描通知分离） -->
+      <service
+        android:name=".PersonIndexForegroundService"
+        android:enabled="true"
+        android:exported="false"
+        android:foregroundServiceType="dataSync"
+        android:stopWithTask="false" />
       
       <activity
         android:name=".MainActivity"

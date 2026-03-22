@@ -2327,6 +2327,32 @@ class UnifiedDataService {
   }
 
   /**
+   * 清空本地位置库 + 清空所有照片的 city（location_id）及关联地址字段，并刷新图片缓存
+   */
+  async resetLocationDatabaseAndClearImageLocations() {
+    try {
+      if (!locationStorageService.isInitialized) {
+        await locationStorageService.initialize();
+      }
+      await locationStorageService.clearAllLocationData();
+
+      const r = await this.imageStorageService.clearAllImageLocationAssignment();
+      if (!r.success) {
+        throw new Error(r.error || '清空照片位置字段失败');
+      }
+
+      await this.imageCache.refreshCache();
+      this.cacheListeners.forEach((listener) => listener(this.imageCache.getCache()));
+
+      logger.info(`✅ 位置库与照片城市字段已重置，影响图片约 ${r.updatedCount} 张`);
+      return { clearedImages: r.updatedCount };
+    } catch (error) {
+      logger.error('❌ resetLocationDatabaseAndClearImageLocations 失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 批量更新分类信息（只更新分类相关字段，不更新其他字段）
    * @param {Array} classificationDataArray - 分类数据数组，每个元素包含：
    *   - uri: 图片 URI（必需）
@@ -2872,6 +2898,48 @@ class UnifiedDataService {
       logger.error('重命名人物分组失败:', error);
       throw error;
     }
+  }
+
+  /**
+   * 将源人物分组合并到目标分组（所有照片改挂到 targetGroupId）
+   * @param {string} sourceGroupId
+   * @param {string} targetGroupId
+   * @returns {Promise<{ success: boolean, mergedCount: number }>}
+   */
+  async mergePersonGroups(sourceGroupId, targetGroupId) {
+    if (!sourceGroupId || !targetGroupId) {
+      throw new Error('人物分组ID不能为空');
+    }
+    if (sourceGroupId === targetGroupId) {
+      throw new Error('不能合并到同一人物分组');
+    }
+
+    const source = await this.getPersonGroupImages(sourceGroupId);
+    if (!source?.images || source.images.length === 0) {
+      throw new Error('源人物分组没有照片');
+    }
+
+    const updates = source.images.map((img) => ({
+      imageId: img.id,
+      personGroupId: targetGroupId,
+      personScore: typeof img.personScore === 'number' ? img.personScore : 1,
+      personSource: 'manual_merge'
+    }));
+
+    await this.updateImagesPersonGrouping(updates);
+
+    const settings = await this.readSettings();
+    const personGroupNames = { ...(settings.personGroupNames || {}) };
+    const sourceName = personGroupNames[sourceGroupId];
+    const targetName = personGroupNames[targetGroupId];
+    if (!targetName && sourceName) {
+      personGroupNames[targetGroupId] = sourceName;
+    }
+    delete personGroupNames[sourceGroupId];
+    settings.personGroupNames = personGroupNames;
+    await this.writeSettings(settings);
+
+    return { success: true, mergedCount: updates.length };
   }
 
   /**

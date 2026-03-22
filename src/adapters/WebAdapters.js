@@ -144,6 +144,9 @@ export const Platform = {
   select: (obj) => obj.web || obj.default
 };
 
+/** Web/Electron 无 RN 原生模块；与 WebAdapters.native.js 对齐导出，供共用代码 import（如 PersonIndexingService） */
+export const NativeModules = {};
+
 // AppState（Web环境模拟，移动端会使用WebAdapters.native.js中的实现）
 export const AppState = {
   currentState: 'active',
@@ -1878,6 +1881,182 @@ export const PermissionAdapter = {
 // 15. React Hooks 导出
 export { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 
+// ---------- PC/Electron：人脸模型 CDN 缓存（onnxruntime-node 只能读本地文件）----------
+const PC_FACE_MODEL_CDN_BASE = 'https://m.xintuxiangce.top/models';
+const PC_FACE_MODEL_FILES = new Set(['face_embedding.onnx', 'face_detector.onnx']);
+/** 与 electron-builder productName 一致，便于与 app.getPath('userData') 目录对齐 */
+const PC_ELECTRON_USERDATA_APP_FOLDER = 'XinTuAlbum';
+const pcFaceModelDownloadPromises = new Map();
+
+function tryGetNodeRequire() {
+  if (typeof window !== 'undefined' && typeof window.require === 'function') {
+    return window.require;
+  }
+  if (typeof require !== 'undefined') {
+    return require;
+  }
+  return null;
+}
+
+function resolvePcFaceModelsCacheDir() {
+  const nodeReq = tryGetNodeRequire();
+  if (!nodeReq) {
+    return null;
+  }
+  try {
+    const pathMod = nodeReq('path');
+    const os = nodeReq('os');
+    if (typeof process !== 'undefined' && process.platform === 'win32') {
+      const base = process.env.APPDATA || pathMod.join(os.homedir(), 'AppData', 'Roaming');
+      return pathMod.join(base, PC_ELECTRON_USERDATA_APP_FOLDER, 'models');
+    }
+    if (typeof process !== 'undefined' && process.platform === 'darwin') {
+      return pathMod.join(os.homedir(), 'Library', 'Application Support', PC_ELECTRON_USERDATA_APP_FOLDER, 'models');
+    }
+    return pathMod.join(os.homedir(), '.config', PC_ELECTRON_USERDATA_APP_FOLDER, 'models');
+  } catch (e) {
+    return null;
+  }
+}
+
+function getPcPublicModelsPath(modelFileName) {
+  const nodeReq = tryGetNodeRequire();
+  if (!nodeReq) {
+    return null;
+  }
+  try {
+    const pathMod = nodeReq('path');
+    return pathMod.join(process.cwd(), 'public', 'models', modelFileName);
+  } catch (e) {
+    return null;
+  }
+}
+
+function downloadUrlToFile(url, destPath) {
+  const nodeReq = tryGetNodeRequire();
+  if (!nodeReq) {
+    return Promise.reject(new Error('Node require 不可用'));
+  }
+  const https = nodeReq('https');
+  const http = nodeReq('http');
+  const fs = nodeReq('fs');
+
+  const doRequest = (currentUrl, redirectCount) => {
+    if (redirectCount > 5) {
+      return Promise.reject(new Error('下载重定向次数过多'));
+    }
+    return new Promise((resolve, reject) => {
+      const isHttps = currentUrl.startsWith('https:');
+      const lib = isHttps ? https : http;
+      const tmpPath = `${destPath}.download`;
+      const fileStream = fs.createWriteStream(tmpPath);
+
+      const req = lib.get(currentUrl, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fileStream.close();
+          try {
+            if (fs.existsSync(tmpPath)) {
+              fs.unlinkSync(tmpPath);
+            }
+          } catch (_) {}
+          const nextUrl = new URL(res.headers.location, currentUrl).href;
+          doRequest(nextUrl, redirectCount + 1).then(resolve).catch(reject);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          fileStream.close();
+          try {
+            if (fs.existsSync(tmpPath)) {
+              fs.unlinkSync(tmpPath);
+            }
+          } catch (_) {}
+          reject(new Error(`下载失败 HTTP ${res.statusCode}`));
+          return;
+        }
+        res.pipe(fileStream);
+        fileStream.on('finish', () => {
+          fileStream.close(() => {
+            try {
+              fs.renameSync(tmpPath, destPath);
+            } catch (err) {
+              reject(err);
+              return;
+            }
+            resolve();
+          });
+        });
+      });
+      req.on('error', (err) => {
+        fileStream.close();
+        try {
+          if (fs.existsSync(tmpPath)) {
+            fs.unlinkSync(tmpPath);
+          }
+        } catch (_) {}
+        reject(err);
+      });
+    });
+  };
+
+  return doRequest(url, 0);
+}
+
+async function ensurePcFaceModelOnDisk(modelFileName) {
+  if (!PC_FACE_MODEL_FILES.has(modelFileName)) {
+    return;
+  }
+  const env = ModelPathAdapter.detectEnvironment();
+  if (env !== 'electron' && env !== 'node') {
+    return;
+  }
+
+  if (pcFaceModelDownloadPromises.has(modelFileName)) {
+    await pcFaceModelDownloadPromises.get(modelFileName);
+    return;
+  }
+
+  const promise = (async () => {
+    const nodeReq = tryGetNodeRequire();
+    if (!nodeReq) {
+      throw new Error('当前环境无法下载模型（缺少 Node require）');
+    }
+    const fs = nodeReq('fs');
+    const pathMod = nodeReq('path');
+
+    const cacheDir = resolvePcFaceModelsCacheDir();
+    if (!cacheDir) {
+      throw new Error('无法解析模型缓存目录');
+    }
+    const destPath = pathMod.join(cacheDir, modelFileName);
+
+    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+      logger.debug(`💻 人脸模型已缓存: ${destPath}`);
+      return;
+    }
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    const bundledPath = getPcPublicModelsPath(modelFileName);
+    if (bundledPath && fs.existsSync(bundledPath) && fs.statSync(bundledPath).size > 0) {
+      logger.debug(`💻 从 public/models 复制人脸模型到缓存: ${modelFileName}`);
+      fs.copyFileSync(bundledPath, destPath);
+      return;
+    }
+
+    const url = `${PC_FACE_MODEL_CDN_BASE}/${encodeURIComponent(modelFileName)}`;
+    logger.info(`💻 从 CDN 下载人脸模型: ${modelFileName}`, url);
+    await downloadUrlToFile(url, destPath);
+    logger.info(`💻 人脸模型下载完成: ${destPath}`);
+  })();
+
+  pcFaceModelDownloadPromises.set(modelFileName, promise);
+  try {
+    await promise;
+  } finally {
+    pcFaceModelDownloadPromises.delete(modelFileName);
+  }
+}
+
 // 16. 模型路径适配器
 export const ModelPathAdapter = {
   /**
@@ -1956,11 +2135,30 @@ export const ModelPathAdapter = {
         modelFileName = configPath;
       }
     }
-    
+
+    const env = this.detectEnvironment();
+    // Electron / Node：人脸模型走 userData 缓存目录（由 ensureModelExists 从 CDN 或 public 复制）
+    if ((env === 'electron' || env === 'node') && PC_FACE_MODEL_FILES.has(modelFileName)) {
+      const cacheDir = resolvePcFaceModelsCacheDir();
+      const nodeReq = tryGetNodeRequire();
+      if (cacheDir && nodeReq) {
+        const pathMod = nodeReq('path');
+        return pathMod.join(cacheDir, modelFileName);
+      }
+    }
+
     const basePath = this.getModelBasePath();
-    
+
     // 拼接完整路径
     return `${basePath}/${modelFileName}`;
+  },
+
+  /**
+   * PC/Electron：将 CDN 人脸模型下载（或从 public/models 复制）到本地缓存，供 onnxruntime-node 加载
+   * @param {string} modelRelativePath 例如 face_embedding.onnx
+   */
+  async ensureModelExists(modelRelativePath) {
+    await ensurePcFaceModelOnDisk(modelRelativePath);
   },
 
   /**

@@ -18,6 +18,7 @@ public class ScanServicePackage implements ReactPackage {
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
         List<NativeModule> modules = new ArrayList<>();
         modules.add(new ScanServiceModule(reactContext));
+        modules.add(new PersonIndexForegroundModule(reactContext));
         return modules;
     }
 }

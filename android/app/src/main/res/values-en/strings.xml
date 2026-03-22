@@ -5,6 +5,9 @@
     <string name="scan_notification_channel_name">Photo Scan Service</string>
     <string name="scan_notification_channel_description">Display photo scan progress</string>
     <string name="scan_notification_title">Photo Smart Classification</string>
+    <string name="person_index_notification_channel_name">Person Grouping Service</string>
+    <string name="person_index_notification_channel_description">Shows person grouping progress</string>
+    <string name="person_index_notification_title">Person Grouping</string>
     <!-- 扫描进展消息已解耦，由JS层通过message参数控制，不再在此定义 -->
 </resources>
 
